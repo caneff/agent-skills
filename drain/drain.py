@@ -5,47 +5,44 @@ work the `ready-for-agent` queue unattended, serially, one PR at a time (#1403).
 The **anchor** is the oldest unblocked ready ticket (`burndown/frontier.py`),
 or, for the first bundle only, the ticket `--anchor <n>` names (refused unless
 `<n>` is open, ready and unblocked).
-`drain` claims it, leaves a `drain anchor:` comment, and starts one headless
-`claude -p` session in a worktree on `implement-<anchor>`, handing it the
-anchor and the number and title of every other unblocked ready ticket. The
-agent chooses the **bundle**: the others it would naturally fix in the same
-PR (at most `--bundle-max` tickets in all). It claims each, records them in a
-`drain bundle:` comment on the anchor, and closes every one in one PR with one
-review wave. `drain` does no directory or closure grouping, and always asks
-for the heavy tier. `--max` stops the loop after that many tickets (a bundle
-counts all of its tickets); `--once` stops after one bundle.
+
+`drain` leaves a `drain anchor:` comment on it, has one headless one-turn `claude -p`
+session choose the **bundle** (the other unblocked ready tickets it would naturally
+fix in the same PR, at most `--bundle-max` in all, all numbered above the anchor;
+the anchor alone when the session fails), records the choice in a `drain bundle:`
+comment, and starts the bundle through `implement-dispatch`, the one dispatch path:
+claim, worktree, an interactive worker in a herdr pane named `<repo-short>-<anchor>`
+that shows in `herdr agent list` (#1415). A headless build cannot wait on its
+reviewers, which is an exit in `-p` mode, so the worker is an ordinary
+interactive one and `drain` waits for it: its PR appears and its pane goes
+idle, under a three-hour wall clock. A worker idle with no PR past a short
+grace is a failed build. `drain` does no directory or closure grouping. `--max`
+stops the loop after that many tickets (a bundle counts all of its tickets);
+`--once` stops after one bundle.
 
 Then it checks (the PR is not draft, CLEAN, closes the anchor within the
 bundle cap, and the repo's seam passes on the PR merged into current main,
 narrowed to what the PR touched; the check is skipped when main has not moved
 past the PR's base, because the worker ran the same suite on that exact tree),
-squash-merges, runs `merge-cleanup`, and returns any ticket the agent claimed
-but the PR did not close to the queue. A bundle that fails is built once more
-in the same worktree; a second failure labels the anchor and every claimed
-ticket `ready-for-human` with a one-line comment, keeps the worktree, and the
-loop moves on. Two bundles in a row handed to Chris stop the loop instead: that
-is the environment failing (auth, quota, the permission mode, headless
-`/implement`), not the tickets.
+squash-merges, runs `merge-cleanup` (which closes the worker's pane), and returns
+any ticket the worker claimed but the PR did not close to the queue. A bundle
+that fails is given one more try by prompting the same worker to finish; a second
+failure labels the anchor and every claimed ticket `ready-for-human` with a
+one-line comment, keeps the worktree, and the loop moves on. Two bundles in a
+row handed to Chris stop the loop instead: that is the environment failing
+(auth, quota, herdr), not the tickets. The worker's brief names the controller
+`drain`, which no session bears: its "PR up" send finds nobody and it stops
+idle, which is what `drain` waits for.
 
-State lives in GitHub and git, nowhere else. An open, in-progress ticket
+State lives in GitHub, git and herdr, nowhere else. An open, in-progress ticket
 carrying drain's own `drain anchor:` comment is resumed (a worker started by
-`implement-dispatch` has none, so it is never taken), an open PR is checked
-rather than rebuilt, and a process still running in the worktree stops the
-run. The worktree setup is `implement-dispatch`'s steps without herdr, which
-that command cannot skip; the commit-identity guard it installs is a
-precondition here, not reinstalled. Only repos whose origin owner is the
-`gh` login.
+`implement-dispatch` outside drain has none, so it is never taken) and its worker
+or open PR is waited on and checked rather than rebuilt. Only repos whose origin
+owner is the `gh` login.
 
 After the last bundle, one full `bash tests/all.sh` runs on current main (#1415):
 a red one stops the run and the summary names the merges since the last green
 full run (`last-green-<repo>` in the log directory), for Chris.
-
-Each build runs in a herdr pane, so `herdr agent list` shows it as
-`<repo-short>-drain-<anchor>` while it works, and `claude -p` streams
-`stream-json` into the pane and the build log as it happens. Without herdr on
-PATH the build is a bare subprocess streaming the same output into the log. A
-SIGKILL of drain leaves the pane's session running (nothing in the pane can
-know); the rerun's `busy()` check then stops on it.
 """
 import argparse
 import collections
@@ -57,7 +54,6 @@ import json
 import re
 import resource
 import shlex
-import shutil
 import signal
 import subprocess
 import sys
@@ -72,27 +68,34 @@ READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_L
 ANCHOR_NOTE, BUNDLE_NOTE, HANDED_NOTE = "drain anchor:", "drain bundle:", "drain could not land"
 BUNDLE_MAX = 8
 MAX_CONSECUTIVE_FAILURES = 2
-# The caps of one build session, stated here and nowhere else: the equivalent
-# of `ulimit -v 32G` (address space, not resident memory, hence generous) and a
-# three-hour wall clock after which the whole process group is killed. The seam
-# gets the same wall clock. TERM and ctrl-C kill the build's whole group;
-# SIGKILL of drain kills only the session itself (PR_SET_PDEATHSIG), and the
-# rerun's `busy()` check then stops on whatever it left running.
+# The caps, stated here and nowhere else: the equivalent of `ulimit -v 32G`
+# (address space, not resident memory, hence generous) on the one-shot bundle
+# chooser, and a three-hour wall clock for a worker to finish and for the seam.
+# TERM and ctrl-C kill a subprocess's whole group; SIGKILL of drain kills only
+# the chooser itself (PR_SET_PDEATHSIG). A worker is an interactive herdr
+# session of its own: drain waits for it and never kills it.
 MEMORY_CAP_BYTES = 32 << 30
+CHOOSER_SECONDS = 15 * 60
 WALL_CLOCK_SECONDS = 3 * 60 * 60
 # Never a permission-skipping flag: the session runs in the mode the harness
 # already trusts for unattended work. Unverified that `/implement` completes
 # under it headless (#1403 asks for that check): a refusal shows as a failed
 # build, and the consecutive-failure stop keeps it from emptying the queue.
 PERMISSION_MODE = "auto"
-# `claude -p` prints nothing until it exits unless asked to stream: the log of a
-# build stays empty for hours otherwise (#1415).
-STREAM_ARGS = ["--output-format", "stream-json", "--verbose"]
 FULL_SEAM = "bash tests/all.sh"
-PANE_POLL_SECONDS = 0.2
-# The hook files `implement-dispatch` installs (`install_identity_guard` in
-# flow/lane/src/bin/implement_dispatch.rs); drain refuses to run without them.
-GUARD_HOOKS = ("pre-commit", "pre-push", "commit-identity-guard", "commit-identity-guard-pre-push")
+# How the wait on a worker is paced. Test hooks, not options: seconds between
+# looks at the worker, and how long its pane may sit idle with no PR before the
+# build counts as failed (an idle worker with a PR is done; one with none is
+# usually waiting on a reviewer for a minute or two, which is why it is not
+# failed at the first idle look).
+POLL_SECONDS = float(os.environ.get("DRAIN_POLL_SECONDS", 15))
+IDLE_GRACE_SECONDS = float(os.environ.get("DRAIN_IDLE_GRACE_SECONDS", 300))
+IDLE = ("idle", "done")
+# The controller named in every brief. No session bears it: the worker's "PR up"
+# send to it finds nobody and the worker stops idle, which is what drain waits
+# for. A question the worker would put to a controller goes unanswered the same
+# way and shows as an idle worker with no PR, a failed build.
+CONTROLLER = "drain"
 _ORIGIN = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 Ctx = collections.namedtuple("Ctx", "root repo default log_dir bundle_max want", defaults=(None,))
@@ -172,14 +175,6 @@ def origin_slug(root):
     return f"{m.group(1)}/{m.group(2)}"
 
 
-def require_guard(ctx):
-    hooks = run(["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks"], cwd=ctx.root)
-    missing = [h for h in GUARD_HOOKS if not os.access(os.path.join(hooks, h), os.X_OK)]
-    if missing:
-        raise DrainError(f"the commit-identity guard is not installed in {ctx.root} ({', '.join(missing)} "
-                         "missing); run implement-dispatch once in this repo, then rerun")
-
-
 def pick(ctx):
     """`[(number, title)]`: the unblocked ready queue, oldest first; the
     anchor is the first."""
@@ -224,19 +219,18 @@ def claim_lock(ctx):
         yield
 
 
-def claim(ctx, anchor):
-    """True when this run claimed the anchor, False when another claim took it
-    since the pick (read again under the lock, as `implement-dispatch` does)."""
+def note_anchor(ctx, anchor):
+    """True when the anchor is still ready and drain left its `drain anchor:`
+    note, False when another claim took it since the pick (read again under the
+    lock, as `implement-dispatch` does). The claim itself is `implement-dispatch`'s
+    and comes after: the note first, so a kill between the two leaves a ready
+    ticket with a stray note, which the next pick simply notes again, where the
+    other order leaves an in-progress ticket no rerun resumes."""
     with claim_lock(ctx):
         view = gh_json("issue", "view", str(anchor), "--repo", ctx.repo, "--json", "state,labels")
         if view["state"].lower() != "open" or READY not in labels_of(view) or CLAIMED in labels_of(view):
             return False
-        # The note first: a kill between the two leaves a ready ticket with a
-        # stray note, which the next pick simply claims again; the other order
-        # leaves an in-progress ticket no rerun resumes and no pick offers.
         gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body", f"{ANCHOR_NOTE} implement-{anchor}")
-        gh("issue", "edit", str(anchor), "--repo", ctx.repo, "--remove-label", READY,
-           "--add-label", CLAIMED, "--add-assignee", "@me")
     return True
 
 
@@ -284,119 +278,102 @@ def bundle_of(ctx, anchor, branch):
     return [anchor] + held
 
 
-def workspace(ctx, branch):
-    path = os.path.join(ctx.root, ".claude", "worktrees", branch)
-    if os.path.isdir(path):
-        return path
-    run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
-    if run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=ctx.root, check=False):
-        run(["git", "worktree", "add", "-q", path, branch], cwd=ctx.root)
-    else:
-        remote = f"origin/{branch}"
-        base = remote if run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}"],
-                             cwd=ctx.root, check=False) else ctx.default
-        run(["git", "worktree", "add", "-q", "--no-track", "-b", branch, path, base], cwd=ctx.root)
-    return path
+def agent_name(ctx, lead):
+    """The herdr agent `implement-dispatch` names its worker: the checkout's
+    directory name cut to fit 32 characters with `-<lead>`, as that command
+    does (`implement_dispatch.rs`)."""
+    suffix = f"-{lead}"
+    return os.path.basename(ctx.root)[:32 - len(suffix)] + suffix
 
 
-def busy(path):
-    """Whether any process has `path` as its working directory."""
-    for pid in os.listdir("/proc"):
-        if pid.isdigit() and int(pid) != os.getpid():
-            with contextlib.suppress(OSError):
-                cwd = os.readlink(f"/proc/{pid}/cwd")
-                if cwd == path or cwd.startswith(path + os.sep):
-                    return True
-    return False
-
-
-def brief(anchor, others, bundle_max):
-    """The prompt: `/implement` on the anchor, then the agent's bundle choice."""
-    listing = "\n".join(f"- #{n} {title}" for n, title in others) or "- (none)"
-    return (f"/implement {anchor} --tier heavy\n\n"
-            "Unattended run, no controller: send no messages. Fix every valid review finding in the PR "
-            "and file no leftover or sweep ticket (docs/adr/0004-workers-fix-their-own-findings.md).\n\n"
-            f"Bundle: #{anchor} is the anchor. Other unblocked ready tickets:\n{listing}\n"
-            f"Read the ones that look related and add those you would naturally fix in the same PR, "
-            f"at most {bundle_max} tickets in all with the anchor. First post one comment on "
-            f"#{anchor} reading `{BUNDLE_NOTE} <numbers, anchor first>`, then claim each ticket you add "
-            f"(`gh issue edit <n> --remove-label {READY} --add-label {CLAIMED} --add-assignee @me`). Then build "
-            "them as one clump (implement/SKILL.md § The brief), working one ticket at a time: test first, "
-            "green, one commit per ticket before the next. If you run out of context or time partway, the "
-            f"PR closes only the finished tickets and you relabel the rest `{READY}` with `{CLAIMED}` and "
-            "your assignee removed. The bundle gets one review wave: its spec axis receives every ticket "
-            "and checks each one's acceptance criteria.")
-
-
-def herdr_usable():
-    return shutil.which("herdr") is not None and subprocess.run(
-        ["herdr", "status", "--json"], capture_output=True).returncode == 0
-
-
-def herdr_json(*args):
-    out = subprocess.run(["herdr", *args], capture_output=True, text=True)
-    if out.returncode:
-        raise DrainError(f"herdr {args[0]} {args[1]} failed: {one_line(out.stderr or out.stdout, 150)}")
-    return json.loads(out.stdout)["result"]
-
-
-def pane_session(path, prompt, log, name):
-    """The build in a herdr pane named `name`. The pane runs a launcher script
-    (so the prompt never passes through a shell string) that tees the session's
-    stream into `log` and leaves its exit status in `<log>.exit`; this waits
-    for that file under the wall clock. The workspace is closed on every way
-    out, which takes the session with it."""
-    exit_file = log + ".exit"
-    for stale in (exit_file, log):
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(stale)
-    with open(log + ".prompt", "w") as f:
-        f.write(prompt)
-    claude = " ".join(shlex.quote(a) for a in ["--permission-mode", PERMISSION_MODE, *STREAM_ARGS])
-    with open(log + ".sh", "w") as f:
-        f.write(f"#!/bin/bash\ncd {shlex.quote(path)} || exit 97\nulimit -v {MEMORY_CAP_BYTES >> 10}\n"
-                f"claude -p \"$(cat {shlex.quote(log + '.prompt')})\" {claude} 2>&1 | tee {shlex.quote(log)}\n"
-                f"echo ${{PIPESTATUS[0]}} > {shlex.quote(exit_file + '.tmp')}\n"
-                f"mv {shlex.quote(exit_file + '.tmp')} {shlex.quote(exit_file)}\n")
-    workspace_id = None
+def agent_status(name):
+    """The worker's herdr status (`idle`, `working`, ...), or `None` when herdr
+    has no such agent. Any other herdr failure stops the run: a herdr that cannot
+    be asked is not a worker that is gone."""
+    out = subprocess.run(["herdr", "agent", "get", name], capture_output=True, text=True)
     try:
-        made = herdr_json("workspace", "create", "--cwd", path, "--label", name, "--no-focus")
-        workspace_id, pane = made["workspace"]["workspace_id"], made["root_pane"]["pane_id"]
-        run(["herdr", "pane", "run", pane, "bash", log + ".sh"])  # prints nothing on success
-        named, deadline = False, time.monotonic() + WALL_CLOCK_SECONDS
-        while True:
-            if not named:  # the pane becomes an agent once herdr sees `claude` start
-                named = subprocess.run(["herdr", "agent", "rename", pane, name], capture_output=True).returncode == 0
-            if os.path.exists(exit_file):
-                break
-            if time.monotonic() > deadline:
-                raise DrainError(f"claude passed the {WALL_CLOCK_SECONDS}s wall clock")
-            time.sleep(PANE_POLL_SECONDS)
-        return int(read_text(exit_file).strip() or 1)
-    finally:
-        if workspace_id:
-            subprocess.run(["herdr", "workspace", "close", workspace_id], capture_output=True)
+        body = json.loads(out.stdout)
+    except ValueError:
+        body = {}
+    if out.returncode == 0 and "result" in body:
+        return body["result"]["agent"]["agent_status"]
+    if body.get("error", {}).get("code") == "agent_not_found":
+        return None
+    raise DrainStop(f"herdr agent get {name} failed: {one_line(out.stderr or out.stdout, 150)}")
 
 
-def read_text(path):
-    with open(path) as f:
-        return f.read()
+def chooser_prompt(anchor, others, bundle_max):
+    listing = "\n".join(f"- #{n} {title}" for n, title in others) or "- (none)"
+    return (f"Bundle choice for an unattended run. #{anchor} is the anchor ticket to build next. Other unblocked "
+            f"ready tickets:\n{listing}\n"
+            f"Read the ones that look related to #{anchor} (`gh issue view <n>`, body and comments) and pick those "
+            f"you would naturally fix in the same PR, at most {bundle_max - 1} of them. Change nothing. "
+            f"Your last line is exactly `{BUNDLE_NOTE} <numbers, the anchor first>`, with no other numbers; "
+            f"`{BUNDLE_NOTE} {anchor}` when none belong.")
 
 
-def build(path, prompt, log, name=None):
-    """One headless session running `/implement`, streaming into `log`; a
-    non-zero exit or the wall clock is a failed build. With a `name` and a
-    usable herdr it runs in a pane of that name, else as a bare subprocess."""
-    if busy(path):
-        raise DrainStop(f"a process is still running in {path}; rerun when it exits")
-    if name and herdr_usable():
-        code = pane_session(path, prompt, log, name)
-    else:
-        with open(log, "w") as out:
-            code, _ = run_group(["claude", "-p", prompt, "--permission-mode", PERMISSION_MODE, *STREAM_ARGS], path,
-                                WALL_CLOCK_SECONDS, out=out, preexec=_cap_session)
-    if code:
-        raise DrainError(f"build exited {code} (log {log})")
+def choose_bundle(ctx, anchor, others, log):
+    """`[anchor, ...]`: the tickets one headless session picks from the other
+    unblocked ready ones, read from its last `drain bundle:` line. It is one turn
+    with no reviewer to wait for, so `-p` is safe here. A chooser that fails,
+    times out or answers with nothing usable gives the anchor alone: bundling is
+    an optimization, never a reason not to build."""
+    if not others:
+        return [anchor]
+    try:
+        code, text = run_group(["claude", "-p", chooser_prompt(anchor, others, ctx.bundle_max),
+                                "--permission-mode", PERMISSION_MODE], ctx.root, CHOOSER_SECONDS,
+                               preexec=_cap_session)
+    except DrainError:
+        return [anchor]
+    with open(log, "w") as out:
+        out.write(text)
+    lines = [x for x in text.splitlines() if x.strip().startswith(BUNDLE_NOTE)]
+    if code or not lines:
+        return [anchor]
+    allowed = {n for n, _ in others}
+    picked = []
+    for n in (int(x) for x in re.findall(r"\d+", lines[-1])):
+        if n in allowed and n not in picked:
+            picked.append(n)
+    return [anchor] + picked[:ctx.bundle_max - 1]
+
+
+def dispatch(ctx, bundle):
+    """Start the bundle's worker through `implement-dispatch`, the one dispatch
+    path: claim, worktree, herdr pane, brief. A refusal claimed and created
+    nothing, so it is the environment's (herdr down, onboarding) and stops the
+    run rather than looping over one ticket."""
+    out = subprocess.run(["implement-dispatch", "--repo", ctx.root, "--controller", CONTROLLER,
+                          *[str(n) for n in bundle]], capture_output=True, text=True)
+    if out.returncode:
+        raise DrainStop("implement-dispatch refused: " + one_line(out.stderr or out.stdout, 250))
+
+
+def wait_for_worker(ctx, branch, agent, bundle):
+    """`"pr"` once the branch has an open PR and its worker has gone idle (or is
+    gone), `"landed"` when it went idle with every ticket closed and no PR (the
+    light tier lands on main itself). An idle worker with neither, past the idle
+    grace, a vanished one with neither, and the wall clock are failed builds."""
+    deadline, idle_since = time.monotonic() + WALL_CLOCK_SECONDS, None
+    while True:
+        status = agent_status(agent)
+        if status is None or status in IDLE:
+            if open_pr(ctx, branch):
+                return "pr"
+            if all(gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "state")["state"].lower()
+                   == "closed" for n in bundle):
+                return "landed"
+            if status is None:
+                raise DrainError(f"the worker {agent} is gone and the build has no PR")
+            idle_since = idle_since or time.monotonic()
+            if time.monotonic() - idle_since >= IDLE_GRACE_SECONDS:
+                raise DrainError(f"the worker {agent} is idle with no PR")
+        else:
+            idle_since = None
+        if time.monotonic() > deadline:
+            raise DrainError(f"the worker {agent} passed the {WALL_CLOCK_SECONDS}s wall clock")
+        time.sleep(POLL_SECONDS)
 
 
 def open_pr(ctx, branch):
@@ -448,6 +425,11 @@ def seam(ctx, head, log):
         raise DrainError(f"seam {exc} on the PR merged into main") from exc
 
 
+def read_text(path):
+    with open(path) as f:
+        return f.read()
+
+
 def last_green_path(ctx):
     return os.path.join(ctx.log_dir, "last-green-" + ctx.repo.replace("/", "__"))
 
@@ -497,6 +479,31 @@ def verify_pr(ctx, branch, anchor):
     return view
 
 
+def cleanup_notes(ctx, branch):
+    """`merge-cleanup`, closing the worker's pane and removing its workspace; a
+    failure is a note, never a reason to build again."""
+    try:
+        cleanup = subprocess.run(["merge-cleanup", "--repo", ctx.root, branch], capture_output=True, text=True)
+    except OSError as exc:
+        return [f"merge-cleanup: {exc}"]
+    if cleanup.returncode:
+        return ["merge-cleanup failed: " + one_line(cleanup.stderr or cleanup.stdout, 150)]
+    return []
+
+
+def finish_landed(ctx, branch, tickets):
+    """The light tier landed on main itself, with no PR: `merge-cleanup` is all
+    that is left, the controller's step in a burn."""
+    notes = cleanup_notes(ctx, branch)
+    try:
+        run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+        sha = run(["git", "rev-parse", ctx.default], cwd=ctx.root)
+    except DrainError as exc:
+        sha = "unread"
+        notes.append(f"main's sha unread: {one_line(exc, 100)}")
+    return {"tickets": tickets, "pr": "(landed on main, no PR)", "sha": sha, "note": "; ".join(notes)}
+
+
 def finish(ctx, anchor, branch, view):
     """After the merge: the squash sha, `merge-cleanup`, and the tickets the
     agent claimed that the PR did not close back to the queue. A step that
@@ -506,12 +513,7 @@ def finish(ctx, anchor, branch, view):
         sha = gh_json("pr", "view", str(view["number"]), "--repo", ctx.repo, "--json", "mergeCommit")["mergeCommit"]["oid"]
     except (DrainError, KeyError, TypeError) as exc:
         notes.append(f"squash sha unread, head shown: {one_line(exc, 100)}")
-    try:
-        cleanup = subprocess.run(["merge-cleanup", "--repo", ctx.root, branch], capture_output=True, text=True)
-        if cleanup.returncode:
-            notes.append("merge-cleanup failed: " + one_line(cleanup.stderr or cleanup.stdout, 150))
-    except OSError as exc:
-        notes.append(f"merge-cleanup: {exc}")
+    notes += cleanup_notes(ctx, branch)
     try:
         for n in set(bundle_of(ctx, anchor, branch)) - set(view["closes"]):
             gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", READY,
@@ -521,17 +523,34 @@ def finish(ctx, anchor, branch, view):
     return {"tickets": view["closes"], "pr": view["url"], "sha": sha, "note": "; ".join(notes)}
 
 
+NUDGE = ("Unattended run, no controller: the PR is not up yet. Finish /implement for this ticket now, the build, "
+         "the review wave and the PR, and send no messages.")
+
+
 def work(ctx, anchor, others, resumed):
-    """`(merge result, None)` or `(None, the second failure's one-line reason)`."""
-    branch, prompt, reason = f"implement-{anchor}", brief(anchor, others, ctx.bundle_max), ""
+    """`(merge result, None)` or `(None, the second failure's one-line reason)`.
+    Attempt 1 starts the worker (a resumed run finds it or its PR already
+    there); attempt 2 prompts the same worker to finish, since its workspace
+    exists and a second dispatch would refuse it."""
+    branch, agent, reason = f"implement-{anchor}", agent_name(ctx, anchor), ""
+    # The worker's branch and agent are named for the lowest ticket in the
+    # clump, so every ticket bundled with the anchor is a higher number.
+    others = [t for t in others if t[0] > anchor]
     for attempt in (1, 2):
         try:
-            path = workspace(ctx, branch)
-            if not (resumed and attempt == 1 and open_pr(ctx, branch)):
-                build(path, prompt, os.path.join(ctx.log_dir, f"{branch}-{attempt}.log"),
-                      name=f"{os.path.basename(ctx.root)}-drain-{anchor}")
-            if not open_pr(ctx, branch):
-                raise DrainError("the build ended with no open PR")
+            if attempt == 2:
+                if agent_status(agent) is None:
+                    raise DrainError(f"the worker {agent} is gone; nothing to prompt")
+                run(["herdr", "agent", "prompt", agent, NUDGE])
+            elif not resumed:
+                bundle = choose_bundle(ctx, anchor, others, os.path.join(ctx.log_dir, f"{branch}-choose.log"))
+                if len(bundle) > 1:
+                    gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
+                       f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)}")
+                dispatch(ctx, bundle)
+            tickets = [anchor] + sorted(noted(ctx, anchor))
+            if wait_for_worker(ctx, branch, agent, tickets) == "landed":
+                return finish_landed(ctx, branch, tickets), None
             view = verify_pr(ctx, branch, anchor)
             gh("pr", "merge", str(view["number"]), "--squash", "--match-head-commit", view["headRefOid"],
                "--repo", ctx.repo)
@@ -557,7 +576,6 @@ def drain(ctx, limit):
     """`(merged, handed, stop reason or None)`; `limit` counts tickets."""
     merged, handed, stop, failures, done, want = [], [], None, 0, 0, ctx.want
     try:
-        require_guard(ctx)
         if want:  # refuse before any work, and not only when the loop gets there
             put_first(pick(ctx), want)
         while done < limit:
@@ -570,7 +588,7 @@ def drain(ctx, limit):
                 if want:
                     queue, want = put_first(queue, want) if any(t[0] == want for t in queue) else queue, None
                 anchor, others = queue[0][0], queue[1:]
-                if not claim(ctx, anchor):
+                if not note_anchor(ctx, anchor):
                     continue
             result, reason = work(ctx, anchor, others, resumed)
             if result:
@@ -591,8 +609,8 @@ def drain(ctx, limit):
     if merged:
         try:
             red = full_run(ctx, merged)
-        except (DrainError, OSError) as exc:
-            red = f"the full suite could not run on main: {one_line(exc, 150)}"
+        except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
+            red = f"the full suite could not run on main: {type(exc).__name__}: {one_line(exc, 150)}"
         stop = "; ".join(x for x in (stop, red) if x) or None
     return merged, handed, stop
 
