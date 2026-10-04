@@ -453,11 +453,19 @@ def test_a_continuation_indented_four_spaces_is_still_the_value():
         "the live app and how a link renders", T.declaration(text)
 
 
-def test_a_blank_line_ends_the_item():
-    # A known limit, not a claim about Markdown: an indented paragraph after
-    # a blank line is not a wrapped line, and is left out.
+def test_an_indented_paragraph_after_a_blank_line_is_still_the_value():
+    # A loose list item: Markdown keeps a paragraph indented under the item
+    # after a blank line inside it, so the blind spot it states is part of
+    # the value (#1406 C3).
     text = ("## End-to-end seam\n\n- **Blind to**: the live app\n\n"
-            "  a later paragraph\n")
+            "  and a later paragraph\n")
+    assert T.declaration(text)["blind to"] == \
+        "the live app and a later paragraph", T.declaration(text)
+
+
+def test_a_blank_line_then_a_line_at_the_item_depth_ends_the_item():
+    text = ("## End-to-end seam\n\n- **Blind to**: the live app\n\n"
+            "The gate runs the suites.\n")
     assert T.declaration(text)["blind to"] == "the live app", \
         T.declaration(text)
 

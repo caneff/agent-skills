@@ -56,11 +56,11 @@ Pick the idea that is easiest to explain with a minimum code example. For a mini
 
 It will be typical that you'll want to compare two approaches. But take a moment to think about the example, because that matters most to the story. Most of the time you don't want to use a toy example. They're not informative and they are overdone. It may be better to generate a creative example that shows where one approach can really shine. We don't want to cherry pick, but we also don't want to do examples that have been overdone either. 
 
-Settle the story and the example before you write any code: they matter more than the implementation. Give the user some interaction but keep scrolling to a minimum. A good example tells a story, it doesn't just state some facts. 
+Settle the story and the example before you write any code: they matter more than the implementation. Give the user some interaction but keep scrolling to a minimum. A good example tells a story, it doesn't just state some facts.
 
 Once it is clear which idea is best to showcase, build the marimo notebook. 
 
-Use the marimo-notebook skill for this, and the anywidget-generator skill only if a custom widget makes for a better story; its essentials are in [references/ANYWIDGET.md](references/ANYWIDGET.md).
+Use the marimo-notebook skill for this. Build a custom anywidget only if it makes for a better story, and then follow [references/ANYWIDGET.md](references/ANYWIDGET.md): it carries the anywidget-generator skill's instructions, since that skill runs only when typed as a command.
 
 When you are ready, make sure that you hide all the code and that you move the cells with inputs/outputs to the top of the file. 
 

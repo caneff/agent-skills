@@ -594,12 +594,10 @@ def close_reason(reason):
 def close(run_id, lowest, reason, root=None):
     """Record that a clump closed with no landing of its own — its ticket
     found already fixed on the default branch, or handed to a nested spec run
-    whose landings live in that run's own file (#1310). Distinct from `land`:
-    no squash sha exists, and `main`'s tip recorded as one is a landing
-    `counts.py` then looks for a sidecar behind. A closed clump holds no
-    slot, has no worker to re-announce to, and has no sidecar for `counts.py`.
-    A landed clump is refused; closing again with the same reason is a no-op,
-    with another reason is refused."""
+    whose landings live in that run's own file (#1310). A landed clump is
+    refused; closing again with the same reason is a no-op, with another
+    reason is refused. Why a close and not a `land` at `main`'s tip, and the
+    hand recovery when one was recorded anyway: `references/run-file.md`."""
     reason = close_reason(reason)
     with locked(run_id, root):
         run = load(run_id, root)

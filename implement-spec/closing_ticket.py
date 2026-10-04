@@ -48,23 +48,28 @@ def _indent(line):
 
 def _continuation(raw, start, reachable):
     """The lines wrapping the list item at `raw[start]`, one stripped string
-    per line: each adjacent line indented deeper than the item, up to a blank
-    line, a heading, a key line, or a line `reachable` (the indices outside a
-    fence) does not hold. A key line always ends the item, deeper or not, so
-    a declaration nested under a parent bullet still reads as before. Read
-    from the raw lines, not from `visible()`, because a four-space
-    continuation is what `visible()` drops as quoted material, and dropping
-    it is the truncation (#1243)."""
+    per line, and the index after the last: each line indented deeper than
+    the item, up to a heading, a key line, or a line `reachable` (the indices
+    outside a fence) does not hold. Blank lines are skipped when the next
+    line still continues the item, so a loose item's indented second
+    paragraph is part of it, as in Markdown (#1406). A key line always ends
+    the item, deeper or not, so a declaration nested under a parent bullet
+    still reads as before. Read from the raw lines, not from `visible()`,
+    because a four-space continuation is what `visible()` drops as quoted
+    material, and dropping it is the truncation (#1243)."""
     depth = _indent(raw[start])
     wrapped = []
+    end = start + 1
     for index in range(start + 1, len(raw)):
         line = raw[index]
-        if (index not in reachable or not line.strip()
-                or _indent(line) <= depth or _ANY_HEADING.match(line)
-                or key_line(line)):
+        if not line.strip():
+            continue
+        if (index not in reachable or _indent(line) <= depth
+                or _ANY_HEADING.match(line) or key_line(line)):
             break
         wrapped.append(line.strip())
-    return wrapped
+        end = index + 1
+    return wrapped, end
 
 
 def declaration(text):
@@ -88,8 +93,7 @@ def declaration(text):
             pair = key_line(rest)
             if pair:
                 key, value = pair
-                wrapped = _continuation(raw, index, reachable)
-                skip_to = index + 1 + len(wrapped)
+                wrapped, skip_to = _continuation(raw, index, reachable)
                 found[key] = " ".join([value] + wrapped).strip()
         return found
     return None
