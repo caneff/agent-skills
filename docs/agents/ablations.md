@@ -6,7 +6,10 @@ here whose heading ends in its state, `running` or `ended`. A worker reads the
 heading to know whether the component runs; a controller appends to the log
 when a burn closes and brings Chris the table when the third burn has.
 
-## Standards axis on small PRs — running
+## Standards axis on small PRs — ended
+
+- **Ended:** 2026-10-04 by Chris's ruling, "i dont want to test this one standards always on",
+  before any burn closed with the table. The standards axis runs on every PR.
 
 - **Off:** the standards axis of `/multi-axis-code-review` on a PR under the
   #1357 size threshold. The other two axes and Codex run as before. A PR at or
