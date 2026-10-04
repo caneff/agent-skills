@@ -43,6 +43,13 @@ The worker's brief names the controller `drain`, which no session bears;
 `implement/SKILL.md` § Control says what a worker does then (no messages, no
 job notices, "PR up" is its stop), and `drain` waits for that stop.
 
+Progress is one flushed line per event on stdout, which `job-run` copies into
+the run's progress file as it happens: `bundle started: #<n> <title>; ...
+pane <repo-short>-<anchor>` when a bundle's worker exists, `bundle ended: #<n>
+... merged <pr> <sha>` or `... handed to Chris: <reason>` or `... stopped:
+<reason>` when it ends, then the summary. `drain/SKILL.md` reads these lines
+for its same-turn print, its status and its completion report.
+
 State lives in GitHub, git and herdr, nowhere else. An open, in-progress
 ticket carrying drain's own `drain anchor:` comment is resumed (a worker
 started by `implement-dispatch` outside drain has none, so it is never taken)
@@ -608,12 +615,33 @@ def nudge(ctx, agent, branch, reason):
         raise DrainError(f"herdr agent prompt {agent} failed: {one_line(text, 150)}")
 
 
-def work(ctx, anchor, others, resumed):
-    """`(merge result, None)` or `(None, the second failure's one-line reason)`.
+def say(text):
+    """One progress line, flushed: `job-run` copies drain's stdout into the run's
+    progress file, and a buffered line would reach it only at exit."""
+    print(text, flush=True)
+
+
+def title_of(ctx, n):
+    try:
+        return one_line(gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "title")["title"], 100)
+    except (DrainError, KeyError, TypeError):
+        return "(title unread)"
+
+
+def announce(ctx, anchor, tickets):
+    """The `bundle started:` line: every ticket with its title and the worker's
+    herdr pane, said the moment the bundle's worker exists."""
+    say("bundle started: " + "; ".join(f"#{n} {title_of(ctx, n)}" for n in tickets)
+        + f"  pane {agent_name(ctx, anchor)}")
+
+
+def work(ctx, anchor, others, resumed, started):
+    """`(merge result, None)` or `(None, the second failure's one-line reason)`;
+    appends the bundle's tickets to `started` once its worker exists.
     Attempt 1 starts the worker (a resumed run finds it or its PR already
     there); attempt 2 prompts the same worker with the first failure's reason,
     since its workspace exists and a second dispatch would refuse it."""
-    branch, agent, reason = f"implement-{anchor}", agent_name(ctx, anchor), ""
+    branch, agent, reason, bundle = f"implement-{anchor}", agent_name(ctx, anchor), "", [anchor]
     # The worker's branch and agent are named for the lowest ticket in the
     # clump, so every ticket bundled with the anchor is a higher number.
     others = [t for t in others if t[0] > anchor]
@@ -631,6 +659,9 @@ def work(ctx, anchor, others, resumed):
                        f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)}")
                 dispatch(ctx, bundle)
             tickets = [anchor] + sorted(noted(ctx, anchor))
+            if attempt == 1:
+                announce(ctx, anchor, tickets)
+                started[:] = tickets
             if wait_for_worker(ctx, branch, agent, tickets) == "landed":
                 return finish_landed(ctx, branch, tickets), None
             view = verify_pr(ctx, branch, anchor)
@@ -638,6 +669,9 @@ def work(ctx, anchor, others, resumed):
                "--repo", ctx.repo)
         except DrainError as exc:
             reason = one_line(exc)
+            if not started:  # a failure before the announce (a dispatch that failed after the claim): the bundle was still worked
+                announce(ctx, anchor, bundle)
+                started[:] = bundle
         else:
             return finish(ctx, anchor, branch, view), None
     return None, reason
@@ -659,6 +693,7 @@ def hand_to_chris(ctx, anchor, reason):
 def drain(ctx, limit):
     """`(merged, handed, stop reason or None)`; `limit` counts tickets."""
     merged, handed, stop, failures, done, want = [], [], None, 0, 0, ctx.want
+    started = []  # the tickets of a bundle whose start line is out and whose end line is not
     try:
         if want:  # refuse before any work, and not only when the loop gets there
             put_first(anchors(ctx, pick(ctx)), want)
@@ -678,12 +713,17 @@ def drain(ctx, limit):
                 others = [t for t in queue if t[0] != anchor]
                 if not note_anchor(ctx, anchor):
                     continue
-            result, reason = work(ctx, anchor, others, resumed)
+            result, reason = work(ctx, anchor, others, resumed, started)
             if result:
+                say(f"bundle ended: {' '.join(f'#{n}' for n in result['tickets'])}  merged  {result['pr']}  "
+                    f"{result['sha']}")
+                started.clear()
                 merged.append(result)
                 done, failures = done + len(result["tickets"]), 0
             else:
                 bundle = hand_to_chris(ctx, anchor, reason)
+                say(f"bundle ended: {' '.join(f'#{n}' for n in bundle)}  handed to Chris: {reason}")
+                started.clear()
                 handed.append((bundle, reason))
                 done, failures = done + len(bundle), failures + 1
                 if failures >= MAX_CONSECUTIVE_FAILURES:
@@ -695,6 +735,8 @@ def drain(ctx, limit):
         stop = str(exc)
     except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
         stop = f"unexpected {type(exc).__name__}: {one_line(exc)}"
+    if started:
+        say(f"bundle ended: {' '.join(f'#{n}' for n in started)}  stopped: {stop}")
     if merged:
         try:
             red = full_run(ctx, merged)
@@ -749,7 +791,7 @@ def main(argv):
         return 1
     limit = 1 if args.once else (args.max or sys.maxsize)
     merged, handed, stop = drain(Ctx(root, repo, default, log_dir, args.bundle_max, args.anchor), limit)
-    print(summary(merged, handed, stop))
+    say(summary(merged, handed, stop))
     return 1 if stop else 0
 
 

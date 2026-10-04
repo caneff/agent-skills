@@ -11,6 +11,7 @@ on a worker in-process, since a three-hour clock has no command-line witness.
 """
 import json
 import os
+import select
 import subprocess
 import sys
 import tempfile
@@ -74,7 +75,7 @@ elif args[:2] == ["issue", "comment"]:
     save()
 elif args[:2] == ["issue", "view"]:
     issue = state["issues"][args[2]]
-    out({"state": issue["state"], "labels": names(issue),
+    out({"state": issue["state"], "labels": names(issue), "title": issue["title"],
          "comments": [dict(body=b) for n, b in state.get("comments", []) if n == args[2]]})
 elif args[:2] == ["pr", "list"]:
     pr = state["prs"].get(opt("--head"))
@@ -176,7 +177,8 @@ json.dump(st, open(env["FAKE_STATE"], "w"))
 # Stands in for herdr. `agent get` answers for the worker: HERDR_STATUS (default
 # idle), HERDR_WORKING_POLLS (that many `working` answers first), HERDR_GONE
 # (agent_not_found), HERDR_DOWN (any other failure), HERDR_FLAKY (that many
-# failures first). Every call is logged.
+# failures first), HERDR_HOLD_FILE (`working` for as long as that file exists).
+# Every call is logged.
 STUB_HERDR = r"""#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
@@ -194,7 +196,8 @@ if args[:2] == ["agent", "get"]:
     counter = env["HERDR_LOG"] + ".polls"
     seen = int(open(counter).read()) if os.path.exists(counter) else 0
     open(counter, "w").write(str(seen + 1))
-    status = "working" if seen < int(env.get("HERDR_WORKING_POLLS", 0)) else env.get("HERDR_STATUS", "idle")
+    held = os.path.exists(env.get("HERDR_HOLD_FILE", "/nonexistent"))
+    status = "working" if held or seen < int(env.get("HERDR_WORKING_POLLS", 0)) else env.get("HERDR_STATUS", "idle")
     print(json.dumps({"result": {"agent": {"agent_status": status, "pane_id": "w9:p1"}}}))
 """
 
@@ -282,14 +285,24 @@ class Sandbox(unittest.TestCase):
     def state(self):
         return json.loads(read(self.state_path))
 
+    def drain_env(self, env=None):
+        return {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
+                "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
+                "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
+                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3",
+                "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
+
     def drain(self, *argv, env=None):
-        e = {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
-             "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
-             "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
-             "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3",
-             "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
         return subprocess.run([sys.executable, DRAIN, "--repo", self.repo, *argv],
-                              capture_output=True, text=True, env=e)
+                              capture_output=True, text=True, env=self.drain_env(env))
+
+    def drain_live(self, *argv, env=None):
+        """Start drain and hand back the process, its stdout a pipe to read while it runs."""
+        return subprocess.Popen([sys.executable, DRAIN, "--repo", self.repo, *argv], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=self.drain_env(env))
+
+    def ended_lines(self, result):
+        return [x for x in result.stdout.splitlines() if x.startswith("bundle ended:")]
 
     def dispatch_runs(self):
         """The `implement-dispatch` calls, one per bundle started."""
@@ -502,6 +515,62 @@ class DrainTest(Sandbox):
         self.assertIn("stopped: implement-dispatch refused: implement-dispatch: no herdr server is running", r.stdout)
         self.assertEqual(self.labels(1), ["ready-for-agent"])
         self.assertEqual(len(self.dispatch_runs()), 1, "a refusal is the environment's: no second ticket is tried")
+
+    def test_the_bundle_is_announced_while_its_worker_is_still_building(self):
+        self.write_state({1: {"title": "first"}, 2: {"title": "second"}})
+        hold = os.path.join(self.tmp.name, "hold")
+        write(hold, "")
+        proc = self.drain_live("--once", env={"TAKE": "2", "HERDR_HOLD_FILE": hold})
+        try:
+            ready, _, _ = select.select([proc.stdout], [], [], 20)
+            self.assertTrue(ready, "no line from drain while its worker was still working")
+            line = proc.stdout.readline()
+            self.assertNotIn("merged", self.state(), "the bundle merged while its worker was held working")
+        finally:
+            os.remove(hold)
+            out, _ = proc.communicate(timeout=60)
+        for part in ("#1 first", "#2 second", "repo-1"):
+            self.assertIn(part, line)
+        self.assertEqual(proc.returncode, 0)
+
+    def test_a_merged_bundle_gets_an_end_line_with_its_pr_and_sha(self):
+        self.write_state({1: {}})
+        r = self.drain("--once")
+        sha = self.state()["merged"][0][1]
+        ended = self.ended_lines(r)
+        self.assertEqual(len(ended), 1, r.stdout)
+        for part in ("#1", "merged", "https://example.test/pull/101", "m" + sha):
+            self.assertIn(part, ended[0])
+
+    def test_a_bundle_handed_to_chris_gets_an_end_line_with_the_reason(self):
+        self.write_state({1: {}})
+        r = self.drain("--once", env={"DRAFT_TICKETS": "1"})
+        ended = self.ended_lines(r)
+        self.assertEqual(len(ended), 1, r.stdout)
+        self.assertIn("handed to Chris", ended[0])
+        self.assertIn("draft", ended[0])
+
+    def test_a_bundle_cut_short_by_a_stop_gets_a_stopped_end_line(self):
+        self.write_state({1: {}})
+        r = self.drain("--once", env={"HERDR_FLAKY": "99"})
+        self.assertEqual(r.returncode, 1)
+        ended = self.ended_lines(r)
+        self.assertEqual(len(ended), 1, r.stdout)
+        self.assertIn("stopped", ended[0])
+
+    def test_a_bundle_whose_dispatch_failed_after_the_claim_is_still_announced_before_it_ends(self):
+        self.write_state({1: {"title": "first"}, 2: {"title": "second"}})
+        r = self.drain("--once", env={"TAKE": "2", "DISPATCH_FAIL_AFTER_CLAIM": "1"})
+        lines = [x for x in r.stdout.splitlines() if x.startswith("bundle ")]
+        self.assertEqual([x.split(":")[0] for x in lines], ["bundle started", "bundle ended"], r.stdout)
+        self.assertIn("#1 first", lines[0])
+        self.assertIn("#2 second", lines[0])
+
+    def test_a_refused_dispatch_announces_no_bundle(self):
+        self.write_state({1: {}})
+        r = self.drain(env={"DISPATCH_REFUSE": "1"})
+        self.assertNotIn("bundle started:", r.stdout)
+        self.assertNotIn("bundle ended:", r.stdout)
 
     def test_a_worker_still_working_is_waited_for_until_it_goes_idle(self):
         self.write_state({1: {}})
