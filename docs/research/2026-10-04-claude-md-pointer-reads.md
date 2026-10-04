@@ -73,3 +73,25 @@ Already hook-enforced (in `flow/claude/settings.json`): Agent `model`
 destroyers (`block-dangerous-git.sh`), background-job wrapping
 (`wrap-background-jobs.sh`). Commit identity is enforced by the lane's git
 hooks. The CLAUDE.md prose for these restates a deterministic guard.
+
+## The count as a script (#1413)
+
+`flow/claude/pointer_reads.py count --end <iso>` replays both tables above.
+A transcript is in the window when its mtime or any top-level `timestamp`
+falls in the 14 days before `--end`, and only its lines up to `--end` are
+searched, so a session that kept running after the count does not shift it.
+The mtime half matters: two transcripts had untimestamped lines appended in
+the window, which `find -mtime -14` counted and timestamps alone would not.
+
+Checked 2026-10-04 against the original runs, which started at 17:52:01Z
+(first table) and 17:54:33Z (follow-up table): `--end 2026-10-04T17:52:01Z`
+gives 584 sessions, 226/23, 175/12, 36/6 and 36/0; `--end
+2026-10-04T17:54:33Z` gives 227/14/9, 175/4/0, 36/35/6 and 36/36/0. Both
+match the tables above exactly. Transcripts older than Claude Code's cleanup
+period are deleted, so this replay only holds while the 2026-09-20 files
+still exist.
+
+`pointer_reads.py recount` runs daily from a user crontab line tagged
+`# pointer-reads-recount-1413`. Fourteen days after #1413 closes it appends
+a dated re-count of the 14 days after closing to this note, pushes it, and
+removes its own line.
