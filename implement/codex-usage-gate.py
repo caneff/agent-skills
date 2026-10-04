@@ -197,6 +197,7 @@ def check(base: str | None = None, tickets: list[str] = (), audit: bool = False)
     switch = kill_switch()
     if switch.exists():
         return CAPPED, f"codex reviews off by Chris's ruling ({switch}) — remove the file to re-enable"
+    why = None
     if base is not None:
         try:
             lines = churn(base)
@@ -205,13 +206,9 @@ def check(base: str | None = None, tickets: list[str] = (), audit: bool = False)
             elif forced(tickets):
                 why = f"{FORCE_LABEL} label forced it, churn {lines} < {SIZE_THRESHOLD}"
             else:
-                why = None
+                return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
         except (SizeCheckError, OSError, ValueError, KeyError, TypeError) as exc:  # a missing tool, unreadable output
             return UNKNOWN, f"size check failed: {exc}"
-        if why is None:
-            return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
-    else:
-        why = None
     worst = reading()
     if worst is None:
         return UNKNOWN, "codex usage unknown: no fresh, readable usage cache and the live fetch failed"
@@ -250,6 +247,16 @@ class Parser(argparse.ArgumentParser):
         raise UsageError(message)
 
 
+class Once(argparse.Action):
+    """Store the value, refusing a repeated flag: argparse would keep only the last, so a clump built
+    one `--tickets` at a time would lose every ticket but one, and its labels with it."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest) not in (None, False):
+            parser.error(f"{option_string} given twice")
+        setattr(namespace, self.dest, True if self.nargs == 0 else values)
+
+
 def ticket(text: str) -> str:
     if not text.isdigit():
         raise argparse.ArgumentTypeError(f"not a ticket number: {text!r}")
@@ -262,9 +269,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
     a rule for, so `main` maps every refusal to 30."""
     p = Parser(add_help=False, allow_abbrev=False)
     for flag in ("percent", "audit", "size"):
-        p.add_argument(f"--{flag}", action="store_true")
-    p.add_argument("--base")
-    p.add_argument("--tickets", nargs="+", type=ticket)
+        p.add_argument(f"--{flag}", action=Once, nargs=0, default=False)
+    p.add_argument("--base", action=Once)
+    p.add_argument("--tickets", action=Once, nargs="+", type=ticket)
     args = p.parse_args(argv)
     given = {k for k, v in vars(args).items() if v not in (None, False)}
     if given not in MODES:
@@ -277,8 +284,8 @@ def main() -> int:
     # has a rule for, and an unread reading is not headroom.
     try:
         args = parse(sys.argv[1:])
-    except UsageError:
-        print(USAGE)
+    except UsageError as exc:
+        print(f"{USAGE} — {exc}")
         return UNKNOWN
     if args.percent:
         try:

@@ -13,5 +13,5 @@ def git(*args: str, ok: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess:
     that failed outright is never read as that answer."""
     r = subprocess.run(["git", *args], capture_output=True, text=True)
     if r.returncode not in ok:
-        raise GitError(f"git {' '.join(args)}: {r.stderr.strip()}")
+        raise GitError(f"git {' '.join(args)}: {r.stderr.strip() or f'exit {r.returncode}'}")
     return r

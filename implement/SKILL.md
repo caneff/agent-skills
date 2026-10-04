@@ -401,9 +401,11 @@ row, name the printed line in the PR body. An unreadable cache is exit 30,
 never headroom. Exit 20 also answers usage at or above the reserve ceiling, 70%
 (#1359), the 100% cap included, so the weekly audit of skipped PRs always has
 quota left; its ledger skip row takes `--skip-reason ceiling` exactly, whenever
-the printed line says `reserve ceiling`. An exit 30 whose line begins
-`size check failed:` leaves a PR of unknown size with no pass: its skip row takes
-`--skip-reason unmeasured` exactly, which the audit reads like `size`. Exit 40 (under the size threshold): its non-test, non-Markdown
+the printed line says `reserve ceiling`. An exit 30 of this PR gate, whether
+its size check or its usage read failed, leaves a PR that may be large with no
+pass: its skip row takes `--skip-reason unmeasured` exactly, which the audit
+reads like `size`. Exit 40 (under the size threshold): its non-test,
+non-Markdown
 churn is under 300 lines and no ticket carries the `needs-codex` label;
 launch nothing,
 append the skip row with `--skip-reason size` exactly (one reason for every
@@ -526,9 +528,9 @@ this PR no longer has, so its row holds none. A pass not launched has no
 record: append it with `--skip-reason "<the printed line>"` and no other flag,
 and it gets a row of zero cost that `report` counts as skipped and never as a
 clean pass. That is an exit 20 or 30 of the usage gate (a reserve-ceiling exit
-20's reason is `ceiling`, not the line; a `size check failed:` exit 30's is
-`unmeasured`), its exit 40 (whose reason is `size`, not the line), or a failed preflight. A refusal from `append` itself goes to the
-controller in "PR up", never skipped.
+20's reason is `ceiling`, not the line; a PR gate's exit 30's is `unmeasured`),
+its exit 40 (whose reason is `size`, not the line), or a failed preflight. A
+refusal from `append` itself goes to the controller in "PR up", never skipped.
 
 A collected pass is its `.out`: each `- [severity] title (file:lines)` line
 under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id

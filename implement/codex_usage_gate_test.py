@@ -350,7 +350,9 @@ for labels, want_status, want_called in (({}, 40, False), ({"1": ["needs-codex"]
 for bad in (["--base", "main"], ["--base", "main", "--tickets"], ["--tickets", "1"],
             ["--base", "main", "--tickets", "#1"], ["--audit", "--base", "main", "--tickets", "1"],
             ["--bogus"], ["--help"], ["-h"], ["--perc"], ["--base", "main", "--tickets", "1", "stray"],
-            ["--percent", "--audit"], ["--percent", "--base", "main", "--tickets", "1"], ["stray"]):
+            ["--percent", "--audit"], ["--percent", "--base", "main", "--tickets", "1"], ["stray"],
+            ["--audit", "--audit"], ["--base", "main", "--tickets", "1", "--tickets", "2"],
+            ["--base", "a", "--tickets", "1", "--base", "b"]):
     status, out = run(cache(5), *bad)
     assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (bad, status, out)
 # Flag order is free (#1405 OE1): the same arguments, tickets first.
@@ -358,6 +360,9 @@ with fake_repo({"a.py": 5000}) as (cwd, env):
     p = subprocess.run([sys.executable, GATE, "--tickets", "1", "2", "--base", "main"],
                        cwd=cwd, env=env, capture_output=True, text=True)
     assert (p.returncode, "5%" in p.stdout) == (0, True), (p.returncode, p.stdout)
+# A usage refusal names its cause, after the usage line (#1405 S1).
+status, out = run(cache(5), "--base", "main", "--tickets", "#1")
+assert status == 30 and "not a ticket number: '#1'" in out, (status, out)
 # `--help` must not be argparse's own exit 0, which a caller reads as proceed.
 status, out = run(cache(5), "--help")
 assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (status, out)

@@ -1494,7 +1494,7 @@ FIX_PATTERN = r"(?i)\b(fix|fixes|fixed|bug|regression)\b"
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
 # A skip reason names a component only when it is one of these; a free-text reason (a Codex gate's
 # printed line) is one component, `other`, so the table is not split by wording.
-_SKIP_REASONS = ("ablation", "size", "ceiling")
+_SKIP_REASONS = ("ablation", "size", "ceiling", "unmeasured")
 _BLAME_RE = re.compile(r"^([0-9a-f]{40}) \d+ \d+")
 
 

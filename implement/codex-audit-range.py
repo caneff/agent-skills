@@ -5,8 +5,9 @@ as one diff range for a single Codex run.
     codex-audit-range.py --ledger PATH --repo R --mark SHA|DATE [--base REF]
 
 Run from a checkout of the repo. Reads the review ledger (`docs/research/review_ledger.py`) for
-gate skip rows of repo R whose skip reason is exactly `size`, `ceiling` or `unmeasured` (`SKILL.md` § The Codex
-pass): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass that ran.
+gate skip rows of repo R whose skip reason is exactly `size`, `ceiling` or `unmeasured` (`SKILL.md`
+§ The Codex pass): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass
+that ran.
 Finds each skipped ticket's merge commit on `--base` (default `origin/HEAD`): a squash commit whose
 subject ends `(#<pr>)` and either names `(#<ticket>)` earlier in the subject or has a body line
 closing it. A ledger row carries no date, so "since the mark" is read off that merge commit: not an
@@ -42,7 +43,7 @@ from gitcmd import GitError, git  # noqa: E402
 from review_ledger import read_ledger  # noqa: E402
 from tally_review_axes import fold_repo  # noqa: E402
 
-# `unmeasured`: the gate's size check failed (exit 30), so the PR may have been large (#1405).
+# `unmeasured`: the gate answered exit 30 (size or usage unread), so the PR may have been large (#1405).
 AUDITED_REASONS = ("size", "ceiling", "unmeasured")
 OK, ERROR, EMPTY = 0, 2, 3
 _PR_SUBJECT_RE = re.compile(r"\(#(\d+)\)$")

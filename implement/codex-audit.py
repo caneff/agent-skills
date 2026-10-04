@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Weekly Codex audit (#1362): one Codex adversarial review over the merged PRs that skipped the
-merge-gate pass for size, the reserve ceiling or an unmeasurable size, and the audit mark that says where the next starts.
+merge-gate pass for size, the reserve ceiling or an unmeasurable PR, and the audit mark that says
+where the next starts.
 
     codex-audit.py run  [--base REF] [--ledger PATH] [--cache DIR] [--trial PATH]
                         [--dry-run [--simulate-status N] [--simulate-out FILE]]
@@ -274,12 +275,10 @@ def cmd_run(args) -> int:
         out, record = stem.with_suffix(".out"), stem.with_suffix(".json")
         usage_before, started = usage_percent(), datetime.now(timezone.utc).isoformat()
         status = launch(args, span, body, out)
-    except OSError as e:  # a missing `gh`, `jq` or `node`: nothing launched
+    except (OSError, GitError) as e:  # a missing `gh`, `jq` or `node`, or a failed git: nothing launched
         return stopped(Stop(ERROR, str(e)), ledger, repo)
     except Stop as stop:
         return stopped(stop, ledger, repo)
-    except GitError as e:
-        return stopped(Stop(ERROR, str(e)), ledger, repo)
     # Codex ran: from here a failure is never recorded as an audit not launched.
     record.write_text(json.dumps({
         "prs": [m.pr for m in prs], "range": str(span), "status": status, "left_out": left_out,
