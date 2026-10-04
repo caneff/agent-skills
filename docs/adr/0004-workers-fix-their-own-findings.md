@@ -18,9 +18,12 @@ No size bar. A valid finding is never dropped. Only a finding that needs a
 design of its own leaves the PR, added to the open ticket for its component
 (or filed, if none exists) under the search-before-filing rule in `CLAUDE.md`.
 
-## Open
+## Review shape (ruled by Chris 2026-10-04, "1 y")
 
-How to hold review rounds down while every finding is fixed in the PR:
-proposed to Chris 2026-10-04, not yet ruled. The skill changes this ruling
-needs (the adjacent-fix bar and `leftover` outcome in `implement/SKILL.md`)
-wait on that answer, so they land as one change.
+One review wave: the three axes, plus Codex when #1357's size gate admits
+it, run in parallel; the worker fixes every finding; the seam (`bash
+tests/all.sh`) is the convergence check. No verification re-review, no
+second Codex pass. Evidence: `docs/research/2026-10-04-agent-workflow-prior-art.md`
+(single-pass review beats multi-turn; the ledger's Codex pass 2 scored 3 in
+value over 70 runs). The skill changes land as one spec after burn
+burn-skills-2026-10-03 closes.
