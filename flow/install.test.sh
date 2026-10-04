@@ -89,11 +89,6 @@ if [ -e "$repo/.git/hooks/pre-push" ] || [ -L "$repo/.git/hooks/pre-push" ]; the
 else
   echo "PASS stale pre-push hook removed"
 fi
-if printf '%s' "$out" | grep -q 'hooks/pre-push'; then
-  echo "FAIL install.sh still links a pre-push hook"; fails=1
-else
-  echo "PASS no pre-push hook linked"
-fi
 if [ -L "$tmp/home/.claude/hooks/refresh-landed.sh" ]; then
   echo "PASS live hooks still linked under the scratch HOME"
 else

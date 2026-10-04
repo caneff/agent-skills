@@ -62,6 +62,20 @@ and never dispatched. 2026-09-20: ten tickets "filed from conversation" by
 hand the day the section became required, and the next burn's controller
 had to resolve all of them before it could dispatch.
 
+## Before filing a ticket
+
+Before any ticket is filed — a review follow-up, a controller observation, a
+retro digest item — the open issues on the same file or component are
+searched. When one exists, the item goes onto it as a comment
+(`gh issue comment <n>`) instead of a new issue. Work under about two minutes
+is done on the spot, never ticketed. Why: on 2026-10-04, 295 tickets had been
+opened in 14 days against 271 closed, most of them one-paragraph items on a
+component that already had an open ticket
+(`docs/research/2026-10-04-agent-ticket-inflation.md`). The teaching hook
+`hooks/teach-filing.sh` shows this section on the first `gh issue create` of
+a session, and on every `gh issue create` lists the open issues its own title
+search found.
+
 ## Pipeline notes
 
 `/wayfinder` is for work that outgrows one session — a shared map of decision

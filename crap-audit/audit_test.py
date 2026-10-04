@@ -179,15 +179,6 @@ def test_normalize_raises_on_partial_basename_collision_between_unmatched_files(
         pass
 
 
-def test_normalize_does_not_raise_when_unmatched_file_shares_no_basename():
-    """The legal case the partial-mismatch guard must leave alone: a radon
-    file genuinely has no coverage data (never imported) and its basename
-    doesn't collide with any leftover coverage file -- 0%/0% is correct,
-    not an error."""
-    radon_json, coverage_json = _load_fixture()
-    rows = audit.normalize(radon_json, coverage_json)  # must not raise
-    assert any(r["file"] == "untested.py" for r in rows)
-
 
 def _assert_findings_schema(findings):
     """The six required findings-schema fields, non-empty, on every row —

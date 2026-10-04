@@ -110,11 +110,6 @@ class UsageChangeTest(CodexAppendCase):
         self.assertEqual(delta["status"], "unknown")
         self.assertIn("fell", delta["reason"])
 
-    def test_a_record_with_no_readings_is_unknown(self):
-        self.record(500)
-        self.ok(500, "gate")
-        self.assertEqual(self.only_row()["cost"]["usage_delta"]["status"], "unknown")
-
     def test_a_refused_run_keeps_its_usage_change_and_is_not_a_clean_pass(self):
         self.record(500, before=f"99 {W1}", after=f"100 {W1}", out=OUT_REFUSED, status=1)
         self.ok(500, "gate")

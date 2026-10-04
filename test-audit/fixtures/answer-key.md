@@ -1,6 +1,6 @@
 # Answer key
 
-Ten test cases across three files, each tagged with the bucket `test-audit`
+Thirteen test cases across five files, each tagged with the bucket `test-audit`
 must land it in and the one-line concrete-failure reason. Running the audit
 over `fixtures/` must reproduce this table exactly — every `Cut`/`Rewrite`
 must match, and every `Keep` must be left alone.
@@ -17,5 +17,8 @@ must match, and every `Keep` must be left alone.
 | 8 | `test_rejects_invalid_email` | `test_user_service.py` | **Rewrite** | name/behavior mismatch + only test on this path | Body only checks `ValidationError().code == "default"` — it would still pass if `validate_email` stopped rejecting anything. Normally a mismatch this total is a Cut, but it is the sole test touching `validate_email`'s reject branch, so cutting opens a silent coverage gap — rewrite it to assert invalid input actually raises. |
 | 9 | `test_user_model_default_role_is_member` | `test_user_service.py` | **Cut** | library-default test | Proves the dataclass's own default argument works — a guarantee the standard library already gives, not app logic. Cannot fail from anything this codebase does; deleting it loses no coverage of behavior this app owns. |
 | 10 | `test_retry_eventually_succeeds` | `test_user_service.py` | **Rewrite** | flakiness-by-construction | Real `time.sleep` and unseeded `random.random()` decide the outcome run to run — it can fail when retry logic is correct (bad luck) and pass when retry logic is broken (good luck). The behavior (retry until success) is real; rewrite with a mocked clock and seeded/injected randomness. |
+| 11 | `test_skill_says_discounts_are_capped` | `test_prose_assertions.py` | **Cut** | prose-assertion | Its only assertion is that `SKILL.md` contains a sentence. It cannot fail when discounts stop being capped, and fails on any rewording of the prose. Pass one flags it mechanically. |
+| 12 | `test_discount_over_100_percent_is_capped` | `test_prose_assertions.py` | **Keep** | — | Runs `apply_discount` and asserts the result. Pass one must not flag it: a test that runs code is not a prose assertion. |
+| 13 | `prose_assertion.test.sh` | `prose_assertion.test.sh` | **Cut** | prose-assertion | Shell test whose only check is `grep` for a sentence in a Markdown file. Pass one flags it mechanically, per file. |
 
-Tally: 2 Keep, 3 Cut, 5 Rewrite.
+Tally: 3 Keep, 5 Cut, 5 Rewrite.

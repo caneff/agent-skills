@@ -315,6 +315,13 @@ assert run_size({"img.png": b"\x00\x89PNG" * 100, "a.py": 5}) == (40, "under siz
 suites = subprocess.run(["bash", os.path.join(HERE, "..", "tests", "all.sh"), "--list"],
                         cwd=HERE, capture_output=True, text=True, check=True).stdout.split("\n")
 suites = [x.removesuffix(" --selfcheck") for x in suites if x and not x.endswith("Cargo.toml")]
+# A mod folder (`flow/mods/<name>`) is one suite label for the `*.test.ts` files inside it.
+repo = os.path.join(HERE, "..")
+mod_tests = [os.path.relpath(os.path.join(d, f), repo)
+             for x in suites if os.path.isdir(os.path.join(repo, x))
+             for d, _, files in os.walk(os.path.join(repo, x)) for f in files if f.endswith(".test.ts")]
+assert mod_tests, suites
+suites = [x for x in suites if not os.path.isdir(os.path.join(repo, x))] + mod_tests
 assert len(suites) > 50, suites
 assert run_size({x: 1 for x in suites}) == (40, "under size threshold (0 < 300)\n"), run_size({x: 1 for x in suites})
 # A pure rename carries no churn, not a 400-line delete plus a 400-line add, and the paths after

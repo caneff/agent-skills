@@ -28,3 +28,4 @@ when a burn closes and brings Chris the table when the third burn has.
 
 One line per closed burn: date, run id, small PRs that skipped the axis,
 escapes attributed so far.
+- 2026-10-04, burn-trs-2026-10-04 (twitch-rules-scroller): 1 small PR skipped the axis (#608); 0 escapes attributed so far.

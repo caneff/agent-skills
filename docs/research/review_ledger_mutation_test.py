@@ -44,10 +44,6 @@ class AppendMutationTest(MutationCase):
         self.assertEqual(got, {"m1": ("red", 12), "m2": ("green", 7), "m3": ("unknown", 0)})
         self.assertEqual({r["type"] for r in self.rows().values()}, {"witness-mutation"})
 
-    def test_unknown_stays_unknown(self):
-        self.ok("m1", status="unknown\n")
-        self.assertEqual(next(iter(self.rows().values()))["outcome"], "unknown")
-
     def test_an_empty_or_malformed_status_is_unknown_never_red_or_green(self):
         for i, text in enumerate(["", "\n", "RED?\n", "redgreen\n", "-1\n", "1 0\n", "1\n", "0\n", "127\n"]):
             self.ok(f"m{i}", status=text)

@@ -18,8 +18,8 @@ Applying the changes is a separate, opt-in step the user asks for by name.
 This is the judgment pass: the smells only reading can find. `audit.py` and
 `audit.mjs` in this skill's directory are pass one — a mechanical scan for
 the syntactically detectable smells (assertion-free tests, tautologies,
-mock-the-world, interaction-only assertions, empty/skipped tests). `audit.py`
-covers pytest; `audit.mjs` covers vitest and node:test. Run both first; their
+mock-the-world, interaction-only assertions, empty/skipped tests) and the
+`prose-assertion` smell. `audit.py` covers pytest and `*.test.sh` files; `audit.mjs` covers vitest and node:test. Run both first; their
 combined candidate list feeds the judgment sweep below instead of starting
 from a blank page.
 
@@ -179,6 +179,19 @@ nothing broke," not "this is a mystery guest."
   test body that changes what gets asserted depending on a runtime
   condition. Whichever branch runs, the test finds a way to pass — it can't
   fail no matter which branch the real behavior takes.
+- **Prose assertion.** The test's only assertions are that a prose file
+  (Markdown, a `SKILL.md`, a doc) contains or lacks a string. It cannot fail
+  when an agent stops following the rule, and fails on every rewording of the
+  sentence, so it proves only that text exists. Always Cut: no behavior is
+  there to rewrite toward. Pass one flags the mechanical cases: a Python test
+  whose assertions are all `in`/`not in`/regex checks, that names a `.md`
+  path and calls nothing but file reads and string handling; and a
+  `*.test.sh` that names a `.md` file and runs nothing but text commands
+  (`grep`, `sed`, `case`, `test`). A test that runs any other code is never
+  flagged by pass one. Whether the output it greps is itself generated prose
+  is the judgment pass's call, for example a test that greps a rendered
+  report's wording instead of its content. Keep a test that runs code and
+  checks a link target or a structure, such as `tests/check-section-references.py`.
 - **Flakiness-by-construction.** Real `sleep`, unseeded randomness, or
   wall-clock time decides the outcome run to run. It can fail when the
   behavior is correct (bad luck) and pass when the behavior is broken (good
@@ -255,8 +268,9 @@ just no longer this test's problem.
 
 ## Verify against the fixture
 
-`~/.agents/skills/test-audit/fixtures/` carries five files.
-`test_pricing.py`, `test_checkout_e2e.py` and `test_user_service.py` span the
+`~/.agents/skills/test-audit/fixtures/` carries seven files.
+`test_pricing.py`, `test_checkout_e2e.py`, `test_user_service.py`,
+`test_prose_assertions.py` and `prose_assertion.test.sh` span the
 Cut/Rewrite/Keep buckets; `~/.agents/skills/test-audit/fixtures/answer-key.md`
 has the pass-two bucket for each of their tests, and a run over them should
 reproduce that table. `test_pytest_smells.py` and `vitest_smells.test.js`
@@ -274,12 +288,12 @@ exist for pass one's scanners to flag; the answer key does not cover them.
    itself; the same skip applies to the judgment sweep.
 
 2. **Pass one — run both mechanical scanners.** `python3
-   ~/.agents/skills/test-audit/audit.py <scope>` scans pytest files; `node
+   ~/.agents/skills/test-audit/audit.py <scope>` scans pytest and `*.test.sh` files; `node
    ~/.agents/skills/test-audit/audit.mjs <scope>` scans
    vitest and node:test files. Run both and concatenate their output into one
-   `file:line: <smell>` candidate list for the five mechanically detectable
+   `file:line: <smell>` candidate list for the six mechanically detectable
    smells (assertion-free, tautology, mock-the-world, interaction-only
-   assertion, empty/skipped). This is a candidate list, not a verdict — every
+   assertion, empty/skipped, prose-assertion). This is a candidate list, not a verdict — every
    line still needs the judgment pass below to confirm it and assign a
    bucket.
 
@@ -313,7 +327,7 @@ vocabulary, and metabar:
   `keep`. `category` is the smell that named it — `duplicate-coverage`,
   `mystery-guest`, `eager`, `sensitive-equality`, `name-mismatch`,
   `library-default`, `conditional-logic`, `flaky-by-construction`, `tautology`,
-  `interaction-only`, `documented-intent`. A rewrite carries `before`/`after`;
+  `interaction-only`, `documented-intent`, `prose-assertion`. A rewrite carries `before`/`after`;
   a duplicate-coverage cut carries `owner` (the stronger test's `file:line`);
   a `documented-intent` row carries the comment it defers to in
   `extra.author_intent`.

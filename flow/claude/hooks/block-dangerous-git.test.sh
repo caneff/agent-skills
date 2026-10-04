@@ -308,4 +308,18 @@ export STUB_LOGIN=caneff STUB_OWNER=caneff
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
 
+# The guard reads commands through command-scan-lib.sh beside its real path.
+# Without the lib no pattern can match, so it blocks every command rather than
+# letting each one through unscanned.
+mkdir -p "$tmp/nolib"
+cp "$hook" "$tmp/nolib/block-dangerous-git.sh"
+out=$(printf '%s' "git status" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+      | (cd "$repo" && PATH="$stubdir:$PATH" bash "$tmp/nolib/block-dangerous-git.sh") 2>&1)
+rc=$?
+if [ "$rc" = 2 ] && [[ "$out" == *"command-scan-lib.sh is missing"* ]]; then
+  echo "PASS: missing scan lib blocks"
+else
+  echo "FAIL: missing scan lib — want exit 2 naming the lib, got $rc: $out"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

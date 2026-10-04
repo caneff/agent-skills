@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Runs every test suite in the repo. Three discovery rules over git-tracked
+# Runs every test suite in the repo. Discovery rules over git-tracked
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
-# runs directly under python3, and each `audit.py` that implements
-# `--selfcheck` runs with that flag. One line per suite; exits non-zero on
-# the first failure (and prints that suite's output). A suite is failed on
-# its exit status *or* on a failure signature at the start of a line in its
-# output, because exit status alone read a suite that reported findings and
-# exited 0 as green (#954; the signature set and its reason are below).
+# runs directly under python3, each `audit.py` that implements
+# `--selfcheck` runs with that flag, each `Cargo.toml` runs `cargo test`, and
+# each mod folder under `flow/mods/` runs `claude plugin test <folder>`. One
+# line per suite; exits non-zero on the first failure (and prints that
+# suite's output). A suite is failed on its exit status *or* on a failure
+# signature at the start of a line in its output, because exit status alone
+# read a suite that reported findings and exited 0 as green (#954; the
+# signature set and its reason are below).
 # `--list` prints the labels the rules select, without running anything.
 # `--changed <base>` narrows the run to the suites under every top-level
 # directory the diff `<base>...HEAD` touches plus everything under `tests/`
@@ -45,6 +47,16 @@ suites() { # prints "<label>\t<command>" per discovered suite
     done
   git ls-files -- '*Cargo.toml' |
     while IFS= read -r f; do printf '%s\tcargo test --manifest-path %s\n' "$f" "$f"; done
+  # Every mod under flow/mods/ (#1368). Scoped to that folder, not every
+  # plugin: `humanizer/` (a skill plugin) and `exa-search-hook/` (a mod with
+  # no test yet) also hold a plugin.json, and `claude plugin test` fails a
+  # plugin that has no `*.test.ts`. A mod under flow/mods/ with no test fails
+  # the same way, which is the point.
+  git ls-files -- 'flow/mods/*/.claude-plugin/plugin.json' |
+    while IFS= read -r f; do
+      dir=$(dirname "$(dirname "$f")")
+      printf '%s\tclaude plugin test %s\n' "$dir" "$dir"
+    done
 }
 
 # Which suites a `--changed <base>` run keeps. The full suite is the answer
@@ -106,6 +118,12 @@ selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; rm -rf "$tmp"; e
 # A missing cargo must fail the gate, not silently skip every Cargo suite.
 if printf '%s\n' "$selection" | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
   echo "tests/all.sh: cargo is not on PATH, and a tracked Cargo.toml needs it" >&2
+  exit 1
+fi
+
+# Likewise a missing claude must fail the gate, not silently skip every mod.
+if suites | cut -f2 | grep -q '^claude plugin test ' && ! command -v claude >/dev/null 2>&1; then
+  echo "tests/all.sh: claude is not on PATH, and a tracked mod needs it" >&2
   exit 1
 fi
 
