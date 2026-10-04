@@ -16,13 +16,15 @@ TEACH_DOCS="$(dirname "$teach_dir")"
 
 TEACH_INPUT=$(cat)
 TEACH_COMMAND=$(printf '%s' "$TEACH_INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null)
+TEACH_CWD=$(printf '%s' "$TEACH_INPUT" | jq -r '.cwd // ""' 2>/dev/null)
 TEACH_SESSION=$(printf '%s' "$TEACH_INPUT" | jq -r '.session_id // "no-session"' 2>/dev/null | tr -c 'A-Za-z0-9_-' '_')
 TEACH_CONTEXT=""
 
 # The words the shell would run, one command per line: heredoc bodies and
 # quoted text dropped (a trigger in either is data), then split at every
 # separator, with leading `VAR=value` assignments taken off each command.
-quote_views "$(printf '%s\n' "$TEACH_COMMAND" | strip_heredocs)"
+TEACH_SCAN=$(printf '%s\n' "$TEACH_COMMAND" | strip_heredocs)
+quote_views "$TEACH_SCAN"
 TEACH_RUN=$(printf '%s\n' "$BARE" | sed -E 's/(&&|\|\||[;&|()`]|\$\()/\n/g' \
   | sed -E 's/^[[:space:]]+//; :a; s/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+//; ta')
 
@@ -51,10 +53,11 @@ section() {
 }
 
 # teach <doc> <heading> <why this command>: add the section to the context,
-# unless this session has already been shown it.
+# unless this session has already been shown it. Returns 1 when it was
+# already shown, so a hook can skip work that only goes with the section.
 teach() {
   local doc=$1 heading=$2 why=$3 key="$1#$2" text
-  shown "$key" && return 0
+  shown "$key" && return 1
   if ! text=$(section "$doc" "$heading"); then
     teach_add "Teaching hook error: section \"## $heading\" was not found in $TEACH_DOCS/$doc, so the reference text for this command is missing. The heading was renamed or removed; the hook and the doc disagree."
     return 0
