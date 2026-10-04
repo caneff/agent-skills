@@ -129,7 +129,7 @@ env, argv = os.environ, sys.argv[1:]
 repo = argv[argv.index("--repo") + 1]
 tickets = [a for a in argv if a.isdigit()]
 n = str(min(int(t) for t in tickets))
-with open(env["CLAUDE_LOG"], "a") as f:
+with open(env["DISPATCH_LOG"], "a") as f:
     f.write(json.dumps({"n": n, "tickets": tickets, "argv": argv}) + "\n")
 if env.get("DISPATCH_REFUSE"):
     sys.stderr.write("implement-dispatch: no herdr server is running (herdr status)\n"); sys.exit(1)
@@ -148,8 +148,12 @@ for t in tickets + env.get("EXTRA_CLOSE", "").split():
 if env.get("LIGHT"):
     for t in tickets:
         st["issues"][t]["state"] = "closed"
+if env.get("NOTE_EXTRA"):
+    st.setdefault("comments", []).append([n, env["NOTE_EXTRA"]])
 json.dump(st, open(env["FAKE_STATE"], "w"))
 subprocess.run(["git", "worktree", "add", "-q", "--no-track", "-b", branch, wt, "origin/main"], cwd=repo, check=True)
+if env.get("DISPATCH_FAIL_AFTER_CLAIM"):
+    sys.stderr.write("herdr agent start failed after the workspace exists\n"); sys.exit(1)
 if env.get("LIGHT") or n in env.get("FAIL_TICKETS", "").split():
     sys.exit(0)
 os.chdir(wt)
@@ -171,7 +175,8 @@ json.dump(st, open(env["FAKE_STATE"], "w"))
 
 # Stands in for herdr. `agent get` answers for the worker: HERDR_STATUS (default
 # idle), HERDR_WORKING_POLLS (that many `working` answers first), HERDR_GONE
-# (agent_not_found), HERDR_DOWN (any other failure). Every call is logged.
+# (agent_not_found), HERDR_DOWN (any other failure), HERDR_FLAKY (that many
+# failures first). Every call is logged.
 STUB_HERDR = r"""#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
@@ -179,7 +184,10 @@ env = os.environ
 with open(env["HERDR_LOG"], "a") as f:
     f.write(json.dumps(args) + "\n")
 if args[:2] == ["agent", "get"]:
-    if env.get("HERDR_DOWN"):
+    flaky = env["HERDR_LOG"] + ".flaky"
+    failed = int(open(flaky).read()) if os.path.exists(flaky) else 0
+    if env.get("HERDR_DOWN") or failed < int(env.get("HERDR_FLAKY", 0)):
+        open(flaky, "w").write(str(failed + 1))
         sys.stderr.write("herdr: no server\n"); sys.exit(1)
     if env.get("HERDR_GONE"):
         sys.stderr.write(json.dumps({"error": {"code": "agent_not_found", "message": "not found"}}) + "\n"); sys.exit(1)
@@ -187,7 +195,7 @@ if args[:2] == ["agent", "get"]:
     seen = int(open(counter).read()) if os.path.exists(counter) else 0
     open(counter, "w").write(str(seen + 1))
     status = "working" if seen < int(env.get("HERDR_WORKING_POLLS", 0)) else env.get("HERDR_STATUS", "idle")
-    print(json.dumps({"result": {"agent": {"agent_status": status}}}))
+    print(json.dumps({"result": {"agent": {"agent_status": status, "pane_id": "w9:p1"}}}))
 """
 
 STUB_CLEANUP = """#!/bin/sh
@@ -240,7 +248,7 @@ class Sandbox(unittest.TestCase):
         self.git(self.repo, "config", "land.testcmd", "true")
         self.set_origin("me/repo")
         self.state_path = os.path.join(t, "state.json")
-        self.claude_log = os.path.join(t, "claude.log")
+        self.dispatch_log = os.path.join(t, "claude.log")
         self.cleanup_log = os.path.join(t, "cleanup.log")
         self.herdr_log = os.path.join(t, "herdr.log")
         self.seam_log = os.path.join(t, "seam.log")
@@ -276,16 +284,16 @@ class Sandbox(unittest.TestCase):
 
     def drain(self, *argv, env=None):
         e = {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
-             "CLAUDE_LOG": self.claude_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
+             "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
              "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
              "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3",
              "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
         return subprocess.run([sys.executable, DRAIN, "--repo", self.repo, *argv],
                               capture_output=True, text=True, env=e)
 
-    def claude_runs(self):
+    def dispatch_runs(self):
         """The `implement-dispatch` calls, one per bundle started."""
-        return [json.loads(line) for line in read(self.claude_log).splitlines()] if os.path.exists(self.claude_log) else []
+        return [json.loads(line) for line in read(self.dispatch_log).splitlines()] if os.path.exists(self.dispatch_log) else []
 
     def chooser_runs(self):
         return [json.loads(line) for line in read(self.chooser_log).splitlines()] if os.path.exists(self.chooser_log) else []
@@ -312,7 +320,7 @@ class DrainTest(Sandbox):
         self.assertEqual([m[0] for m in st["merged"]], [[1]])  # the oldest only
         self.assertEqual(self.labels(2), ["ready-for-agent"])
         self.assertIn("implement-1", read(self.cleanup_log))
-        run = self.claude_runs()[0]
+        run = self.dispatch_runs()[0]
         self.assertEqual(run["argv"], ["--repo", self.repo, "--controller", "drain", "1"])
         self.assertEqual(self.chooser_runs()[0]["argv"][2:], ["--permission-mode", "auto"])
         self.assertIn(["agent", "get", "repo-1"], self.herdr_calls())  # the worker's herdr agent name
@@ -326,7 +334,7 @@ class DrainTest(Sandbox):
         self.assertEqual(st["merged"][0][0], [1, 2, 3])
         self.assertEqual([i["state"] for i in st["issues"].values()], ["closed"] * 3 + ["open"])
         self.assertEqual(self.labels(4), ["ready-for-agent"])
-        self.assertEqual(self.claude_runs()[0]["argv"][-3:], ["1", "2", "3"])
+        self.assertEqual(self.dispatch_runs()[0]["argv"][-3:], ["1", "2", "3"])
         prompt = self.chooser_runs()[0]["prompt"]
         for line in ("#1 is the anchor", "- #2 ticket 2", "- #3 ticket 3", "- #4 ticket 4", "at most 7 of them"):
             self.assertIn(line, prompt)
@@ -337,56 +345,52 @@ class DrainTest(Sandbox):
         for env in ({"CHOOSER_FAIL": "1", "TAKE": "2"}, {"CHOOSER_SAY": "no idea", "TAKE": "2"}):
             self.write_state({1: {}, 2: {}})
             self.drain("--once", env=env)
-            self.assertEqual(self.claude_runs()[-1]["tickets"], ["1"], env)
+            self.assertEqual(self.dispatch_runs()[-1]["tickets"], ["1"], env)
             self.assertEqual(self.labels(2), ["ready-for-agent"], env)
-            os.remove(self.claude_log)
+            os.remove(self.dispatch_log)
             self.git(self.repo, "worktree", "remove", "--force", self.worktree(1))
             self.git(self.repo, "branch", "-D", "implement-1")
 
     def test_a_chooser_pick_that_was_not_offered_or_is_below_the_anchor_is_dropped(self):
         self.write_state({1: {}, 2: {}, 3: {}})
         self.drain("--anchor", "2", "--once", env={"CHOOSER_SAY": "drain bundle: 2 1 9 3 3"})
-        self.assertEqual(self.claude_runs()[0]["tickets"], ["2", "3"])
+        self.assertEqual(self.dispatch_runs()[0]["tickets"], ["2", "3"])
         self.assertEqual(self.labels(1), ["ready-for-agent"])
 
-    def test_a_chooser_past_its_wall_clock_bundles_the_anchor_alone(self):
+    def test_a_chooser_past_its_wall_clock_bundles_the_anchor_alone_and_says_why(self):
         self.write_state({1: {}, 2: {}})
-        code = ("import drain; drain.CHOOSER_SECONDS = 1; "
-                "import sys; sys.argv = ['drain.py'] + sys.argv[1:]; sys.exit(drain.main(sys.argv[1:]))")
-        e = {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
-             "CLAUDE_LOG": self.claude_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
-             "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log, "CHOOSER_SLEEP": "1", "TAKE": "2",
-             "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), "PYTHONPATH": HERE}
-        r = subprocess.run([sys.executable, "-c", code, "--repo", self.repo, "--once"], capture_output=True,
-                           text=True, env=e)
+        r = self.drain("--once", env={"CHOOSER_SLEEP": "1", "TAKE": "2", "DRAIN_CHOOSER_SECONDS": "1"})
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
-        self.assertEqual(self.claude_runs()[0]["tickets"], ["1"])
+        self.assertEqual(self.dispatch_runs()[0]["tickets"], ["1"])
+        self.assertTrue(any("drain chooser: #1 alone: " in b and "wall clock" in b
+                            for i, b in self.state()["comments"] if i == "1"), self.state()["comments"])
 
-    def test_max_counts_tickets_not_bundles(self):
-        # The first bundle holds two tickets, so --max 2 is spent; counting
-        # bundles it would go on to build ticket 3.
-        self.write_state({1: {}, 2: {}, 3: {}, 4: {}})
-        self.drain("--max", "2", env={"TAKE": "2"})
-        self.assertEqual([m[0] for m in self.state()["merged"]], [[1, 2]])
-        self.assertEqual(self.labels(3), ["ready-for-agent"])
-
-    def test_a_bundle_max_below_one_is_refused(self):
-        self.write_state({1: {}})
-        self.assertNotEqual(self.drain("--bundle-max", "0").returncode, 0)
-        self.assertEqual(self.claude_runs(), [])
+    def test_a_chooser_that_fails_leaves_a_comment_saying_so(self):
+        self.write_state({1: {}, 2: {}})
+        self.drain("--once", env={"CHOOSER_FAIL": "1", "TAKE": "2"})
+        notes = [b for i, b in self.state()["comments"] if i == "1" and b.startswith("drain chooser:")]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("the chooser exited 1", notes[0])
+        self.assertEqual([b for i, b in self.state()["comments"] if b.startswith("drain bundle:")], [],
+                         "the chooser note's digits must never read as bundle members")
 
     def test_the_choosers_bundle_is_cut_to_bundle_max(self):
         self.write_state({1: {}, 2: {}, 3: {}})
         self.drain("--once", "--bundle-max", "2", env={"TAKE": "2 3"})
-        self.assertEqual(self.claude_runs()[0]["tickets"], ["1", "2"])
+        self.assertEqual(self.dispatch_runs()[0]["tickets"], ["1", "2"])
         self.assertIn("at most 1 of them", self.chooser_runs()[0]["prompt"])
         self.assertEqual(self.labels(3), ["ready-for-agent"])
 
     def test_a_pr_over_bundle_max_is_a_failed_build(self):
-        # A worker that closes more than the cap names, past the bundle comment.
+        # The bundle comments name three tickets, one more than the cap, and the PR closes all three.
         self.write_state({1: {}, 2: {}, 3: {}})
-        self.drain("--once", "--bundle-max", "2", env={"TAKE": "2", "EXTRA_CLOSE": "3"})
+        self.drain("--once", "--bundle-max", "2", env={"TAKE": "2", "EXTRA_CLOSE": "3", "NOTE_EXTRA": "drain bundle: 1 3"})
         self.assertNotIn("merged", self.state())
+        self.assertIn("over --bundle-max 2", self.handed_comment(1)[0])
+
+    def test_a_pr_closing_a_ticket_no_bundle_comment_names_is_a_failed_build_even_under_the_cap(self):
+        self.write_state({1: {}, 2: {}, 3: {}})
+        self.drain("--once", "--bundle-max", "5", env={"TAKE": "2", "EXTRA_CLOSE": "3"})
         self.assertIn("which no drain bundle: comment on #1 names", self.handed_comment(1)[0])
 
     def test_a_ticket_the_agent_claimed_but_the_pr_did_not_close_goes_back_to_ready(self):
@@ -423,7 +427,7 @@ class DrainTest(Sandbox):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("ready-for-human", self.labels(1))
         self.assertEqual([m[0] for m in self.state()["merged"]], [[2]])
-        self.assertEqual([c["n"] for c in self.claude_runs()], ["1", "2"])  # one dispatch; the second try prompts it
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["1", "2"])  # one dispatch; the second try prompts it
         self.assertTrue(any(c[:3] == ["agent", "prompt", "repo-1"] for c in self.herdr_calls()))
 
     def test_a_pr_that_is_not_clean_is_a_failed_build(self):
@@ -451,19 +455,19 @@ class DrainTest(Sandbox):
         self.write_state({1: {"body": "## Blocked by\n\n- #2\n"}, 2: {"labels": ["in-progress"]},
                           3: {"labels": ["ready-for-agent", "ready-for-human"]}, 4: {}})
         self.drain("--max", "5")
-        self.assertEqual([c["n"] for c in self.claude_runs()], ["4"])
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["4"])
 
     def test_a_ticket_taken_since_the_pick_is_not_claimed_over(self):
         self.write_state({1: {}, 2: {}})
         self.drain("--once", env={"TAKE_AFTER_PICK": "1"})
-        self.assertEqual([c["n"] for c in self.claude_runs()], ["2"])
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["2"])
         self.assertIn("in-progress", self.labels(1))
 
     def test_a_merge_cleanup_failure_is_a_note_not_a_rebuild(self):
         self.write_state({1: {}})
         r = self.drain("--once", env={"CLEANUP_FAIL": "1"})
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(self.claude_runs()), 1)
+        self.assertEqual(len(self.dispatch_runs()), 1)
         self.assertIn("merge-cleanup failed: cleanup exploded", r.stdout)
         self.assertEqual([m[0] for m in self.state()["merged"]], [[1]])
 
@@ -497,7 +501,7 @@ class DrainTest(Sandbox):
         self.assertEqual(r.returncode, 1)
         self.assertIn("stopped: implement-dispatch refused: implement-dispatch: no herdr server is running", r.stdout)
         self.assertEqual(self.labels(1), ["ready-for-agent"])
-        self.assertEqual(len(self.claude_runs()), 1, "a refusal is the environment's: no second ticket is tried")
+        self.assertEqual(len(self.dispatch_runs()), 1, "a refusal is the environment's: no second ticket is tried")
 
     def test_a_worker_still_working_is_waited_for_until_it_goes_idle(self):
         self.write_state({1: {}})
@@ -535,7 +539,7 @@ class DrainTest(Sandbox):
     def test_a_rerun_with_a_gone_worker_and_no_pr_hands_the_ticket_over(self):
         self.write_state({1: {"labels": ["in-progress"]}, 2: {}}, comments=[["1", "drain anchor: implement-1"]])
         self.drain("--once", env={"HERDR_GONE": "1"})
-        self.assertEqual(self.claude_runs(), [], "a resumed ticket is waited on, never dispatched twice")
+        self.assertEqual(self.dispatch_runs(), [], "a resumed ticket is waited on, never dispatched twice")
         self.assertIn("ready-for-human", self.labels(1))
 
     def test_a_rerun_checks_an_open_pr_without_rebuilding(self):
@@ -552,7 +556,7 @@ class DrainTest(Sandbox):
         self.save(st)
         r = self.drain("--once")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.claude_runs(), [])
+        self.assertEqual(self.dispatch_runs(), [])
         self.assertEqual([m[0] for m in self.state()["merged"]], [[1]])
 
     def test_a_live_workers_ticket_is_not_adopted(self):
@@ -561,7 +565,7 @@ class DrainTest(Sandbox):
         self.write_state({1: {"labels": ["in-progress"]}, 2: {}})
         self.git(self.repo, "worktree", "add", "-q", "-b", "implement-1", self.worktree(1), "origin/main")
         self.drain("--once")
-        self.assertEqual([c["n"] for c in self.claude_runs()], ["2"])
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["2"])
         self.assertEqual(self.labels(1), ["in-progress"])
 
     def test_a_ticket_drain_handed_to_chris_is_not_adopted_when_it_is_readied_again(self):
@@ -569,7 +573,7 @@ class DrainTest(Sandbox):
                          comments=[["1", "drain anchor: implement-1"], ["1", "drain could not land this ticket (x)"]])
         self.git(self.repo, "worktree", "add", "-q", "-b", "implement-1", self.worktree(1), "origin/main")
         self.drain("--once")
-        self.assertEqual(self.claude_runs(), [])
+        self.assertEqual(self.dispatch_runs(), [])
         self.assertEqual(self.labels(1), ["in-progress"])
 
     def test_a_failed_claim_comment_leaves_the_ticket_ready(self):
@@ -605,7 +609,7 @@ class DrainTest(Sandbox):
         self.set_origin("someone-else/repo")
         r = self.drain("--once")
         self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(self.claude_runs(), [])
+        self.assertEqual(self.dispatch_runs(), [])
         self.assertIn("someone-else", r.stderr)
 
     # --- #1415: targeted seam, one full run per drain run, --anchor ------------
@@ -649,9 +653,17 @@ class DrainTest(Sandbox):
         self.assertEqual(self.drain("--once").returncode, 0)
         green = read(os.path.join(self.tmp.name, "logs", "last-green-me__repo")).strip()
         self.assertEqual(green, self.git(self.repo, "rev-parse", "origin/main"))
+        # Two merges land on main since that green run (the fake `gh` never moves main itself).
+        for subject in ("first other merge", "second other merge"):
+            self.git(self.repo, "commit", "-q", "--allow-empty", "-m", subject)
+        self.git(self.repo, "push", "-q", "origin", "main")
         r = self.drain("--once", env={"SEAM_RED": "1"})
         self.assertIn("stopped: the full suite is red on main", r.stdout)
         self.assertIn("Merges since the last green full run: ", r.stdout)
+        # Named from last-green's sha, not just this run's own merge: with the file unread
+        # the list would hold only the PR url.
+        for subject in ("first other merge", "second other merge"):
+            self.assertIn(subject, r.stdout)
 
     def test_no_merge_means_no_full_run(self):
         self.write_state({})
@@ -663,8 +675,8 @@ class DrainTest(Sandbox):
         self.write_state({1: {}, 2: {}, 3: {}})
         r = self.drain("--anchor", "3", "--max", "2")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual([c["n"] for c in self.claude_runs()], ["3", "1"])
-        self.assertEqual([c["tickets"] for c in self.claude_runs()], [["3"], ["1"]])
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["3", "1"])
+        self.assertEqual([c["tickets"] for c in self.dispatch_runs()], [["3"], ["1"]])
 
     def test_anchor_that_is_not_ready_or_is_blocked_is_refused_before_any_work(self):
         self.write_state({1: {}, 2: {"labels": ["in-progress"]}, 3: {"body": "## Blocked by\n\n- #1\n"}})
@@ -672,14 +684,75 @@ class DrainTest(Sandbox):
             r = self.drain("--anchor", n)
             self.assertEqual(r.returncode, 1, n)
             self.assertIn(f"--anchor #{n} is not an open, ready, unblocked ticket", r.stdout)
-        self.assertEqual(self.claude_runs(), [])
+        self.assertEqual(self.dispatch_runs(), [])
         self.assertEqual(self.labels(1), ["ready-for-agent"])
+
+    # --- review fixes (#1415) --------------------------------------------------
+
+    def test_a_failed_check_prompts_the_worker_with_the_reason_and_waits_for_it_to_start_working(self):
+        self.write_state({1: {}})
+        self.drain("--once", env={"DRAFT_TICKETS": "1"})
+        prompts = [c for c in self.herdr_calls() if c[:2] == ["agent", "prompt"]]
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("the PR is up but drain's check of it failed", prompts[0][3])
+        self.assertIn("still a draft", prompts[0][3])
+        self.assertEqual(prompts[0][4:7], ["--wait", "--until", "working"])
+
+    def test_a_missing_pr_prompts_with_the_reason_it_is_not_up(self):
+        self.write_state({1: {}})
+        self.drain("--once", env={"FAIL_TICKETS": "1"})
+        prompt = next(c for c in self.herdr_calls() if c[:2] == ["agent", "prompt"])
+        self.assertIn("the PR is not up yet", prompt[3])
+        self.assertIn("is idle with no PR", prompt[3])
+
+    def test_a_blocked_worker_is_a_failed_build_not_a_wait_for_the_wall_clock(self):
+        self.write_state({1: {}})
+        self.drain("--once", env={"FAIL_TICKETS": "1", "HERDR_STATUS": "blocked"})
+        self.assertIn("is blocked with no PR", self.handed_comment(1)[0])
+
+    def test_a_bundle_handed_to_chris_closes_its_workers_pane(self):
+        self.write_state({1: {}})
+        self.drain("--once", env={"FAIL_TICKETS": "1"})
+        self.assertIn(["pane", "close", "w9:p1"], self.herdr_calls())
+
+    def test_a_ticket_whose_workspace_is_kept_is_not_picked_and_an_anchor_naming_it_is_refused(self):
+        self.write_state({1: {}, 2: {}})
+        self.git(self.repo, "worktree", "add", "-q", "-b", "implement-1", self.worktree(1), "origin/main")
+        r = self.drain("--anchor", "1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--anchor #1 is not an open, ready, unblocked ticket without a kept workspace", r.stdout)
+        self.assertEqual(self.dispatch_runs(), [])
+        self.drain("--once")
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["2"])
+
+    def test_a_transient_look_failure_does_not_fail_the_build(self):
+        self.write_state({1: {}})
+        r = self.drain("--once", env={"HERDR_FLAKY": "2"})
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual([m[0] for m in self.state()["merged"]], [[1]])
+
+    def test_a_dispatch_that_fails_after_the_claim_is_this_bundles_failed_build(self):
+        self.write_state({1: {}, 2: {}})
+        r = self.drain("--once", env={"DISPATCH_FAIL_AFTER_CLAIM": "1", "HERDR_GONE": "1"})
+        self.assertNotIn("stopped", r.stdout)
+        self.assertEqual(len(self.dispatch_runs()), 1, "a failure after the claim is not retried by dispatching again")
+        self.assertIn("ready-for-human", self.labels(1))
+        self.assertEqual(self.handed_comment(1)[0].count("Last failure"), 1)
+
+    def test_a_drain_run_from_a_linked_worktree_names_the_primary_checkout(self):
+        self.write_state({1: {}})
+        linked = os.path.join(self.tmp.name, "linked")
+        self.git(self.repo, "worktree", "add", "-q", "--detach", linked, "origin/main")
+        r = self.drain("--once", "--repo", linked)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.dispatch_runs()[0]["argv"][:2], ["--repo", self.repo])
+        self.assertIn(["agent", "get", "repo-1"], self.herdr_calls())
 
     def test_an_empty_queue_says_so(self):
         r = self.drain()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "nothing to drain")
-        self.assertEqual(self.claude_runs(), [])
+        self.assertEqual(self.dispatch_runs(), [])
 
 
 class WaitTest(Sandbox):

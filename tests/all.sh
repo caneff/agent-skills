@@ -12,12 +12,14 @@
 # directory the diff `<base>...HEAD` touches plus everything under `tests/`
 # (the repo-wide checks); see `scope_changed` for when it widens to the full
 # suite. Suites run concurrently, `TESTS_JOBS` at a time (default `nproc`),
-# and are reported in discovery order. A suite whose first twenty lines carry
-# `all.sh: serial` cannot share the box (a fixed port, a shared global path):
-# it runs alone after the concurrent ones, and names why on that line.
+# and are reported in discovery order. A suite with a comment line
+# `# all.sh: serial (<why>)` in its first twenty lines cannot share the box (a
+# fixed port, a shared global path): it runs alone after the concurrent ones.
 # Each suite is also held to a CPU budget (see `cpu_budget`): its own user+sys
 # time with every process it started, not wall-clock time, so load on a shared
-# box cannot make it flaky.
+# box cannot make it flaky. `TESTS_CPU_BUDGET=<seconds>` can only lower every
+# budget (a test uses it to make a fixture suite go over); raising one is an
+# edit to `cpu_budget`, a visible diff line.
 # This is the merge gate (`git config land.testcmd`), not a push hook — see
 # #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
@@ -60,7 +62,10 @@ scope_changed() { # <base>
     [ -n "$file" ] || continue
     dir=${file%%/*}
     if [ "$file" = tests/all.sh ] || [ "$dir" = "$file" ] || ! grep -qxF "$dir" <<<"$all_dirs"; then
-      echo "full suite: $file is not owned by a directory with suites (or is tests/all.sh)" >&2
+      if [ "$file" = tests/all.sh ]; then why="tests/all.sh itself changed"
+      elif [ "$dir" = "$file" ]; then why="$file is at the repo root, which no directory of suites owns"
+      else why="$dir/ holds no suite ($file)"; fi
+      echo "full suite: $why" >&2
       echo '*'; return
     fi
     case " $dirs " in *" $dir "*) ;; *) dirs="$dirs $dir" ;; esac
@@ -192,9 +197,9 @@ identity_before=$(identity_snapshot)
 jobs=${TESTS_JOBS:-$(nproc 2>/dev/null || echo 4)}
 case $jobs in ''|*[!0-9]*|0) echo "tests/all.sh: TESTS_JOBS must be a positive integer, got '$jobs'" >&2; exit 2 ;; esac
 
-is_serial() { # <label>: a suite file whose head says `all.sh: serial`
+is_serial() { # <label>: a suite file with a `# all.sh: serial` comment line in its head
   local file=${1%% *}
-  [ -f "$file" ] && head -n 20 "$file" | grep -q 'all\.sh: serial'
+  [ -f "$file" ] && head -n 20 "$file" | grep -q '^# all\.sh: serial'
 }
 : >"$tmp/parallel"; : >"$tmp/serial"
 while IFS=$'\t' read -r label cmd; do
@@ -215,15 +220,22 @@ cpu_budget() { # <label>: prints the suite's budget in seconds
     flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir) and runs 140+ process-spawning tests
     flow/install.test.sh) echo 160 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME (measured 109s)
     drain/drain_test.py) echo 40 ;; # one real git repo, bare origin and stub processes per case, 43 cases (measured 23s)
-    *) echo "${TESTS_CPU_BUDGET:-$default_cpu_budget}" ;;
+    *) echo "$default_cpu_budget" ;;
   esac
 }
+# The budget actually applied: the named one, lowered (never raised) by the
+# environment's `TESTS_CPU_BUDGET`.
+effective_cpu_budget() { # <label>
+  local b; b=$(cpu_budget "$1")
+  case ${TESTS_CPU_BUDGET:-} in ''|*[!0-9]*) echo "$b" ;; *) [ "$TESTS_CPU_BUDGET" -lt "$b" ] && echo "$TESTS_CPU_BUDGET" || echo "$b" ;; esac
+}
 
-# User+sys seconds of everything this subshell waited for, from the `times`
-# builtin: line 2 is the children, descendants included. The builtin must run in
-# this shell itself, so it writes to a file (a pipe or `$(...)` would run it in a
-# fresh subshell that reports zero). A subshell starts at zero, so each suite
-# runs in one (backgrounded, or parenthesised).
+# User+sys seconds of this subshell and everything it waited for, from the
+# `times` builtin: line 1 is the shell itself, line 2 its children, descendants
+# included, and both are summed. The builtin must run in this shell itself, so
+# it writes to a file (a pipe or `$(...)` would run it in a fresh subshell that
+# reports zero). A subshell starts at zero, so each suite runs in one
+# (backgrounded, or parenthesised).
 cpu_seconds() { # <file>
   times >"$1.times"
   awk '{ for (i = 1; i <= NF; i++) { split($i, p, "m"); t += p[1] * 60 + p[2] } } END { printf "%.1f", t }' "$1.times" >"$1"
@@ -236,14 +248,17 @@ run_suite() { # <index> <command>
   after=$(identity_snapshot)
   printf '%s' "$out" >"$tmp/$1.out"
   [ "$after" = "$identity_before" ] || printf '%s' "$after" >"$tmp/$1.ident"
+  # A failed suite stops new ones from starting at once, not when the reporter
+  # reaches it in discovery order.
+  [ "$status" -eq 0 ] || touch "$tmp/stop"
   echo "$status" >"$tmp/$1.rc.tmp" && mv "$tmp/$1.rc.tmp" "$tmp/$1.rc"
 }
 
 dispatch() {
   local idx=0 label cmd
   while IFS=$'\t' read -r label cmd; do
-    [ -e "$tmp/stop" ] && break
     while [ "$(jobs -pr | wc -l)" -ge "$jobs" ]; do wait -n; done
+    [ -e "$tmp/stop" ] && break
     run_suite "$idx" "$cmd" &
     idx=$((idx + 1))
   done <"$tmp/parallel"
@@ -293,7 +308,7 @@ while IFS=$'\t' read -r label cmd; do
         "  $hit" \
         "$(logging_remedy "$hit")"
     fi
-    cpu=$(cat "$tmp/$idx.cpu"); budget=$(cpu_budget "$label")
+    cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label")
     if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then
       stop_and_wait
       report_failure "$label" "$out" \

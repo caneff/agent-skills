@@ -7,6 +7,9 @@
 # tests/all.sh in a shadow repo of fake suites, so nothing here reads this one.
 set -uo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+# The cases set these themselves; a caller's value would change what the inner
+# tests/all.sh runs do.
+unset TESTS_JOBS TESTS_CPU_BUDGET
 root=$(git rev-parse --show-toplevel) || exit 1
 shadow=$(mktemp -d) || { echo "FAIL: mktemp -d"; exit 1; }
 trap 'rm -rf "$shadow"' EXIT
@@ -60,6 +63,8 @@ check "an empty diff lists only the repo-wide checks" "$(has tests/t.test.sh && 
 fresh; change a/x.txt
 out=$(cd "$shadow/repo" && bash tests/all.sh --list --changed no-such-ref 2>&1); rc=$?
 check "an unreadable base exits 2 instead of selecting nothing" "$([ "$rc" = 2 ]; echo $?)"
+out=$(cd "$shadow/repo" && bash tests/all.sh --changed no-such-ref 2>&1); rc=$?
+check "...on a run too, which must not report 0 suites and exit 0" "$([ "$rc" = 2 ] && ! grep -q 'suites passed' <<<"$out"; echo $?)"
 
 fresh; change a/x.txt
 out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1); rc=$?
@@ -67,15 +72,24 @@ check "a --changed run passes and runs the narrowed set" "$([ "$rc" = 0 ] && has
 check "...and says which scope it chose" "$(has 'changed suites: a + tests'; echo $?)"
 
 # Concurrency: two suites that each wait for the other's marker finish only if
-# they run at the same time; with one job the first would wait out its timeout.
-fresh
-for pair in "a/a.test.sh mine theirs" "b/b.test.sh theirs mine"; do
-  set -- $pair
-  printf '#!/usr/bin/env bash\ntouch "%s/$2"\nfor _ in $(seq 100); do [ -e "%s/$3" ] && exit 0; sleep 0.1; done\necho never-met\nexit 1\n' \
-    "$shadow" "$shadow" >"$shadow/repo/$1"
-done
+# they run at the same time. The same pair under one job is the control that
+# shows the fixture can fail.
+rendezvous() { # <file> <my marker> <their marker>
+  cat >"$1" <<FIXTURE
+#!/usr/bin/env bash
+# a mid-line mention of all.sh: serial must not make this suite serial
+touch "$shadow/$2"
+for _ in \$(seq 30); do [ -e "$shadow/$3" ] && exit 0; sleep 0.1; done
+echo never-met
+exit 1
+FIXTURE
+}
+fresh; rendezvous "$shadow/repo/a/a.test.sh" mine theirs; rendezvous "$shadow/repo/b/b.test.sh" theirs mine
 out=$(cd "$shadow/repo" && TESTS_JOBS=4 bash tests/all.sh 2>&1); rc=$?
 check "two suites that need each other pass only because they ran concurrently" "$([ "$rc" = 0 ]; echo $?)"
+rm -f "$shadow/mine" "$shadow/theirs"
+out=$(cd "$shadow/repo" && TESTS_JOBS=1 bash tests/all.sh 2>&1); rc=$?
+check "...and the same pair fails under one job (the fixture can go red)" "$([ "$rc" = 1 ] && has never-met; echo $?)"
 rm -f "$shadow/mine" "$shadow/theirs"
 
 # A serial suite never overlaps the concurrent ones.
@@ -85,6 +99,14 @@ printf '#!/usr/bin/env bash\n# all.sh: serial (test fixture)\n[ ! -e "%s/busy" ]
 out=$(cd "$shadow/repo" && TESTS_JOBS=4 bash tests/all.sh 2>&1); rc=$?
 check "an 'all.sh: serial' suite runs alone after the concurrent ones" "$([ "$rc" = 0 ]; echo $?)"
 
+# A failing suite stops new suites from starting.
+fresh
+printf '#!/usr/bin/env bash\nexit 1\n' >"$shadow/repo/a/a.test.sh"
+printf '#!/usr/bin/env bash\ntouch "%s/later-ran"\n' "$shadow" >"$shadow/repo/b/b.test.sh"
+rm -f "$shadow/later-ran"
+out=$(cd "$shadow/repo" && TESTS_JOBS=1 bash tests/all.sh 2>&1); rc=$?
+check "a failing suite stops the suites after it from starting" "$([ "$rc" = 1 ] && [ ! -e "$shadow/later-ran" ]; echo $?)"
+
 # A failure prints that suite's output in full, in discovery order.
 fresh
 printf '#!/usr/bin/env bash\necho line-one; echo line-two; exit 1\n' >"$shadow/repo/a/a.test.sh"
@@ -92,13 +114,22 @@ out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
 check "a failing suite fails the run and prints all of its output" "$([ "$rc" = 1 ] && has 'FAIL a/a.test.sh' && has line-one && has line-two; echo $?)"
 
 # The CPU budget: a suite that burns CPU past it fails the run, naming both
-# numbers; the same suite under a raised budget passes.
+# numbers. The burner counts its own process CPU time (a wall-clock loop would
+# measure whatever the box gives it). `TESTS_CPU_BUDGET` only lowers a budget.
 fresh
-printf '#!/usr/bin/env bash\nend=$((SECONDS + 2)); while [ $SECONDS -lt $end ]; do :; done\n' >"$shadow/repo/a/a.test.sh"
+cat >"$shadow/repo/a/a.test.sh" <<'FIXTURE'
+#!/usr/bin/env bash
+python3 - <<'PY'
+import time
+t = time.process_time()
+while time.process_time() - t < 2:
+    pass
+PY
+FIXTURE
 out=$(cd "$shadow/repo" && TESTS_CPU_BUDGET=1 bash tests/all.sh 2>&1); rc=$?
 check "a suite over its CPU budget fails the run" "$([ "$rc" = 1 ] && has 'FAIL a/a.test.sh'; echo $?)"
 check "...naming its CPU time and its budget" "$(grep -qE 'over its CPU budget: [0-9.]+s CPU against 1s' <<<"$out"; echo $?)"
-out=$(cd "$shadow/repo" && TESTS_CPU_BUDGET=60 bash tests/all.sh 2>&1); rc=$?
-check "the same suite within its budget passes" "$([ "$rc" = 0 ] && has_pass a/a.test.sh; echo $?)"
+out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
+check "the same suite within the default budget passes, its CPU time on the PASS line" "$([ "$rc" = 0 ] && has_pass a/a.test.sh; echo $?)"
 
 exit $fail
