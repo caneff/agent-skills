@@ -2669,7 +2669,9 @@ fn a_script_written_while_sibling_threads_spawn_still_executes() {
     let mut failures = Vec::new();
     for i in 0..400 {
         let script = c.root().join(format!("fake-{i}"));
-        write_executable(&script, "#!/bin/sh\nexit 0\n");
+        // Padded so the file stays open for writing long enough for a fork on
+        // another thread to land inside the write.
+        write_executable(&script, &format!("#!/bin/sh\n# {}\nexit 0\n", "x".repeat(2 << 20)));
         match spawn(&mut std::process::Command::new(&script)) {
             Ok(mut child) => {
                 child.wait().unwrap();
