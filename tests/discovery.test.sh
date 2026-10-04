@@ -15,7 +15,8 @@ for label in \
   "all-audits/driver_test.py" \
   "crap-audit/audit_test.py" \
   "mutation-audit/audit.py --selfcheck" \
-  "flow/lane/Cargo.toml"
+  "flow/lane/Cargo.toml" \
+  "flow/mods/agent-model"
 do
   grep -qxF "$label" <<<"$listed" || { echo "FAIL: $label not discovered"; fail=1; }
 done
