@@ -355,7 +355,7 @@ class DrainTest(Sandbox):
         self.write_state({1: {}})
         self.git(self.repo, "config", "land.testcmd", "test -e marker")
         self.drain("--once", env={"RESET_TO_OLD": "1"})
-        self.assertEqual([m[0] for m in self.state()["merged"]], [[1]])
+        self.assertEqual([m[0] for m in self.state().get("merged", [])], [[1]])
 
     def test_blocked_and_claimed_and_human_tickets_are_skipped(self):
         self.write_state({1: {"body": "## Blocked by\n\n- #2\n"}, 2: {"labels": ["in-progress"]},
@@ -384,9 +384,12 @@ class DrainTest(Sandbox):
             self.assertIn("ready-for-human", self.labels(n))
 
     def test_a_bundle_comment_left_by_an_earlier_run_touches_nothing(self):
-        self.write_state({1: {}, 5: {"labels": ["ready-for-human"]}}, comments=[["1", "drain bundle: 5"]])
+        # Ticket 5 is another worker's live ticket; the old note naming it
+        # predates this run's claim of ticket 1, so a failed bundle leaves it be.
+        self.write_state({1: {}, 5: {"labels": ["in-progress"]}}, comments=[["1", "drain bundle: 5"]])
         self.drain("--once", env={"FAIL_TICKETS": "1"})
-        self.assertEqual(self.labels(5), ["ready-for-human"])
+        self.assertIn("ready-for-human", self.labels(1))
+        self.assertEqual(self.labels(5), ["in-progress"])
         self.assertEqual(self.handed_comment(5), [])
 
     def test_two_bundles_in_a_row_handed_over_stop_the_loop(self):
