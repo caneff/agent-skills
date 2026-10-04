@@ -321,6 +321,48 @@ export STUB_LOGIN=caneff STUB_OWNER=caneff
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
 
+# The dot-pathspec discard (#1387): blocked everywhere, except a linked
+# worktree under .scratch/mutation-*, a disposable copy where discarding every
+# change is the point. The target is `git -C <path>` or the cwd, resolved.
+mkdir -p "$repo/.scratch" "$repo/.claude/worktrees"
+git -C "$repo" worktree add -q --detach "$repo/.scratch/mutation-m1"
+git -C "$repo" worktree add -q --detach "$repo/.claude/worktrees/implement-9"
+mkdir -p "$repo/plain/.scratch/mutation-fake"   # named like one, not a worktree
+blocked="discards every uncommitted change under '.'"
+run "dot discard: -C a mutation worktree allowed" 0 \
+  "git -C $repo/.scratch/mutation-m1 checkout -q -- ."
+RUN_CWD="$repo/.scratch/mutation-m1" run "dot discard: cwd in a mutation worktree allowed" 0 \
+  "git checkout -- ."
+RUN_CWD="$repo/.scratch/mutation-m1" run "dot discard: restore in a mutation worktree allowed" 0 \
+  "git restore --worktree ."
+run "dot discard: primary checkout blocked" 2 "git checkout -- ." "$blocked"
+RUN_CWD="$repo/.claude/worktrees/implement-9" run "dot discard: implement-* worktree blocked" 2 \
+  "git checkout -- ." "$blocked"
+run "dot discard: -C that backs out of a mutation path blocked" 2 \
+  "git -C $repo/.scratch/mutation-m1/../.. checkout -- ." "$blocked"
+run "dot discard: -C that backs out of a mutation path into another worktree blocked" 2 \
+  "git -C $repo/.scratch/mutation-m1/../../.claude/worktrees/implement-9 checkout -- ." "$blocked"
+run "dot discard: git -c key=value before the verb blocked" 2 \
+  "git -c core.fsmonitor=false checkout -- ." "$blocked"
+run "dot discard: --work-tree before the verb blocked" 2 \
+  "git --work-tree=$repo checkout -- ." "$blocked"
+run "dot discard: inside a subshell blocked" 2 "(git checkout -- .)" "$blocked"
+run "dot discard: quoted -C a mutation worktree allowed" 0 \
+  "git -C \"$repo/.scratch/mutation-m1\" checkout -q -- ."
+RUN_CWD="$repo/.scratch/mutation-m1" run "dot discard: cd out of the mutation cwd blocked" 2 \
+  "cd $repo && git checkout -- ." "$blocked"
+RUN_CWD="$repo/.scratch/mutation-m1" run "dot discard: GIT_WORK_TREE naming the primary blocked" 2 \
+  "GIT_DIR=$repo/.git GIT_WORK_TREE=$repo git checkout -- ." "$blocked"
+run "dot discard: a second -C hidden in a comment blocked" 2 \
+  "git -C $repo checkout -- . # git -C $repo/.scratch/mutation-m1" "$blocked"
+mkdir -p "$repo/.claude/worktrees/implement-9/.scratch/mutation-fake"
+run "dot discard: mutation-named dir inside another worktree blocked" 2 \
+  "git -C $repo/.claude/worktrees/implement-9/.scratch/mutation-fake checkout -- ." "$blocked"
+run "dot discard: mutation-named dir that is no worktree blocked" 2 \
+  "git -C $repo/plain/.scratch/mutation-fake checkout -- ." "$blocked"
+run "dot discard: allowed target chained to a blocked one blocked" 2 \
+  "git -C $repo/.scratch/mutation-m1 checkout -- . && git checkout -- ." "$blocked"
+
 # The guard reads commands through command-scan-lib.sh beside its real path.
 # Without the lib no pattern can match, so it blocks every command rather than
 # letting each one through unscanned.

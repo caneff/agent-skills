@@ -211,7 +211,15 @@ echo "boom: something real broke" >&2
 exit 1
 STUB
 chmod +x "$fail/flow/bin/herdr-toast-install"
+# This run reaches the end of install.sh, so it also pins the call to
+# install-check.sh (#1224): a failing stub must surface in install.sh's output.
+printf '#!/usr/bin/env bash\necho "PROBLEM: stub-check-ran"\nexit 1\n' > "$fail/flow/install-check.sh"
 out=$(HOME="$tmp/fail-home" bash "$fail/flow/install.sh" 2>&1); rc=$?
+if printf '%s' "$out" | grep -q "stub-check-ran" && printf '%s' "$out" | grep -q "install-check.sh found problems"; then
+  echo "PASS install.sh runs install-check.sh and reports its problems"
+else
+  echo "FAIL install.sh did not run or report install-check.sh (rc=$rc): $out"; fails=1
+fi
 if [ "$rc" -ne 0 ]; then
   echo "PASS a non-refusal herdr-toast-install failure makes install.sh exit nonzero"
 else

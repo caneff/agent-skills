@@ -95,3 +95,13 @@ then the summary:
 - **merged**: each ticket set with its PR and squash sha.
 - **handed to Chris**: each ticket set with the reason, as drain printed it.
 - **stopped**: the reason, when drain printed one.
+- **Live layer**: when the target repo declares a live layer above its merge
+  seam in its `AGENTS.md` § End-to-end seam, a command run once per run on
+  Chris's go (`./e2e.sh` in twitch-rules-scroller, #1392), end the report with the ask
+  and run nothing yet: it takes Chris's screen, and its `permissions.ask` rules
+  make a start without his go a prompt. On his go, run it once on merged
+  `main` (in the primary checkout, after `git pull --ff-only`) with the owed
+  live checks: the "Live check after merge" items of the tickets this run
+  merged. File a fix or revert ticket for anything red, and say so before the
+  report closes. A repo with no declared live layer gets no ask: say "no live
+  layer declared".

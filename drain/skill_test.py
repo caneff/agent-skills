@@ -48,5 +48,26 @@ class PassThroughTest(unittest.TestCase):
             self.assertIn(flag, helped.stdout, f"{flag} is not a drain.py flag")
 
 
+class LiveLayerTest(unittest.TestCase):
+    """The batched live run (#1392): its step sits under `## On completion`, and
+    names what a session needs to do it without asking again."""
+
+    def completion(self):
+        match = re.search(r"^## On completion\n(.*)\Z", skill_text(), re.S | re.M)
+        self.assertIsNotNone(match, "SKILL.md has no `## On completion` section")
+        return match.group(1)
+
+    def test_live_run_step_reads_the_repos_declared_layer(self):
+        text = self.completion()
+        self.assertIn("**Live layer**", text, "the live-run step is missing from On completion")
+        self.assertIn("AGENTS.md", text)
+        self.assertIn("§ End-to-end seam", text)
+
+    def test_live_run_waits_for_chris_and_runs_once_on_merged_main(self):
+        step = " ".join(self.completion().split("**Live layer**", 1)[1].lower().split())
+        for needle in ("on his go", "once on merged `main`", "owed live checks", "fix or revert ticket"):
+            self.assertIn(needle, step, f"the live-run step does not say {needle!r}")
+
+
 if __name__ == "__main__":
     unittest.main()
