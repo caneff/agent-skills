@@ -108,6 +108,15 @@ Look for the originating spec, in this order:
 
 Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
+**List them from the worktree, never from memory** (#1329). Briefs once
+contradicted each other on whether `docs/agents/defect-classes.md` exists in the
+same repo, because the caller asserted it. `render-brief.py` (§ 4) runs the
+existence check itself: it lists the standards files present in the worktree, names
+`docs/agents/defect-classes.md` as a source only when it exists there, and
+prints the three defect shapes inline when it does not — the skill's own
+fallback, so a repo without the file is still checked for them. A prompt written
+without the renderer does the same `ls` first.
+
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** below — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing. Two rules bind it:
 
 - **The repo overrides.** A documented repo standard always wins; where it endorses something the baseline would flag, suppress the smell.
@@ -166,6 +175,10 @@ The `diff-reviewer` agent definition (`flow/claude/agents/diff-reviewer.md`, ins
 
 **Settled decisions.** This is the one home for the rule; every caller passes the list and points here rather than rewording it. Every prompt carries a settled-decisions list: what the owner already ruled on — at a grill, in the issue's `**Settled:**` comments, or in an earlier round — one line each. With nothing settled, say so — "settled decisions: none" — rather than dropping the line, so the reviewer knows the list is empty and not forgotten. A reviewer that re-raises a settled decision costs a round the fixer spends re-arguing it, and a reviewer with the issue in reach reads those comments itself before writing a finding.
 
+**A "Settled decisions" block carries only what Chris or the controller ruled** (#1400). A choice the worker made itself is named as the worker's and marked flag-if-you-disagree (`--choice`) — never listed as settled, because settled tells the reviewer not to look. A check the worker ran itself is handled the same way: its result goes to the reviewer as a claim to re-run (`--claim`), never as settled. A verification brief hands the worker's claimed dispositions to the verifier as claims to check — never as settled, and never with the outcome pre-assigned, because a verdict written into the brief is the verdict that comes back.
+
+**A reviewer does its own reading and running and spawns no nested subagent**, because a nested agent reports to the top-level session instead of its spawner and the work is lost; a task too large for one agent is reported as such and stopped. **A brief that asks an agent to run solves, builds or test gates on this box states the worker count and a wall-clock ceiling**, because three reviewers each defaulting to 8 workers is 24 cores for one diff.
+
 **A finding names the file and the intent, not the edit.** This is the one home for the rule; callers point here rather than reword it. Say where the problem is and what outcome is wrong; the fixer owns the file and picks the change. The observable: a finding never contains a command to run. A finding written as a patch to apply verbatim ("exactly these, nothing else", or a `git checkout <sha> -- <path>` the fixer is told to paste) turns one round into four — the fixer stops reading for the problem and starts applying the script, so a wrong script lands four times instead of being caught once.
 
 Every prompt carries only the **diff, the commit list, the spec/standards sources, the settled decisions and the id prefix** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
@@ -182,7 +195,10 @@ and no rating decides whether a finding is fixed.
 finding stops needing an LLM pass over prose (#855, #854): "Also write
 `<dir>/findings-<axis>-<n>.jsonl`, one JSON object per line, one line per
 finding: `{"id": "<letter+ordinal>", "axis": "<axis>", "severity": "hard"
-or "judgement", "file": "<path>", "title": "<short title>"}`. Assign each
+or "judgement", "file": "<path>", "title": "<short title>"}`; a correctness
+line also carries `"rating": "CONFIRMED"` or `"PLAUSIBLE"` (#1230) — the rating
+the brief asks for decides how hard to look at a bug, and a verifier reads it
+from the sidecar instead of from prose; the other axes have no rating field. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
 correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`; an
 over-engineering cut instead takes its own `OE1`, `OE2`, … series, still
@@ -378,26 +394,61 @@ its report, rather than reviewing nothing.
 
 If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
+**Render each axis's prompt; do not compose it** (#1216). About sixty briefs were
+once hand-composed from one skeleton and drifted: word caps that outlived their
+removal, contradictory `node_modules` instructions, the dispositions grammar
+spelled four ways, claimed dispositions in `/tmp`, the verification report
+named three ways. One script holds the skeleton, and the three bullet lists
+below are what it takes as inputs:
+
+```
+python3 ~/.agents/skills/multi-axis-code-review/render-brief.py --axis <axis> \
+  --repo <repo> --worktree "$worktree" --ticket "$n" --base "$fixed_point" \
+  --diff <the exact path the capture printed> --diff-command "<the capture's command>" \
+  [--commit "<sha subject>"]... [--spec <path or pointer> | --no-spec] \
+  [--ruling "<text>"]... [--choice "<text>"]... [--claim "<id>: <text>"]... \
+  [--workers <k>] [--ceiling <seconds>] [--test-command "<cmd>"]
+```
+
+It reads the diff's line count from the file, lists the standards sources from
+the worktree, pins one report name `review-<axis>-<n>.md` with the sidecar and
+marker beside it, prints a ruling only under *Settled decisions*, a worker's own
+choice only under its own flagged heading, and a claim only under *Claims to
+check* — a heading that is absent when there are none. It writes no outcome of
+its own. It states the worker count (default 1) and wall-clock ceiling (default
+600 seconds) any solve, build or test run is held to, and that the reviewer
+spawns no nested subagent. Exit 2 means a bad input and no prompt. Pass the
+printed prompt to `Agent` as it stands.
+
 **Standards sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The list of standards-source files you found in step 3, and the settled decisions. The smell baseline and the over-engineering lens are the agent definition's to read from § 3; paste them only in the no-definition fallback above.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Check `docs/agents/defect-classes.md` by name when present in the reviewed repo — the three shapes this repo keeps shipping, with every instance; when absent, check the three shapes inline instead: (1) an absent or malformed answer read as a benign one; (2) a stated fallback with no mechanism behind it; (3) a test that passes for a reason other than the one it claims. Skip anything tooling enforces, and skip the hollow-witness check — the correctness axis owns it (#938), and two opus agents mutating the same tests over the same diff cost two dispositions for one finding. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `OE<n>: location: <tag> <what>. <replacement>.` form using the five tags, `<n>` a per-report ordinal starting at 1 for this subsection's own series. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Also give each cut a line in the same findings sidecar as your other findings, with that `OE<n>` id and `axis: "standards"`. Findings and their evidence only, no preamble."
+- The brief: [`briefs/standards.md`](briefs/standards.md), which `render-brief.py` includes. Edit it there; never retype it into a prompt.
 
 **Spec sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec, and the settled decisions.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name when present in the reviewed repo; when absent, check the three shapes inline instead: (1) an absent or malformed answer read as a benign one; (2) a stated fallback with no mechanism behind it; (3) a test that passes for a reason other than the one it claims. Findings and their evidence only, no preamble."
+- The brief: [`briefs/spec.md`](briefs/spec.md), which `render-brief.py` includes. Edit it there; never retype it into a prompt.
 
 **Correctness sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) when present in the reviewed repo, `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; when absent, check those same two shapes inline plus class 2 (a stated fallback with no mechanism behind it); (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. (e) every safety guard the diff adds — a check that refuses, validates or fails closed — gets a second, separate mutation: mutate its call site. For every entry point the guard exists to protect, delete or neutralize the call to the guard there, run the suite that covers that entry point, and confirm it goes red at that entry point — not only in the unit test that calls the guard directly; mutating the guard's own body (d) reddens that unit test and says nothing about whether anything still calls the guard. A call-site mutation that stays green is an unprotected entry point: report it as a finding naming the entry point, since the guard can be bypassed at the only place it matters. Read the failure message as in (d), so a red from a missing file is not taken for a red from the assertion. Run every mutation in a throwaway worktree, never in a copy of the tree, which on a linked worktree shares the checkout's own index. Run them all with one `bash ~/.agents/skills/multi-axis-code-review/witness-check.sh` call (described after this brief): it does the worktrees and their removal, the concurrency bound, the per-id output, `unknown` for an unreached mutation and the ledger rows. Your part is a file outside the checkout defining `mutate`. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. Hand the script every id in that one call rather than walking them in turn: it runs them together under *The bound*, fewer when the box is busy, slower never refused. Each mutation keeps its own worktree and its own captured output, and you collect them by id when it finishes; a call-site mutation gets its own id, distinct from the constraint mutation it accompanies, never shared with it, so a failure message is still read against the mutation that produced it. A mutation whose worktree, suite run or output never arrived is `unknown`, reported by that name — never counted as an assertion that held, which is class 1. Nothing is restored between mutations: each worktree is discarded whole, and the checkout is left exactly as found. A file outside the repository (`~/.local/bin`, a dotfile, a registry) is read with one plain command — `cat <path>` or `diff <a> <b>` — never inside a `cd ... && for` compound, which the permission classifier cannot read as the read it is and blocks; and a mutation never reaches a step that writes outside the worktree (an installer, a registry edit, a symlink into `~`): stub that seam or skip the mutation and report it `unknown`. Rate each bug PLAUSIBLE or CONFIRMED and say which. Findings and their evidence only, no preamble."
+- The brief: [`briefs/correctness.md`](briefs/correctness.md), which `render-brief.py` includes. Edit it there; never retype it into a prompt.
 
 **What the witness check costs, and what actually isolates it** (#939). The
 check itself is the most valuable thing a review does. Neither line below runs it less.
+
+*Where they live* (#1324). One home: `witness-check.sh --repo <repo>` puts
+every throwaway worktree under `~/.cache/agent-reviews/<repo>/witness.XXXXXX/`,
+beside the reports the same review writes, and removes it before exiting. Not
+`mktemp -d` in `/tmp`: a worktree stranded there is on no sweep and in no
+listing. `git worktree remove --force` on that path is cleanup of the session's
+own throwaway checkout (`flow/claude/settings.json` autoMode allows it by
+name); a reviewer that is refused it reports the refusal verbatim and stops,
+never reaching the removal another way.
 
 *Isolation.* `git worktree add` a throwaway worktree per mutation. **Never
 `cp -a`**, or any other byte copy of the reviewed tree: a linked worktree's
@@ -500,6 +551,22 @@ axis, while the covering suite finishes in seconds. The whole gate belongs to
 the worker's own pre-report gate, where it already runs once.
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs; replace its part (b) with "(b) say 'no spec available'".
+
+**A rate-limited axis did not run** (#1325). An axis whose completion carries an
+HTTP 429 or a usage-limit message is `## <Axis> — NOT RUN (rate limit, resets
+<time from the message>)`, never "no findings": a limit-killed reviewer leaves
+no sidecar and no `.done` marker, and `implement/fix-check.sh` refuses that as a
+reviewer that never ran. When every axis fails that way, no round happened:
+report the reset time to the controller and stop the lane there, with the work
+committed and pushed to its branch — never go idle with an unpushed commit and
+no word. A controller named `drain` is no session, so the report goes into the
+pane and the worker's final line names the reset time. No usage check runs
+before the axes spawn: Claude's plan usage is readable only from the status
+line's own session JSON (`flow/ccstatusline-table/helpers/usage-segment.sh`),
+not from a script, and reading it through the OAuth endpoint is barred. A gate
+whose reading cannot be taken would be a stated fallback with no mechanism
+behind it (`AGENTS.md` § Recurring defect classes, class 2), so the 429 path
+above is the covered one.
 
 **Wait for every axis.** Each reviewer ends with a completion notification; do nothing with the round until every one you spawned has arrived. Never send a reviewer a "report now" or "wrap up" message — a reviewer hurried mid-pass returns what it has and its unread work is the round's biggest cost (agent-skills #732: eight finder reports, none read). Only when an axis's notification has arrived empty *and* its fallback file is absent do you report that axis in step 5 as `## Standards — NO REPORT RECEIVED` (or `## Spec — …`, `## Correctness — …`); a reviewer that is merely slow is waited on, not replaced.
 

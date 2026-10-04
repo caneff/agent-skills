@@ -18,6 +18,7 @@ mechanically, what the removed verification pass used to grade:
 - a `moved` line's ticket is open, and is not a ticket this PR closes (the
   merge would close it and lose the finding);
 - a `disputed` line gives a reason;
+- a correctness finding's line carries `rating`, CONFIRMED or PLAUSIBLE (#1230);
 - every review that ran left a sidecar beside its completion marker
   `findings-<axis>-<n>.done`, written after the sidecar was complete: an empty
   file is also what a reviewer that crashed leaves, and a truncated one is
@@ -50,6 +51,7 @@ import review_ledger  # noqa: E402
 import runfile  # noqa: E402
 
 AXES = ("standards", "spec", "correctness")
+RATINGS = ("CONFIRMED", "PLAUSIBLE")
 SHA = re.compile(r"[0-9a-f]{7,40}\Z")
 CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #(\d+)", re.IGNORECASE)
 
@@ -155,6 +157,9 @@ def axis_findings(reviews, n, branch, skipped, problems):
             obj = json_object(line)
             if obj is None or not isinstance(obj.get("id"), str) or not obj["id"].strip():
                 problems.append(f"{name}:{num} is not a finding line with an id")
+            elif axis == "correctness" and obj.get("rating") not in RATINGS:
+                problems.append(f"{name}:{num} has no rating (CONFIRMED or PLAUSIBLE), which a correctness "
+                                "finding carries in its sidecar (#1230)")
             else:
                 ids.append(obj["id"])
     return ids

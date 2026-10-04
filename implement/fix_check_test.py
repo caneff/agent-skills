@@ -93,7 +93,8 @@ class World:
         for axis in ("standards", "spec", "correctness"):
             ids = by_axis.get(axis, [])
             self.put(f"findings-{axis}-5.jsonl",
-                     "".join(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t"}) + "\n"
+                     "".join(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t",
+                                         **({"rating": "CONFIRMED"} if axis == "correctness" else {})}) + "\n"
                              for i in ids))
             self.put(f"findings-{axis}-5.done", "")
 
@@ -231,6 +232,19 @@ def main():
         for outcome in ("leftover", "filed", "handed-back"):
             w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": outcome})
             case(f"the removed outcome {outcome}", w, 1, f"its outcome is '{outcome}'")
+        # #1230: a correctness finding carries its CONFIRMED/PLAUSIBLE rating in the sidecar.
+        w.findings(correctness=["C1"])
+        w.dispositions({"id": "C1", "outcome": "disputed", "reason": "r"})
+        case("a correctness finding with a rating passes", w, 0, "1 findings")
+        w.put("findings-correctness-5.jsonl", json.dumps({"id": "C1", "axis": "correctness", "severity": "hard",
+                                                         "file": "f", "title": "t"}) + "\n")
+        case("a correctness finding with no rating is refused", w, 1, "findings-correctness-5.jsonl:1 has no rating")
+        w.put("findings-correctness-5.jsonl", json.dumps({"id": "C1", "axis": "correctness", "severity": "hard",
+                                                         "rating": "LIKELY", "file": "f", "title": "t"}) + "\n")
+        case("a correctness rating outside CONFIRMED/PLAUSIBLE is refused", w, 1, "has no rating")
+        w.findings(standards=["S1"], spec=["P1"])
+        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "r"})
+        case("standards and spec findings need no rating", w, 0, "2 findings")
         w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "  "})
         case("disputed with no reason", w, 1, "P1: disputed without a reason")
 

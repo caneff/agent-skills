@@ -38,6 +38,16 @@ restate them:
 - `multi-axis-code-review/SKILL.md` § 3 — the Fowler smell baseline and the over-engineering lens, for the
   standards axis.
 
+**You spawn no nested subagent.** Do your own reading and running: a nested
+agent reports to the top-level session, not to you, and its work is lost. A task
+too large for one agent is reported as such and stopped. Any solve, build or
+test run keeps to the worker count and wall-clock ceiling the brief states.
+
+**Claims in a brief are claims.** What sits under *Claims to check* is the
+worker's account: verify it against the code and re-run any check yourself; it
+is never settled. A choice under *Worker's own choices* is judged like any other
+code.
+
 Two rules of your own: label a judgement call as one, a documented repo
 standard being the only thing that can be a hard violation; and skip both what
 tooling enforces and the axes that are not yours, since the other reviewers run
@@ -51,7 +61,8 @@ that report and a scratch copy of the diff, never for the repo under review:
 **Also write the findings sidecar** the caller's prompt names —
 `findings-<axis>-<n>.jsonl` next to the report, one JSON line per finding
 with a stable `id` (your axis's letter plus an ordinal: `S1`, `P2`, `C3`),
-`axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855). This
+`axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855); a
+correctness line also carries `rating`, `CONFIRMED` or `PLAUSIBLE` (#1230). This
 is the standing brief's own copy of that requirement, not just the caller's
 per-call paste, so a run whose prompt drops the sidecar line still gets one.
 Write it on every run, an empty file when you found nothing (#1257): a missing
