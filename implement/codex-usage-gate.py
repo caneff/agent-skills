@@ -19,8 +19,8 @@ One line on stdout, and an exit status the caller branches on:
 `--base <ref> --tickets <n>...` marks the launch as a PR's gate pass: from the
 PR's workspace, the gate sums the added plus deleted lines of `<ref>...HEAD`
 in files that are neither Markdown nor tests (what `tests/all.sh` discovers —
-`*_test.py`, `*.test.sh`, `audit.py` — or anything under a `tests/`
-directory). Below SIZE_THRESHOLD it answers 40, `under size threshold (<churn>
+`*_test.py`, `*.test.sh`, a mod's `*.test.ts`, `audit.py` — or anything under
+a `tests/` directory). Below SIZE_THRESHOLD it answers 40, `under size threshold (<churn>
 < <threshold>)`, before any usage read, so a skipped PR costs no RPC — unless
 any of the clump's tickets carries FORCE_LABEL, which sends it on to the usage
 read. The label bypasses the size check only; the kill switch, the reserve
@@ -141,7 +141,7 @@ def is_counted(path: str) -> bool:
     """A path whose churn counts toward the size check: not Markdown, and not a file
     `tests/all.sh` discovers as a suite or keeps under a `tests/` directory."""
     name = path.rsplit("/", 1)[-1]
-    if name.endswith((".md", "_test.py", ".test.sh")) or name == "audit.py":
+    if name.endswith((".md", "_test.py", ".test.sh", ".test.ts")) or name == "audit.py":
         return False
     return not (path.startswith("tests/") or "/tests/" in path)
 
