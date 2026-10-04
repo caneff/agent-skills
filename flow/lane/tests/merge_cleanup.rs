@@ -5,7 +5,7 @@
 //! reads JSON itself), plus the regression tests for the bugs fixed in it.
 
 mod support;
-use support::cleanup::{which, Cleanup, Tools};
+use support::cleanup::{spawn, which, write_executable, Cleanup, Tools};
 
 fn s(p: &std::path::Path) -> &str {
     p.to_str().unwrap()
@@ -807,8 +807,7 @@ fn without_herdr_the_linked_worktree_is_removed_and_the_skip_reported() {
 fn replace_git_with(c: &Cleanup, tools_dir: &str, script: String) {
     let git = c.root().join(tools_dir).join("git");
     std::fs::remove_file(&git).unwrap();
-    std::fs::write(&git, script).unwrap();
-    std::fs::set_permissions(&git, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    write_executable(&git, &script);
 }
 
 fn worker_record(workspace: &std::path::Path, branch: &str) -> lane::workers::WorkerRecord {
@@ -990,7 +989,7 @@ fn with_siblings(c: &Cleanup, r: &std::path::Path, wt: &std::path::Path) -> std:
     c.set_agents(&format!(r#"[{{"name":"skills-10","pane_id":"w3:p1","cwd":"{}0"}}]"#, wt.display()));
     std::fs::create_dir(wts.join("agent-orphan")).unwrap();
     std::fs::write(wts.join("agent-orphan/f"), "leftover\n").unwrap();
-    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let mut child = spawn(&mut std::process::Command::new("true")).unwrap();
     let dead = child.id();
     child.wait().unwrap();
     c.session("dead", &format!(r#"{{"pid":{dead},"cwd":"{}"}}"#, wt.display()));
@@ -2654,4 +2653,41 @@ fn a_workspace_whose_directory_is_already_gone_still_has_its_branch_cleaned_up()
     assert!(run.ok, "{}", run.text());
     assert!(!c.has_branch(&r, "implement-122"), "{}", run.text());
     assert!(run.has(&format!("  {}  reaped", wt.display())), "{}", run.text());
+}
+
+// --- #1385: a script written while sibling threads fork must still exec -----
+
+#[test]
+fn a_script_written_while_sibling_threads_spawn_still_executes() {
+    // A forked child holds every open fd until its own exec; a script being
+    // written at that moment is "text file busy" to anyone who execs it, and
+    // merge-cleanup then reads its fake `git` as failed.
+    let c = Cleanup::new();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let spawners: Vec<_> = (0..4)
+        .map(|_| {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    spawn(std::process::Command::new("true").stdin(std::process::Stdio::null())).unwrap().wait().unwrap();
+                }
+            })
+        })
+        .collect();
+    let mut failures = Vec::new();
+    for i in 0..400 {
+        let script = c.root().join(format!("fake-{i}"));
+        write_executable(&script, "#!/bin/sh\nexit 0\n");
+        match spawn(&mut std::process::Command::new(&script)) {
+            Ok(mut child) => {
+                child.wait().unwrap();
+            }
+            Err(e) => failures.push(format!("{i}: {e}")),
+        }
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    for t in spawners {
+        t.join().unwrap();
+    }
+    assert!(failures.is_empty(), "{failures:?}");
 }

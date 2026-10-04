@@ -8,6 +8,35 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+/// Held while this process forks and while it has a script open for writing.
+/// A forked child keeps every inherited fd until its own `exec`, so a fork
+/// that lands inside a script's write window leaves that script "text file
+/// busy" to the next `exec` of it — merge-cleanup then read its fake `git` as
+/// failed (#1385). `Command::spawn` returns only after the child's `exec`, so
+/// a write that holds this lock sees no child still holding a stale fd.
+static EXEC_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Start `cmd`, returning once its `exec` has succeeded or failed. Every
+/// process this suite starts goes through here, never `Command::output` or
+/// `Command::spawn` directly.
+pub fn spawn(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    let _held = EXEC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    cmd.spawn()
+}
+
+/// `Command::output`, through `spawn`.
+pub fn output(cmd: &mut Command) -> std::io::Result<Output> {
+    spawn(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))?.wait_with_output()
+}
+
+/// Write an executable script at `path`, with no fork in flight.
+pub fn write_executable(path: &Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let _held = EXEC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::fs::write(path, body).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 /// Which fake tools a run's PATH holds.
 #[derive(Clone, Copy)]
 pub enum Tools {
@@ -97,14 +126,13 @@ impl Cleanup {
     }
 
     pub fn git(&self, args: &[&str]) -> Output {
-        Command::new("git")
-            .args(args)
+        let mut cmd = Command::new("git");
+        cmd.args(args)
             .env("HOME", self.home())
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .output()
-            .unwrap()
+            .env_remove("GIT_INDEX_FILE");
+        output(&mut cmd).unwrap()
     }
     pub fn git_ok(&self, args: &[&str]) {
         let out = self.git(args);
@@ -279,14 +307,14 @@ impl Cleanup {
 
     /// Runs merge-cleanup with stdin closed.
     pub fn mc(&self, tools: Tools, args: &[&str], env: &[(&str, &str)]) -> Run {
-        let out = self.command(tools, args, env).stdin(Stdio::null()).output().unwrap();
+        let out = output(&mut self.command(tools, args, env)).unwrap();
         Run::from(out)
     }
 
     /// The same, from `cwd` — what a run started inside a workspace, rather
     /// than pointed at a repo with --repo, sees.
     pub fn mc_in(&self, tools: Tools, cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
-        let out = self.command(tools, args, env).current_dir(cwd).stdin(Stdio::null()).output().unwrap();
+        let out = output(self.command(tools, args, env).current_dir(cwd)).unwrap();
         Run::from(out)
     }
 
@@ -296,13 +324,8 @@ impl Cleanup {
     /// stderr.
     pub fn mc_broken_pipe(&self, tools: Tools, args: &[&str]) -> (Option<i32>, String) {
         use std::io::Read;
-        let mut child = self
-            .command(tools, args, &[])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let mut child =
+            spawn(self.command(tools, args, &[]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())).unwrap();
         let mut stdout = child.stdout.take().unwrap();
         let mut byte = [0u8; 1];
         while stdout.read(&mut byte).unwrap() != 0 && byte[0] != b'\n' {}
@@ -316,13 +339,8 @@ impl Cleanup {
     /// Runs merge-cleanup with `input` piped to its stdin.
     pub fn mc_piped(&self, tools: Tools, args: &[&str], input: &str) -> Run {
         use std::io::Write;
-        let mut child = self
-            .command(tools, args, &[])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let mut child =
+            spawn(self.command(tools, args, &[]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())).unwrap();
         child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
         Run::from(child.wait_with_output().unwrap())
     }
@@ -365,14 +383,15 @@ impl Cleanup {
 
     fn tty_command(&self, line: &str, typed: &str) -> Output {
         use std::io::Write;
-        let mut child = Command::new("script")
-            .args(["-qec", line, "/dev/null"])
-            .env("SHELL", which("bash"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let mut child = spawn(
+            Command::new("script")
+                .args(["-qec", line, "/dev/null"])
+                .env("SHELL", which("bash"))
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        )
+        .unwrap();
         // The answer arrives after the prompt is up, as a person's would.
         std::thread::sleep(std::time::Duration::from_millis(1500));
         child.stdin.take().unwrap().write_all(typed.as_bytes()).unwrap();
