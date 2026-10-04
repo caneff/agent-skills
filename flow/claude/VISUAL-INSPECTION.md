@@ -1,6 +1,8 @@
 # Visual inspection (read when showing me a file, or looking at a rendered page, window, or image)
 
-Pointer target for `CLAUDE.md` § Gotchas.
+The teaching hook `hooks/teach-visual.sh` shows the matching section on a
+session's first `zed` or `shot-scraper` call; `CLAUDE.md` no longer points
+here (#1413).
 
 ## Showing me a file
 

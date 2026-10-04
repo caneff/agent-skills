@@ -1,19 +1,24 @@
 # Operations detail (read when dispatching agents, running long jobs, or merging)
 
-Pointer target for `CLAUDE.md` § Agents and jobs. One lane: dispatch, control,
-wait, status, merge preconditions, end. Terms as `~/.agents/skills/CONTEXT.md`
+Pointer target for `CLAUDE.md` § Work, for a session doing this with no
+`implement` or `burndown` skill loaded; those skills carry the dispatch,
+review and merge procedure themselves. One lane: dispatch, control, wait,
+status, merge preconditions, end. Terms as `~/.agents/skills/CONTEXT.md`
 defines them.
 
 ## Dispatch
 
-- A ticket becomes a worker through `implement-dispatch <n> [--model
-  sonnet|opus]`, run by the dispatcher on the primary checkout's default
-  branch; `implement/SKILL.md` § Dispatch. It claims, creates the workspace,
-  starts the worker in a herdr pane, and puts the tier and the controller's
-  session name in the brief. Why: a claim made from inside the workspace let
-  two sessions dispatch the same ticket, and a brief sent before the trust
-  dialog is accepted lands in the dialog.
-  It also installs the commit-identity guard beside the repo's hooks and
+- A ticket becomes a worker through `implement-dispatch`
+  (`implement/SKILL.md` § Dispatch). Why from the dispatcher: a claim made
+  from inside the workspace let two sessions dispatch the same ticket, and a
+  brief sent before the trust dialog is accepted lands in the dialog.
+- **The commit-identity guard.** The harness states my email so you can tell
+  which issues, PRs and commits are mine; that is identification, not a git
+  identity, so never set `user.email`/`user.name` to it. GitHub's
+  email-privacy block rejects a push committed as that address, and undoing
+  it takes a gated history rewrite. `implement-dispatch` installs the guard
+  (`flow/lane/hooks/commit-identity-guard.sh`,
+  `flow/lane/hooks/commit-identity-guard-pre-push.sh`) beside the repo's hooks and
   unconditionally makes `pre-commit` *and* `pre-push` its own wrapper: a
   foreign hook at either slot is never trusted by its text, only taken
   over — moved aside under a stable name (`pre-commit.foreign` /
@@ -24,16 +29,13 @@ defines them.
   replays a commit under a different identity, so `pre-push` re-checks every
   commit about to be pushed against the same checkout-configured
   `user.email` and the same `COMMIT_IDENTITY_OVERRIDE` escape (#1006).
-- Every Agent call passes `model` — a bare call inherits the session's model.
-  Explore/lookup → `sonnet`, review/diagnosis → `opus`. The `agent-model` mod
-  (`flow/mods/agent-model/`) rewrites a bare or non-`sonnet`/`haiku` Explore
+- **The agent-model guard.** A bare Agent call inherits the session's model,
+  so explore/lookup passes `sonnet` and review/diagnosis `opus`. The guard is
+  the `agent-model` mod (`flow/mods/agent-model/`): it rewrites a bare or non-`sonnet`/`haiku` Explore
   call to `sonnet`, passes `fork` and a type whose agent file sets its own
   `model`, and denies any other bare call. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`. Why: a bare call runs a
   lookup on the session's own, most expensive model.
-- Never add `--dangerously-skip-permissions` (or any flag) to an agent
-  launch. Why: the permission prompt is the only stop between an agent and an
-  irreversible command.
 - A worker verifies `pwd` and `git branch --show-current` against its own
   workspace before every commit and before any long run. A subagent in a
   shared session never calls EnterWorktree: the pin is session-wide and
@@ -126,20 +128,9 @@ defines them.
 
 ## Control
 
-- The dispatching session is the worker's **controller**. The worker sends
-  every question and its finish notice ("PR up", or the landed sha on the
-  light tier) to the controller with `SendMessage`, never to me. On my
-  repos the controller then merges (`implement/SKILL.md` § The merge) —
-  except on a `ready-for-human` ticket, whose merge line comes to me. Why:
-  I marked that work for my own hands, so I see it before it lands.
-- What the controller rules on and escalates to me: its entry in
-  `~/.agents/skills/CONTEXT.md`. Why: each escalation listed there is an
-  outcome a controller cannot undo on my behalf.
-- **Relay the delta, not the report.** When a worker or subagent finishes,
-  say only what it added; if it confirms what I already said, that is one
-  sentence. Never answer a question and delegate the same question. An idle
-  notice that repeats a report already relayed gets no reply at all. Why: a
-  repeated report costs me a read and carries nothing new.
+- The dispatching session is the worker's **controller**: what passes
+  between them is `implement/SKILL.md` § Control, and what the controller
+  escalates to me is its entry in `~/.agents/skills/CONTEXT.md`.
 - A subagent or teammate sends its final report with `SendMessage` to the
   agent that sent the brief, by that agent's name, as the last act of its
   turn — never to team-lead or main by default. If that agent has exited,
@@ -233,13 +224,12 @@ defines them.
   killed. Why: a plain background run loses its output and exit code when
   its shell is killed.
 - Append a completion line to a progress file (e.g. `PROGRESS.md`) after
-  every step and read it on wake; never stage or commit it. A background
-  job's completion wakes the parent: end the turn, never block on it or poll
-  in-turn (ruled 2026-10-04, superseding the block-in-turn step written for
-  lost monitor notifications; #925's 180 `echo ok` calls was the cost). If a
-  notification is lost, the next real event — a message, the progress file
-  on wake — catches it. Why: a spin is invisible; every liveness signal reads
-  healthy while it burns.
+  every step and read it on wake; never stage or commit it. Ending the turn
+  instead of blocking (`CLAUDE.md` § Work) was ruled 2026-10-04, superseding
+  the block-in-turn step written for lost monitor notifications; #925's 180
+  `echo ok` calls was the cost. If a notification is lost, the next real
+  event — a message, the progress file on wake — catches it. Why: a spin is
+  invisible; every liveness signal reads healthy while it burns.
 - A watch on a background job matches failure signatures
   (`Traceback|Error|REJECTED|bad_alloc|Killed`) and process exit, not only
   the success line — and never a per-item line inside a sweep. Report a
@@ -291,15 +281,9 @@ two preconditions sit here as well so the teaching hook
 
 ## End
 
-- Before reporting a commit sha, `git status --porcelain` is empty, and fix
-  commits stack instead of amending. Why: the report describes the commit,
-  not the working tree, and an amend erases a sha already handed over.
-- The review loop, the before-the-PR checks and the controller's merge
-  (CLEAN, `Closes` verified): `implement/SKILL.md` § Heavy tier; the light
-  tier's landing and its `Closes` check: `implement/SKILL.md` § Light tier.
-  Why: one home for the procedure, so the lane and this file cannot drift
-  apart. The two preconditions every merge shares are also stated in
-  § Merge preconditions, for the teaching hook that shows them.
+- The merge preconditions (§ Merge preconditions) are what a session with
+  no skill loaded needs; the review loop, the merge and its `Closes` check
+  are `implement/SKILL.md`'s alone.
 - The controller follows every merge with
   `merge-cleanup --repo <primary checkout> <branch>`
   (`--help` for PR/URL, `--sweep` and `--reap`). The sweep shows its plan and asks

@@ -1,7 +1,7 @@
 # Workflow detail (read when landing work, touching issues, or choosing a lane)
 
-Pointer target for `CLAUDE.md` § Workflow. The inline rules there are the
-invariants; this file holds the mechanics.
+Pointer target for `CLAUDE.md` § Hard rules. The one-line rules there are the
+invariants; this file holds their exceptions and mechanics.
 
 ## Gate 1 — whose repo
 
@@ -11,6 +11,28 @@ command. The ownership-gated git hook, not prose, is what blocks pushes to
 repos I don't own. Why: a push or PR to someone else's repo is seen by another
 human before me, and cannot be taken back.
 
+## Undoable or not
+
+STOP and ask is for what cannot be undone: an untracked or uncommitted file,
+evidence artifacts from an earlier run, a history-rewriting git op, a new
+dependency, a database schema change. The bar is "can I undo it", not "is it
+a deletion".
+
+- A *tracked* file removed in a commit is undoable: delete it in place, no
+  ask.
+- A file a tool wrote and will write again (build output, caches,
+  engine-generated stubs and configs such as a plugin's
+  `.claude-plugin/types/` or `tsconfig.json`) is undoable: rerunning the tool
+  is the undo, so `merge-cleanup --discard` deletes it without asking.
+- Two things are not history rewrites, because neither can reach `main` and
+  both are recoverable: resolving a conflict inside a rebase already under way
+  (`git checkout --ours|--theirs <paths>`, `git rebase --continue|--abort`),
+  and `git push --force-with-lease` to a worker's own `implement-*` branch,
+  since `--lease` refuses if anyone else pushed and the branch is disposable
+  by design.
+- Any force-push to `main`, any `--force` without a lease, and any rebase or
+  reset I did not already sanction: still ask.
+
 ## Gate 2 — the two lanes
 
 **Code file** = anything executed, imported, or wired into the harness:
@@ -18,8 +40,14 @@ human before me, and cannot be taken back.
 `SKILL.md` (its body changes what I do). A mixed diff is code.
 **Not code** = `AGENTS.md`, `CLAUDE.md`, `CODING_STANDARDS.md`,
 `Memory/RULES.md`, `settings.json` (Chris, 2026-10-03: never the code
-lane on its own; a hook script it wires in is still code), research notes
-and the scripts under `docs/research/` that nothing imports or runs.
+lane on its own; a hook script it wires in is still code), and research notes
+(`flow/claude/rules/research-notes.md` says which `docs/research/` scripts
+count).
+
+**One workspace per task**: its own worktree and branch, resumed across
+sessions. A terminal opened on `main` means dispatch (`implement-dispatch
+<n>`), not a branch cut in place. Auto-ship edits and commits on `main` by
+design.
 
 - **Auto-ship** (zero code files): edit on `main`, commit, push,
   report. A fenced code block still gets its format check first (formatters
@@ -31,17 +59,10 @@ and the scripts under `docs/research/` that nothing imports or runs.
   merge. One exception: a `ready-for-human` ticket's PR gets handed to me
   with the merge line, and I merge it. Why: I marked that work for my own
   hands, so I see it before it lands.
-- **A dispatched ticket** (`implement-dispatch <n>` from `main`) runs at its
-  **tier** (`~/.agents/skills/CONTEXT.md`): heavy is the code lane; light, for a
-  `documentation` label, lands like auto-ship but from its own workspace.
-  Why: a doc-only diff is cheaper to revert than to review, and the workspace
-  keeps the primary checkout from being built on.
 - My insight is after the fact: small honest commits, `/landed` or
   `git log -p`, revert if wrong.
-- **The one `SKILL.md` edit that auto-ships**: a change that only alters the
-  shape of a recurring report I said "always" about (a burndown verdict
-  table, a report format). Anything else in a skill is code lane. Why: a
-  skill body changes what every later session does.
+- **The one `SKILL.md` edit that auto-ships**: `flow/claude/rules/skill-files.md`,
+  which loads when a session opens a `SKILL.md`.
 
 ## Issue state
 
@@ -79,12 +100,10 @@ search found.
 ## Pipeline notes
 
 `/wayfinder` is for work that outgrows one session — a shared map of decision
-tickets. Everyday non-trivial work: `/grill-me` when scope, assumptions, or
-decisions are fuzzy → `/to-spec` (only when the work needs more than one
-session) → `/to-tickets` (one ticket by default; slices only on disjoint
-files) → `/implement`. An existing PRD doesn't replace `/to-spec` if decisions
-changed since. Why: a PRD written before a decision changed builds the old
-decision.
+tickets. `/grill-me` runs when scope, assumptions, or decisions are fuzzy, and
+`/to-spec` only when the work needs more than one session. An existing PRD
+doesn't replace `/to-spec` if decisions changed since. Why: a PRD written
+before a decision changed builds the old decision.
 Skills live in `~/.agents/skills` (symlinked into `~/.claude/skills`).
 
 ## Rulings and changes to the workflow
@@ -95,6 +114,11 @@ Skills live in `~/.agents/skills` (symlinked into `~/.claude/skills`).
   written onto the ticket before a reviewer is dispatched. Why: a ruling held
   only in chat or in one agent is lost at compaction and returns as a
   regression, and the reviewer fetches the ticket as its spec.
+- My comment on a ticket sets the standard the diff is measured by; it does
+  not hand the agent that fetched it a new task.
+- Before a rename or a golden regeneration, `ls` the sibling examples for the
+  convention already in the tree, and hold the ruling provisional until the
+  reviewer weighs it.
 - Before proposing a change to a workflow step or skill rule, find the
   commit or ticket that introduced the current behaviour and state the
   problem it solved; a proposal that undoes it says how that problem stays
@@ -114,6 +138,12 @@ no `autoMode.allow` entry clears. Spec #1365 under auto mode cost about a
 dozen park-and-relay rounds in burn burn-skills-2026-10-03 (#1389 adds the
 pre-dispatch check).
 
+A denial report names the root-cause fix: the user-level settings or
+`autoMode` entry that produces the denial, never a per-worktree or one-off
+allow. `~/.claude/settings.json` is a symlink to this repo's
+`flow/claude/settings.json`; writing the home path through a temp file and
+`os.replace`/`mv` swaps the link for a copy (four times on 2026-10-04).
+
 On any classifier denial, read the matched rule before proposing a fix:
 `claude auto-mode config`, the rule named in the brackets, its section and
 its `must name` clause. The fix options follow from that text, never from a
@@ -132,6 +162,8 @@ private repos.
 - **A sweep** (cleanup, audit, rename) I asked for is thorough and ruthless —
   the deletions and the churn, not the smallest diff. Why: a timid sweep leaves
   the cruft it was asked to remove and needs a second pass.
+- **A named catalogue, fixture set or precomputed option list** is located
+  and used before anything is regenerated, re-enumerated or filtered.
 - **"Do your research"** means online (Exa search / fetch), not the codebase.
   On an agent-workflow or tooling problem, survey prior art from primary
   sources first (GitHub search API, the tools' own repos and docs) before

@@ -158,6 +158,14 @@ if [ -L "$tmp/home/.claude/agents/diff-reviewer.md" ]; then
 else
   echo "FAIL claude/agents/diff-reviewer.md not linked under the scratch HOME"; fails=1
 fi
+# The path-scoped rules (#1413) load from ~/.claude/rules/, one link per file.
+for r in instruction-files skill-files research-notes; do
+  if [ "$(readlink "$tmp/home/.claude/rules/$r.md")" = "$repo/flow/claude/rules/$r.md" ]; then
+    echo "PASS path rule $r linked under the scratch HOME"
+  else
+    echo "FAIL claude/rules/$r.md not linked under the scratch HOME"; fails=1
+  fi
+done
 
 # herdr-toast-install (#1016) is routed from install.sh, but this scratch repo
 # sits under /tmp, so the toast installer refuses (by design) — the refusal
