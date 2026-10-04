@@ -634,7 +634,7 @@ def work(ctx, anchor, others, resumed, started):
     Attempt 1 starts the worker (a resumed run finds it or its PR already
     there); attempt 2 prompts the same worker with the first failure's reason,
     since its workspace exists and a second dispatch would refuse it."""
-    branch, agent, reason = f"implement-{anchor}", agent_name(ctx, anchor), ""
+    branch, agent, reason, bundle = f"implement-{anchor}", agent_name(ctx, anchor), "", [anchor]
     # The worker's branch and agent are named for the lowest ticket in the
     # clump, so every ticket bundled with the anchor is a higher number.
     others = [t for t in others if t[0] > anchor]
@@ -662,6 +662,9 @@ def work(ctx, anchor, others, resumed, started):
                "--repo", ctx.repo)
         except DrainError as exc:
             reason = one_line(exc)
+            if not started:  # a failure before the announce (a dispatch that failed after the claim): the bundle was still worked
+                announce(ctx, anchor, bundle)
+                started[:] = bundle
         else:
             return finish(ctx, anchor, branch, view), None
     return None, reason

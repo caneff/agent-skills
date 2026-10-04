@@ -525,7 +525,7 @@ class DrainTest(Sandbox):
             ready, _, _ = select.select([proc.stdout], [], [], 20)
             self.assertTrue(ready, "no line from drain while its worker was still working")
             line = proc.stdout.readline()
-            self.assertIsNone(proc.poll(), "drain exited before the bundle line was read")
+            self.assertNotIn("merged", self.state(), "the bundle merged while its worker was held working")
         finally:
             os.remove(hold)
             out, _ = proc.communicate(timeout=60)
@@ -557,6 +557,14 @@ class DrainTest(Sandbox):
         ended = [x for x in r.stdout.splitlines() if x.startswith("bundle ended:")]
         self.assertEqual(len(ended), 1, r.stdout)
         self.assertIn("stopped", ended[0])
+
+    def test_a_bundle_whose_dispatch_failed_after_the_claim_is_still_announced_before_it_ends(self):
+        self.write_state({1: {"title": "first"}, 2: {"title": "second"}})
+        r = self.drain("--once", env={"TAKE": "2", "DISPATCH_FAIL_AFTER_CLAIM": "1"})
+        lines = [x for x in r.stdout.splitlines() if x.startswith("bundle ")]
+        self.assertEqual([x.split(":")[0] for x in lines], ["bundle started", "bundle ended"], r.stdout)
+        self.assertIn("#1 first", lines[0])
+        self.assertIn("#2 second", lines[0])
 
     def test_a_refused_dispatch_announces_no_bundle(self):
         self.write_state({1: {}})
