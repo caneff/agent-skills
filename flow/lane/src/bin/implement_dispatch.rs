@@ -514,6 +514,34 @@ fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str
     Ok(())
 }
 
+/// When `core.hooksPath` is set for `primary`, the sentence naming it, where
+/// it came from and the command that unsets it, to follow a "cannot create
+/// <hooks dir>" refusal (#1327): git resolves the hooks dir to that path, so
+/// a value left over from another environment (`/home/agent/.git-no-hooks`)
+/// fails here as a bare permission error. Empty when it is not set or the
+/// lookup fails — the refusal then stands as it was.
+fn hooks_path_hint(primary: &str) -> String {
+    let Ok(Some(text)) = quiet_stdout_bounded(
+        "git",
+        &["-C", primary, "config", "--show-origin", "--show-scope", "--get", "core.hooksPath"],
+        git_query_timeout(),
+    ) else {
+        return String::new();
+    };
+    let mut cols = text.trim_end().splitn(3, '\t');
+    let (Some(scope), Some(origin), Some(value)) = (cols.next(), cols.next(), cols.next()) else {
+        return String::new();
+    };
+    let unset = match scope {
+        "local" => format!("git -C {primary} config --unset core.hooksPath"),
+        "worktree" => format!("git -C {primary} config --worktree --unset core.hooksPath"),
+        "global" => "git config --global --unset core.hooksPath".to_string(),
+        "system" => "sudo git config --system --unset core.hooksPath".to_string(),
+        _ => return format!(" — core.hooksPath is set to {value} ({scope}, {origin}) and cannot be unset from a config file"),
+    };
+    format!(" — core.hooksPath is set to {value} ({scope}, {origin}); if that path belongs to another environment, unset it: {unset}")
+}
+
 /// Installs both halves of the commit-identity guard: pre-commit (#934) and
 /// pre-push (#1006). The pre-commit guard alone never fires on a rebase or
 /// cherry-pick that replays a commit under a different identity, and the
@@ -527,8 +555,10 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
     let dir = quiet_stdout_bounded("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"], git_query_timeout())?
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
+        .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}{}", hooks_path_hint(primary)))?;
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Err(format!("cannot create {dir}: {e}{}", hooks_path_hint(primary)));
+    }
     // (slot, foreign_name, guard_name, guard_content, buffer_stdin) — one row
     // per hook slot the lane owns. `buffer_stdin` is true only for pre-push,
     // whose ref list arrives on stdin; see `hook_wrapper`.

@@ -1198,6 +1198,49 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
     assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
 }
 
+/// #1327: a `core.hooksPath` that cannot be used is reported with its value,
+/// its scope and the command that unsets it, not as a bare "cannot create".
+fn dispatch_on_a_bad_hooks_path(bad_path_of: impl Fn(&std::path::Path) -> std::path::PathBuf) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let bad_path = bad_path_of(&repo);
+    let set = std::process::Command::new("git")
+        .arg("-C").arg(&repo).args(["config", "core.hooksPath"]).arg(&bad_path)
+        .output().unwrap();
+    assert!(set.status.success(), "{}", out_text(&set));
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(!out.status.success(), "dispatch went ahead on an unusable hooksPath: {}", out_text(&out));
+    let text = out_text(&out);
+    // `Fixture` drops its tempdir on return; the strings are all the asserts need.
+    (repo, bad_path, text)
+}
+
+fn assert_names_the_unset_command(repo: &std::path::Path, bad_path: &std::path::Path, text: &str) {
+    assert!(text.contains(&format!("core.hooksPath is set to {}", bad_path.display())), "{text}");
+    assert!(text.contains("(local, "), "{text}");
+    assert!(text.contains(&format!("git -C {} config --unset core.hooksPath", repo.display())), "{text}");
+}
+
+#[test]
+fn a_hooks_path_that_cannot_be_created_is_reported_with_the_unset_command() {
+    // /proc takes no new directories, the way /home/agent/... failed on this box.
+    let (repo, bad, text) = dispatch_on_a_bad_hooks_path(|_| std::path::PathBuf::from("/proc/lane-1327-no-hooks"));
+    assert!(text.contains("cannot create /proc/lane-1327-no-hooks"), "{text}");
+    assert_names_the_unset_command(&repo, &bad, &text);
+}
+
+#[test]
+fn a_hooks_path_git_cannot_resolve_is_reported_with_the_unset_command() {
+    let (repo, bad, text) = dispatch_on_a_bad_hooks_path(|repo| {
+        let blocker = repo.join("not-a-dir");
+        std::fs::write(&blocker, "x").unwrap();
+        blocker.join("hooks")
+    });
+    assert!(text.contains("cannot resolve the hooks dir"), "{text}");
+    assert_names_the_unset_command(&repo, &bad, &text);
+}
+
 /// A repo already carrying *this build's own* pre-commit wrapper from an
 /// earlier dispatch must be recognised as already-installed, byte-identity,
 /// and not displaced (its bytes stay stable; it is still rewritten in place
