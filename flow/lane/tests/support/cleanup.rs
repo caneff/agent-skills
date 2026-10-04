@@ -13,7 +13,8 @@ use std::process::{Command, Output, Stdio};
 /// that lands inside a script's write window leaves that script "text file
 /// busy" to the next `exec` of it — merge-cleanup then read its fake `git` as
 /// failed (#1385). `Command::spawn` returns only after the child's `exec`, so
-/// a write that holds this lock sees no child still holding a stale fd.
+/// a write that holds this lock sees no child still holding a stale fd, and a
+/// fork cannot start while a script is open for writing.
 static EXEC_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Start `cmd`, returning once its `exec` has succeeded or failed. Every

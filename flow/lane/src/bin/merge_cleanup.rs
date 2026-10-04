@@ -73,12 +73,16 @@ name them, e.g. **Discardable**: `out/`, `*.egg-info`. Each is one path
 component, with at most a leading or trailing `*`; an ignored entry with a
 component matching one is removed with the worktree unasked, counted as
 declared-discardable file(s) apart from caches. The list holds only what git
-ignores, so a modified or untracked file never counts, and `.git`, `.scratch`
-and a bare `*` are never honoured. Anything outside the list still refuses.
+ignores, so a modified or untracked file never counts, nothing at or beneath
+`.git` or `.scratch` is ever matched, and a bare `*` is never honoured. A
+registered worktree found beneath a declared path is removed as one, and its
+uncommitted work refuses. Anything outside the list still refuses.
 
 A linked worktree registered with any repo and nested beneath the one being
 removed — a timing or verification checkout under .scratch/ — is removed
-first, each against its own repo, so none is left registered. What git does
+first, each against its own repo, so none is left registered; a locked one
+refuses until --discard. A directory that merely copies a worktree is not
+registered, so it is plain files. What git does
 not hold in it (modified, untracked or ignored files) refuses as ignored files
 under its path and takes --discard like any other; a clean one is not a
 blocker.
@@ -476,6 +480,10 @@ fn ignores_all(dir: &Path) -> bool {
 /// An unreadable file or a missing line declares nothing.
 fn declared_discardable(wt: &str) -> Vec<String> {
     let primary = primary_of(wt);
+    // An empty answer would read AGENTS.md from the process's cwd.
+    if primary.is_empty() {
+        return Vec::new();
+    }
     let Ok(text) = std::fs::read_to_string(Path::new(&primary).join("AGENTS.md")) else { return Vec::new() };
     let Some(line) = text.lines().find_map(|l| l.strip_prefix("**Discardable**:")) else { return Vec::new() };
     line.split('`')
@@ -490,6 +498,11 @@ fn declared_discardable(wt: &str) -> Vec<String> {
 /// everything beneath it. Unlike a cache, no `.gitignore` is required: the
 /// repo's own word is the approval.
 fn is_declared(names: &[String], entry: &IgnoredEntry) -> bool {
+    // A glob can match a name the parse refused (`.*` matches `.scratch`), so
+    // the evidence and git directories are excluded here too, at any depth.
+    if entry.path.split('/').any(|c| matches!(c, ".git" | ".scratch")) {
+        return false;
+    }
     entry.path.split('/').any(|c| {
         names.iter().any(|n| match (n.strip_prefix('*'), n.strip_suffix('*')) {
             (Some(suffix), _) => c.ends_with(suffix),
@@ -508,7 +521,13 @@ fn nested_worktree(dir: &Path) -> Option<NestedWorktree> {
     }
     let path = dir.to_str()?;
     let common_dir = quiet_stdout("git", &["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"])?;
-    Some(NestedWorktree { path: path.to_string(), common_dir })
+    // Registered with that repo: a byte copy of a worktree keeps a `.git`
+    // pointer that resolves, but is listed nowhere, and `worktree remove`
+    // refuses it.
+    let here = dir.canonicalize().ok()?;
+    let listed = quiet_stdout("git", &["--git-dir", &common_dir, "worktree", "list", "--porcelain"])?;
+    let registered = listed.lines().filter_map(|l| l.strip_prefix("worktree ")).any(|p| Path::new(p).canonicalize().is_ok_and(|p| p == here));
+    registered.then(|| NestedWorktree { path: path.to_string(), common_dir })
 }
 
 impl WorktreeFiles {
@@ -573,6 +592,12 @@ impl WorktreeFiles {
         if is_cache(wt, &entry) {
             self.caches.push(entry.shown());
         } else if is_declared(&self.declared_names, &entry) {
+            // Discarded unasked, but a registered worktree beneath it is
+            // found first, so it is removed properly and its uncommitted
+            // work is not discarded by a declaration about build output.
+            if entry.is_dir {
+                self.find_nested(wt, &Path::new(wt).join(&entry.path));
+            }
             self.declared.push(entry.shown());
         } else if !entry.is_dir {
             self.ignored.push(entry.shown());
@@ -600,6 +625,8 @@ impl WorktreeFiles {
             Some(inner) => {
                 let held = inner.modified.iter().chain(&inner.untracked).chain(&inner.ignored);
                 self.ignored.extend(held.map(|f| format!("{prefix}/{f}")));
+                self.caches.extend(inner.caches.iter().map(|f| format!("{prefix}/{f}")));
+                self.declared.extend(inner.declared.iter().map(|f| format!("{prefix}/{f}")));
                 self.nested.push(nested);
                 self.nested.extend(inner.nested);
                 return true;
@@ -607,6 +634,19 @@ impl WorktreeFiles {
         }
         self.nested.push(nested);
         true
+    }
+
+    /// `take_nested` for every directory beneath `dir` (and `dir`), looking at
+    /// directories only and not descending into a worktree it takes.
+    fn find_nested(&mut self, wt: &str, dir: &Path) {
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            if self.take_nested(wt, &d) {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(&d) else { continue };
+            stack.extend(entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()));
+        }
     }
 
     /// Modified, untracked or non-cache ignored files: work a removal would
@@ -1489,7 +1529,14 @@ impl Cleanup {
             // removed against its own repo, which may not be this one.
             for n in approved.nested.iter().rev() {
                 let git_dir = format!("--git-dir={}", n.common_dir);
-                if !self.step(&format!("removing the nested worktree at {}", n.path), "git", &[&git_dir, "worktree", "remove", "--force", &n.path]) {
+                // A locked worktree needs --force twice; only --discard says
+                // the lock may go.
+                let mut args = vec![git_dir.as_str(), "worktree", "remove", "--force"];
+                if self.discard {
+                    args.push("--force");
+                }
+                args.push(&n.path);
+                if !self.step(&format!("removing the nested worktree at {}", n.path), "git", &args) {
                     eprintln!("merge-cleanup: refusing to remove {wt} — could not remove the nested worktree at {}", n.path);
                     return false;
                 }

@@ -2448,8 +2448,7 @@ fn a_workspace_that_goes_dirty_between_the_plan_and_the_removal_is_refused_not_f
     let r = reap_repo(&c, "r40", &["114", "115"]);
     let (first, second) = (r.join(".claude/worktrees/implement-114"), r.join(".claude/worktrees/implement-115"));
     let hook = r.join(".git/hooks/pre-push");
-    std::fs::write(&hook, format!("#!/bin/sh\necho unsaved > {}/notes\n", second.display())).unwrap();
-    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    write_executable(&hook, &format!("#!/bin/sh\necho unsaved > {}/notes\n", second.display()));
 
     let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
     assert!(run.ok, "{}", run.text());
@@ -2491,9 +2490,9 @@ fn a_branch_that_moved_to_another_worktree_since_the_plan_is_refused() {
     let (first, planned) = (r.join(".claude/worktrees/implement-118"), r.join(".claude/worktrees/implement-119"));
     let moved_to = c.root().join("r42-elsewhere");
     let hook = r.join(".git/hooks/pre-push");
-    std::fs::write(
+    write_executable(
         &hook,
-        format!(
+        &format!(
             "#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n\
              git -C {repo} worktree remove --force {planned}\n\
              git -C {repo} worktree add -q {moved} implement-119\n",
@@ -2501,9 +2500,7 @@ fn a_branch_that_moved_to_another_worktree_since_the_plan_is_refused() {
             planned = planned.display(),
             moved = moved_to.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    );
 
     let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
     assert!(run.ok, "{}", run.text());
@@ -2523,18 +2520,16 @@ fn a_branch_that_moved_into_the_primary_checkout_since_the_plan_is_refused() {
     let r = reap_repo(&c, "r43", &["118", "119"]);
     let (first, planned) = (r.join(".claude/worktrees/implement-118"), r.join(".claude/worktrees/implement-119"));
     let hook = r.join(".git/hooks/pre-push");
-    std::fs::write(
+    write_executable(
         &hook,
-        format!(
+        &format!(
             "#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n\
              git -C {repo} worktree remove --force {planned}\n\
              git -C {repo} checkout -q implement-119\n",
             repo = r.display(),
             planned = planned.display(),
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    );
 
     let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
     assert!(run.ok, "{}", run.text());
@@ -2555,12 +2550,10 @@ fn a_branch_with_no_holder_at_all_since_the_plan_still_reaps() {
     let r = reap_repo(&c, "r44", &["118", "119"]);
     let planned = r.join(".claude/worktrees/implement-119");
     let hook = r.join(".git/hooks/pre-push");
-    std::fs::write(
+    write_executable(
         &hook,
-        format!("#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\ngit -C {} worktree remove --force {} || true\n", r.display(), planned.display()),
-    )
-    .unwrap();
-    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        &format!("#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\ngit -C {} worktree remove --force {} || true\n", r.display(), planned.display()),
+    );
 
     let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
     assert!(run.ok, "{}", run.text());
@@ -2606,8 +2599,7 @@ fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reapi
     let r = reap_repo(&c, "r45", &["118", "119"]);
     let planned = r.join(".claude/worktrees/implement-119");
     let hook = r.join(".git/hooks/pre-push");
-    std::fs::write(&hook, format!("#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n: > \"{}\"\n", marker.display())).unwrap();
-    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    write_executable(&hook, &format!("#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n: > \"{}\"\n", marker.display()));
 
     let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
     assert!(run.ok, "{}", run.text());
@@ -2695,7 +2687,7 @@ fn a_script_written_while_sibling_threads_spawn_still_executes() {
 // --- #1326: repo-declared discardable paths, nested registered worktrees -----
 
 /// The repo declares `out/` and `*.egg-info` discardable in its AGENTS.md, and
-/// git ignores them, as the sudokumaker repo does.
+/// git ignores them, the shape a repo like sudokupad-art writes in prose today.
 fn declare_discardable(r: &std::path::Path, line: &str) {
     std::fs::write(r.join("AGENTS.md"), format!("## Notes\n\n{line}\n")).unwrap();
     std::fs::write(r.join(".git/info/exclude"), "out/\n*.egg-info/\n.scratch/\nkeep.log\n").unwrap();
@@ -2754,6 +2746,9 @@ fn a_clean_registered_worktree_nested_in_scratch_is_removed_with_its_parent() {
     c.worktree_add(&r, &["--detach", s(&nested), "origin/main"]);
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists(), "{}", run.text());
+    // The line, not the registration: the run's later `worktree prune` clears
+    // a same-repo registration whether or not the nested removal ran.
+    assert!(run.has(&format!("removing the nested worktree at {}", nested.display())), "{}", run.text());
     assert!(!registered_names(&c, &r).contains("timing"), "{}", registered_names(&c, &r));
 }
 
@@ -2803,4 +2798,100 @@ fn a_dry_run_reports_no_blocker_for_a_clean_nested_worktree() {
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
     assert_eq!(blocker_lines(&run), vec!["blockers: none".to_string()], "{}", run.text());
     assert!(wt.join(".scratch/timing").is_dir(), "{}", run.text());
+}
+
+#[test]
+fn a_glob_declaration_cannot_reach_scratch() {
+    for decl in [".*", ".scr*", "*h"] {
+        let c = Cleanup::new();
+        let (r, wt) = lane_workspace(&c, "r1326h", "implement-1326h");
+        declare_discardable(&r, &format!("**Discardable**: `{decl}`"));
+        std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+        std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
+        let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+        assert!(!run.ok && wt.join(".scratch/evidence.log").is_file(), "{decl}: {}", run.text());
+    }
+}
+
+#[test]
+fn a_declared_name_does_not_discard_beneath_scratch() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326i", "implement-1326i");
+    declare_discardable(&r, "**Discardable**: `out/`");
+    // Only `out/` is ignored, so git lists `.scratch/out/` itself.
+    std::fs::write(r.join(".git/info/exclude"), "out/\n").unwrap();
+    std::fs::create_dir_all(wt.join(".scratch/out")).unwrap();
+    std::fs::write(wt.join(".scratch/out/evidence.log"), "kept\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && wt.join(".scratch/out/evidence.log").is_file(), "{}", run.text());
+}
+
+#[test]
+fn a_copied_worktree_is_files_not_a_nested_worktree() {
+    // A byte copy of a worktree keeps its `.git` pointer but is registered
+    // nowhere: removing it as a worktree fails, so it must stay plain files.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326j", "implement-1326j");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    let real = c.root().join("r1326j-real");
+    c.worktree_add(&r, &["--detach", s(&real), "origin/main"]);
+    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+    let copy = wt.join(".scratch/copy");
+    assert!(std::process::Command::new("cp").args(["-a", s(&real), s(&copy)]).status().unwrap().success());
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains(".scratch/copy/") && copy.is_dir(), "{}", run.text());
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+}
+
+#[test]
+fn a_locked_nested_worktree_refuses_until_discard() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326k", "implement-1326k");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    let nested = wt.join(".scratch/timing");
+    c.worktree_add(&r, &["--detach", s(&nested), "origin/main"]);
+    c.git_ok(&["-C", s(&r), "worktree", "lock", s(&nested)]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains("could not remove the nested worktree"), "{}", run.text());
+    assert!(wt.is_dir() && nested.is_dir(), "{}", run.text());
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+}
+
+#[test]
+fn a_worktree_of_another_repo_under_a_declared_path_is_removed_and_unregistered() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326l", "implement-1326l");
+    declare_discardable(&r, "**Discardable**: `out/`");
+    let other = c.root().join("r1326l-other");
+    c.git_ok(&["init", "-q", "-b", "main", s(&other)]);
+    c.git_ok(&["-C", s(&other), "config", "user.email", "t@example.com"]);
+    c.git_ok(&["-C", s(&other), "config", "user.name", "t"]);
+    c.git_ok(&["-C", s(&other), "commit", "-q", "--allow-empty", "-m", "base"]);
+    let nested = wt.join("out/qqrr");
+    c.worktree_add(&other, &["--detach", s(&nested), "main"]);
+    std::fs::write(nested.join("notes.txt"), "unsaved\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains("out/qqrr/notes.txt") && nested.is_dir(), "{}", run.text());
+    std::fs::remove_file(nested.join("notes.txt")).unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(!registered_names(&c, &other).contains("qqrr"), "{}", registered_names(&c, &other));
+}
+
+#[test]
+fn a_clean_nested_worktree_in_an_untracked_directory_is_removed_with_its_parent() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326m", "implement-1326m");
+    let other = c.root().join("r1326m-other");
+    c.git_ok(&["init", "-q", "-b", "main", s(&other)]);
+    c.git_ok(&["-C", s(&other), "config", "user.email", "t@example.com"]);
+    c.git_ok(&["-C", s(&other), "config", "user.name", "t"]);
+    c.git_ok(&["-C", s(&other), "commit", "-q", "--allow-empty", "-m", "base"]);
+    let nested = wt.join("timing");
+    c.worktree_add(&other, &["--detach", s(&nested), "main"]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(!registered_names(&c, &other).contains("timing"), "{}", registered_names(&c, &other));
 }
