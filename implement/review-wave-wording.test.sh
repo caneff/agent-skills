@@ -26,7 +26,7 @@ check_absent() { case "$1" in *"$2"*) echo "FAIL: implement/SKILL.md still has: 
 # One wave, one fix round, the seam as the convergence check.
 check_in "$review" 'One review wave, one fix round, then the seam' '§ Review'
 check_in "$review" 'There is no re-review: the seam is the convergence check.' '§ Review'
-check_in "$review" 'run `bash tests/all.sh`' '§ Review'
+check_in "$review" 'bash tests/all.sh --changed origin/<default>' '§ Review'
 
 # Three outcomes, no size bar.
 check_in "$review" 'exactly one disposition, one of three outcomes' '§ Review'
