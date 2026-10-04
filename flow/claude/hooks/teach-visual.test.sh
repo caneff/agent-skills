@@ -22,11 +22,11 @@ expect_none "second zed in the same session" "$(context "$hook" s1 "zed README.m
 got=$(context "$hook" s1 "shot-scraper accessibility report.html")
 expect_has "extraction: shot-scraper returns § Reading a rendered page yourself" "$got" "${reading[@]}"
 expect_none "second shot-scraper in the same session" "$(context "$hook" s1 "shot-scraper report.html -o a.png")"
-expect_has "both triggers in one command, new session" \
+expect_has "extraction: both triggers in one command, new session" \
   "$(context "$hook" s2 "shot-scraper page.html -o p.png && zed p.png")" "${showing[@]}" "${reading[@]}"
 
 expect_none "unrelated command" "$(context "$hook" s3 "ls -la")"
-expect_none "trigger in a grep pattern" "$(context "$hook" s3 "rg 'shot-scraper' docs/")"
+expect_none "trigger in a grep pattern" "$(context "$hook" s3 "rg 'x; shot-scraper' docs/")"
 expect_none "trigger in a heredoc body" "$(context "$hook" s3 "cat > open.sh <<'SH'
 zed notes.md
 SH")"

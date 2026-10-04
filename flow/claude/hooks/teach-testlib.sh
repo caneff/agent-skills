@@ -12,14 +12,17 @@ export XDG_CACHE_HOME="$tmp/cache"
 fails=0
 
 # context <hook> <session id> <command> -> the additionalContext printed, or
-# nothing. A non-zero exit or output that is not the PreToolUse shape is a
-# failure of its own, reported here, so an empty answer always means the hook
-# chose to say nothing.
+# nothing. RUN_CWD sets the session cwd the hook is told about (default $PWD);
+# RUN_AGENT adds the agent_id a subagent's tool call carries.
+# A non-zero exit or output that is not the PreToolUse shape is a failure of
+# its own, reported here, so an empty answer always means the hook chose to
+# say nothing.
 context() {
   local hook=$1 session=$2 cmd=$3 out rc
   out=$(printf '%s' "$cmd" \
-        | jq -Rs --arg s "$session" --arg cwd "${RUN_CWD:-$PWD}" \
-            '{session_id:$s,cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:.}}' \
+        | jq -Rs --arg s "$session" --arg cwd "${RUN_CWD:-$PWD}" --arg a "${RUN_AGENT:-}" \
+            '{session_id:$s,cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:.}}
+             + (if $a == "" then {} else {agent_id:$a} end)' \
         | PATH="${STUB_PATH:-}${STUB_PATH:+:}$PATH" bash "$hook" 2>"$tmp/stderr")
   rc=$?
   if [ "$rc" != 0 ]; then
@@ -52,9 +55,9 @@ expect_none() {
   fi
 }
 
-# copy_tree <hook>... -> a private copy of the hooks dir and its docs at
-# $tmp/tree/claude, for a case that mutates a source doc. The hooks find their
-# docs beside their own real path, so the copy reads the mutated doc.
+# copy_tree: a private copy of the hooks dir and its docs at $tmp/tree/claude,
+# for a case that mutates a source doc or removes a file. The hooks find their
+# docs and libs beside their own real path, so the copy reads the mutation.
 copy_tree() {
   local src
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
