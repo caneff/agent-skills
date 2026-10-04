@@ -41,6 +41,14 @@ _Avoid_: component (the graph term), cluster
 The tickets inside one family whose closures are identical, at most three (`MAX_CLUMP` in `burndown/closure.py`); any other family member is a clump of one. One worker, one workspace, one PR that closes every ticket in it.
 _Avoid_: batch, group, cluster
 
+**Anchor**:
+The oldest unblocked `ready-for-agent` ticket, which `drain` (`drain/drain.py`) claims and builds first. The agent it starts adds the other ready tickets it would naturally fix in the same PR.
+_Avoid_: seed, lead ticket
+
+**Bundle**:
+The anchor plus the tickets the agent chose to fix with it, at most `--bundle-max` (8): one agent, one worktree, one PR that closes every one, one review wave. The agent chooses it after reading the queue; `drain` groups nothing by directory or closure. Unlike a clump, which the burn's controller computes from file closures before dispatch.
+_Avoid_: clump (the burn's term), batch
+
 **Tier**:
 How much process a ticket's build gets, set at dispatch by its `documentation` label: light (label present; the worker pushes to the default branch, no PR, no reviewer) or heavy (no label; TDD, one review round plus one verification pass, PR). A worker may raise light to heavy, never the reverse.
 _Avoid_: lane (that is auto-ship vs code), mode, level
