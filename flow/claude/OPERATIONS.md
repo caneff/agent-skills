@@ -187,21 +187,18 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   send it `SendMessage` with `notify_when_idle: true`. Why: polling loops
   and "are you done?" messages cost turns and interrupt the worker; measured
   on the socket fan-in prototype (#778).
-- A worker that stops without a successful `SendMessage` to its controller
-  since its last prompt still wakes the controller — unless it is waiting
-  (a subagent, a background shell or a Monitor task still out) or it
-  already reported and has done nothing since (#886): the `Stop` hook
-  `worker-stop-alert.sh` types one line into the controller's herdr pane,
-  `[worker-stop-alert] worker #<n> stopped without reporting to
-  <controller> (herdr agent <name>)`. Read that agent's
-  pane (`herdr agent read <name>`) for the report it never sent. herdr
-  refuses a prompt to a blocked pane; the hook retries with backoff for up to
-  12 s, then writes a `not-sent` line (`controller blocked: …`) to
-  `~/.claude/worker-stop-alerts.log`. So while workers are out, read the
-  `not-sent` lines added to that log since your last read, on every wake and
-  before ending a turn — the one read the rule above allows. Why: in the
-  #781 trial two workers finished without reporting and the run stalled ~4 h
-  unseen (#820).
+- A worker that stops without reporting must still wake the controller. Why:
+  in the #781 trial two workers finished without reporting and the run
+  stalled ~4 h unseen (#820). The controller subscribes to each worker it
+  dispatches, and again after every message it sends one: `SendMessage` to
+  the worker with `notify_when_idle: true` (no message needed). The idle
+  notice reaches the controller only. On it, read that worker's pane
+  (`herdr agent read <name>`) and say nothing to Chris unless the pane holds
+  a question for him. The `Stop` hook `worker-stop-alert.sh` used to do this
+  job by typing a line into the controller's herdr pane. It was unregistered
+  from `settings.json` on 2026-10-04 because it typed into Chris's own input
+  and fired about a dozen times in one burn without once being right. The script
+  stays installed, and re-adding its `Stop` entry restores it.
 - A worker that never stops raises no stop alert, and its transcript mtime
   and `working` state read healthy while it spins. The `PostToolUse` hook
   `worker-spin-alert.sh` runs inside the turn: the same tool with

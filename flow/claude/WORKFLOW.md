@@ -71,6 +71,26 @@ decisions are fuzzy → `/to-spec` → `/to-tickets` (tracer-bullet slices) →
 since. Why: a PRD written before a decision changed builds the old decision.
 Skills live in `~/.agents/skills` (symlinked into `~/.claude/skills`).
 
+## Auto mode and harness work
+
+Work that changes the harness itself is never dispatched into auto mode
+workers. Harness work means `flow/claude/settings.json`, hooks, mods, plugins,
+plugin load paths, and sessions driving other sessions. Chris runs it in a
+session outside auto mode, where each risky step is one prompt he approves.
+Why: the classifier exists to stop exactly this work, and its rules for it
+(`Self-Modification`, `Auto-Mode Bypass`, `Instruction Poisoning`,
+`Unauthorized Persistence`, and more) are must-name `soft_deny` rules that
+no `autoMode.allow` entry clears. Spec #1365 under auto mode cost about a
+dozen park-and-relay rounds in burn burn-skills-2026-10-03 (#1389 adds the
+pre-dispatch check).
+
+On any classifier denial, read the matched rule before proposing a fix:
+`claude auto-mode config`, the rule named in the brackets, its section and
+its `must name` clause. The fix options follow from that text, never from a
+guess at the classifier. Detail and the six failed guesses it would have
+saved: `docs/research/2026-10-04-auto-mode-self-modification-denials.md`
+(#1388 makes this a required park step).
+
 ## CI
 
 CI is local, not GitHub Actions: a repo's gate is `git config land.testcmd`,
