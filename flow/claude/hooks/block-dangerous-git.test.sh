@@ -363,6 +363,22 @@ run "dot discard: mutation-named dir that is no worktree blocked" 2 \
 run "dot discard: allowed target chained to a blocked one blocked" 2 \
   "git -C $repo/.scratch/mutation-m1 checkout -- . && git checkout -- ." "$blocked"
 
+# The scan is linear in the command's length. A quadratic lexer took 2.6 s on
+# 44 KB and 5.9 s on 66 KB (#1423), past the teaching hooks' 5 s timeout, and a
+# guard that times out lets the command through. 100 KB of quoted words,
+# comments and escapes, no heredoc, then a foreign merge, must still be blocked
+# well inside that timeout.
+big=$(awk 'BEGIN { for (i = 0; i < 2500; i++) printf "echo \"a b $i\" '"'"'c d'"'"' x\\ y # note %d\n", i }')
+big+=$'\ngh pr merge 5 --repo someone-else/x'
+started=$(date +%s.%N)
+run "foreign merge after a 100 KB command blocked" 2 "$big" "BLOCKED"
+elapsed=$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN { printf "%.2f", b - a }')
+if awk -v e="$elapsed" 'BEGIN { exit !(e < 2.5) }'; then
+  echo "PASS: 100 KB command scanned in ${elapsed}s"
+else
+  echo "FAIL: 100 KB command took ${elapsed}s, want under 2.5s"; fails=1
+fi
+
 # The guard reads commands through command-scan-lib.sh beside its real path.
 # Without the lib no pattern can match, so it blocks every command rather than
 # letting each one through unscanned.

@@ -94,7 +94,9 @@ discards_worktree() {
   git_verb checkout "$1" || { git_verb restore "$1" && ! restore_is_unstage_only "$1"; } || return 1
   ! is_mutation_worktree "$1"
 }
-while IFS= read -r segment; do
+# The two segment loops fork several greps per segment, so a long command is
+# gated on the verb they look for, with no fork (#1423).
+[[ "$SCAN" == *checkout* || "$SCAN" == *restore* ]] && while IFS= read -r segment; do
   if discards_worktree "$segment"; then
     echo "BLOCKED: '$COMMAND' discards every uncommitted change under '.'. That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact line to run themselves. Do not attempt it yourself." >&2
     exit 2
@@ -121,7 +123,7 @@ is_force_push_segment() {
     && echo "$1" | grep -qE '[[:space:]](--force([[:space:]]|$)|-f([[:space:]]|$))' \
     && ! echo "$1" | grep -q 'force-with-lease'
 }
-while IFS= read -r segment; do
+[[ "$SCAN" == *push* ]] && while IFS= read -r segment; do
   if is_force_push_segment "$segment"; then
     echo "BLOCKED: bare force-push in '$COMMAND' can destroy commits on origin. Use '--force-with-lease', or hand the user the exact '! git push --force ...' line." >&2
     exit 2
