@@ -112,8 +112,8 @@ teach_add() { TEACH_CONTEXT+="${TEACH_CONTEXT:+$'\n\n'}$1"; }
 # shown nothing and spends nothing. A denial of the same call (a permission
 # prompt, a parallel blocking hook) does not drop the context: the model still
 # read it, so printing is the right moment to record (#1423,
-# docs/research/2026-10-04-teaching-hook-live-firing.md). Always exit 0: a teaching hook never
-# blocks a command.
+# docs/research/2026-10-04-teaching-hook-live-firing.md). Always exit 0: a
+# teaching hook never blocks a command.
 teach_emit() {
   local key
   [ -n "$TEACH_CONTEXT" ] || exit 0

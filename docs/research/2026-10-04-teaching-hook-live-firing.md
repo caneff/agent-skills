@@ -76,7 +76,7 @@ opened one (`a\ #x`, an escaped blank read as a word break). #1413 fixed that
 and two older scanner gaps (`<<<` and a `<<` shift read as heredoc openers),
 each with a guard test in `block-dangerous-git.test.sh`.
 
-## When the same call is denied (#1423, 2026-10-05)
+## When the same call is denied (#1423, 2026-10-04)
 
 Question (finding C9 of #1413's review): `teach_emit` spends a section when it
 prints it, so does PreToolUse `additionalContext` still reach the model when
@@ -89,12 +89,15 @@ claude-haiku-4-5-20251001 --setting-sources project`, a private
 |---|---|---|---|---|
 | a second PreToolUse hook beside it exits 2 | `72c7da7a-c771-44ce-a212-194f717c6ed1` | `PreToolUse:Bash hook error: ... denied by a parallel hook` | present, SHELL-SAFETY § Killing a process | quoted its first sentence, said the command was denied |
 | no `--allowedTools`, so the permission prompt denies | `6d7bebcb-fcb5-413e-a7f0-b0c9f30b89a5` | `This command requires approval` | present, same section | quoted its first sentence, said the command was denied |
+| `--permission-mode auto` | `e35e5bd5-f425-470d-911c-b4251151c3d3` | `This command requires approval` | present, same section | quoted its first sentence, said the command was denied |
 
-Both transcripts are under
+All three transcripts are under
 `~/.claude/projects/-tmp-claude-1000-probe/<session>.jsonl`; the cache record
 of each run lists the section once.
 
 Ruling: a denial does not drop the context, so the record stays on PreToolUse
-and `teach_emit` is unchanged. Not probed: an auto-mode classifier denial; it
-decides after PreToolUse like the permission prompt does, but that is
-inferred, not read from a transcript.
+and `teach_emit` is unchanged. The auto-mode run ended in the same
+"requires approval" denial as the permission prompt, headless; an interactive
+auto-mode classifier denial of a call the classifier judges unsafe was not
+separately produced, and is inferred to behave the same since it decides after
+PreToolUse.
