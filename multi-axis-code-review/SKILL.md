@@ -161,6 +161,8 @@ findings (§ 4 below), `axis` still `"standards"` and `severity` always
 
 ### 4. Spawn the three sub-agents in parallel
 
+Run the usage gate first (§ below, *A rate-limited axis did not run*): exit 20 spawns nothing.
+
 A caller that has switched an axis off — `implement/SKILL.md` § Review's
 first ablation skips the standards axis on a small PR — names it, and you
 spawn the other two. The skipped axis is not reported as `NO REPORT RECEIVED`
@@ -588,13 +590,18 @@ reviewer that never ran. When every axis fails that way, no round happened:
 report the reset time to the controller and stop the lane there, with the work
 committed and pushed to its branch — never go idle with an unpushed commit and
 no word. A controller named `drain` is no session, so the report goes into the
-pane and the worker's final line names the reset time. No usage check runs
-before the axes spawn: Claude's plan usage is readable only from the status
-line's own session JSON (`flow/ccstatusline-table/helpers/usage-segment.sh`),
-not from a script, and reading it through the OAuth endpoint is barred. A gate
-whose reading cannot be taken would be a stated fallback with no mechanism
-behind it (`AGENTS.md` § Recurring defect classes, class 2), so the 429 path
-above is the covered one.
+pane and the worker's final line names the reset time. A usage check runs
+before the axes spawn (#1436): `python3 ~/.agents/skills/multi-axis-code-review/claude-usage-gate.py`
+reads the `rate_limits` cache the status line writes on each render
+(`flow/ccstatusline-table/helpers/claude-usage.py`), since the plan's usage is
+readable only from the status line's own session JSON, never from a script, and
+reading it through the OAuth endpoint is barred. Exit 0: spawn. Exit 20 (a
+window at or above 95%): spawn no axis, and treat it as every axis failing the
+way above — the line's reset time is the report's, the work stays pushed, and
+the lane stops. Exit 30 (no cache, older than 10 minutes, malformed, or a window
+already reset) is unknown, not headroom: spawn, and say in the report that
+usage was unread; the 429 path above is what covers a limit hit mid-round. The
+cache is account-wide, so any live session's status line feeds it.
 
 **Wait for every axis.** Each reviewer ends with a completion notification; do nothing with the round until every one you spawned has arrived. Never send a reviewer a "report now" or "wrap up" message — a reviewer hurried mid-pass returns what it has and its unread work is the round's biggest cost (agent-skills #732: eight finder reports, none read). Only when an axis's notification has arrived empty *and* its fallback file is absent do you report that axis in step 5 as `## Standards — NO REPORT RECEIVED` (or `## Spec — …`, `## Correctness — …`); a reviewer that is merely slow is waited on, not replaced.
 

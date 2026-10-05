@@ -50,6 +50,11 @@ in `helpers/` (versioned here):
   beside it stay Claude's. Blank when there's no usable reply, or once the
   window it describes has reset.
 
+Each render also writes the session JSON's `rate_limits` block to
+`~/.cache/agent-skills/claude-usage.json` (`helpers/claude-usage.py`, #1436),
+which `multi-axis-code-review/claude-usage-gate.py` reads before the review axes
+spawn. An absent or malformed block never replaces a good reading.
+
 Git branch/changes and context tokens are computed in-script.
 
 ## Test
@@ -58,6 +63,7 @@ Git branch/changes and context tokens are computed in-script.
 python3 table-statusline.py --selftest
 helpers/usage-segment.sh --selftest
 python3 helpers/codex-usage.py --selftest
+python3 claude_usage_cache_test.py
 ```
 
 `statusline.test.sh` runs all three, so the repo's `tests/all.sh` picks them up.
