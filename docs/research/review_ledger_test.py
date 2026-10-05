@@ -143,7 +143,9 @@ class Case(unittest.TestCase):
         return result
 
     def rows(self):
-        return {r["row_id"]: r for r in map(json.loads, self.ledger.read_text().splitlines())}
+        """The ledger's rows by row id; none when no command has written it yet."""
+        return {r["row_id"]: r for r in map(json.loads, self.ledger.read_text().splitlines())} \
+            if self.ledger.exists() else {}
 
 
 class HarvestTest(Case):
@@ -258,6 +260,8 @@ class HarvestTest(Case):
         self.assertEqual(row["type"], "verification")
         # not-fixed with neither a reason nor a text is not readable as leftover or disputed.
         self.assertEqual(row["findings"][0]["outcome"], "unknown")
+        # The file-name mapping is the row's own, not only the review file's (P4, #1406).
+        self.assertIn({"from": "verify", "to": "verification (axis in filename)"}, row["status"]["mappings"])
 
     def test_alias_repo_folds_onto_skills(self):
         self.assertEqual(self.rows()["skills/103/spec/1/findings-spec-103"]["repo"], "skills")

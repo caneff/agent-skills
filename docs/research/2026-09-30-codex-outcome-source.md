@@ -34,3 +34,31 @@ The 257 rows hold 222 findings (121 high, 101 medium). Outcomes: 195 `unknown`, 
   `unknown`. `report` counts them in `unknown outcomes` and never as zero value.
 - Split ids (`codex-second-1a` / `-1b`) and drifted ids (`codex-gate-1-obs-session`) do not join; they
   are listed under "Dispositions with no finding" in the review file.
+
+## Correction, 2026-10-04 (#1406, sweep item P5)
+
+The finding above, that a Codex outcome is joinable only for a `leftover`, held for passes run
+before #1401. It no longer holds for forward gate passes:
+
+- **The rule changed.** Since 82f5d39 (#1401, 2026-10-04) the worker writes one dispositions line
+  per finding, Codex's included, as `codex-gate-<k>` for the k-th finding of the `.out`
+  (`implement/SKILL.md` § Review, step 3). The harvest joins that id by number.
+- **Something enforces it.** `implement/fix_check.py` (`codex_findings`) reads the gate's `.out` with
+  the ledger's own parser and requires a dispositions line for every `codex-gate-<k>`, so a
+  missing line fails the worker's pre-report gate instead of reading as `unknown`.
+- **Split ids now join.** A finding disposed as two ids, `codex-<phase>-<label>a` and `-b`, joins
+  as one: halves that agree give their outcome, one valued half gives a partial
+  (`review_ledger.py` `_split_outcome`, #1406). Drifted ids such as `codex-gate-1-obs-session`
+  still do not join and are still listed under "Dispositions with no finding".
+
+What is still unknown: the share of forward Codex findings that actually carry a known outcome.
+This correction does not measure it; it reads the rule and its gate, not a harvest. The
+second pass is gone (ADR 0004), so the gate is the only forward Codex phase. Backfilled passes
+(the 195 `unknown` above) stay unjoinable: their fixed and disputed outcomes exist only as PR-body
+prose.
+
+**Follow-up, recorded here because ADR 0005 freezes new tickets against this machinery:** after
+the next burn, run `review_ledger.py harvest` and `report`, and count, over `codex-gate` rows whose
+record `started` after 2026-10-04, the findings with a known outcome. Under the new rule that
+should be all of them; any `unknown` there names a worker that skipped a line and a fix-check that
+let it through, which is a bug that blocks the measurement and may be filed as one.

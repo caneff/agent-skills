@@ -44,8 +44,10 @@ because there is no worker, and no message ever arrives to be waited on. So
 the backstop reads the machine — one `herdr agent get` per live slot — rather
 than waiting harder on a channel that has nothing to deliver.
 
-Bounded means what it says: one call per live, unlanded slot, no retry, no
-wait, and nothing for a clump that already landed or closed with no landing. `sweep` never raises on a
+Bounded means what it says: one call per live, unsettled slot, no retry, no
+wait. A clump is **settled** once it has landed or closed with no landing
+(`runfile.settled`), and the loop and its docs use that one word for it; a
+settled clump gets no call. `sweep` never raises on a
 worker's own probe failure either — a herdr that answers for two workers and
 not the third still tells the controller about two, and the third is reported
 as `unreachable`, which is a different fact from `vanished`.

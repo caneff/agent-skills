@@ -55,7 +55,7 @@ def read(issues, states=None, parents=None):
     states = states or {}
     parents = parents or {}
 
-    def parent_of(repo, ticket):
+    def parent_of(repo, ticket, run=None):
         answer = parents.get(ticket["number"])
         if isinstance(answer, Exception):
             raise answer
@@ -853,7 +853,7 @@ def test_the_parent_is_read_for_the_ticket_not_a_spec_parent():
                fetch=lambda repo, label: [issue(1, labels=("ready-for-agent", "spec"),
                                                 body=NO_BLOCKERS)],
                state_of=lambda repo, number: None,
-               parent_of=lambda repo, ticket: asked.append(ticket["number"]))
+               parent_of=lambda repo, ticket, run: asked.append(ticket["number"]))
     assert asked == [], asked
 
 
@@ -944,6 +944,27 @@ def _parent_run():
     })
 
 
+def test_a_parent_named_by_two_slices_is_read_once():
+    # #1406 C6: slices of one spec each fall back to `Part of #483`; the
+    # parent issue is read once per frontier read, as a blocker's state is.
+    asked = []
+    table = {"repos/owner/repo/issues/483": spec_parent(483)}
+    for n in (491, 492):
+        table[f"repos/owner/repo/issues/{n}/parent"] = F.FrontierError("gh: Not Found (HTTP 404)")
+    answer = gh_answers(table)
+
+    def run(args):
+        asked.append(args[-1])
+        return answer(args)
+
+    got = F.frontier("owner/repo", "ready-for-agent",
+                     fetch=lambda repo, label: [issue(n, body=NO_BLOCKERS + "\n\nPart of #483\n")
+                                                for n in (491, 492)],
+                     state_of=lambda repo, number: None, run=run)
+    assert numbers(got["slice"]) == [491, 492], got
+    assert asked.count("repos/owner/repo/issues/483") == 1, asked
+
+
 def test_fetch_parent_reads_the_link_form_to_tickets_writes():
     body = ("## Parent\n\nPart of [Spec: the thing](https://github.com/owner/repo/issues/483).\n\n"
             "## TL;DR\n\nSomething.\n")
@@ -969,14 +990,49 @@ def test_fetch_parent_reads_a_bare_issue_url_under_the_parent_heading():
     assert got["number"] == 483, got
 
 
+def unreadable_parent(body):
+    """The `FrontierError` `fetch_parent` raises for `body`'s `## Parent`, or
+    an `AssertionError` when it answered instead."""
+    try:
+        got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    except F.FrontierError as exc:
+        return exc
+    raise AssertionError(f"an unreadable `## Parent` was answered: {got!r}")
+
+
+# A `## Parent` section that states something this reader cannot resolve is
+# a parent it could not read, never "no parent" (#1406 S1/P1, reversing
+# #1282's three cases): read as none, a slice of a spec dispatches as an
+# ordinary ticket.
 def test_the_parent_section_ends_at_the_next_heading():
-    body = "## Parent\n\nnone yet\n\n## TL;DR\n\nSee #483.\n"
-    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+    # Read past the heading, `#483` would answer; the section's own prose
+    # names nothing, so it is unreadable.
+    body = "## Parent\n\nto be decided\n\n## TL;DR\n\nSee #483.\n"
+    assert "## Parent" in str(unreadable_parent(body))
 
 
 def test_a_link_to_another_repo_is_decided_by_its_url_not_its_text():
     body = "## Parent\n\nPart of [Spec: fix #483 crash](https://github.com/other/place/issues/12).\n"
+    assert "## Parent" in str(unreadable_parent(body))
+
+
+def test_an_empty_parent_section_is_unreadable():
+    assert "## Parent" in str(unreadable_parent("## Parent\n\n## TL;DR\n\nx\n"))
+
+
+def test_a_parent_section_saying_none_is_no_parent():
+    body = "## Parent\n\nNone\n\n## TL;DR\n\nSee #483.\n"
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
+def test_a_slice_whose_parent_section_is_unreadable_is_unresolved():
+    body = NO_BLOCKERS + "\n## Parent\n\nPart of [Spec](https://github.com/other/place/issues/12).\n"
+    got = F.frontier("owner/repo", "ready-for-agent",
+                     fetch=lambda repo, label: [issue(491, body=body)],
+                     state_of=lambda repo, number: "closed",
+                     run=_parent_run())
+    assert numbers(got["unresolved"]) == [491], got
+    assert numbers(got["unblocked"]) == [], got
 
 
 def test_a_bare_reference_beside_a_foreign_link_is_still_the_parent():
@@ -990,9 +1046,35 @@ def test_fetch_parent_ignores_a_bare_reference_outside_the_parent_heading():
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
 
 
-def test_fetch_parent_ignores_a_link_to_another_repo():
+def test_a_parent_section_linking_another_repo_is_unreadable():
     body = "## Parent\n\nPart of [Spec](https://github.com/other/place/issues/483).\n"
+    assert "## Parent" in str(unreadable_parent(body))
+
+
+# #1406 C2: the same declaration as a bare `Part of` line, with no heading,
+# is just as unreadable; read as none, the slice dispatches.
+def test_a_part_of_line_linking_another_repo_is_unreadable():
+    body = "Part of [Spec](https://github.com/other/place/issues/12).\n\nBody.\n"
+    assert "`Part of`" in str(unreadable_parent(body))
+
+
+def test_a_part_of_line_naming_another_repos_shorthand_is_unreadable():
+    assert "`Part of`" in str(unreadable_parent("Part of other/place#12\n"))
+
+
+def test_a_prose_line_starting_part_of_is_no_parent():
+    body = "Part of the work is a rename.\n"
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
+def test_a_slice_whose_part_of_line_links_another_repo_is_unresolved():
+    body = NO_BLOCKERS + "\n\nPart of [Spec](https://github.com/other/place/issues/12).\n"
+    got = F.frontier("owner/repo", "ready-for-agent",
+                     fetch=lambda repo, label: [issue(491, body=body)],
+                     state_of=lambda repo, number: "closed",
+                     run=_parent_run())
+    assert numbers(got["unresolved"]) == [491], got
+    assert numbers(got["unblocked"]) == [], got
 
 
 def test_a_fenced_part_of_line_is_not_a_parent_reference():

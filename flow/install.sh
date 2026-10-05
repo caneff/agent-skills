@@ -38,6 +38,9 @@ link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 # Symlinked, not copy-only (#1031): a probed harness write rewrote the live
 # file through the link without breaking it (`claude plugin disable --scope
 # user`); backup-sync.sh --commit still backs it up, straight off this link.
+# That is the only write path probed (controller, 2026-09-23, commit
+# 9c2244f). A `/config` change and an "always allow" permission write are
+# unprobed: either may yet replace the link with a regular file.
 link claude/settings.json       "$HOME/.claude/settings.json"
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
 # shellcheck source=hooks-manifest.sh

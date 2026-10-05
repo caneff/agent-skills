@@ -34,7 +34,7 @@ But you can also use the CLI from marimo.
 ```python
 if mo.app_meta().mode == "script":
     if "help" in mo.cli_args() or len(mo.cli_args()) == 0:
-        print("Usage: uv run notebook.py [--sample-size <n>] [--learning-rate <x>]")
+        print("Usage: uv run notebook.py --<name> <value> [--<name> <value> ...]")
         print()
         for name, field in ModelParams.model_fields.items():
             default = f" (default: {field.default})" if field.default is not None else " (required)"

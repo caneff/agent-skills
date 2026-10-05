@@ -62,7 +62,7 @@ but no closure, and a closure stored at claim time is exactly what goes
 stale. The two are what `loop.py dispatch` reads as `--in-flight`; the job
 record comes from the run file through the required `--run <run-id>`. The
 closure is only what the ticket's named files reach, so dispatch also unions
-each unlanded, unclosed in-flight workspace's `git diff --name-only
+each unsettled in-flight workspace's `git diff --name-only
 origin/<default>...HEAD`, uncommitted edits and untracked files into it
 (#1212): on burn-trs-2026-09-27 two workers ran concurrently in files no
 candidate list named. An unreadable diff refuses the tick rather than reading
@@ -82,12 +82,14 @@ exploration budget for an answer that is already on file.
 one closure is not a hub however central it looks: nothing else in the queue
 closes over it.
 
-## The exclusion rule, and what it costs
+## The exclusion rule and what it costs
 
-A clump whose closure intersects a live workspace's closure is **off the
+A clump whose closure overlaps a live workspace's closure is **off the
 frontier**. A controller reading only "open, unblocked, unclaimed" would
 dispatch straight into a collision — two workers editing one file, which is a
-merge conflict the controller caused.
+merge conflict the controller caused. Overlap (`loop.overlap`) is one rule
+for a live workspace and for a clump picked earlier the same tick: a shared
+file, or a shared directory, one inside the other counting.
 
 Among what is left, `picks` offers the free slots **widest closure first**
 (#1026, grill Q12): a sweep ticket touching many files would otherwise go out
@@ -105,11 +107,15 @@ clump came first. That is the same-tick guard's ordinary behaviour, not a
 bug in the sort — the run drains a slot behind schedule rather than into a
 collision.
 
-The guard also holds two clumps whose lists share a **directory** (or one
-inside the other), not only a file (#1342): a ticket body names fewer files
-than its diff reaches, so two clumps naming disjoint files under one
-directory collided in the merge tail anyway. The repo root is not a shared directory. The cost is the same kind
-of idle slot, and larger in a repo that keeps its code in one directory.
+A shared **directory** holds, not only a shared file (#1342): a ticket body
+names fewer files than its diff reaches, so two clumps naming disjoint files
+under one directory collided in the merge tail anyway. The live hold reads
+directories too (#1406): held for one tick only, a clump listing
+`examples/hit-counts` went out next tick beside a live worker editing
+`examples/hit-counts/build_size.py` (spec-649-smcc). The repo root is not a
+shared directory, or every root file would hold every other. The cost is the
+same kind of idle slot, and larger in a repo that keeps its code in one
+directory.
 
 Both consequences are stated in the skill because neither is visible from the
 frontier's own definition:
@@ -186,7 +192,7 @@ run's.
 
 A WSL restart renames every Claude session, and every worker's brief
 names its controller in `--controller "<name>"`, a session name that a restart invalidates when the controller had no herdr agent name. So on resume the controller re-announces
-itself — **exactly one message per live, unlanded worker**, which is
+itself — **exactly one message per live, unsettled worker**, which is
 `runfile.reconcile`'s `announce` bucket and only that one. A landed or
 closed clump's worker is finished however its agent looks. A vanished one is reconciled or
 parked by hand; messaging an agent nobody can find is not reconciliation.

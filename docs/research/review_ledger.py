@@ -52,10 +52,13 @@ harvested; `codex-third` rows were written before #1360 made the second pass fin
 refuses the type), wall clock from the record's `started` and `completed`, findings from the `.out`'s
 `- [severity] title (file:lines)` lines with severity as written, outcomes from the ticket's dispositions
 sidecar lines `codex-<phase>-<label>` (label: the finding's number, or its severity's initial and number
-among that severity; no such line is `unknown`). Usage change is `unknown` on every backfilled row. A record
-with a non-zero status is a refusal row: no findings, counted in `report`'s `refused` column and never in
-`clean passes`. Outcomes are read from the dispositions sidecar only, where the controller writes a line by rule for
-a `leftover` alone, so most backfilled Codex outcomes are `unknown` and the known ones skew to leftover. A `.out` whose findings cannot be read is `unknown`, never empty.
+among that severity; a split disposition's two halves `<id>a` and `<id>b` join as one; no such line is
+`unknown`). Usage change is `unknown` on every backfilled row. A record with a non-zero status is a refusal
+row: no findings, counted in `report`'s `refused` column and never in `clean passes`. Outcomes are read from
+the dispositions sidecar only. Since #1401 the worker writes a line for every finding, Codex's included
+(`implement/SKILL.md` § Review step 3); before it, the controller wrote one by rule for a `leftover` alone,
+so most backfilled Codex outcomes are `unknown` and the known ones skew to leftover. A `.out` whose
+findings cannot be read is `unknown`, never empty.
 
 Codex rows from `append` (#1269) are the ones the controller writes at merge, one per pass. The pass's
 record carries `usage_before` and `usage_after`, each `<percent> <resetsAt>` as `implement/codex-usage-gate.py
@@ -93,6 +96,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
@@ -118,6 +122,12 @@ CODEX_TYPES = ("codex-gate", "codex-second", "codex-third")
 # `append` refuses it by name, so a controller reading a stale copy of the step writes nothing.
 RETIRED_CODEX_TYPES = {"codex-third": "#1360: the second Codex pass is final"}
 AUDIT_TYPE = "codex-audit"
+
+
+def is_codex(row_type) -> bool:
+    """Whether a row type is a Codex run: any phase, retired or not, and the audit. The one test
+    of the family, so a new Codex type is never a Claude reviewer in one place and Codex in another."""
+    return str(row_type).startswith("codex-")
 
 DEFAULT_WEIGHTS = {"hard": 3, "judgement": 1, "high": 3, "medium": 2, "low": 1}
 VALUE_OUTCOMES = ("fixed", "filed", "moved")
@@ -342,8 +352,8 @@ def _norm_repo(name: str) -> str:
 
 
 def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources, *,
-            model=None, cost=None, mappings=(), origin="harvest", extra=None) -> dict:
-    """A ledger row: the one place its shape is written. `extra` holds the keys only one kind
+            model=None, cost=None, mappings=(), origin="harvest", own_keys=None) -> dict:
+    """A ledger row: the one place its shape is written. `own_keys` holds the keys only one kind
     of row carries (a mutation row's `mutation_id` and `outcome`)."""
     return {
         "row_id": row_id, "origin": origin, "repo": repo, "pr": None, "ticket": tickets[0] if tickets else None,
@@ -355,15 +365,18 @@ def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_sta
                        {"status": "unknown", "reason": "not in the sidecars or the transcripts"},
                        "findings": findings_status},
             "sources": sources, "mappings": [{"from": m.source, "to": m.to} for m in mappings]},
-        **(extra or {})}
+        **(own_keys or {})}
 
 
-def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tuple[list[dict], dict]:
+def attach_costs(rows: list[dict], runs: list[dict], missing: str | None,
+                 held: dict[str, str] | None = None) -> tuple[list[dict], dict]:
     """Fill each row's cost from its transcripts; returns (rows for runs no sidecar row holds,
     {"multi": the rows that sum more than one transcript, "shared": the transcripts behind a shared key}). A verification run whose round differs from
     its sidecar's joins that row when the ticket has exactly one verification row. Two sidecar
     rows on one key cannot split a transcript between them, so both stay unknown. Over-engineering
-    cost stays inside standards."""
+    cost stays inside standards. `held` maps a transcript an appended row counts to that row's id:
+    it joins that row alone, and is never costed into another (#1304)."""
+    held = held or {}
     canon = {_norm_repo(r["repo"]): r["repo"] for r in rows}
     by_key: dict[tuple, list[dict]] = {}
     by_type: dict[tuple, list[dict]] = {}
@@ -374,13 +387,16 @@ def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tup
     joined: dict[str, list[dict]] = {}
     shared: dict[str, str] = {}
     shared_runs: dict[str, list[str]] = {}
-    extra: list[dict] = []
+    unjoined: list[dict] = []
     for run in runs:
         run["repo"] = canon.get(_norm_repo(run["repo"]), run["repo"])
         hits = by_key.get((run["repo"], run["ticket"], run["type"], run["round"]), [])
         if not hits and run["type"] == "verification":
             hits = by_type.get((run["repo"], run["ticket"], "verification"), [])
             hits = hits if len(hits) == 1 else []
+        holder = held.get(run["source"])
+        if holder is not None and [h["row_id"] for h in hits] != [holder]:
+            continue
         if len(hits) > 1:
             key = f"({run['repo']}, #{run['ticket']}, {run['type']}, round {run['round']})"
             shared_runs.setdefault(key, []).append(run["source"])
@@ -390,7 +406,7 @@ def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tup
         elif hits:
             joined.setdefault(hits[0]["row_id"], []).append(run)
         else:
-            extra.append(run)
+            unjoined.append(run)
     multi = []
     for r in rows:
         runs_here = joined.get(r["row_id"], [])
@@ -409,7 +425,7 @@ def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tup
         else:
             r["cost"] = unknown_cost(missing or "no transcript attributed to this row")
     new_rows = []
-    for run in extra:
+    for run in unjoined:
         cost, model = _merge_cost([run])
         new_rows.append(new_row(
             f"{run['repo']}/{run['ticket']}/{run['type']}/{run['round']}/{run['agent']}", run["repo"],
@@ -491,7 +507,7 @@ def titles_match(a: dict, b: dict) -> bool:
 def _reviewer(row_type: str) -> str:
     """The reviewer that wrote a row: OE findings come from the standards run, and the
     Codex phases are one reviewer, so a second pass re-raising a gate finding shares nothing."""
-    return "standards" if row_type == "over-engineering" else "codex" if row_type.startswith("codex-") else row_type
+    return "standards" if row_type == "over-engineering" else "codex" if is_codex(row_type) else row_type
 
 
 class MatchSide(NamedTuple):
@@ -649,9 +665,44 @@ def _ticket_groups(dispositions: dict[str, dict], ticket: int) -> list[str]:
     return [g for g in sorted(dispositions) if str(ticket) in g.split("-")]
 
 
-def _tally_mapping(mapping: Mapping | None, mappings: Counter, unmapped: Counter) -> None:
-    if mapping:
-        (unmapped if mapping.to == "unknown" else mappings)[mapping] += 1
+@dataclass
+class HarvestFacts:
+    """What a harvest lists in the review file beside its rows; every harvester adds to one."""
+    mappings: Counter = field(default_factory=Counter)
+    unmapped: Counter = field(default_factory=Counter)
+    skipped: list = field(default_factory=list)
+    unharvested: list = field(default_factory=list)
+
+    def tally(self, mapping: Mapping | None, row_mappings: list) -> None:
+        """Count a label the harvest rewrote, in the review file and in its row's own list."""
+        if mapping:
+            (self.unmapped if mapping.to == "unknown" else self.mappings)[mapping] += 1
+            row_mappings.append(mapping)
+
+
+def _split_outcome(fid: str, table: dict[str, dict]) -> Joined:
+    """The outcome of a Codex finding disposed as two ids, `<id>a` and `<id>b`: one ruling that
+    divides it. Halves that agree give their outcome; one valued half (fixed, filed, moved) beside
+    another readable one gives that one as a partial; anything else, a missing or unreadable half
+    included, is unknown. An unreadable half's mapping is the one returned, so its label is listed
+    unmapped (the first one only, when both are unreadable)."""
+    halves = [(h, table.get(h)) for h in (fid + "a", fid + "b")]
+    missing = [h for h, d in halves if d is None]
+    if missing:
+        return Joined.unknown(f"{missing[0]} is missing: a split disposition needs both halves")
+    (a_id, a), (b_id, b) = ((h, normalise_outcome(d)) for h, d in halves)
+    unread = [(h, j) for h, j in ((a_id, a), (b_id, b)) if j.outcome == "unknown"]
+    if unread:
+        why = "; ".join(f"{h}: {j.status['reason']}" for h, j in unread)
+        return Joined.unknown(f"a split half is unreadable ({why})", unread[0][1].mapping)
+    if a.outcome == b.outcome:
+        joined = Joined(a.outcome, a.partial or b.partial, {"status": "known"})
+    elif valued := [j for j in (a, b) if j.outcome in VALUE_OUTCOMES]:
+        joined = Joined(valued[0].outcome, True, {"status": "known"})
+    else:
+        return Joined.unknown(f"{a_id} and {b_id} are {a.outcome} and {b.outcome}: no one outcome")
+    return joined._replace(mapping=Mapping("codex split <id>a + <id>b",
+                                           joined.outcome + ("+partial" if joined.partial else "")))
 
 
 def _finding_entry(fid, severity, joined: Joined, file, title) -> dict:
@@ -660,13 +711,13 @@ def _finding_entry(fid, severity, joined: Joined, file, title) -> dict:
 
 
 def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dict[str, dict[str, dict]],
-                  joined: set, mappings: Counter, unmapped: Counter, skipped: list, unharvested: list) -> list[dict]:
+                  joined: set, facts: HarvestFacts) -> list[dict]:
     """One row per `codex-adversarial-<n>-<phase>.json` in a repo's cache directory. Findings
     come from the `.out`, outcomes from `codex-<phase>-<label>` lines of the ticket's own
-    dispositions sidecar (the PR body's prose is not read, and the controller writes a sidecar line
-    by rule only for a `leftover`, so most real outcomes are `unknown`); a finding with no such
-    line is `unknown`. A line credits one finding: a second claimant is `unknown`. A record with a
-    non-zero status is a refusal: no findings, never a pass that found nothing."""
+    dispositions sidecar, or from its two halves `<id>a` and `<id>b` (`_split_outcome`); the PR
+    body's prose is not read. A finding with no such line is `unknown`. A line credits one
+    finding: a second claimant is `unknown`. A record with a non-zero status is a refusal: no
+    findings, never a pass that found nothing."""
     rows = []
     credited: dict[tuple, str] = {}
     # A retried gate sorts after the gate itself, so the gate's disposition is not taken by its retry.
@@ -681,40 +732,50 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
             rec = None
         if not (isinstance(rec, dict) and isinstance(rec.get("status"), int) and not isinstance(rec["status"], bool)
                 and rec.get("ticket") == int(m.group(1)) and rec.get("phase") == m.group(2)):
-            skipped.append(f"{where}: record is unreadable or disagrees with its file name")
+            facts.skipped.append(f"{where}: record is unreadable or disagrees with its file name")
             continue
         phase = _CODEX_PHASES.get(rec["phase"])
         if phase is None:
-            unharvested.append(f"{where} (phase {rec['phase']!r} has no review type)")
+            facts.unharvested.append(f"{where} (phase {rec['phase']!r} has no review type)")
             continue
+        row_mappings: list[Mapping] = []
         if rec["phase"] != phase:
-            mappings[Mapping(f"phase {rec['phase']}", f"codex-{phase}")] += 1
+            facts.tally(Mapping(f"phase {rec['phase']}", f"codex-{phase}"), row_mappings)
         ticket, stem = rec["ticket"], name.removesuffix(".json")
         out_path = repo_dir / (stem + ".out")
         out = out_path.read_text(errors="replace") if out_path.exists() else None
         sources = [where] + ([f"{repo_dir.name}/{stem}.out"] if out is not None else [])
-        extra = {"exit_status": rec["status"]}
+        own_keys = {"exit_status": rec["status"]}
         findings: list[dict] = []
         parsed, fstatus = _codex_run_status(rec["status"], out)
         if fstatus["status"] == "refused":
-            extra["refusal"] = fstatus["reason"]
+            own_keys["refusal"] = fstatus["reason"]
         else:
             groups = _ticket_groups(dispositions, ticket)
             for k, (f, labels) in enumerate(zip(parsed or [], _codex_labels(parsed or [])), 1):
-                hits = [(label, g, dispositions[g][f"codex-{phase}-{label}"]) for label in labels for g in groups
-                        if f"codex-{phase}-{label}" in dispositions[g]]
+                # (label, group, the dispositions ids it takes): a whole id, or the two halves of a split one.
+                hits = []
+                for label in labels:
+                    fid = f"codex-{phase}-{label}"
+                    for g in groups:
+                        if fid in dispositions[g]:
+                            hits.append((label, g, (fid,)))
+                        elif fid + "a" in dispositions[g] or fid + "b" in dispositions[g]:
+                            hits.append((label, g, (fid + "a", fid + "b")))
                 if len(hits) == 1:
-                    label, g, disp = hits[0]
-                    key = (g, f"codex-{phase}-{label}")
-                    if key in credited:
-                        joined_outcome = Joined.unknown(f"{key[1]} already credits {credited[key]}")
+                    label, g, ids = hits[0]
+                    taken = [i for i in ids if (g, i) in credited]
+                    if taken:
+                        joined_outcome = Joined.unknown(f"{taken[0]} already credits {credited[(g, taken[0])]}")
                     else:
-                        credited[key] = stem
-                        joined.add(key)
-                        joined_outcome = normalise_outcome(disp)
+                        credited.update({(g, i): stem for i in ids})
+                        joined.update((g, i) for i in ids)
+                        joined_outcome = (normalise_outcome(dispositions[g][ids[0]]) if len(ids) == 1
+                                          else _split_outcome(f"codex-{phase}-{label}", dispositions[g]))
                         if not label.isdigit():
-                            mappings[Mapping(f"codex label {label[0]}<k>", "k-th finding of that severity")] += 1
-                        _tally_mapping(joined_outcome.mapping, mappings, unmapped)
+                            facts.tally(Mapping(f"codex label {label[0]}<k>", "k-th finding of that severity"),
+                                        row_mappings)
+                        facts.tally(joined_outcome.mapping, row_mappings)
                 elif hits:
                     joined_outcome = Joined.unknown(f"labels {' and '.join(h[0] for h in hits)} both name this finding")
                 else:
@@ -727,17 +788,30 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
             sources, cost={"tokens": dict(_CODEX_TOKENS),
                            "wall_clock": _codex_wall(rec),
                            "usage_delta": _usage_delta(rec.get("usage_before"), rec.get("usage_after"))},
-            extra=extra))
+            mappings=row_mappings, own_keys=own_keys))
     return rows
 
 
+def _claim_row_id(seen: set[str], repo_dir: str, repo: str, ticket, row_type: str, rnd: int,
+                  run_id: str) -> tuple[str, str]:
+    """(row id, run id) of a new row, claimed in `seen`. Two cache directories the alias fold
+    puts on one repo can name one run alike: the later one's run id carries its directory."""
+    row_id = f"{repo}/{ticket}/{row_type}/{rnd}/{run_id}"
+    if row_id in seen:
+        run_id = f"{repo_dir}:{run_id}"
+        row_id = f"{repo}/{ticket}/{row_type}/{rnd}/{run_id}"
+    seen.add(row_id)
+    return row_id, run_id
+
+
 def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = None,
-                  only: tuple[str, int] | None = None, held: frozenset = frozenset()) -> tuple[list[dict], dict]:
+                  only: tuple[str, int] | None = None, held: dict[str, str] | None = None) -> tuple[list[dict], dict]:
     """(rows, review-file facts) for a whole cache tree. `transcripts` is the tree the
     Claude reviewers' cost is read from; None means there is none, for the reason `missing`.
     `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
-    what `append` does, so its rows are the ones a full harvest writes. `held` names the
-    transcripts an appended row already counts, which no row here is costed from (#1304)."""
+    what `append` does, so its rows are the ones a full harvest writes. `held` maps each
+    transcript an appended row already counts to that row's id: no other row is costed from it
+    (#1304)."""
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
     codex_pairs = find_codex_records(cache)
     if only:
@@ -754,11 +828,8 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     rows: list[dict] = []
     codex_rows: list[dict] = []  # costed from their own records, so kept out of the transcript join
     seen_ids: set[str] = set()
-    mappings: Counter = Counter()
-    unmapped: Counter = Counter()
+    facts = HarvestFacts()
     orphans: list[str] = []
-    skipped: list[str] = []
-    unharvested: list[str] = []
     for repo_dir in sorted(by_repo):
         repo = fold_repo(repo_dir)
         dispositions: dict[str, dict[str, dict]] = {}
@@ -767,14 +838,14 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 continue
             group = _dispositions_group(name)
             if group is None:
-                unharvested.append(f"{repo_dir}/{name}")
+                facts.unharvested.append(f"{repo_dir}/{name}")
                 continue
             table: dict[str, dict] = {}
-            for d in _read_sidecar(cache / repo_dir / name, skipped)[0]:
+            for d in _read_sidecar(cache / repo_dir / name, facts.skipped)[0]:
                 if not isinstance(d.get("id"), str):
-                    skipped.append(f"{repo_dir}/{name}: disposition without a string id")
+                    facts.skipped.append(f"{repo_dir}/{name}: disposition without a string id")
                 elif d["id"] in table:
-                    skipped.append(f"{repo_dir}/{name}: duplicate disposition id {d['id']} (the later line wins)")
+                    facts.skipped.append(f"{repo_dir}/{name}: duplicate disposition id {d['id']} (the later line wins)")
                     table[d["id"]] = d
                 else:
                     table[d["id"]] = d
@@ -786,25 +857,26 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 continue
             parsed = _findings_name(name)
             if parsed is None:
-                unharvested.append(f"{repo_dir}/{name}")
+                facts.unharvested.append(f"{repo_dir}/{name}")
                 continue
             axis, group, name_round = parsed
             tickets = [int(t) for t in group.split("-")]
-            if axis == "verify":
-                mappings[Mapping("verify", "verification (axis in filename)")] += 1
+            # A mapping the file name carries is every row's of this file, and counted once.
+            file_mappings = [Mapping("verify", "verification (axis in filename)")] if axis == "verify" else []
+            facts.mappings.update(file_mappings)
             base = "verification" if axis in ("verify", "verification") else axis
             path = cache / repo_dir / name
-            raw_findings, lost = _read_sidecar(path, skipped)
+            raw_findings, lost = _read_sidecar(path, facts.skipped)
             by_type: dict[tuple[str, int], list] = {(base, name_round): []}
             file_dispositions = dispositions.get(group)
             row_mappings: dict[tuple[str, int], list] = {}
             for raw in raw_findings:
                 if not all(isinstance(raw.get(k), str) and raw[k] for k in ("id", "severity", "file", "title")):
-                    skipped.append(f"{repo_dir}/{name}: finding without id/severity/file/title")
+                    facts.skipped.append(f"{repo_dir}/{name}: finding without id/severity/file/title")
                     lost += 1
                     continue
                 if (group, raw["id"]) in seen_finding_ids:
-                    skipped.append(f"{repo_dir}/{name}: duplicate finding id {raw['id']} for ticket {group} "
+                    facts.skipped.append(f"{repo_dir}/{name}: duplicate finding id {raw['id']} for ticket {group} "
                                    "(both kept; they join the same disposition)")
                 seen_finding_ids.add((group, raw["id"]))
                 row_type = "over-engineering" if base == "standards" and _OE_ID_RE.match(raw["id"]) else base
@@ -817,9 +889,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 else:
                     joined.add((group, raw["id"]))
                     joined_outcome = normalise_outcome(file_dispositions[raw["id"]])
-                _tally_mapping(joined_outcome.mapping, mappings, unmapped)
-                if joined_outcome.mapping:
-                    row_mappings.setdefault(key, []).append(joined_outcome.mapping)
+                facts.tally(joined_outcome.mapping, row_mappings.setdefault(key, []))
                 by_type.setdefault(key, []).append(_finding_entry(
                     raw["id"], raw["severity"], joined_outcome, raw["file"], raw["title"]))
             # A file named for round 1 whose every id says round 2 holds no round-1 run.
@@ -835,24 +905,16 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
             else:
                 findings_status = {"status": "known"}
             for (row_type, rnd), findings in by_type.items():
-                run_id = path.stem
-                row_id = f"{repo}/{tickets[0]}/{row_type}/{rnd}/{run_id}"
-                if row_id in seen_ids:
-                    run_id = f"{repo_dir}:{run_id}"
-                    row_id = f"{repo}/{tickets[0]}/{row_type}/{rnd}/{run_id}"
-                seen_ids.add(row_id)
+                row_id, run_id = _claim_row_id(seen_ids, repo_dir, repo, tickets[0], row_type, rnd, path.stem)
                 sources = [f"{repo_dir}/{name}"]
                 if file_dispositions is not None:
                     sources.append(f"{repo_dir}/dispositions-{group}.jsonl")
                 rows.append(new_row(
                     row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources,
-                    mappings=row_mappings.get((row_type, rnd), [])))
-        for r in harvest_codex(cache / repo_dir, repo, by_repo[repo_dir], dispositions, joined,
-                               mappings, unmapped, skipped, unharvested):
-            if r["row_id"] in seen_ids:  # the alias fold put two directories' records on one key
-                r["run_id"] = f"{repo_dir}:{r['run_id']}"
-                r["row_id"] = f"{repo}/{r['ticket']}/{r['type']}/{r['round']}/{r['run_id']}"
-            seen_ids.add(r["row_id"])
+                    mappings=file_mappings + row_mappings.get((row_type, rnd), [])))
+        for r in harvest_codex(cache / repo_dir, repo, by_repo[repo_dir], dispositions, joined, facts):
+            r["row_id"], r["run_id"] = _claim_row_id(seen_ids, repo_dir, repo, r["ticket"], r["type"], r["round"],
+                                                     r["run_id"])
             codex_rows.append(r)
         for group, table in sorted(dispositions.items()):
             for fid in sorted(table):
@@ -862,17 +924,16 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     runs, unattributed, ignored = read_transcripts(transcripts, wanted) if transcripts else ([], [], 0)
     if only:  # a ticket number repeats across repos
         runs = [r for r in runs if _norm_repo(fold_repo(r["repo"])) == _norm_repo(fold_repo(only[0]))]
-    runs = [r for r in runs if r["source"] not in held]
-    new_rows, listed = attach_costs(rows, runs, missing)
+    new_rows, listed = attach_costs(rows, runs, missing, held)
     rows += new_rows + codex_rows
     rows.sort(key=lambda r: r["row_id"])
     matches: list[dict] = []
     restatements: list[dict] = []
     mark_overlap(rows, matches, restatements)
     return rows, {**listed, "restatements": restatements, "unattributed": sorted(unattributed), "ignored": ignored,
-                  "mappings": mappings, "unmapped": unmapped, "matches": matches,
-                  "orphans": sorted(set(orphans)), "skipped": sorted(set(skipped)),
-                  "unharvested": sorted(unharvested)}
+                  "mappings": facts.mappings, "unmapped": facts.unmapped, "matches": matches,
+                  "orphans": sorted(set(orphans)), "skipped": sorted(set(facts.skipped)),
+                  "unharvested": sorted(facts.unharvested)}
 
 
 def review_file_text(facts: dict) -> str:
@@ -952,7 +1013,7 @@ def rescore(ledger: dict, ticket: tuple, matches: list | None = None) -> None:
     appending each cross-reviewer match to `matches`. Only rows of reviewer types, Codex
     included: a mutation row is not ours to re-score."""
     mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
-                  and (r.get("type") in REVIEWER_TYPES or str(r.get("type")).startswith("codex-"))],
+                  and (r.get("type") in REVIEWER_TYPES or is_codex(r.get("type")))],
                  [] if matches is None else matches, [])
 
 
@@ -961,9 +1022,12 @@ def _known(field) -> bool:
 
 
 def _keep_known(old: dict, new: dict) -> dict:
-    """`new`, a harvest's rebuild of the row `old` that `append` wrote, kept `append`. `old`'s known
-    cost fields and model win outright; its findings, or a finding's outcome with the label mappings,
-    fill in what `new` reads as unknown."""
+    """`new`, a harvest's rebuild of the row `old` that `append` wrote, kept `append`. When the
+    rebuild read every source `old` counted, its known cost fields and model win, since it may
+    also hold a retry or a transcript that grew after the append (#1406); otherwise `old`'s known
+    ones win. `old`'s findings, or a finding's outcome with the label mappings, fill in what `new`
+    reads as unknown."""
+    complete = set(old["status"]["sources"]) <= set(new["status"]["sources"])
     status = {**new["status"], "fields": dict(new["status"]["fields"]),
               "sources": list(dict.fromkeys(new["status"]["sources"] + old["status"]["sources"]))}
     if _known(old["status"]["fields"].get("findings")) and not _known(status["fields"]["findings"]):
@@ -979,9 +1043,10 @@ def _keep_known(old: dict, new: dict) -> dict:
             # joined none and mapped no label: the labels mapped are the ones `old` recorded.
             status["mappings"] = old["status"]["mappings"]
     # A rebuild can read fewer transcripts than append summed, or one from a round whose sidecar is gone.
-    kept_cost = {k: v for k, v in (old.get("cost") or {}).items() if _known(v)}
+    kept_cost = {k: v for k, v in (old.get("cost") or {}).items()
+                 if _known(v) and not (complete and _known(new["cost"].get(k)))}
     row = {**new, "origin": "append", "status": status, "findings": findings, "cost": {**new["cost"], **kept_cost}}
-    if old.get("model"):
+    if old.get("model") and not (complete and new.get("model")):
         row["model"], status["fields"]["model"] = old["model"], old["status"]["fields"]["model"]
     return row
 
@@ -1027,8 +1092,8 @@ def cmd_harvest(args) -> int:
         def harvest_into(ledger: dict) -> None:
             # Under the ledger's lock, so no append lands between reading what is held and the merge.
             # A transcript an appended row holds is counted there, whichever row it would join here.
-            held = frozenset(s for r in ledger.values() if r.get("origin") == "append"
-                             for s in r.get("status", {}).get("sources", []))
+            held = {s: r["row_id"] for r in ledger.values() if r.get("origin") == "append"
+                    for s in r.get("status", {}).get("sources", [])}
             rows, facts = harvest_cache(args.cache, transcripts, missing, held=held)
             merged.append((facts, *merge_harvest(ledger, rows)))
 
@@ -1060,7 +1125,7 @@ MUTATION_OUTCOMES = ("red", "green", "unknown")
 _MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def _refusal(row: dict) -> str | None:
+def _unknown_cost_why(row: dict) -> str | None:
     """Why a row cannot be appended: the cost source it was read from is missing or unreadable."""
     for field in ("tokens", "wall_clock"):
         c = row["cost"][field]
@@ -1081,8 +1146,6 @@ def cmd_append_mutation(args) -> int:
     """Write the one row of a mutation that just ran. Its outcome comes from a status file or
     `--outcome`, its wall clock from `--seconds`; there is no cache or transcript to read."""
     try:
-        if args.cache is not None or args.transcripts is not None:
-            raise ValueError("--cache and --transcripts are for review types, not mutation rows")
         if not args.mutation_id or not _MUTATION_ID_RE.fullmatch(args.mutation_id):
             raise ValueError("a mutation row needs --mutation-id made of letters, digits, . - _")
         if (args.status_file is None) == (args.outcome is None):
@@ -1102,7 +1165,7 @@ def cmd_append_mutation(args) -> int:
                   [], cost={"tokens": {"status": "not-applicable",
                                        "reason": "a mutation's tokens stay with the correctness reviewer, or with the worker for worker-mutation"},
                             "wall_clock": {"status": "known", "seconds": seconds}},
-                  origin="append", extra={"mutation_id": args.mutation_id, "outcome": outcome})
+                  origin="append", own_keys={"mutation_id": args.mutation_id, "outcome": outcome})
     try:
         update_ledger(args.ledger, lambda ledger: ledger.update({row_id: row}))
     except ValueError as e:
@@ -1156,9 +1219,6 @@ def cmd_append_codex(args) -> int:
     readings the controller took around the pass. `--refusal` marks a run the gate refused
     (raced, stale): it cost usage but its findings describe a diff the PR no longer has."""
     phase, repo = args.type.removeprefix("codex-"), fold_repo(args.repo)
-    if args.round != 1:
-        print(f"review_ledger append: {args.type} rows are round 1", file=sys.stderr)
-        return 2
     if args.skip_reason is not None:
         if not args.skip_reason.strip() or args.refusal is not None or args.cache is not None:
             print("review_ledger append: --skip-reason is a non-empty reason, alone: a pass not launched has "
@@ -1168,7 +1228,7 @@ def cmd_append_codex(args) -> int:
         mine = [new_row(f"{repo}/{args.ticket}/{args.type}/1/{stem}", repo, [args.ticket], args.type, 1, stem, [],
                         {"status": "skipped", "reason": args.skip_reason}, [],
                         cost=not_launched_cost("pass"),
-                        extra={"skip_reason": args.skip_reason})]
+                        own_keys={"skip_reason": args.skip_reason})]
     else:
         try:
             rows, _ = harvest_cache(args.cache or REVIEWS_ROOT, None, only=(args.repo, args.ticket))
@@ -1195,8 +1255,7 @@ def cmd_append_axis_skip(args) -> int:
     """Write the row of a review axis that was switched off for this PR (#1401's ablation), so the
     escape measure can attribute a later bug to the missing review. It reads no cache and costs
     nothing: the run never started."""
-    if (not args.skip_reason.strip() or args.refusal is not None or args.cache is not None
-            or args.round != 1):
+    if not args.skip_reason.strip() or args.cache is not None or args.round != 1:
         print("review_ledger append: --skip-reason is a non-empty reason, alone, round 1: an axis not run "
               "has no sidecar to read", file=sys.stderr)
         return 2
@@ -1204,7 +1263,7 @@ def cmd_append_axis_skip(args) -> int:
     stem = f"axis-skipped-{args.ticket}-{args.type}"
     row = new_row(f"{repo}/{args.ticket}/{args.type}/1/{stem}", repo, [args.ticket], args.type, 1, stem, [],
                   {"status": "skipped", "reason": args.skip_reason}, [],
-                  cost=not_launched_cost("review"), extra={"skip_reason": args.skip_reason})
+                  cost=not_launched_cost("review"), own_keys={"skip_reason": args.skip_reason})
     return _write_appended(args, [row])
 
 
@@ -1214,12 +1273,6 @@ def cmd_append_audit(args) -> int:
     def refuse(why: str) -> int:
         print(f"review_ledger append: {AUDIT_TYPE}: {why}", file=sys.stderr)
         return 2
-    if args.ticket is not None or args.cache is not None:
-        return refuse("an audit row takes no --ticket or --cache: it covers the PRs its record names")
-    if args.round != 1:
-        return refuse("an audit row is round 1")
-    if args.mutation_id or args.status_file or args.outcome or args.seconds is not None or args.transcripts:
-        return refuse("--mutation-id, --status-file, --outcome, --seconds and --transcripts are not for an audit row")
     if (args.record is None) == (args.skip_reason is None):
         return refuse("give exactly one of --record and --skip-reason")
     repo = fold_repo(args.repo)
@@ -1229,7 +1282,7 @@ def cmd_append_audit(args) -> int:
         stem = f"codex-audit-skipped-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
         row = new_row(f"{repo}/audit/{AUDIT_TYPE}/1/{stem}", repo, [], AUDIT_TYPE, 1, stem, [],
                       {"status": "skipped", "reason": args.skip_reason}, [], cost=not_launched_cost("audit"),
-                      origin="append", extra={"skip_reason": args.skip_reason, "prs": [], "range": None})
+                      origin="append", own_keys={"skip_reason": args.skip_reason, "prs": [], "range": None})
     else:
         try:
             rec = json.loads(args.record.read_text())
@@ -1254,7 +1307,7 @@ def cmd_append_audit(args) -> int:
                       [str(args.record)],
                       cost={"tokens": dict(_CODEX_TOKENS), "wall_clock": _codex_wall(rec),
                             "usage_delta": _usage_delta(rec.get("usage_before"), rec.get("usage_after"))},
-                      origin="append", extra={"prs": rec["prs"], "range": rec["range"],
+                      origin="append", own_keys={"prs": rec["prs"], "range": rec["range"],
                                               **({"refusal": args.refusal} if args.refusal else {})})
     try:
         update_ledger(args.ledger, lambda ledger: ledger.update({row["row_id"]: row}))
@@ -1265,9 +1318,10 @@ def cmd_append_audit(args) -> int:
 
 
 def _write_appended(args, mine: list[dict], refresh: list[dict] = ()) -> int:
-    """Write `mine` whole. Each `refresh` row replaces only the findings of the ledger row it
-    shares a row id with, and only one `append` wrote: the axis rows a verification pass
-    finds already appended, whose outcomes were `unknown` until its dispositions existed."""
+    """Write `mine` whole. Each `refresh` row is a rebuild of the ledger row it shares a row id
+    with, merged into it by `_keep_known` as a harvest would, and only into a row `append`
+    wrote: the axis rows a verification pass finds already appended, whose outcomes were
+    `unknown` until its dispositions existed."""
     ticket = (mine[0]["repo"], mine[0]["ticket"])
 
     def add_rows(ledger: dict) -> None:
@@ -1275,9 +1329,7 @@ def _write_appended(args, mine: list[dict], refresh: list[dict] = ()) -> int:
         for r in refresh:
             old = ledger.get(r["row_id"])
             if old and old.get("origin") == "append":
-                old["findings"] = r["findings"]
-                old["status"]["fields"]["findings"] = r["status"]["fields"]["findings"]
-                old["status"]["sources"], old["status"]["mappings"] = r["status"]["sources"], r["status"]["mappings"]
+                ledger[r["row_id"]] = _keep_known(old, r)
         # The ticket's other reviewers may have appended already: re-split credit across all of them.
         rescore(ledger, ticket)
 
@@ -1302,35 +1354,15 @@ def cmd_append(args) -> int:
         print(f"review_ledger append: {args.type} is retired ({RETIRED_CODEX_TYPES[args.type]}); "
               f"no such pass should have run, so append no row for it", file=sys.stderr)
         return 2
-    if args.type == AUDIT_TYPE:
+    family = append_family(args.type)
+    if family == "audit":
         return cmd_append_audit(args)
-    if args.ticket is None:
-        print(f"review_ledger append: {args.type} needs --ticket", file=sys.stderr)
-        return 2
-    if args.record is not None:
-        print(f"review_ledger append: --record is for {AUDIT_TYPE}, not {args.type}", file=sys.stderr)
-        return 2
-    if args.type not in CODEX_TYPES and args.refusal is not None:
-        print(f"review_ledger append: --refusal is for codex types, not {args.type}", file=sys.stderr)
-        return 2
-    if args.type not in CODEX_TYPES and args.type not in SKIPPABLE_AXES and args.skip_reason is not None:
-        print(f"review_ledger append: --skip-reason is for codex types and the review axes, not {args.type}",
-              file=sys.stderr)
-        return 2
-    if args.skip_reason is not None and args.type in SKIPPABLE_AXES:
+    if family == "axis" and args.skip_reason is not None:
         return cmd_append_axis_skip(args)
-    if args.type in MUTATION_TYPES:
+    if family == "mutation":
         return cmd_append_mutation(args)
-    if args.type in CODEX_TYPES:
-        if args.mutation_id or args.status_file or args.outcome or args.seconds is not None or args.transcripts:
-            print(f"review_ledger append: --mutation-id, --status-file, --outcome, --seconds and --transcripts "
-                  f"are not for {args.type}", file=sys.stderr)
-            return 2
+    if family == "codex":
         return cmd_append_codex(args)
-    if args.mutation_id or args.status_file or args.outcome or args.seconds is not None:
-        print(f"review_ledger append: --mutation-id, --status-file, --outcome and --seconds are for "
-              f"mutation types, not {args.type}", file=sys.stderr)
-        return 2
     args.cache = args.cache or REVIEWS_ROOT
     try:
         transcripts = args.transcripts or DEFAULT_TRANSCRIPTS
@@ -1348,7 +1380,7 @@ def cmd_append(args) -> int:
               f"{args.repo} #{args.ticket} under {args.cache}", file=sys.stderr)
         return 2
     for r in mine:
-        if (why := _refusal(r)):
+        if (why := _unknown_cost_why(r)):
             print(f"review_ledger append: {r['row_id']}: {why}", file=sys.stderr)
             return 2
     refresh = [r for r in rows if args.type == "verification" and r["round"] == args.round
@@ -1398,7 +1430,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
         rate = lambda outcome: (sum(f["outcome"] == outcome for f in known) / len(known)) if known else None
         inside = t == "over-engineering"
         mutation = t in MUTATION_TYPES
-        codex = t in CODEX_TYPES or t == AUDIT_TYPE
+        codex = is_codex(t)
         usage = [r["cost"].get("usage_delta", {}) for r in mine] if codex else []
         known_usage = [u["delta"] for u in usage if u["status"] == "known"]
         skipped = sum(r["status"]["fields"]["findings"]["status"] == "skipped" for r in mine)
@@ -1414,8 +1446,8 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
         for r, v, d in priced:
             if r["status"]["fields"]["findings"]["status"] == "known":
                 # Over-engineering cost is inside its standards row's dollars, so its value joins the numerator.
-                extra = oe_value.pop((r["repo"], r["ticket"], r["round"]), 0.0) if t == "standards" else 0.0
-                rated.append((v + extra, d))
+                oe = oe_value.pop((r["repo"], r["ticket"], r["round"]), 0.0) if t == "standards" else 0.0
+                rated.append((v + oe, d))
         rated_dollars = sum(d for _, d in rated)
         types.append({
             "type": t, "rows": len(mine), "findings": None if mutation else len(findings), "value": None if mutation else round(value, 4),
@@ -1437,7 +1469,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
             "audited_prs": sum(len(r.get("prs") or []) for r in mine) if t == AUDIT_TYPE else None,
             "refused_rows": sum(r["status"]["fields"]["findings"]["status"] == "refused" for r in mine),
             "clean_rows": sum(r["status"]["fields"]["findings"]["status"] == "known" and not r["findings"]
-                              for r in mine) if t.startswith("codex-") else None,
+                              for r in mine) if codex else None,
             "unknown_cost_rows": 0 if inside else sum(
                 any(c.get(f, {}).get("status") not in ("known", "not-applicable") for f in ("tokens", "wall_clock"))
                 for c in costs),
@@ -1466,7 +1498,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
     return {"types": types, "notes": notes}
 
 
-def _n(x, spec=""):
+def _cell(x, spec=""):
     """A count or value cell; n/a when the type has none (a mutation type holds no findings)."""
     return "n/a" if x is None else format(x, spec)
 
@@ -1647,19 +1679,70 @@ def cmd_report(args) -> int:
           "| refused | skipped | clean passes | audited PRs | usage % | unknown usage | tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
     print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for t in result["types"]:
-        print(f"| {t['type']} | {t['rows']} | {_n(t['findings'])} | {_n(t['value'], '.2f')} | {_pct(t['unique_share'])} "
-              f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {_n(t['unknown_outcomes'])} "
-              f"| {_n(t['unweighted'])} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
-              f"| {t['refused_rows']} | {_n(t['skipped_rows'])} | {_n(t['clean_rows'])} | {_n(t['audited_prs'])} "
-              f"| {_n(t['usage_percent'], 'g')} | {_n(t['unknown_usage_rows'])} "
-              f"| {' | '.join(_cost_cells(t))} | {_pct(t['red_rate'])} | {_n(t['unknown_mutations'])} |")
+        print(f"| {t['type']} | {t['rows']} | {_cell(t['findings'])} | {_cell(t['value'], '.2f')} | {_pct(t['unique_share'])} "
+              f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {_cell(t['unknown_outcomes'])} "
+              f"| {_cell(t['unweighted'])} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
+              f"| {t['refused_rows']} | {_cell(t['skipped_rows'])} | {_cell(t['clean_rows'])} | {_cell(t['audited_prs'])} "
+              f"| {_cell(t['usage_percent'], 'g')} | {_cell(t['unknown_usage_rows'])} "
+              f"| {' | '.join(_cost_cells(t))} | {_pct(t['red_rate'])} | {_cell(t['unknown_mutations'])} |")
     print()
     for note in result["notes"]:
         print(note)
     return 0
 
 
+def append_family(row_type: str) -> str:
+    """Which `append` writer a type goes to, and so which flags it takes (`_APPEND_FLAGS`)."""
+    if row_type in MUTATION_TYPES:
+        return "mutation"
+    if row_type == AUDIT_TYPE:
+        return "audit"
+    if is_codex(row_type):
+        return "codex"
+    return "axis" if row_type in SKIPPABLE_AXES else "verification"
+
+
+# Each `append` flag, and the families that take it beside --repo, --type and --ledger. A type's
+# parser holds only its family's flags, so argparse refuses any other by name.
+_APPEND_ARGS = {
+    "--ticket": ({"type": int, "required": True}, ("axis", "verification", "mutation", "codex")),
+    "--round": ({"type": int, "default": 1}, ("axis", "verification", "mutation")),
+    "--cache": ({"type": Path, "help": f"default {REVIEWS_ROOT}"}, ("axis", "verification", "codex")),
+    "--transcripts": ({"type": Path, "help": f"default {DEFAULT_TRANSCRIPTS}"}, ("axis", "verification")),
+    "--mutation-id": ({"help": "the id the mutation is reported by"}, ("mutation",)),
+    "--status-file": ({"type": Path, "help": "the witness check's status file for the id"}, ("mutation",)),
+    "--outcome": ({"choices": MUTATION_OUTCOMES, "help": "the outcome, when no status file"}, ("mutation",)),
+    "--seconds": ({"type": float, "help": "the mutation's wall clock"}, ("mutation",)),
+    "--refusal": ({"help": "the run was refused (raced, stale), and why; its usage still counts"},
+                  ("codex", "audit")),
+    "--skip-reason": ({"help": "the run was not launched, and why; nothing is read"}, ("axis", "codex", "audit")),
+    "--record": ({"type": Path, "help": "the audit run's record; its .out sits beside it"}, ("audit",)),
+}
+APPEND_CHOICES = APPEND_TYPES + MUTATION_TYPES + CODEX_TYPES + (AUDIT_TYPE,)
+
+
+def parse_append(argv: list[str]) -> argparse.Namespace:
+    """`append`'s arguments, read by the parser of the one type `--type` names. A flag of
+    another family is refused by argparse; an absent one reads as None (`--round` as 1)."""
+    pre = argparse.ArgumentParser(prog="review_ledger.py append", add_help=False)
+    pre.add_argument("--type", choices=APPEND_CHOICES, required=True)
+    row_type = pre.parse_known_args(argv)[0].type
+    family = append_family(row_type)
+    p = argparse.ArgumentParser(prog=f"review_ledger.py append --type {row_type}")
+    p.add_argument("--repo", required=True, help="the review cache's repo directory name")
+    p.add_argument("--type", choices=APPEND_CHOICES, required=True)
+    p.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    for flag, (kwargs, families) in _APPEND_ARGS.items():
+        if family in families:
+            p.add_argument(flag, **kwargs)
+    absent = {flag.lstrip("-").replace("-", "_"): None for flag in _APPEND_ARGS}
+    return p.parse_args(argv, namespace=argparse.Namespace(**{**absent, "round": 1}))
+
+
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else [str(a) for a in argv]
+    if argv[:1] == ["append"]:
+        return cmd_append(parse_append(argv[1:]))
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     h = sub.add_parser("harvest")
@@ -1668,22 +1751,8 @@ def main(argv=None) -> int:
     h.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     h.add_argument("--review-file", type=Path)
     h.set_defaults(func=cmd_harvest)
-    a = sub.add_parser("append")
-    a.add_argument("--repo", required=True, help="the review cache's repo directory name")
-    a.add_argument("--ticket", type=int, help=f"every type but {AUDIT_TYPE}")
-    a.add_argument("--type", choices=APPEND_TYPES + MUTATION_TYPES + CODEX_TYPES + (AUDIT_TYPE,), required=True)
-    a.add_argument("--round", type=int, default=1)
-    a.add_argument("--cache", type=Path, default=None, help=f"default {REVIEWS_ROOT}")
-    a.add_argument("--mutation-id", help="a mutation type: the id the mutation is reported by")
-    a.add_argument("--status-file", type=Path, help="a mutation type: the witness check's status file for the id")
-    a.add_argument("--outcome", choices=MUTATION_OUTCOMES, help="a mutation type: the outcome, when no status file")
-    a.add_argument("--refusal", help="a codex type: the run was refused (raced, stale), and why; its usage still counts")
-    a.add_argument("--skip-reason", help="a codex type: the pass was not launched, and why; no record is read")
-    a.add_argument("--record", type=Path, help=f"{AUDIT_TYPE}: the audit run's record; its .out sits beside it")
-    a.add_argument("--seconds", type=float, help="a mutation type: the mutation's wall clock")
-    a.add_argument("--transcripts", type=Path, help=f"default {DEFAULT_TRANSCRIPTS}")
-    a.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
-    a.set_defaults(func=cmd_append)
+    # Read by `parse_append`, never here: listed so the usage names it.
+    sub.add_parser("append", help="`append --type T --help` lists the flags type T takes")
     e = sub.add_parser("escapes", help="bugs fixed on the default branch within days of a reviewed PR landing, "
                        "on lines it wrote, by skipped review component (#1401)")
     e.add_argument("--repo-dir", type=Path, required=True, help="a checkout of the reviewed repo")

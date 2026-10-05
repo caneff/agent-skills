@@ -39,7 +39,7 @@ branch (`references/loop.md` says why).
    agent name, and `--repo <primary checkout>`, required: the run's target,
    which every printed `implement-dispatch` command carries and
    `counts.py --repo` is checked against (§ Run state). Resuming an existing run instead:
-   `runfile.py resume`, and then **one message per live, unlanded worker**
+   `runfile.py resume`, and then **one message per live, unsettled worker**
    — its `announce` bucket and only that one, via `loop.announce`. A
    landed or closed clump's worker gets none however its agent looks; a vanished one
    gets none either, and is reconciled or parked by hand. The bucket
@@ -88,21 +88,20 @@ branch (`references/loop.md` says why).
    live, drops any candidate whose lowest ticket is a clump the run file
    records as landed or closed (printing `landed #<n>: skipped` for each),
    so the candidates file stays the frozen set and the run file is the
-   progress, and then unions each unlanded in-flight workspace's real
+   progress, and then unions each unsettled in-flight workspace's real
    `git diff --name-only origin/<default>...HEAD`, its uncommitted edits and
    its untracked files into that closure (#1212), so a file the worker
    reached that no candidate list named still holds the clumps that share it;
-   a diff it cannot read refuses the tick. A clump whose closure intersects a
-   live workspace's is **off the frontier**: `loop.py dispatch` picks from
-   what is left, **widest closure first** so a wide clump does not sit
-   behind narrow ones and block them later (#1026), and names what holds
-   the rest. That hold, with `picks`'
-   same-tick guard (two clumps sharing a file or a directory are never
-   picked in one tick, since a ticket body under-names its diff, #1342; that
-   skip prints its own `held` line, naming the earlier pick it collided with
-   rather than a live workspace), is what keeps a **family's clumps** apart:
-   a clump sharing a file with a live or just-picked one waits, and family
-   members sharing no file and no directory run at once. Two consequences,
+   a diff it cannot read refuses the tick. A clump sharing a file or a
+   directory with a live workspace, or with a clump picked earlier the same
+   tick, is **off the frontier**
+   (`references/loop.md` § The exclusion rule and what it costs):
+   `loop.py dispatch` picks from what is left, **widest
+   closure first** so a wide clump does not sit behind narrow ones and block
+   them later (#1026), and prints a `held` line for the rest naming its live
+   workspace or the earlier pick. That hold is what keeps a **family's
+   clumps** apart: family members sharing no file and no directory run at
+   once. Two consequences,
    because neither is visible from the frontier's own definition — a run drains
    **out of ticket order**, and one parked worker can hold a **whole family**
    off the frontier until it lands. A controller reading only "open,
@@ -159,11 +158,12 @@ branch (`references/loop.md` says why).
    step 1's resume has nothing to re-announce to — each landing with
    `runfile.py land`, each clump that finishes with no landing of its own
    (its ticket found already fixed on `main`, or handed to a nested spec
-   run, once that run has finished and not at the hand-off) with `runfile.py close <run-id> --clump <n> --reason <text>` rather
-   than a `land` at `main`'s tip, which `counts.py` refuses for the
-   sidecar no PR wrote, and each "PR up" with `runfile.py pr-up <run-id>
-   --clump <n> --pr <n>` as it arrives, for § Liveness, so a restart can pick
-   the run back up with nothing transcribed by hand. The controller clears the
+   run, once that run has finished and not at the hand-off) with
+   `runfile.py close <run-id> --clump <n> --reason <text>`, never
+   a `land` at `main`'s tip (why, and the recovery when one was recorded:
+   `references/run-file.md`), and each "PR up" with `runfile.py pr-up <run-id>
+   --clump <n> --pr <n>` as it arrives, for this file's § Liveness, so a
+   restart can pick the run back up with nothing transcribed by hand. The controller clears the
    PR-up record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever
    it hands findings back to the worker (a red seam's failure, or any ruling
    that sends it back to work), since the PR stays open through the fix round,
@@ -369,7 +369,7 @@ behind the ranking, and what each source costs when it is read the other way:
    what herdr says it is doing — never whether the work is progressing.
 
    A finished pane — `done`, or `idle` once someone has focused it — on an
-   unlanded clump with no "PR up" on record is **`stalled`**, distinct from
+   unsettled clump with no "PR up" on record is **`stalled`**, distinct from
    `idle`. Its turn ended with no "PR up", so it either stopped mid-lane or
    is waiting on your answer to a question; the line says to read the pane,
    and the pane says which. The record is

@@ -113,6 +113,17 @@ if [ -n "${offenders//[[:space:]]/}" ]; then
   fail=1
 fi
 
+# Rule 8: a clump that landed or closed is "settled", one word for code and
+# prose (`runfile.settled`); "unlanded" left out the closed half (#1406 S2).
+check_in "$reference_text" '**settled**' references/liveness.md
+for doc in "$skill" "$here"/references/*.md; do
+  # A branch or PR is still "unlanded"; a clump, worker or slot is not.
+  if tr '\n' ' ' <"$doc" | grep -qiE 'unlanded,? +(worker|clump|slot|in-flight|unclosed)'; then
+    echo "FAIL: ${doc#"$here"/} calls a clump unlanded; the term is unsettled" >&2
+    fail=1
+  fi
+done
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS burndown/liveness.test.sh"
 else

@@ -30,10 +30,6 @@ class MutationCase(Case):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r
 
-    def rows(self):
-        return {r["row_id"]: r for r in map(json.loads, self.ledger.read_text().splitlines())} \
-            if self.ledger.exists() else {}
-
 
 class AppendMutationTest(MutationCase):
     def test_one_row_per_mutation_id_with_its_outcome_and_wall_clock(self):
@@ -108,7 +104,8 @@ class AppendMutationTest(MutationCase):
         r = run("append", "--repo", "skills", "--ticket", 500, "--type", "standards", "--mutation-id", "m1",
                 "--outcome", "red", "--seconds", 1, "--ledger", self.ledger, home=self.home)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("are for mutation types", r.stderr)  # the guard's own message, not a missing transcripts tree
+        # The parser's own message, not a missing transcripts tree.
+        self.assertIn("append --type standards: error: unrecognized arguments: --mutation-id m1", r.stderr)
 
     def test_a_mutation_type_refuses_the_review_cache_arguments(self):
         for flag in ("--cache", "--transcripts"):
@@ -116,7 +113,7 @@ class AppendMutationTest(MutationCase):
                     "m1", "--outcome", "red", "--seconds", 1, flag, self.tmp, "--ledger", self.ledger,
                     home=self.home)
             self.assertEqual(r.returncode, 2, flag)
-            self.assertIn("are for review types", r.stderr)
+            self.assertIn(f"unrecognized arguments: {flag}", r.stderr)
         self.assertFalse(self.ledger.exists())
 
     def test_a_corrupt_ledger_is_refused_and_left_alone(self):

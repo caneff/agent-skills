@@ -244,6 +244,22 @@ def test_the_cli_names_a_same_tick_directory_hold_as_a_held_line():
         assert "held      #11  by #10 this tick  over d/" in got.stdout, got.stdout
 
 
+def test_a_live_workspace_holds_a_clump_naming_its_directory():
+    # spec-649-smcc (#1406 C1): #666 listed the directory `examples/hit-counts`
+    # and was dispatched beside live #655, which was editing
+    # `examples/hit-counts/build_size.py`. The live hold reads directories as
+    # the same-tick guard does, so the directory hold outlasts its tick.
+    candidates = [{"tickets": [666], "files": ["examples/hit-counts"]},
+                  {"tickets": [700], "files": ["docs/a.md"]}]
+    live = [{"tickets": [655], "workspace": "/w/implement-655",
+             "files": ["examples/hit-counts/build_size.py"]}]
+    state = loop.frontier(candidates, live)
+    assert [c["tickets"] for c in state["dispatchable"]] == [[700]]
+    assert len(state["held"]) == 1, state["held"]
+    assert state["held"][0]["holder"] == 655
+    assert state["held"][0]["over"] == ["examples/"]
+
+
 def test_picks_takes_the_widest_closure_first():
     # #1026: two free slots, three independent candidates (no collisions)
     # with closure sizes 1, 4 and 2 in ticket order — the widest goes out
@@ -795,7 +811,7 @@ def resume_state():
     }
 
 
-def test_resume_sends_exactly_one_message_per_live_unlanded_worker():
+def test_resume_sends_exactly_one_message_per_live_unsettled_worker():
     sent = []
 
     def send(agent, msg):
@@ -1157,6 +1173,17 @@ def test_a_clump_with_no_files_is_refused_whatever_is_in_flight():
             assert "#452" in str(exc) and "files" in str(exc), exc
         else:
             raise AssertionError("a clump with no files must be refused")
+
+
+def test_the_frontier_itself_refuses_a_clump_with_no_files():
+    # `refill` would also refuse it later, in `picks`; the frontier's own
+    # check is what refuses it to a caller reading only the frontier.
+    try:
+        loop.frontier([{"tickets": [452]}], [])
+    except loop.LoopError as exc:
+        assert "#452" in str(exc) and "files" in str(exc), exc
+    else:
+        raise AssertionError("the frontier must refuse a clump with no files")
 
 
 def test_a_malformed_clump_file_is_one_line_and_not_a_traceback():
@@ -1614,7 +1641,7 @@ def test_the_sweep_names_the_vanished_worker_distinctly_when_rendered():
 def test_a_finished_pane_with_no_pr_up_is_stalled_and_says_read_the_pane():
     """#1095: the worker ended its turn mid-lane with a summary to no one,
     herdr showed `done`, and the sweep had no verdict for it. A finished pane
-    (`done`, or `idle` once someone focused it) on an unlanded clump whose "PR
+    (`done`, or `idle` once someone focused it) on an unsettled clump whose "PR
     up" is not on record is `stalled`, and its line says to read the pane,
     since a worker waiting on the controller's answer reads the same. With
     "PR up" on record the sweep prints herdr's own word."""
@@ -1709,7 +1736,7 @@ def test_the_cli_dispatch_treats_a_landed_clumps_null_job_as_a_freed_slot():
 def test_the_cli_dispatch_frontier_ignores_a_landed_clumps_own_closure():
     # A landed clump's workspace is dead — its change is on main, and the
     # next worker branches from main — so it holds nothing. `frontier` must
-    # be fed the same `unlanded` collection core_room and the peak count
+    # be fed the same `unsettled` collection core_room and the peak count
     # use, or a candidate sharing a file with the landed clump's closure
     # reads as blocked by a workspace that no longer exists (Codex gate on
     # PR #1050).

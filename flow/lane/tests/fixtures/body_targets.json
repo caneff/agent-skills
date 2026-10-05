@@ -1,282 +1,352 @@
 [
  {
   "body": "edit `multi-axis-code-review/SKILL.md` § 6",
-  "target": "multi-axis-code-review/SKILL.md"
+  "target": "multi-axis-code-review/SKILL.md",
+  "why": "a SKILL.md path is code despite its prose extension (CODE_BASENAMES), and backticks end a token"
  },
  {
   "body": "SKILL.md.",
-  "target": "SKILL.md"
+  "target": "SKILL.md",
+  "why": "a bare SKILL.md is code by basename; trailing sentence dots are trimmed"
  },
  {
   "body": "edit skill.MD please",
-  "target": "skill.MD"
+  "target": "skill.MD",
+  "why": "the basename match ignores case"
  },
  {
   "body": "see a/b.py, then",
-  "target": "a/b.py"
+  "target": "a/b.py",
+  "why": "a path with a listed code extension is code; a trailing comma ends the token"
  },
  {
   "body": "see x.ts, then",
-  "target": "x.ts"
+  "target": "x.ts",
+  "why": "a bare token with a listed code extension (ts) is code"
  },
  {
   "body": "see x.js, then",
-  "target": "x.js"
+  "target": "x.js",
+  "why": "a bare .js token is code; only the exact PROSE_TOKENS name node.js is prose"
  },
  {
   "body": "see hooks/g.sh, then",
-  "target": "hooks/g.sh"
+  "target": "hooks/g.sh",
+  "why": "a path with a code extension is code"
  },
  {
   "body": "see src/lib.rs, then",
-  "target": "src/lib.rs"
+  "target": "src/lib.rs",
+  "why": "a path with a code extension is code"
  },
  {
   "body": "see settings.json, then",
-  "target": "settings.json"
+  "target": "settings.json",
+  "why": "a bare config file (json) is code: it wires the harness"
  },
  {
   "body": "see .github/workflows/ci.yml, then",
-  "target": ".github/workflows/ci.yml"
+  "target": ".github/workflows/ci.yml",
+  "why": "CI config (yml) on a dotted path is code"
  },
  {
   "body": "see Cargo.toml, then",
-  "target": "Cargo.toml"
+  "target": "Cargo.toml",
+  "why": "a bare build config (toml) is code"
  },
  {
   "body": "see hooks/x.bash, then",
-  "target": "hooks/x.bash"
+  "target": "hooks/x.bash",
+  "why": "a path with the bash extension is code"
  },
  {
   "body": "see a.tsx, then",
-  "target": "a.tsx"
+  "target": "a.tsx",
+  "why": "a bare token with a listed code extension (tsx) is code"
  },
  {
   "body": "see a.mjs, then",
-  "target": "a.mjs"
+  "target": "a.mjs",
+  "why": "a bare token with a listed code extension (mjs) is code"
  },
  {
   "body": "see settings.local.json, then",
-  "target": "settings.local.json"
+  "target": "settings.local.json",
+  "why": "a multi-dot bare name is read by its last extension"
  },
  {
   "body": "see bin/implement-dispatch, then",
-  "target": "bin/implement-dispatch"
+  "target": "bin/implement-dispatch",
+  "why": "an extensionless entry under bin/ is a script (CODE_DIRS)"
  },
  {
   "body": "see Makefile, then",
-  "target": "Makefile"
+  "target": "Makefile",
+  "why": "a bare extensionless build file is code by basename"
  },
  {
   "body": "see build/Dockerfile, then",
-  "target": "build/Dockerfile"
+  "target": "build/Dockerfile",
+  "why": "Dockerfile is code by basename on a path"
  },
  {
   "body": "see .githooks/pre-push, then",
-  "target": ".githooks/pre-push"
+  "target": ".githooks/pre-push",
+  "why": "an extensionless entry under .githooks/ is a hook (CODE_DIRS)"
  },
  {
   "body": "see hooks/commit-msg, then",
-  "target": "hooks/commit-msg"
+  "target": "hooks/commit-msg",
+  "why": "an extensionless entry under hooks/ is a hook (CODE_DIRS)"
  },
  {
   "body": "see a.go, then",
-  "target": "a.go"
+  "target": "a.go",
+  "why": "a bare token with a listed code extension (go) is code"
  },
  {
   "body": "see a.zsh, then",
-  "target": "a.zsh"
+  "target": "a.zsh",
+  "why": "a bare token with a listed code extension (zsh) is code"
  },
  {
   "body": "see a.ps1, then",
-  "target": "a.ps1"
+  "target": "a.ps1",
+  "why": "a listed extension holding a digit (ps1) is code"
  },
  {
   "body": "see a.lua, then",
-  "target": "a.lua"
+  "target": "a.lua",
+  "why": "a bare token with a listed code extension (lua) is code"
  },
  {
   "body": "see a.ini, then",
-  "target": "a.ini"
+  "target": "a.ini",
+  "why": "a bare config extension (ini) is code"
  },
  {
   "body": "see a.cfg, then",
-  "target": "a.cfg"
+  "target": "a.cfg",
+  "why": "a bare config extension (cfg) is code"
  },
  {
   "body": "see x/y.rb, then",
-  "target": "x/y.rb"
+  "target": "x/y.rb",
+  "why": "a path with a listed code extension (rb) is code"
  },
  {
   "body": "see src/main.dart, then",
-  "target": "src/main.dart"
+  "target": "src/main.dart",
+  "why": "on a path, an unlisted non-prose extension (dart) is code: the prose whitelist"
  },
  {
   "body": "see tools/Gemfile, then",
-  "target": "tools/Gemfile"
+  "target": "tools/Gemfile",
+  "why": "Gemfile is code by basename on a path"
  },
  {
   "body": "see a/b.sql, then",
-  "target": "a/b.sql"
+  "target": "a/b.sql",
+  "why": "on a path, an unlisted extension (sql) is code"
  },
  {
   "body": "see infra/main.tf, then",
-  "target": "infra/main.tf"
+  "target": "infra/main.tf",
+  "why": "on a path, an unlisted extension (tf) is code"
  },
  {
   "body": "see Gemfile, then",
-  "target": "Gemfile"
+  "target": "Gemfile",
+  "why": "a bare Gemfile is code by basename"
  },
  {
   "body": "see lib/Rakefile, then",
-  "target": "lib/Rakefile"
+  "target": "lib/Rakefile",
+  "why": "Rakefile is code by basename on a path"
  },
  {
   "body": "see config/.env, then",
-  "target": "config/.env"
+  "target": "config/.env",
+  "why": "on a path, a dotfile's name is its extension, and env is not prose"
  },
  {
   "body": "see x/.eslintrc, then",
-  "target": "x/.eslintrc"
+  "target": "x/.eslintrc",
+  "why": "on a path, a dotfile config is code"
  },
  {
   "body": "see scripts/node.js, then",
-  "target": "scripts/node.js"
+  "target": "scripts/node.js",
+  "why": "the node.js prose exception applies to a bare token only, never a path"
  },
  {
   "body": "see Bin/foo, then",
-  "target": "Bin/foo"
+  "target": "Bin/foo",
+  "why": "the script-directory match ignores case (Bin/)"
  },
  {
   "body": "see x/HOOKS/run, then",
-  "target": "x/HOOKS/run"
+  "target": "x/HOOKS/run",
+  "why": "a script directory is matched at any depth, ignoring case"
  },
  {
   "body": "see A.PY, then",
-  "target": "A.PY"
+  "target": "A.PY",
+  "why": "the extension match ignores case"
  },
  {
   "body": "see MAKEFILE, then",
-  "target": "MAKEFILE"
+  "target": "MAKEFILE",
+  "why": "the basename match ignores case"
  },
  {
   "body": "see x/Dockerfile, then",
-  "target": "x/Dockerfile"
+  "target": "x/Dockerfile",
+  "why": "Dockerfile is code by basename under any directory"
  },
  {
   "body": "Research why ./e2e.sh.",
-  "target": "./e2e.sh"
+  "target": "./e2e.sh",
+  "why": "a ./ path is a path, and the sentence's final dot is trimmed"
  },
  {
   "body": "a.py..",
-  "target": "a.py"
+  "target": "a.py",
+  "why": "every trailing dot is trimmed, not just one"
  },
  {
   "body": "then docs/x.md and a.py",
-  "target": "a.py"
+  "target": "a.py",
+  "why": "a prose path is skipped and the first code token wins"
  },
  {
   "body": "see bin\\implement-dispatch, then",
-  "target": "bin/implement-dispatch"
+  "target": "bin/implement-dispatch",
+  "why": "a Windows separator is a path separator, and the target is reported with /"
  },
  {
   "body": "edit .githooks\\pre-push",
-  "target": ".githooks/pre-push"
+  "target": ".githooks/pre-push",
+  "why": "a Windows separator under a hook directory is a hook"
  },
  {
   "body": "src\\main.dart",
-  "target": "src/main.dart"
+  "target": "src/main.dart",
+  "why": "a Windows-separated path with an unlisted extension is code"
  },
  {
   "body": "see (a_b-c.py)",
-  "target": "a_b-c.py"
+  "target": "a_b-c.py",
+  "why": "underscores and hyphens stay in a token; parentheses end it"
  },
  {
   "body": "read/write and and/or",
-  "target": null
+  "target": null,
+  "why": "a slash between words with no extension is not a script path"
  },
  {
   "body": "docs/notes.md",
-  "target": null
+  "target": null,
+  "why": "md on a path is prose (PROSE_EXTENSIONS)"
  },
  {
   "body": "a/b.txt",
-  "target": null
+  "target": null,
+  "why": "txt on a path is prose (PROSE_EXTENSIONS)"
  },
  {
   "body": "a/b.rst",
-  "target": null
+  "target": null,
+  "why": "rst on a path is prose (PROSE_EXTENSIONS)"
  },
  {
   "body": "a/b.markdown",
-  "target": null
+  "target": null,
+  "why": "markdown on a path is prose (PROSE_EXTENSIONS)"
  },
  {
   "body": "ratio 3/4.5 here",
-  "target": null
+  "target": null,
+  "why": "on a path, an extension with no letter (a number) is not code"
  },
  {
   "body": "docs/.notes.md",
-  "target": null
+  "target": null,
+  "why": "a dotfile with a prose extension is prose"
  },
  {
   "body": "i.e. this",
-  "target": null
+  "target": null,
+  "why": "a dotted abbreviation is not a file"
  },
  {
   "body": "e.g. that",
-  "target": null
+  "target": null,
+  "why": "a dotted abbreviation is not a file"
  },
  {
   "body": "bump to v1.2 now",
-  "target": null
+  "target": null,
+  "why": "a version number is not a file"
  },
  {
   "body": "runs on Node.js",
-  "target": null
+  "target": null,
+  "why": "node.js is a product name, prose (PROSE_TOKENS), ignoring case"
  },
  {
   "body": "read/write and/or edit",
-  "target": null
+  "target": null,
+  "why": "slash-joined words are not a script path"
  },
  {
   "body": "version 3.10.2",
-  "target": null
+  "target": null,
+  "why": "a dotted version number is not a file"
  },
  {
   "body": "docs\\notes.md",
-  "target": null
+  "target": null,
+  "why": "a Windows-separated prose path is prose"
  },
  {
   "body": "Add docs/research/note.md and update AGENTS.md. Use rust, not a .rs-less thing",
-  "target": null
+  "target": null,
+  "why": "bare and pathed .md are prose, and a leading-dot fragment (.rs-less) has no stem"
  },
  {
   "body": "",
-  "target": null
+  "target": null,
+  "why": "an empty body names nothing"
  },
  {
   "body": "build.gradle",
-  "target": null
+  "target": "build.gradle",
+  "why": "a build file named by basename is code even though its extension is unlisted (#1406 P11); user.email, re.compile and node.js stay prose"
  },
  {
   "body": "notes in .env",
-  "target": null
+  "target": null,
+  "why": "a bare dotfile has no stem, so it is not read as code"
  },
  {
   "body": "a/b.",
-  "target": null
+  "target": null,
+  "why": "a trailing dot leaves an extensionless non-script path, prose"
  },
  {
   "body": "user.email is set",
-  "target": null
+  "target": null,
+  "why": "a bare dotted config key is prose: the reason bare tokens use a blacklist"
  },
  {
   "body": "node.js.",
-  "target": null
+  "target": null,
+  "why": "the node.js prose exception survives a trailing sentence dot"
  },
  {
   "body": "a bare .py or .json is an extension, not a file",
-  "target": null
+  "target": null,
+  "why": "a bare extension with no stem is not a file"
  }
 ]

@@ -192,7 +192,16 @@ fn wait_bounded(child: &mut Child, timeout: Duration) -> std::io::Result<(ExitSt
             // Negative pid signals the whole process group `process_group(0)`
             // above put this child in; `Child::kill` alone only reaches the
             // direct child, not anything it forked without exec-replacing.
-            let _ = Command::new("kill").args(["-9", "--", &format!("-{}", child.id())]).status();
+            // With no `kill` on PATH, or one that failed, `Child::kill` is the
+            // fallback: the direct child at least, or the wait below has no
+            // bound at all (#1406 C6).
+            let grouped = Command::new("kill")
+                .args(["-9", "--", &format!("-{}", child.id())])
+                .status()
+                .is_ok_and(|s| s.success());
+            if !grouped {
+                let _ = child.kill();
+            }
             return Ok((child.wait()?, true));
         }
         thread::sleep(TIMEOUT_POLL_INTERVAL);
@@ -333,6 +342,39 @@ pub fn quiet_ok_bounded(program: &str, args: &[&str], timeout: Duration) -> Resu
     match run.incomplete() {
         Some(err) => Err(err),
         None => Ok(run.status.success()),
+    }
+}
+
+/// [`quiet_ok_bounded`] for a caller that reads the exit code itself
+/// (`git ls-remote --exit-code`, whose 2 is "no such ref"). `Ok(None)` is a
+/// child killed by a signal it was not sent here.
+pub fn quiet_code_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<Option<i32>, String> {
+    let run = run_quiet(program, args, timeout)?;
+    match run.incomplete() {
+        Some(err) => Err(err),
+        None => Ok(run.status.code()),
+    }
+}
+
+/// [`status`], bounded: stdin, stderr and (unless `drop_stdout`) stdout are
+/// this process's own, so the operator sees the command's output as it runs,
+/// and the child's process group is killed past `timeout`. Its own group
+/// means a command reading the terminal (a credential prompt) is stopped
+/// rather than answered, and so fails at the bound; and Ctrl-C reaches this
+/// process but not the child, which is left running. Both are accepted
+/// costs of a bound that can kill the whole group (#1406 C6). `Err` names
+/// the command and why: it timed out, or it could not be spawned.
+pub fn status_bounded(program: &str, args: &[&str], drop_stdout: bool, timeout: Duration) -> Result<bool, String> {
+    let command = format!("{program} {}", args.join(" "));
+    let mut cmd = Command::new(program);
+    cmd.args(args).process_group(0);
+    if drop_stdout {
+        cmd.stdout(Stdio::null());
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("{command}: {e}"))?;
+    match wait_bounded(&mut child, timeout).map_err(|e| format!("{command}: {e}"))? {
+        (_, true) => Err(format!("{command} timed out after {timeout:?}")),
+        (status, false) => Ok(status.success()),
     }
 }
 

@@ -5,13 +5,14 @@
 
 use lane::git_origin::{default_branch, origin_slug};
 use lane::herdr::{self, Agent};
-use lane::runner::{on_path, quiet_ok, quiet_stderr_ok, quiet_stdout, status};
+use lane::runner::{on_path, quiet_code_bounded, quiet_ok, quiet_stderr_ok, quiet_stdout, status_bounded};
 use lane::sessions::{self, in_tree};
 use lane::{safe_print, safe_println};
 use std::env;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
 const HELP: &str = r#"The tail the controller runs after squash-merging a worker's PR: tear the
 workspace down, delete the branch local and remote, fast-forward the primary
@@ -690,11 +691,12 @@ impl WorktreeFiles {
             .filter(|(_, v)| !v.is_empty())
             .map(|(k, v)| format!("{} {k}", v.len()))
             .collect();
+        // One list of modified and untracked names, capped as `Modified` is.
         let others: Vec<String> = self.modified.iter().chain(&self.untracked).cloned().collect();
         let names: Vec<String> = (!self.ignored.is_empty())
-            .then(|| names_shown(IGNORED, &self.ignored))
+            .then(|| names_shown(DirtyKind::Ignored, &self.ignored))
             .into_iter()
-            .chain((!others.is_empty()).then(|| names_shown("modified", &others)))
+            .chain((!others.is_empty()).then(|| names_shown(DirtyKind::Modified, &others)))
             .collect();
         format!("{} file(s) would be lost: {}", kinds.join(", "), names.join(", "))
     }
@@ -745,19 +747,43 @@ fn collapse_nested_worktrees(wt: &str, names: &[String]) -> Vec<String> {
     out
 }
 
-/// The kind whose names are never capped; every site that names it uses this.
-const IGNORED: &str = "ignored";
+/// A kind of file a removal would lose, as the refusal and the dry run's
+/// blocker lines name it. An enum, not a string, so a new call site cannot
+/// misspell `Ignored` into the capped branch (#838).
+#[derive(Clone, Copy)]
+enum DirtyKind {
+    Modified,
+    Untracked,
+    Ignored,
+    Scratch,
+}
+
+impl DirtyKind {
+    fn label(self) -> &'static str {
+        match self {
+            DirtyKind::Modified => "modified",
+            DirtyKind::Untracked => "untracked",
+            DirtyKind::Ignored => "ignored",
+            DirtyKind::Scratch => "scratch",
+        }
+    }
+
+    /// Whether `names_shown` may cut this kind's names to "and N more".
+    /// Ignored names never are: `--discard` destroys them unseen (#838). No
+    /// wildcard arm, so a new kind must answer this before it compiles.
+    fn capped(self) -> bool {
+        match self {
+            DirtyKind::Ignored => false,
+            DirtyKind::Modified | DirtyKind::Untracked | DirtyKind::Scratch => true,
+        }
+    }
+}
 
 /// How the refusal and the dry run's blocker lines show the `names` of one
-/// `kind` of dirty file — the one place the capping rule lives. Ignored names
-/// are never capped: `--discard` destroys them unseen, so none may fall into
-/// "and N more" (#838). Every other kind is capped at `NAMES_SHOWN`.
-fn names_shown(kind: &str, names: &[String]) -> String {
-    if kind == IGNORED {
-        names.join(", ")
-    } else {
-        first_names(names)
-    }
+/// `kind` of dirty file — the one place the capping rule lives: a capped kind
+/// shows its first `NAMES_SHOWN`, an uncapped one all of them.
+fn names_shown(kind: DirtyKind, names: &[String]) -> String {
+    if kind.capped() { first_names(names) } else { names.join(", ") }
 }
 
 /// The first `NAMES_SHOWN` names, comma-separated, then "and <n> more".
@@ -824,13 +850,13 @@ impl Cleanup {
                     let scratch_count = scratch.len();
                     let scratch = collapse_nested_worktrees(&wt, &scratch);
                     for (kind, names, count) in [
-                        ("modified", files.modified.clone(), files.modified.len()),
-                        ("untracked", files.untracked.clone(), files.untracked.len()),
-                        (IGNORED, ignored.clone(), ignored.len()),
-                        ("scratch", scratch, scratch_count),
+                        (DirtyKind::Modified, files.modified.clone(), files.modified.len()),
+                        (DirtyKind::Untracked, files.untracked.clone(), files.untracked.len()),
+                        (DirtyKind::Ignored, ignored.clone(), ignored.len()),
+                        (DirtyKind::Scratch, scratch, scratch_count),
                     ] {
                         if !names.is_empty() {
-                            lines.push(format!("{kind} {count} file(s): {}", names_shown(kind, &names)));
+                            lines.push(format!("{} {count} file(s): {}", kind.label(), names_shown(kind, &names)));
                         }
                     }
                 }
@@ -1918,20 +1944,25 @@ enum RemoteBranch {
     Unknown,
 }
 
+/// A lookup past its bound, or one that could not start, says why on
+/// stderr before the caller reports the branch as unknown.
 fn remote_branch(path: &str, b: &str) -> RemoteBranch {
-    let code = std::process::Command::new("git")
-        .args(["-C", path, "ls-remote", "--exit-code", "--heads", "origin", b])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .ok()
-        .and_then(|s| s.code());
-    match code {
-        Some(0) => RemoteBranch::Present,
-        Some(2) => RemoteBranch::Absent,
-        _ => RemoteBranch::Unknown,
+    let args = ["-C", path, "ls-remote", "--exit-code", "--heads", "origin", b];
+    match quiet_code_bounded("git", &args, env_ms_or("LANE_REMOTE_QUERY_TIMEOUT_MS", 60_000)) {
+        Ok(Some(0)) => RemoteBranch::Present,
+        Ok(Some(2)) => RemoteBranch::Absent,
+        Ok(_) => RemoteBranch::Unknown,
+        Err(e) => {
+            eprintln!("merge-cleanup: {e}");
+            RemoteBranch::Unknown
+        }
     }
+}
+
+/// `var` in milliseconds, or `default_ms` when it is unset or not a number:
+/// the bounds below, which a test shortens through the variable.
+fn env_ms_or(var: &str, default_ms: u64) -> Duration {
+    Duration::from_millis(env::var(var).ok().and_then(|v| v.parse().ok()).unwrap_or(default_ms))
 }
 
 /// This process's working directory, symlinks resolved. Empty when there is
@@ -2058,13 +2089,17 @@ fn holds_only_worktrees(dir: &str) -> bool {
     any
 }
 
-/// `status`, but under `--quiet` the command's stdout is dropped: its
-/// stderr, where a failure is reported, still passes through.
+/// A step's command with its output passed through, but under `--quiet`
+/// its stdout is dropped: its stderr, where a failure is reported, still
+/// passes through. Bounded (#1406): a step is a `git` or `gh` mutation, a
+/// worktree removal or a push among them, so the bound is generous headroom
+/// for a large tree or a slow remote, not an expected latency. Past it the
+/// step is killed, says so, and counts as failed.
 fn run_status(program: &str, args: &[&str]) -> bool {
-    if !quiet() {
-        return status(program, args);
-    }
-    std::process::Command::new(program).args(args).stdout(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+    status_bounded(program, args, quiet(), env_ms_or("LANE_STEP_TIMEOUT_MS", 300_000)).unwrap_or_else(|e| {
+        eprintln!("merge-cleanup: {e}");
+        false
+    })
 }
 
 /// `"$dir"/*/`: the non-hidden directories in `dir`, sorted, as paths. A
@@ -2199,10 +2234,9 @@ mod tests {
     #[test]
     fn names_shown_caps_every_kind_but_ignored() {
         let seven = names(NAMES_SHOWN + 2);
-        assert_eq!(names_shown(IGNORED, &seven), seven.join(", "));
-        for kind in ["modified", "untracked", "scratch"] {
-            assert_eq!(names_shown(kind, &seven), first_names(&seven));
-            assert!(names_shown(kind, &seven).ends_with("and 2 more"));
+        assert_eq!(names_shown(DirtyKind::Ignored, &seven), "f1, f2, f3, f4, f5, f6, f7");
+        for kind in [DirtyKind::Modified, DirtyKind::Untracked, DirtyKind::Scratch] {
+            assert_eq!(names_shown(kind, &seven), "f1, f2, f3, f4, f5 and 2 more", "{}", kind.label());
         }
     }
 }

@@ -18,8 +18,11 @@ declaration:
 
 A value may wrap onto continuation lines indented deeper than its item, as a
 Markdown list item does; they are joined onto it with single spaces (#1243).
-The value ends at a blank line, a heading, a fence, a key line (nested or
-not), or the first line at the item's own indent or shallower. Reading only
+Under a list item, a blank line followed by a deeper-indented paragraph does
+not end it, as in a loose list item (#1406); under a key line with no list
+marker, a blank line ends the value, since an indented block after it is
+code. The value ends at a heading, a fence, a key line (nested or not), or
+the first line at the item's own indent or shallower. Reading only
 the first line would state a partial blind spot as the whole one; reading
 past these would pad it with text the author never wrote there.
 

@@ -33,6 +33,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 from frontier import key_line, unfenced, visible  # noqa: E402
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
+# A list item's marker: a bare `**Key**:` line also matches `key_line`, by
+# its first `*`, but is no list item.
+_LIST_ITEM = re.compile(r"^[ \t]*[-*+][ \t]+")
 _SEAM_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
                            re.IGNORECASE)
 
@@ -48,23 +51,33 @@ def _indent(line):
 
 def _continuation(raw, start, reachable):
     """The lines wrapping the list item at `raw[start]`, one stripped string
-    per line: each adjacent line indented deeper than the item, up to a blank
-    line, a heading, a key line, or a line `reachable` (the indices outside a
-    fence) does not hold. A key line always ends the item, deeper or not, so
-    a declaration nested under a parent bullet still reads as before. Read
-    from the raw lines, not from `visible()`, because a four-space
-    continuation is what `visible()` drops as quoted material, and dropping
-    it is the truncation (#1243)."""
+    per line, and the index after the last: each line indented deeper than
+    the item, up to a heading, a key line, or a line `reachable` (the indices
+    outside a fence) does not hold. Under a list item, blank lines are
+    skipped when the next line still continues it, so a loose item's
+    indented second paragraph is part of it, as in Markdown (#1406). Under a
+    key line that is no list item a blank line ends the value: what follows
+    indented is a code block, not a paragraph of it. A key line always ends
+    the item, deeper or not, so a declaration nested under a parent bullet
+    still reads as before. Read from the raw lines, not from `visible()`,
+    because a four-space continuation is what `visible()` drops as quoted
+    material, and dropping it is the truncation (#1243)."""
     depth = _indent(raw[start])
+    loose = bool(_LIST_ITEM.match(raw[start]))
     wrapped = []
+    end = start + 1
     for index in range(start + 1, len(raw)):
         line = raw[index]
-        if (index not in reachable or not line.strip()
-                or _indent(line) <= depth or _ANY_HEADING.match(line)
-                or key_line(line)):
+        if not line.strip():
+            if loose:
+                continue
+            break
+        if (index not in reachable or _indent(line) <= depth
+                or _ANY_HEADING.match(line) or key_line(line)):
             break
         wrapped.append(line.strip())
-    return wrapped
+        end = index + 1
+    return wrapped, end
 
 
 def declaration(text):
@@ -88,8 +101,7 @@ def declaration(text):
             pair = key_line(rest)
             if pair:
                 key, value = pair
-                wrapped = _continuation(raw, index, reachable)
-                skip_to = index + 1 + len(wrapped)
+                wrapped, skip_to = _continuation(raw, index, reachable)
                 found[key] = " ".join([value] + wrapped).strip()
         return found
     return None
