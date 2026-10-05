@@ -1,0 +1,6 @@
+# Generated or vendored; multi-axis-code-review's diff capture leaves these out.
+# One git pathspec per line (#1218, #1437).
+flow/lane/Cargo.lock
+test-audit/package-lock.json
+visual-teach/assets/katex/
+visual-teach/assets/prism/
