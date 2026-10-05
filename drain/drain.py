@@ -106,6 +106,9 @@ FULL_SEAM = "bash tests/all.sh"
 POLL_SECONDS = float(os.environ.get("DRAIN_POLL_SECONDS", 15))
 IDLE_GRACE_SECONDS = float(os.environ.get("DRAIN_IDLE_GRACE_SECONDS", 30 * 60))
 CHOOSER_SECONDS = float(os.environ.get("DRAIN_CHOOSER_SECONDS", 15 * 60))
+# Characters of each candidate's body and comments the chooser's prompt carries;
+# the chooser may still open a ticket in full.
+EXCERPT_CHARS = 400
 IDLE = ("idle", "done")
 # `blocked` is a permission or question dialog nobody here can answer.
 STALLED = ("blocked",)
@@ -355,11 +358,24 @@ def stop_worker(name):
             subprocess.run(["herdr", "pane", "close", info["pane_id"]], capture_output=True)
 
 
+def excerpt(ctx, n):
+    """A candidate's body and comments, read live and cut to `EXCERPT_CHARS`, so
+    the chooser judges from text and the log shows what it judged from. A ticket
+    that cannot be read says so: an empty excerpt would read as an empty ticket."""
+    try:
+        view = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "body,comments")
+    except DrainError as exc:
+        return f"(body not read: {one_line(exc, 80)})"
+    text = " ".join([view["body"] or "", *(c["body"] or "" for c in view["comments"])])
+    return one_line(text, EXCERPT_CHARS) or "(empty)"
+
+
 def chooser_prompt(anchor, others, bundle_max):
-    listing = "\n".join(f"- #{n} {title}" for n, title in others) or "- (none)"
+    """`others` is `(number, title, excerpt)` per candidate."""
+    listing = "\n".join(f"- #{n} {title}: {text}" for n, title, text in others) or "- (none)"
     return (f"Bundle choice for an unattended run. #{anchor} is the anchor ticket to build next. Other unblocked "
-            f"ready tickets:\n{listing}\n"
-            f"Read the ones that look related to #{anchor} (`gh issue view <n>`, body and comments) and pick those "
+            f"ready tickets, each with the start of its body and comments:\n{listing}\n"
+            f"Open any that look related to #{anchor} in full (`gh issue view <n>`, body and comments) and pick those "
             f"you would naturally fix in the same PR, at most {bundle_max - 1} of them. Change nothing. "
             f"Your last line is exactly `{BUNDLE_NOTE} <numbers, the anchor first>`, with no other numbers; "
             f"`{BUNDLE_NOTE} {anchor}` when none belong.")
@@ -375,7 +391,8 @@ def choose_bundle(ctx, anchor, others, log):
     if not others:
         return [anchor], None
     try:
-        code, text = run_group(["claude", "-p", chooser_prompt(anchor, others, ctx.bundle_max),
+        code, text = run_group(["claude", "-p", chooser_prompt(anchor, [(n, t, excerpt(ctx, n)) for n, t in others],
+                                                    ctx.bundle_max),
                                 "--permission-mode", PERMISSION_MODE], ctx.root, CHOOSER_SECONDS,
                                preexec=_cap_session)
     except DrainError as exc:

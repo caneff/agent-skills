@@ -35,7 +35,8 @@ def opt(name):
     return args[args.index(name) + 1] if name in args else None
 def names(issue):
     return [dict(name=x) for x in issue["labels"]]
-if args[:2] == ["issue", os.environ.get("FAIL_VERB")]:
+if args[:2] == ["issue", os.environ.get("FAIL_VERB")] or (
+        args[:2] == ["issue", "view"] and args[2] in os.environ.get("FAIL_VIEW", "").split()):
     sys.stderr.write("fake gh: injected failure\n"); sys.exit(1)
 if args[:2] == ["api", "user"]:
     print(state["login"])
@@ -75,7 +76,7 @@ elif args[:2] == ["issue", "comment"]:
     save()
 elif args[:2] == ["issue", "view"]:
     issue = state["issues"][args[2]]
-    out({"state": issue["state"], "labels": names(issue), "title": issue["title"],
+    out({"state": issue["state"], "labels": names(issue), "title": issue["title"], "body": issue["body"],
          "comments": [dict(body=b) for n, b in state.get("comments", []) if n == args[2]]})
 elif args[:2] == ["pr", "list"]:
     pr = state["prs"].get(opt("--head"))
@@ -353,6 +354,26 @@ class DrainTest(Sandbox):
             self.assertIn(line, prompt)
         self.assertIn(["1", "drain bundle: 1 2 3"], self.state()["comments"][-1:])
         self.assertIn("#1 #2 #3", r.stdout)
+
+    def test_the_chooser_prompt_carries_each_candidates_body_and_comments_capped(self):
+        long_body = "needle " + "x" * 2000 + " TAILMARK\n## Blocked by\n\n- None\n"
+        self.write_state({1: {}, 2: {"body": "Fix the parser\nin   two lines\n## Blocked by\n\n- None\n"}, 3: {"body": long_body}},
+                         comments=[["2", "later: also handle tabs"]])
+        r = self.drain("--once")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        prompt = self.chooser_runs()[0]["prompt"]
+        self.assertIn("- #2 ticket 2: Fix the parser in two lines ## Blocked by - None later: also handle tabs", prompt)
+        self.assertIn("needle", prompt)
+        self.assertNotIn("TAILMARK", prompt)
+        self.assertLess(len(prompt), 1500)
+
+    def test_a_candidate_whose_body_cannot_be_read_is_listed_as_unread(self):
+        self.write_state({1: {}, 2: {}, 3: {"body": "readable body\n## Blocked by\n\n- None\n"}})
+        r = self.drain("--once", env={"FAIL_VIEW": "2"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        prompt = self.chooser_runs()[0]["prompt"]
+        self.assertIn("- #2 ticket 2: (body not read:", prompt)
+        self.assertIn("- #3 ticket 3: readable body ## Blocked by - None", prompt)
 
     def test_a_chooser_that_fails_or_says_nothing_usable_bundles_the_anchor_alone(self):
         for env in ({"CHOOSER_FAIL": "1", "TAKE": "2"}, {"CHOOSER_SAY": "no idea", "TAKE": "2"}):
