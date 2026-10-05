@@ -367,6 +367,12 @@ class DrainTest(Sandbox):
         self.assertNotIn("TAILMARK", prompt)
         self.assertLess(len(prompt), 1500)
 
+    def test_the_choose_log_holds_the_prompt_the_chooser_judged_from_even_when_it_fails(self):
+        self.write_state({1: {}, 2: {"body": "distinctive-excerpt\n## Blocked by\n\n- None\n"}})
+        self.drain("--once", env={"CHOOSER_FAIL": "1"})
+        log = read(os.path.join(self.tmp.name, "logs", "implement-1-choose.log"))
+        self.assertIn("- #2 ticket 2: distinctive-excerpt", log)
+
     def test_a_candidate_whose_body_cannot_be_read_is_listed_as_unread(self):
         self.write_state({1: {}, 2: {}, 3: {"body": "readable body\n## Blocked by\n\n- None\n"}})
         r = self.drain("--once", env={"FAIL_VIEW": "2"})

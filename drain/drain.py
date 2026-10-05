@@ -361,13 +361,15 @@ def stop_worker(name):
 def excerpt(ctx, n):
     """A candidate's body and comments, read live and cut to `EXCERPT_CHARS`, so
     the chooser judges from text and the log shows what it judged from. A ticket
-    that cannot be read says so: an empty excerpt would read as an empty ticket."""
+    that cannot be read says so: a blank excerpt would read as an empty ticket.
+    A candidate is unblocked, so its body holds a `## Blocked by` section and is
+    never empty."""
     try:
         view = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "body,comments")
     except DrainError as exc:
         return f"(body not read: {one_line(exc, 80)})"
     text = " ".join([view["body"] or "", *(c["body"] or "" for c in view["comments"])])
-    return one_line(text, EXCERPT_CHARS) or "(empty)"
+    return one_line(text, EXCERPT_CHARS)
 
 
 def chooser_prompt(anchor, others, bundle_max):
@@ -390,14 +392,15 @@ def choose_bundle(ctx, anchor, others, log):
     never a reason not to build, and the reason is left on the ticket."""
     if not others:
         return [anchor], None
+    prompt = chooser_prompt(anchor, [(n, t, excerpt(ctx, n)) for n, t in others], ctx.bundle_max)
+    with open(log, "w") as out:  # the prompt first, so a chooser that fails still leaves what it was given
+        out.write(prompt + "\n\n--- chooser output ---\n")
     try:
-        code, text = run_group(["claude", "-p", chooser_prompt(anchor, [(n, t, excerpt(ctx, n)) for n, t in others],
-                                                    ctx.bundle_max),
-                                "--permission-mode", PERMISSION_MODE], ctx.root, CHOOSER_SECONDS,
+        code, text = run_group(["claude", "-p", prompt, "--permission-mode", PERMISSION_MODE], ctx.root, CHOOSER_SECONDS,
                                preexec=_cap_session)
     except DrainError as exc:
         return [anchor], one_line(exc, 120)
-    with open(log, "w") as out:
+    with open(log, "a") as out:
         out.write(text)
     lines = [x for x in text.splitlines() if x.strip().startswith(BUNDLE_NOTE)]
     if code or not lines:
