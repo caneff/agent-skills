@@ -109,8 +109,11 @@ teach_add() { TEACH_CONTEXT+="${TEACH_CONTEXT:+$'\n\n'}$1"; }
 
 # Prints the PreToolUse answer when there is anything to say, then records
 # what it printed as shown: a hook killed before this point (a timeout) has
-# shown nothing and spends nothing. Always exit 0: a teaching hook never
-# blocks a command.
+# shown nothing and spends nothing. A denial of the same call (a permission
+# prompt, a parallel blocking hook) does not drop the context: the model still
+# read it, so printing is the right moment to record (#1423,
+# docs/research/2026-10-04-teaching-hook-live-firing.md). Always exit 0: a
+# teaching hook never blocks a command.
 teach_emit() {
   local key
   [ -n "$TEACH_CONTEXT" ] || exit 0

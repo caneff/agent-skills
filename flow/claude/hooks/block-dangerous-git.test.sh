@@ -363,6 +363,43 @@ run "dot discard: mutation-named dir that is no worktree blocked" 2 \
 run "dot discard: allowed target chained to a blocked one blocked" 2 \
   "git -C $repo/.scratch/mutation-m1 checkout -- . && git checkout -- ." "$blocked"
 
+# A command's length must not decide the guard's cost. A quadratic lexer took
+# 2.6 s on 44 KB and 5.9 s on 66 KB (#1423), and the teaching hooks, which share
+# it, time out at 5 s. 100 KB of quoted words, comments and escapes, no
+# heredoc, one line that names `push` and `checkout` so both segment loops run,
+# then a foreign merge, must be blocked on CPU time (user+sys, which a busy box
+# running suites in parallel does not inflate) well under that.
+big=$(awk 'BEGIN { for (i = 0; i < 2500; i++) printf "echo \"a b $i\" '"'"'c d'"'"' x\\ y # note %d\n", i }')
+big+=$'\ngit commit -m "do not push yet; checkout notes"\ngh pr merge 5 --repo someone-else/x'
+TIMEFORMAT='%U %S'
+cpu=$( { time run "foreign merge after a 100 KB command blocked" 2 "$big" "BLOCKED" >/dev/null; } 2>&1 )
+if awk -v t="$cpu" 'BEGIN { split(t, p, " "); exit !(p[1] + p[2] < 2.5) }'; then
+  echo "PASS: 100 KB command scanned in ${cpu% *}+${cpu#* }s CPU"
+else
+  echo "FAIL: 100 KB command took '$cpu' s CPU (user sys), want under 2.5s"; fails=1
+fi
+unset TIMEFORMAT
+# A backslash-newline inside double quotes is removed by the shell, so these
+# run `gh pr merge` and `bash -c`; the scan must still see one command (#1423).
+run "foreign merge: bash -c after a quoted backslash-newline blocked" 2 \
+  "bash \"\\
+\"-c 'gh pr merge 5 --repo someone-else/x'" "BLOCKED"
+run "foreign merge: pipe into bash after a quoted backslash-newline blocked" 2 \
+  "echo 'gh pr merge 5 --repo someone-else/x' | \"\\
+\"bash" "BLOCKED"
+# A lexer that cannot run must not read as a command with nothing in it.
+mkdir -p "$tmp/noawk"
+# Only the lexer's calls (`-v view=...`) fail; the owner scan's awk still runs.
+cat > "$tmp/noawk/awk" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = "-v" ] && [[ "$2" == view=* ]] && exit 1
+exec /usr/bin/awk "$@"
+STUB
+chmod +x "$tmp/noawk/awk"
+stubdir_saved=$stubdir; stubdir="$tmp/noawk:$stubdir"
+run "foreign merge blocked when the lexer's awk fails" 2 \
+  "bash -c 'gh pr merge 5 --repo someone-else/x'" "BLOCKED"
+stubdir=$stubdir_saved
 # The guard reads commands through command-scan-lib.sh beside its real path.
 # Without the lib no pattern can match, so it blocks every command rather than
 # letting each one through unscanned.

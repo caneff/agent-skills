@@ -94,12 +94,15 @@ discards_worktree() {
   git_verb checkout "$1" || { git_verb restore "$1" && ! restore_is_unstage_only "$1"; } || return 1
   ! is_mutation_worktree "$1"
 }
+# The two segment loops fork several greps per segment, so each is fed only the
+# segments that hold the verb it looks for: a long command of other words costs
+# one grep, not a fork per line (#1423).
 while IFS= read -r segment; do
   if discards_worktree "$segment"; then
     echo "BLOCKED: '$COMMAND' discards every uncommitted change under '.'. That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact line to run themselves. Do not attempt it yourself." >&2
     exit 2
   fi
-done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g')
+done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -e checkout -e restore)
 
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   if echo "$SCAN" | grep -qE "$pattern"; then
@@ -126,7 +129,7 @@ while IFS= read -r segment; do
     echo "BLOCKED: bare force-push in '$COMMAND' can destroy commits on origin. Use '--force-with-lease', or hand the user the exact '! git push --force ...' line." >&2
     exit 2
   fi
-done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g')
+done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -e push)
 
 # GitHub owners are case-insensitive: `CANEFF/x` and `caneff/x` name the same
 # account, so every owner-vs-login compare lowercases both sides first. `tr`
