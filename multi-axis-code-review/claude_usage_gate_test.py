@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""The Claude usage gate (#1436): `claude-usage-gate.py` reads the cache the status
-line writes (`flow/ccstatusline-table/helpers/claude-usage.py`) and answers with an exit
-status the review step branches on — 0 proceed, 20 capped (spawn no axis), 30 unknown
-(no fresh, well-formed reading; the 429 path covers the spawn).
+"""The Claude usage gate (#1436): `claude-usage-gate.py` reads the cache the
+status line writes (`flow/ccstatusline-table/helpers/claude-usage.py`); its
+docstring defines the exit statuses.
 
-Seam: the script's command line — stdout line and exit status — against a cache file
-under a temporary `$HOME`.
+Seam: the script's command line — stdout line and exit status — against a
+cache file under a temporary `$HOME`.
 """
 import json
 import os
@@ -65,6 +64,18 @@ def main():
     check("malformed window voids the reading", run(cache(win(10), {"used_percentage": "x", "resets_at": 1})), 30)
     check("percentage out of range", run(cache(win(120))), 30)
     check("a window that has reset is not a reading", run(cache(win(99, time.time() - 5))), 30)
+    check("future-dated stamp", run(cache(win(10), age=-HOUR)), 30, "future")
+    check("crash is exit 30, not 1", run(cache(win(10, 1e300))), 30)
+    later = time.time() + 3 * 86400
+    later_when = time.strftime("%Y-%m-%d %H:%M", time.localtime(later))
+    check("block names when it lifts: the later reset of the blocking windows",
+          run(cache(win(99, time.time() + HOUR), win(96, later))), 20, later_when)
+    check("only a blocking window's reset counts",
+          run(cache(win(99, time.time() + HOUR), win(10, later))), 20,
+          time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() + HOUR)))
+    check("cause: missing", run(None), 30, "no cache file")
+    check("cause: stale", run(cache(win(10), age=11 * 60)), 30, "older than")
+    check("cause: reset window", run(cache(win(99, time.time() - 5))), 30, "already reset")
     check("no fetched stamp", run({"rate_limits": {"five_hour": win(10)}}), 30)
     print("ok")
 
