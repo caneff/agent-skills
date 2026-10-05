@@ -12,10 +12,12 @@ value. We fan the raw stdin bytes out to each.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import subprocess
 import sys
+import time
 import unicodedata
 from pathlib import Path
 
@@ -173,12 +175,25 @@ def table(rows: list[list[tuple[str, str]]], frame: str) -> str:
     return "\n".join(lines)
 
 
+def write_usage_cache(data: object) -> None:
+    """Keep the `rate_limits` block for `multi-axis-code-review/claude-usage-gate.py` (#1436)."""
+    try:
+        spec = importlib.util.spec_from_file_location("claude_usage", CFG / "claude-usage.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.write_cache(data, time.time())
+    except Exception:
+        pass
+
+
 def main() -> None:
     raw = sys.stdin.buffer.read()
     try:
         data = json.loads(raw or b"{}")
     except Exception:
         data = {}
+
+    write_usage_cache(data)
 
     model = (data.get("model") or {}).get("display_name", "")
     cwd = (data.get("workspace") or {}).get("current_dir") or data.get("cwd") or "."
