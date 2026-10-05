@@ -293,8 +293,8 @@ worktree=<the worktree under review>
 # docs/agents/review-generated-paths.txt, one git pathspec per line, blank lines
 # and `#` comments ignored. Goldens, lockfiles and regenerated data stay out of
 # every capture; no file means nothing is excluded. `.gitattributes`
-# `linguist-generated` marks are not read (#1437): a repo lists those paths here too,
-# so there is one declaration and one reader.
+# `linguist-generated` marks are not read (#1437): a repo that carries them
+# lists the same paths here too, so the capture has one reader.
 generated=(); excludes=()
 if [ -f "$worktree/docs/agents/review-generated-paths.txt" ]; then
   while IFS= read -r p || [ -n "$p" ]; do   # a last line with no newline still counts

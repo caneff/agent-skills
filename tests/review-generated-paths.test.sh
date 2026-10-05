@@ -9,6 +9,8 @@ root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 f=docs/agents/review-generated-paths.txt
 [ -f "$f" ] || { echo "FAIL: $f is missing"; exit 1; }
+# The read below mirrors the reader in multi-axis-code-review/SKILL.md (CR strip,
+# blank and `#` lines skipped, an unterminated last line counted); change both.
 n=0; fail=0
 while IFS= read -r p || [ -n "$p" ]; do
   p=${p%$'\r'}
