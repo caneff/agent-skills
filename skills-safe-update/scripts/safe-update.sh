@@ -10,14 +10,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
 
 # commit_staged <message> — commit what is staged, with the checkout's own
-# identity (no `-c user.*` override: the commit-identity guard refuses one, #1450).
-# Returns 0 when it committed, 3 when nothing was staged, and git's own status
-# when git refused — with its stderr left visible. A refusal must never read as
-# "nothing to commit".
+# identity (no `-c user.*` override: the commit-identity guard refuses one,
+# #1450). Returns 0 when it committed, NOTHING_STAGED when nothing was staged,
+# and git's own status when git refused, with its stderr left visible. A
+# refusal must never read as "nothing to commit". An unborn HEAD (a refused
+# baseline commit) is compared against the empty tree, so the next run can
+# still make the root commit.
+NOTHING_STAGED=3
 commit_staged(){
-  local rc=0
-  git diff --cached --quiet HEAD || rc=$?
-  case $rc in 0) return 3 ;; 1) ;; *) return "$rc" ;; esac
+  local rc=0 ref=HEAD
+  git rev-parse -q --verify HEAD >/dev/null || ref=$(git hash-object -t tree /dev/null)
+  git diff --cached --quiet "$ref" || rc=$?
+  case $rc in 0) return "$NOTHING_STAGED" ;; 1) ;; *) return "$rc" ;; esac
   git commit -qm "$1" >/dev/null
 }
 
@@ -231,7 +235,11 @@ protect_skills(){
   [ ${#conflicted[@]} -eq 0 ] || return 0
   git add -A
   local crc=0; commit_staged "merge local edits with upstream (three-way)" || crc=$?
-  [ "$crc" -eq 0 ] || [ "$crc" -eq 3 ] || return "$crc"
+  if [ "$crc" -ne 0 ] && [ "$crc" -ne "$NOTHING_STAGED" ]; then
+    rm -f "$prelock"
+    echo "merge commit failed (exit $crc) — upstream is committed as $POST, the merged tree is staged but uncommitted, no summary printed; undo: git -C $SKILLS reset --hard $PRE" >&2
+    return "$crc"
+  fi
 }
 
 # ------------------------------------------------------------------- update
@@ -256,8 +264,8 @@ snap_lock(){ [ -f "$LOCK" ] && cp "$LOCK" "$SKILLS/.skill-lock.json"; }
 snap_lock
 git add -A
 rc=0; commit_staged "pre-update snapshot $(date +%F)" || rc=$?
-if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
-  echo "pre-update snapshot commit failed (exit $rc) — nothing was updated" >&2; exit "$rc"
+if [ "$rc" -ne 0 ] && [ "$rc" -ne "$NOTHING_STAGED" ]; then
+  echo "pre-update snapshot failed (exit $rc) — npx was not run, nothing was updated" >&2; exit "$rc"
 fi
 PRE=$(git rev-parse HEAD)
 
@@ -269,7 +277,7 @@ PRE=$(git rev-parse HEAD)
 # only pointer to the base. hand-installed skills (.extra-skills.json) join
 # the same map: treeSha is their installed-upstream hash, same semantics.
 EXTRA="$SKILLS/.extra-skills.json"
-PRELOCK=$(mktemp)
+PRELOCK=$(mktemp); trap 'rm -f "$PRELOCK"' EXIT   # every exit path, a refused commit included
 python3 "$SCRIPT_DIR/upstream.py" prelock --lock "$LOCK" --extras "$EXTRA" > "$PRELOCK"
 
 echo "running: npx skills update -g"
@@ -289,8 +297,8 @@ git add -A
 rc=0; commit_staged "upstream: skills update $(date +%F)" || rc=$?
 case $rc in
   0) ;;
-  3) echo "no upstream changes."; exit 0 ;;
-  *) echo "upstream commit failed (exit $rc) — the update is staged, uncommitted" >&2; exit "$rc" ;;
+  "$NOTHING_STAGED") echo "no upstream changes."; exit 0 ;;
+  *) echo "upstream commit failed (exit $rc) — npx already rewrote the working tree and the live lock without a merge; restore your edits with: git -C $SKILLS reset --hard $PRE" >&2; exit "$rc" ;;
 esac
 POST=$(git rev-parse HEAD)
 
