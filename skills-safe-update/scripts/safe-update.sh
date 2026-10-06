@@ -8,7 +8,22 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
-git(){ command git -c user.email=skills@local -c user.name=skills "$@"; }
+
+# commit_staged <message> — commit what is staged, with the checkout's own
+# identity (no `-c user.*` override: the commit-identity guard refuses one,
+# #1450). Returns 0 when it committed, NOTHING_STAGED when nothing was staged,
+# and git's own status when git refused, with its stderr left visible. A
+# refusal must never read as "nothing to commit". An unborn HEAD (a refused
+# baseline commit) is compared against the empty tree, so the next run can
+# still make the root commit.
+NOTHING_STAGED=3
+commit_staged(){
+  local rc=0 ref=HEAD
+  git rev-parse -q --verify HEAD >/dev/null || ref=$(git hash-object -t tree /dev/null)
+  git diff --cached --quiet "$ref" || rc=$?
+  case $rc in 0) return "$NOTHING_STAGED" ;; 1) ;; *) return "$rc" ;; esac
+  git commit -qm "$1" >/dev/null
+}
 
 # ---------------------------------------------------------- three-way merge
 
@@ -219,8 +234,11 @@ protect_skills(){
   # The commit gate. Markers in the tree must never reach a commit.
   [ ${#conflicted[@]} -eq 0 ] || return 0
   git add -A
-  if ! git diff --cached --quiet HEAD; then
-    git commit -qm "merge local edits with upstream (three-way)" >/dev/null
+  local crc=0; commit_staged "merge local edits with upstream (three-way)" || crc=$?
+  if [ "$crc" -ne 0 ] && [ "$crc" -ne "$NOTHING_STAGED" ]; then
+    rm -f "$prelock"
+    echo "merge commit failed (exit $crc) — upstream is committed as $POST, the merged tree is staged but uncommitted, no summary printed; undo: git -C $SKILLS reset --hard $PRE" >&2
+    return "$crc"
   fi
 }
 
@@ -245,7 +263,10 @@ snap_lock(){ [ -f "$LOCK" ] && cp "$LOCK" "$SKILLS/.skill-lock.json"; }
 # 2. snapshot current state (so PRE holds your edits)
 snap_lock
 git add -A
-git commit -qm "pre-update snapshot $(date +%F)" >/dev/null 2>&1 || true
+rc=0; commit_staged "pre-update snapshot $(date +%F)" || rc=$?
+if [ "$rc" -ne 0 ] && [ "$rc" -ne "$NOTHING_STAGED" ]; then
+  echo "pre-update snapshot failed (exit $rc) — npx was not run, nothing was updated" >&2; exit "$rc"
+fi
 PRE=$(git rev-parse HEAD)
 
 # capture the lock's upstream hashes BEFORE updating. skillFolderHash IS the
@@ -256,7 +277,7 @@ PRE=$(git rev-parse HEAD)
 # only pointer to the base. hand-installed skills (.extra-skills.json) join
 # the same map: treeSha is their installed-upstream hash, same semantics.
 EXTRA="$SKILLS/.extra-skills.json"
-PRELOCK=$(mktemp)
+PRELOCK=$(mktemp); trap 'rm -f "$PRELOCK"' EXIT   # every exit path, a refused commit included
 python3 "$SCRIPT_DIR/upstream.py" prelock --lock "$LOCK" --extras "$EXTRA" > "$PRELOCK"
 
 echo "running: npx skills update -g"
@@ -273,9 +294,12 @@ fi
 # 4. record upstream result (npx rewrote the live lock — mirror the new one in)
 snap_lock
 git add -A
-if ! git commit -qm "upstream: skills update $(date +%F)" >/dev/null 2>&1; then
-  echo "no upstream changes."; exit 0
-fi
+rc=0; commit_staged "upstream: skills update $(date +%F)" || rc=$?
+case $rc in
+  0) ;;
+  "$NOTHING_STAGED") echo "no upstream changes."; exit 0 ;;
+  *) echo "upstream commit failed (exit $rc) — npx already rewrote the working tree and the live lock without a merge; restore your edits with: git -C $SKILLS reset --hard $PRE" >&2; exit "$rc" ;;
+esac
 POST=$(git rev-parse HEAD)
 
 # 5. protect locally-edited skills: merge YOUR version with upstream's.

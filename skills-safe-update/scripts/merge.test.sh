@@ -13,6 +13,8 @@ export SKILLS_DIR="$WORK"
 # shellcheck source=safe-update.sh
 source "$SCRIPT_DIR/safe-update.sh"
 set +e   # the sourced script sets -e; these tests assert on exit codes
+# safe-update.sh no longer forces an identity (#1450); fixtures bring one.
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 
 fails=0
 ok(){ printf 'ok   %s\n' "$1"; }
