@@ -1,5 +1,4 @@
 ---
-disable-model-invocation: true
 name: marimo-pair
 description: >-
   Drive a live marimo notebook as a workspace: run Python in the same kernel
@@ -19,9 +18,9 @@ session is running.
 A user interacts with the same runtime via a notebook UI with cells, outputs,
 and widgets.
 
-**The active runtime is the source of truth.** During a session, do not
-modify the associated `.py` file directly: file edits do not reach the active
-kernel or user, and the kernel may overwrite them on save. Use
+**WARNING. The active runtime is the source of truth.** During a session, you
+SHOULD NOT modify the associated `.py` file directly. File edits WILL NOT reach
+the active kernel or user, and the kernel may overwrite them on save. Use
 `marimo._code_mode` (`cm`) for notebook changes. Reading disk is fine, but
 prefer `ctx.cells[...].code` for current cell code.
 
@@ -117,17 +116,17 @@ print(x)
 ```
 
 Here `df` comes from notebook globals, while `x` is a scratchpad-local binding.
-`x` exists for this call only and is not added to notebook globals.
+`x` exists for this call only and WILL NOT be added to notebook globals.
 
 ### Persist with `cm`
 
 Top-level scratchpad assignments and rebindings are temporary. To persist work,
-including new variables, submit changes through `marimo._code_mode`
+including new variables, you MUST submit changes through `marimo._code_mode`
 (`cm`).
 
-`marimo._code_mode` is a private, unstable agent API (note the leading
+`marimo._code_mode` is a PRIVATE, UNSTABLE agent API (note the leading
 underscore). It exists for tools like this skill to drive a live kernel from
-the scratchpad. Do not import it from notebook cells, library code, or
+the scratchpad. DO NOT import it from notebook cells, library code, or
 anything a user would run — methods can change or disappear across marimo
 versions and kernels. Treat every `import marimo._code_mode as cm` as
 scratchpad-only.
@@ -178,32 +177,10 @@ a directed acyclic graph (DAG):
 These rules keep the kernel, UI, and saved artifact consistent.
 
 When `cm` submits a cell body, marimo parses its top-level definitions and
-references. A top-level name enters the graph unless it is private with a
-leading underscore.
-
-```python
-# Public definitions: values, total, i, value, mean
-values = np.array([1, 2, 3])
-total = 0
-for i, value in enumerate(values):
-    total += value
-mean = total / len(values)
-mean
-```
-
-```python
-# Public definition: mean
-_values = np.array([1, 2, 3])
-_total = 0
-for _i, _value in enumerate(_values):
-    _total += _value
-mean = _total / len(_values)
-mean
-```
-
-Use private names for intermediates that no other cell should read. Public
-names define the notebook-level dataflow. If a `cm` edit violates the contract,
-marimo rejects the structural change and returns the validation error.
+references. Public names enter the graph. Names that start with `_` are local
+to their cell and unavailable to other cells. If a `cm` edit violates the
+contract, marimo rejects the structural change and returns the validation
+error.
 
 ## The Notebook's Shape
 
@@ -248,8 +225,8 @@ those checks alone does not guarantee a useful artifact. Committed cells should
 still be readable, rerunnable, and editable.
 
 Make durable edits that reuse the notebook's existing names, imports,
-dependencies, and UI model. Avoid one-off workarounds that pass `cm`
-validation but leave a brittle notebook.
+dependencies, and UI model. Don't be lazy. Avoid one-off workarounds that pass
+`cm` validation but leave a brittle notebook.
 
 ### Cell Bodies
 
@@ -261,10 +238,7 @@ Submit the code that belongs in the cell.
   scratchpad calls. Before `edit_cell`, read the current body from
   `ctx.cells[...]` and submit the full replacement.
 - **Reuse notebook imports** - if `np` already exists, use it or edit the owning
-  import cell. Do not add `import numpy as _np` just to bypass the graph.
-- **Define public names intentionally** - use public names for values later
-  cells should reference. Use private `_name` bindings or function locals for
-  same-cell intermediates.
+  import cell. DO NOT add `import numpy as _np` just to bypass the graph.
 - **Define each public name once** - a public name has one owning cell.
   Reassigning it in another cell fails with `Multiply-defined names`; edit the
   owning cell or give the result a new name. See
@@ -272,12 +246,21 @@ Submit the code that belongs in the cell.
 - **Run cells deliberately** - `create_cell` and `edit_cell` change structure
   only. Queue `ctx.run_cell(...)` when the cell should execute.
 
+### Cell Boundaries
+
+A cell is also a rerun boundary. Put expensive or reusable computation
+upstream of presentation so UI edits stay cheap. Keep cheap,
+presentation-specific work with the view when that is easier to read.
+
+Use `mo.vstack` and `mo.hstack` only when the composition is part of the UI.
+Narrative often reads better in an adjacent markdown cell.
+
 ### Prefer `cm`-Managed Changes
 
 Use `cm` APIs when they exist. Avoid direct file edits, shell package commands,
 and scratchpad-only state for changes that should persist.
 
-- **Do not edit the `.py` artifact** - Do not use `Edit`, `Write`, or
+- **Do not edit the `.py` artifact** - DO NOT use `Edit`, `Write`, or
   `NotebookEdit` on the notebook file during a live session. Use
   `ctx.edit_cell(...)` even for small changes.
 - **Manage packages through `cm`** - use `ctx.packages.add()` or

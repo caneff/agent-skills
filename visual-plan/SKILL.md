@@ -1,6 +1,5 @@
 ---
 name: visual-plan
-disable-model-invocation: true
 description: >-
   Turn ordinary text plans into rich interactive visual plans with diagrams,
   file maps, annotated code, open questions, and UI/prototype review when
@@ -109,7 +108,7 @@ surface.
 
 ## Create A Structured Agent-Native Plan — Never Inline
 
-The deliverable is a structured Agent-Native Plan, not a chat-only plan.
+The deliverable is ALWAYS a structured Agent-Native Plan, not a chat-only plan.
 The hosted Plan MCP connector (`plan` server, or legacy `agent-native-plans`) is
 the default collaboration and commenting surface; it is not a reason to reject
 the planning pattern as an external dependency or rented layer. Plans are
@@ -120,13 +119,13 @@ skill's review discipline. Do not advise the user to skip `/visual-plan` because
 the default surface is hosted; choose the right Plan mode for the user's
 ownership, privacy, sharing, and branding needs.
 
-By default, create the plan via the Plan MCP connector and do not hand it over as
+By default, create the plan via the Plan MCP connector and NEVER hand it over as
 inline chat content — no Markdown prose, ASCII sketch, table, or fenced
 wireframe. If the `plan` (or legacy `agent-native-plans`) tools are not visible,
 discover them through the host's `tool_search` first; if they are still missing,
-stop and give the user the client-specific reconnect step rather than improvising
+STOP and give the user the client-specific reconnect step rather than improvising
 an inline plan. Before publishing, or whenever a connector or auth error appears,
-read `references/connection.md` in this skill directory — it is the single source
+READ `references/connection.md` in this skill directory — it is the single source
 of truth for the never-inline rule, connector discovery, and the per-client
 reconnect steps. Local-files privacy mode (after Tool Guidance) is the exception.
 
@@ -302,10 +301,10 @@ folding framework chrome into the product UI.
   the main question. Use `create-prototype-plan`, which still preserves static
   mocks where useful.
 
-For mixed canvas + prototype plans, reuse the same real labels, app statuses,
-and screen ids across both surfaces. The canvas is the inspectable static reference;
-the prototype is the interactive version of that same flow, not a separate
-design direction.
+For mixed canvas + prototype plans, reuse labels and IDs; patch surfaces
+together unless explicitly single-surface. For output audits, read the
+observability skill: support single-app and workspace tables, preserve app
+previews, and keep audit, synthesis, diffs, and applying changes admin-gated.
 
 Treat “higher fidelity,” “pixel-accurate,” “polished mockup,” “production-like,”
 “real design,” and “not a sketch/wireframe” as design-first language even when
@@ -324,10 +323,10 @@ handle a fidelity follow-up.
 UI recap/plan wireframes must meet a strict quality bar — full-width chrome,
 pinned bottom bars, real product content, before/after comparability, the right
 `surface` preset, `--wf-*` tokens instead of hex, and no `<html>`/`<style>`/font
-tags. Before authoring any wireframe / `<Screen>` / `WireframeBlock`, read
+tags. Before authoring ANY wireframe / `<Screen>` / `WireframeBlock`, READ
 `references/wireframe.md` in this skill directory — it is the single source of
 truth for HTML wireframe quality, shared word for word with `/visual-plan`
-and `/visual-recap`.
+and `/visual-recap`. Do not author wireframes from memory.
 
 ## Canvas — read `references/canvas.md`
 
@@ -335,9 +334,9 @@ The canvas is the single source of truth for static UI mockups: the `surface`
 locks each artboard's footprint, mixed surfaces lay out
 in lanes, annotations are plain-text designer notes anchored by
 `targetId`/`placement`, and edits are surgical `contentPatches`. Before
-authoring or editing any canvas, artboard, or annotation, read
+authoring or editing ANY canvas, artboard, or annotation, READ
 `references/canvas.md` in this skill directory — it is the single source of truth
-for canvas/artboard mechanics.
+for canvas/artboard mechanics. Do not author canvas layouts from memory.
 Canvas artboards use the same HTML wireframe path as document-body
 `WireframeBlock` screens: author `<Screen surface="..." html={...} />` with a
 semantic HTML fragment. Do not author fresh kit-tree children such as
@@ -350,13 +349,14 @@ layouts.
 The document is a serious technical plan, not marketing: outcome-first,
 prose-first, self-contained, built from the right native blocks, with open
 questions in a single bottom `question-form` and a pre-handoff visual check.
-Before authoring the plan document, read `references/document-quality.md` in this
+Before authoring the plan document, READ `references/document-quality.md` in this
 skill directory — it is the single source of truth for the document quality bar.
+Do not write the document from memory.
 
 ## Good vs. bad exemplar — read `references/exemplar.md`
 
 For a worked example of the bar — a great UI-first plan and `/visual-plan`, plus
-the anti-patterns to avoid — read `references/exemplar.md` in this skill
+the anti-patterns to avoid — READ `references/exemplar.md` in this skill
 directory before authoring a plan.
 
 ## Authoring invariants
@@ -415,7 +415,7 @@ Treat these as data-integrity checks, not optional polish:
   annotations, and `plan.updatedAt`; it also returns the MDX folder for source
   workflows. Re-read immediately before a destructive write for its concurrency
   fence and again after every write to verify persisted state.
-- `get-plan-feedback`: read unconsumed human feedback (Core Workflow step 5 says when); it
+- `get-plan-feedback`: read unconsumed human feedback. Use it frequently; it
   returns grouped threads, exact anchor details, expected resolver, and recent
   review-event payloads so agents can act only on the comments meant for them.
 - `get-plan-blocks`: resolve block tags before authoring — do not memorize tags;
@@ -435,7 +435,7 @@ artifacts, or `AGENT_NATIVE_PLANS_MODE=local-files` — do not call any hosted P
 tool except the schema-only `get-plan-blocks` catalog lookup. Author a local MDX
 folder and
 preview it with `plan local check` / `plan local serve` / `plan local verify`.
-Before using local-files mode, read `references/local-files.md` in this skill
+Before using local-files mode, READ `references/local-files.md` in this skill
 directory — it is the single source of truth for the full contract (catalog
 lookup, MDX folder layout, the local bridge commands, and the hosted tools you
 must not call). Carry forward only the code-research and plan-composition

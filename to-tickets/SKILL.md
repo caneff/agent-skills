@@ -1,13 +1,14 @@
 ---
 name: to-tickets
-description: Turn a plan, spec, or the current conversation into tickets on the configured tracker — one ticket by default, sliced only into pieces on disjoint files that can run at the same time, each declaring its blocking edges.
+description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
+disable-model-invocation: true
 ---
 
 # To Tickets
 
-Turn a plan, spec, or conversation into **tickets**. The default output is **one** ticket. Slice into more only where the pieces touch disjoint files and can run at the same time; each slice declares the tickets that **block** it.
+Break a plan, spec, or conversation into a set of **tickets**: tracer-bullet vertical slices, each declaring the tickets that **block** it.
 
-The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
+The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.
 
 ## Process
 
@@ -15,86 +16,65 @@ The issue tracker and triage label vocabulary should have been provided to you �
 
 Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
 
-Check whether the source issue already has sub-issues before slicing it: run `gh issue view <n> --repo <owner>/<repo> --json subIssues` bare — piping it through another command (`| jq`, `| grep`) substitutes that command's exit status for `gh`'s own, which reopens the failure this guard exists to close. Its exit status and its output split into three outcomes, never two:
-
-- **Exit 0, `subIssues.nodes` a non-empty array**: already sliced — stop and list the children instead of slicing again.
-- **Exit 0, `subIssues.nodes` present and an empty array**: confirmed no children — proceed to slice.
-- **Non-zero exit, or exit 0 with `subIssues.nodes` missing or not an array** (missing `gh`, no network, an auth failure, an unexpected output shape, any other lookup error): the lookup failed, not "no children" — stop, report the error, and publish nothing. Never fall through to slicing on a failed lookup; a failure read as an empty answer is how a duplicate ticket set gets published under the same parent with nothing erroring to flag it.
-
 ### 2. Explore the codebase (optional)
 
 If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use the project's domain glossary vocabulary, and respect ADRs in the area you're touching.
 
 Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
 
-### 3. Draft the ticket, then slice only if you must
+### 3. Draft vertical slices
 
-Start from one ticket that carries the whole plan. Slice it only when pieces touch **disjoint files** and can run **at the same time**, so slicing buys parallel work. State in each slice's body **why each slice exists**: the disjoint files and what runs beside it. A piece that would take under a day's agent work is not a slice, and neither is a tracer-bullet shape for its own sake: fold it into a neighbour.
+Break the work into **tracer bullet** tickets.
 
-<slice-rules>
+<vertical-slice-rules>
 
-- A slice that is not disjoint from another is not a slice: merge them, or order them with a blocking edge when one must land first
+- Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests): vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable or verifiable on its own
-- Any prefactoring is done first, inside the first ticket that needs it
-- With more than one slice, the last slice is blocked by every other slice, and a spec's end-to-end test and spec-level check go in its PR as a closing-check section the spec run appends once those blockers land (`implement-spec/SKILL.md` § The closing check), never in a ticket of their own
+- Each slice is sized to fit in a single fresh context window
+- Any prefactoring should be done first
 
-</slice-rules>
+</vertical-slice-rules>
 
-Give each ticket its **blocking edges** — the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
+Give each ticket its **blocking edges**: the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
 
-Give each ticket its **seams under test** — the public boundaries `/implement` will write its failing tests against (see the `tdd` skill for what a seam is). Name the interface, not the internals. Agreeing them here is what makes them the "pre-agreed seams" `/implement` needs, so implementation never starts without a place to put the red test.
-
-**Wide refactors are the exception to the one-ticket default.** A **wide refactor** is one mechanical change — rename a column, retype a shared symbol — whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no single slice can land green. Don't force it into one ticket; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch, and put the final verification in the last batch's PR — green is promised only there.
+**Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change (rename a column, retype a shared symbol) whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket; green is promised only there.
 
 ### 4. Quiz the user
 
 Present the proposed breakdown as a numbered list. For each ticket, show:
 
 - **Title**: short descriptive name
-- **Why this slice exists**: the disjoint files and what runs beside it (omit for a single ticket)
 - **Blocked by**: which other tickets (if any) must complete first
 - **What it delivers**: the end-to-end behaviour this ticket makes work
-- **Seams under test**: the public boundaries its tests will be written against
 
 Ask the user:
 
-- Is one ticket enough? (the default; each extra slice needs its reason above)
-- Are the blocking edges correct — does each ticket only depend on tickets that genuinely gate it?
-- Are the seams the right ones to test at?
-- Should any slices be merged into a neighbour?
+- Does the granularity feel right? (too coarse / too fine)
+- Are the blocking edges correct: does each ticket only depend on tickets that genuinely gate it?
+- Should any tickets be merged or split further?
 
 Iterate until the user approves the breakdown.
 
 ### 5. Publish the tickets to the configured tracker
 
-Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured — the tickets are the same either way, only the shape of the blocking edges changes:
+Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured; the tickets are the same either way, only the shape of the blocking edges changes:
 
-- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below — one ticket per file, never a single combined file.
-- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Set the platform's **native blocking** / sub-issue relationship where it has one (on GitHub, `gh issue edit <n> --add-blocked-by <#>`) — and write the `## Blocked by` section **in addition to** it, never instead of it. When the source is a parent issue, link each published ticket as a child using the issue tracker doc's parent-linking convention **immediately after publishing it, before the next one** — a crash then leaves the parent with children, so a re-run stops at step 1's guard and lists them, where publishing all first and linking after leaves a parent with none and a re-run slices again and publishes a duplicate set. Verify the parent reports the full ticket count as children before finishing. One window is left: a crash between publishing the first ticket and linking it leaves the parent with no children, and a re-run then slices again — when a run was interrupted, check the tracker for tickets already carrying this parent in their `## Parent` section before re-slicing, and report a count short of the plan to the user rather than re-slicing.
-
-On a tracker, **never omit the `## Blocked by` section** — not on a tracker with native edges, and not on a ticket with no blockers, where it reads `None — can start immediately.` A ticket with neither native edges nor that section reads as **unresolved**, not unblocked, and is never dispatched: the frontier reader treats silence as its own answer rather than guessing. Write the section in the grammar that reader parses — the heading exactly `Blocked by`, one bare `#NNN` per blocking issue in this repo, or the literal `None`. The grammar and what each answer means: `~/.agents/skills/burndown/references/frontier.md`.
-
-Either way, give each ticket exactly one of three triage roles — its label on a tracker, its **Status** line in a local file: `ready-for-agent` when it is fully specified and an agent can build it unattended; `ready-for-human` when it is specified but a human builds it (a taste call, credentials, something the user wants to write themselves); `needs-info` when it needs grilling first. A ticket genuinely too unclear to call is `needs-info`, with its body saying what is unclear. Never `needs-triage` — that role is for issues outside people open. Why: a ticket marked ready is dispatched as it stands, so one that still needs grilling must carry `needs-info` or it gets built before anyone grills it.
+- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below: one ticket per file, never a single combined file.
+- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. If the source was an existing issue, make each ticket its sub-issue (tracker doc's operation). Apply the `ready-for-agent` triage label unless instructed otherwise; the tickets are agent-grabbable by construction.
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
-When the source was a tracker issue — a spec or plan these tickets now decompose — keep its `ready-for-agent` label and add `spec`. The `spec` label marks the issue as a parent reference for a burn to hand to `/implement-spec`; plain `implement-dispatch` refuses a `spec`-labelled issue, so the label does not send an ordinary agent to build it unsliced. Leave the issue open as the tickets' parent reference; don't otherwise edit its contents.
+Do NOT close or modify any parent issue.
 
 <local-ticket-template>
 
-# <NN> — <Ticket title>
+# <NN>: <Ticket title>
 
-**TL;DR:** one or two sentences of plain English — what this ticket gets working, said so anyone (non-engineer included) understands it. No domain jargon, no coined terms, no glossary words that need a gloss. Everything below this line may use the project's full technical vocabulary freely.
+**What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer-by-layer implementation list.
 
-**What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective — not a layer-by-layer implementation list.
+**Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
 
-**Why this slice exists:** the disjoint files and what runs beside it, when the work is sliced; omit for a single ticket.
-
-**Blocked by:** the numbers/titles of the tickets that gate this one, or "None — can start immediately".
-
-**Seams under test:** the public boundaries the tests go against — user-approved, so `/implement` writes its failing tests here without asking again.
-
-**Status:** the triage role step 5 chose — ready-for-agent, ready-for-human, or needs-info
+**Status:** ready-for-agent
 
 - [ ] Acceptance criterion 1
 - [ ] Acceptance criterion 2
@@ -107,35 +87,19 @@ When the source was a tracker issue — a spec or plan these tickets now decompo
 
 A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
 
-## TL;DR
-
-One or two sentences of plain English — what this ticket gets working, said so anyone (non-engineer included) understands it. No domain jargon, no coined terms, no glossary words that need a gloss. Every section below may use the project's full technical vocabulary freely.
-
 ## What to build
 
-The end-to-end behaviour this ticket makes work, from the user's perspective — not layer-by-layer implementation.
+The end-to-end behaviour this ticket makes work, from the user's perspective, not layer-by-layer implementation.
 
 ## Acceptance criteria
 
 - [ ] Criterion 1
 - [ ] Criterion 2
 
-## Why this slice exists
-
-The disjoint files and what runs beside it, when the work is sliced; omit this section for a single ticket.
-
 ## Blocked by
 
-- A reference to each blocking ticket, or "None — can start immediately".
-
-## Seams under test
-
-- The public boundaries the tests go against — user-approved, so `/implement` writes its failing tests here without asking again.
+- A reference to each blocking ticket, or "None (can start immediately)". Omit this section when blockers were set as native edges.
 
 </issue-template>
 
-In either form, avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
-
-Publishing local ticket files, and amending them later, both change tracked files in the working checkout. Commit and push them to main before the next `/implement` — that command branches from the pushed main, so an uncommitted ticket edit is either missing inside the worktree or duplicated into it, and a duplicate that then advances on the branch conflicts when the work ships.
-
-Work the frontier one ticket at a time with `/implement`, clearing context between tickets.
+In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.

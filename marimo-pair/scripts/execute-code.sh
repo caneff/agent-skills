@@ -13,8 +13,6 @@
 # Auth: set MARIMO_TOKEN env var (preferred) or pass --token TOKEN (visible in ps).
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
-
 usage() {
   echo "Usage: execute-code.sh --url URL [--file PATH | --session ID] -c 'code'" >&2
   echo "       execute-code.sh --url URL [--file PATH | --session ID] -" >&2
@@ -71,7 +69,14 @@ else
   usage
 fi
 
-require_tools jq curl
+missing=""
+for tool in jq curl; do
+  command -v "$tool" >/dev/null 2>&1 || missing="${missing:+$missing, }$tool"
+done
+if [[ -n "$missing" ]]; then
+  echo "execute-code.sh needs ${missing} on PATH." >&2
+  exit 1
+fi
 
 base="${url%/}"
 
@@ -94,13 +99,17 @@ case "$url_host" in
   *)
     # Under WSL the gateway is the Windows host running this distro, not a
     # remote machine.
-    gateway=$(find_gateway)
+    gateway=""
+    if command -v ip >/dev/null 2>&1; then
+      gateway=$(ip route show default 2>/dev/null | awk 'NR == 1 { print $3 }') || gateway=""
+    fi
     if [[ -z "$gateway" || "$url_host" != "$gateway" ]]; then
       echo "Warning: connecting to non-local server '${url_host}'. Ensure this is trusted." >&2
     fi
     ;;
 esac
 
+# Build optional auth header
 auth_args=()
 if [[ -n "$token" ]]; then
   auth_args+=(-H "Authorization: Bearer ${token}")
@@ -115,7 +124,7 @@ else
     echo "Failed to connect to marimo server at ${base}" >&2
     case "$base" in
       *//127.0.0.1:*|*//localhost:*)
-        if [[ "$(detect_platform)" == wsl ]]; then
+        if [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
           echo "Under WSL, 127.0.0.1 is the distro's own loopback, not the Windows host's." >&2
           echo "Run discover-servers.sh and use the url it reports." >&2
         fi

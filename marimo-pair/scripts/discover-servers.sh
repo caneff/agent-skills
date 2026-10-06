@@ -16,11 +16,24 @@
 # Pass `url` straight to execute-code.sh --url.
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+missing=""
+for tool in jq curl; do
+  command -v "$tool" >/dev/null 2>&1 || missing="${missing:+$missing, }$tool"
+done
+if [[ -n "$missing" ]]; then
+  echo "discover-servers.sh needs ${missing} on PATH." >&2
+  exit 1
+fi
 
-require_tools jq curl
+# ---------------------------------------------------------------- platform ---
 
-platform=$(detect_platform)
+if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
+  platform=windows
+elif [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+  platform=wsl
+else
+  platform=posix
+fi
 
 # Path to a Windows executable. With appendWindowsPath=false interop still
 # works, it is just not on PATH.
@@ -36,6 +49,8 @@ windows_exe() {
   printf '%s\n' "$sys32/$name"
 }
 
+# ------------------------------------------------------- registry locations ---
+#
 # Origin is tracked per directory, not guessed from an entry's path: a Linux box
 # may well keep its home under a mount point.
 
@@ -63,6 +78,8 @@ if [[ "$platform" == wsl ]] && cmd_exe=$(windows_exe cmd.exe); then
   fi
 fi
 
+# ---------------------------------------------------------------- liveness ---
+#
 # A server is live if its process is running or something answers at its
 # address. Neither signal is reliable alone — Windows recycles PIDs, and a
 # healthy server can be unreachable across the WSL boundary — so an entry is
@@ -108,15 +125,29 @@ process_alive() {
   return 1
 }
 
+# ------------------------------------------------------------ reachability ---
+
 gateway=""
 gateway_resolved=false
 
-# Memoize lib.sh's find_gateway: this script may need it from several call
-# sites (candidate_hosts, the trailer loop) and it shells out to `ip`.
-resolve_gateway() {
+# The default gateway, which under WSL NAT is the Windows host.
+find_gateway() {
+  local hex
   [[ "$gateway_resolved" == false ]] || return 0
   gateway_resolved=true
-  gateway=$(find_gateway)
+  if command -v ip >/dev/null 2>&1; then
+    # `|| gateway=""` keeps `set -e` from killing us before the fallback runs.
+    gateway=$(ip route show default 2>/dev/null | awk 'NR == 1 { print $3 }') || gateway=""
+  fi
+  if [[ -z "$gateway" && -r /proc/net/route ]]; then
+    # Without iproute2, read the default route (destination and mask zero)
+    # from the kernel. Its gateway field is little-endian hex.
+    hex=$(awk '$2 == "00000000" && $8 == "00000000" { print $3; exit }' /proc/net/route 2>/dev/null) || hex=""
+    if [[ "$hex" =~ ^[0-9A-Fa-f]{8}$ ]]; then
+      printf -v gateway '%d.%d.%d.%d' \
+        "0x${hex:6:2}" "0x${hex:4:2}" "0x${hex:2:2}" "0x${hex:0:2}"
+    fi
+  fi
 }
 
 is_private_ipv4() {
@@ -163,7 +194,7 @@ candidate_hosts() {
     *) echo "$host" ;;
   esac
 
-  resolve_gateway
+  find_gateway
   if [[ -n "$gateway" ]] && is_private_ipv4 "$gateway"; then
     echo "$gateway"
   fi
@@ -178,6 +209,7 @@ candidate_hosts() {
   esac
 }
 
+# Print a base URL that answered, or nothing.
 resolve_url() {
   local host=$1 port=$2 base_url=$3 origin=$4 candidate url
   while IFS= read -r candidate; do
@@ -193,6 +225,8 @@ resolve_url() {
   done <<<"$(candidate_hosts "$host" "$port" "$origin")"
   return 1
 }
+
+# ------------------------------------------------------------------- scan ---
 
 live_files=()
 live_origins=()
@@ -238,6 +272,8 @@ for ((i = 0; i < ${#dirs[@]}; i++)); do
   done
 done
 
+# ----------------------------------------------------------------- output ---
+
 entries=""
 for ((i = 0; i < live_count; i++)); do
   entry=$(jq -c --arg origin "${live_origins[$i]}" --arg url "${live_urls[$i]}" \
@@ -263,7 +299,7 @@ for ((i = 0; i < live_count; i++)); do
   port=${live_ports[$i]}
 
   if [[ "${live_origins[$i]}" == windows-host ]]; then
-    resolve_gateway
+    find_gateway
     echo "${id} is running on the Windows host (PID ${pid}) but answered at no address reachable from WSL." >&2
     case "$host" in
       0.0.0.0|::)
