@@ -35,7 +35,7 @@ Break the work into **tracer bullet** tickets.
 
 - Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests): vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable or verifiable on its own
-- Each slice is sized to fit in a single fresh context window: a plan too big for one worker is sliced until each piece fits
+- Each slice is sized to fit in a single fresh context window
 - Any prefactoring should be done first
 - With more than one slice, the last slice is blocked by every other slice, and a spec's end-to-end test and spec-level check go in its PR as a closing-check section the spec run appends once those blockers land (`implement-spec/SKILL.md` § The closing check), never in a ticket of their own
 
