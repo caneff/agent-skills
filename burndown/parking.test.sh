@@ -14,9 +14,9 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
 reference="$here/references/parking.md"
-context="$here/../GLOSSARY.md"
+glossary="$here/../GLOSSARY.md"
 
-for f in "$skill" "$reference" "$context"; do
+for f in "$skill" "$reference" "$glossary"; do
   [ -f "$f" ] || { echo "FAIL: missing $f" >&2; exit 1; }
 done
 
@@ -36,7 +36,7 @@ ruling_text="$(printf '%s\n' "$ruling" | flatten)"
 reference_text="$(flatten <"$reference")"
 # The Controller entry alone — the list a controller reads — and not the rest
 # of the glossary, which names controllers throughout.
-controller_text="$(sed -n '/^\*\*Controller\*\*:/,/^_Avoid_:/p' "$context" | flatten)"
+controller_text="$(sed -n '/^\*\*Controller\*\*:/,/^_Avoid_:/p' "$glossary" | flatten)"
 [ -n "$controller_text" ] || { echo "FAIL: GLOSSARY.md has no Controller entry" >&2; exit 1; }
 
 fail=0

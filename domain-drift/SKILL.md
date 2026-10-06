@@ -52,13 +52,13 @@ error to paper over.
   what `GLOSSARY.md` calls a `Run`).
 - **`misuse`** / `term-misuse` — a defined term is used in code for something
   the glossary says it is not (a variable named `parent` holding what the
-  glossary defines as a `blocker` — `GLOSSARY.md`'s own `_Avoid_` note may name
-  the mix-up directly).
+  glossary defines as a `blocker` — `GLOSSARY.md`'s own `_Avoid_` note may
+  name the mix-up directly).
 
 `extra` carries `should_be` (the displaced/correct term) and `source` (where
-it's defined, e.g. `GLOSSARY.md` or `docs/adr/0001-....md`). The displaced term
-must be named in both `failure` and `extra.should_be` — a finding that can't
-name the term it displaces is not a finding, per the one test above.
+it's defined, e.g. `GLOSSARY.md` or `docs/adr/0001-....md`). The displaced
+term must be named in both `failure` and `extra.should_be` — a finding that
+can't name the term it displaces is not a finding, per the one test above.
 
 ## The audit, worked
 
@@ -78,8 +78,8 @@ settled: a `consolidate` / `synonym-sprawl` finding, `should_be: "Run"`,
 `source: "GLOSSARY.md"`.
 
 Contrast a name the audit leaves alone: `cfg` in the same file. Generic,
-sure — but nothing in `GLOSSARY.md` or the ADRs defines a term `cfg` displaces.
-No finding.
+sure — but nothing in `GLOSSARY.md` or the ADRs defines a term `cfg`
+displaces. No finding.
 
 ## Out of scope
 

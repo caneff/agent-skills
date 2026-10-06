@@ -746,6 +746,11 @@ def test_mutation_worktree_is_removed_even_when_the_failure_report_raises():
         assert os.listdir(run.worktrees) == [], "the worktree must be removed on every exit path"
 
 
+def test_domain_drift_is_gated_on_the_glossary_file():
+    assert "GLOSSARY.md" in driver.GATED["domain-drift"], driver.GATED["domain-drift"]
+    assert "CONTEXT.md" not in driver.GATED["domain-drift"], driver.GATED["domain-drift"]
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
