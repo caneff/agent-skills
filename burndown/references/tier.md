@@ -2,7 +2,7 @@
 
 A ticket's **tier** is read off its `documentation` label at dispatch —
 present is light, absent is heavy (the **Tier** entry in
-[`../../CONTEXT.md`](../../CONTEXT.md)). A docs-only ticket whose author forgot the
+[`../../GLOSSARY.md`](../../GLOSSARY.md)). A docs-only ticket whose author forgot the
 label therefore gets the full heavy process for a page of prose. The exploration pass already knows each
 candidate's files before dispatch, so it **writes the missing label onto the
 ticket**, and takes a `documentation` label its code targets contradict back

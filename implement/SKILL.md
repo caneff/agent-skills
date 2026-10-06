@@ -130,7 +130,7 @@ owner's word turns it on.
 ## Control
 
 The controller is the session named in the brief; what it rules on and what
-it escalates is its entry in `~/.agents/skills/CONTEXT.md`. The brief's
+it escalates is its entry in `~/.agents/skills/GLOSSARY.md`. The brief's
 `--controller "<name>"` is the controller's herdr agent name when it has one,
 and a WSL restart renames its Claude session but not that. `SendMessage` takes
 only the session name, so **resolve before every send**:

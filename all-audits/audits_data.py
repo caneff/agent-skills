@@ -14,7 +14,7 @@ AUDITS = [
     {"name": "duplication", "gated": False, "short": False, "ground_truth": []},
     {"name": "error-handling", "gated": False, "short": False, "ground_truth": []},
     {"name": "docstring-coverage", "gated": False, "short": False, "ground_truth": []},
-    {"name": "domain-drift", "gated": True, "short": False, "ground_truth": ["CONTEXT.md", "docs/adr/"]},
+    {"name": "domain-drift", "gated": True, "short": False, "ground_truth": ["GLOSSARY.md", "docs/adr/"]},
     {"name": "type-tightness", "gated": True, "short": False, "ground_truth": []},
     {"name": "crap-audit", "gated": False, "short": False, "ground_truth": []},
 ]

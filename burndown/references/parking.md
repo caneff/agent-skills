@@ -43,7 +43,7 @@ workers into whatever is wrong with the run rather than with the tickets.
 
 ## The two escalation shapes added
 
-`CONTEXT.md`'s Controller entry already carried a spec-ruling change, a new
+`GLOSSARY.md`'s Controller entry already carried a spec-ruling change, a new
 dependency, an irreversible deletion, and a repo Chris does not own. Two
 more, from the burn:
 

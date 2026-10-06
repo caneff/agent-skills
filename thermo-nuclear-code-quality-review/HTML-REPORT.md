@@ -106,7 +106,7 @@ Close with a short section — a `vt-callout` holding a plain list — of the th
 
 Direct, serious, and demanding about quality. Name the problem plainly. Do not hedge it into a mild suggestion. Rank without mercy: the headline and the Blockers come first; the Nits ride along at the bottom or not at all.
 
-**Write the prose in Simplified Technical English** (see the SKILL.md "Write the review in plain language" section). Short sentences. One idea per sentence. Active voice, present tense. Use the **target repo's own domain terms** — its `CONTEXT.md` names them if it has one — instead of inventing new ones. Keep real technical terms (module, regex, atomic write). **Do not put this skill's metaphors — "code judo", "spaghetti", "seam leak" — into the card text.** A card that needs the dialect to be understood has failed; rewrite it.
+**Write the prose in Simplified Technical English** (see the SKILL.md "Write the review in plain language" section). Short sentences. One idea per sentence. Active voice, present tense. Use the **target repo's own domain terms** — its `GLOSSARY.md` names them if it has one — instead of inventing new ones. Keep real technical terms (module, regex, atomic write). **Do not put this skill's metaphors — "code judo", "spaghetti", "seam leak" — into the card text.** A card that needs the dialect to be understood has failed; rewrite it.
 
 - Good: "This layout is written in three places. Change it and all three must stay the same."
 - Good: "One bad row stops the whole import. Skip the bad row and keep the rest."

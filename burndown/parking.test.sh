@@ -3,7 +3,7 @@
 # must have checked before it rules instead. Three park causes and no fourth
 # — every other blocker is a controller ruling, and a fourth cause added
 # quietly is how "the controller decides" erodes into "the controller asks".
-# Two docs: `burndown/SKILL.md` for the run's own policy, and `CONTEXT.md`'s
+# Two docs: `burndown/SKILL.md` for the run's own policy, and `GLOSSARY.md`'s
 # Controller entry, which is the escalation list every controller reads.
 # Prose assertions no Python harness can make.
 # BASH_SOURCE rather than `git rev-parse --show-toplevel`, and GIT_* scrubbed:
@@ -14,9 +14,9 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
 reference="$here/references/parking.md"
-context="$here/../CONTEXT.md"
+glossary="$here/../GLOSSARY.md"
 
-for f in "$skill" "$reference" "$context"; do
+for f in "$skill" "$reference" "$glossary"; do
   [ -f "$f" ] || { echo "FAIL: missing $f" >&2; exit 1; }
 done
 
@@ -36,8 +36,8 @@ ruling_text="$(printf '%s\n' "$ruling" | flatten)"
 reference_text="$(flatten <"$reference")"
 # The Controller entry alone — the list a controller reads — and not the rest
 # of the glossary, which names controllers throughout.
-controller_text="$(sed -n '/^\*\*Controller\*\*:/,/^_Avoid_:/p' "$context" | flatten)"
-[ -n "$controller_text" ] || { echo "FAIL: CONTEXT.md has no Controller entry" >&2; exit 1; }
+controller_text="$(sed -n '/^\*\*Controller\*\*:/,/^_Avoid_:/p' "$glossary" | flatten)"
+[ -n "$controller_text" ] || { echo "FAIL: GLOSSARY.md has no Controller entry" >&2; exit 1; }
 
 fail=0
 check_in() {
@@ -86,10 +86,10 @@ if [ "$clauses" -ne 2 ]; then
   fail=1
 fi
 
-# Rule 5: CONTEXT.md's Controller entry carries both new escalation shapes,
+# Rule 5: GLOSSARY.md's Controller entry carries both new escalation shapes,
 # since that entry — not this skill — is what every controller reads.
-check_in "$controller_text" 'the spec is silent' CONTEXT.md
-check_in "$controller_text" 'a lane-mandated step the harness refuses' CONTEXT.md
+check_in "$controller_text" 'the spec is silent' GLOSSARY.md
+check_in "$controller_text" 'a lane-mandated step the harness refuses' GLOSSARY.md
 
 # Rule 6: the reference carries the evidence each clause came from, so the
 # next reader can weigh it rather than only obey it.

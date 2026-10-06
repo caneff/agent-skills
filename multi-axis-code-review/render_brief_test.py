@@ -64,6 +64,12 @@ def main():
         src = section(out, "Standards sources") or ""
         check("a standards file present in the worktree is listed", "CODING_STANDARDS.md" in src, src)
         check("a standards file absent from the worktree is not listed", "CONTRIBUTING.md" not in src, src)
+        open(os.path.join(wt, "GLOSSARY.md"), "w").write("x\n")
+        _, out_g, _ = render(wt, diff)
+        src_g = section(out_g, "Standards sources") or ""
+        check("the domain glossary present in the worktree is listed as GLOSSARY.md",
+              "GLOSSARY.md" in src_g, src_g)
+        os.remove(os.path.join(wt, "GLOSSARY.md"))
         dc = section(out, "Defect classes") or ""
         check("defect-classes.md absent: the three shapes are inline and the file is not named as a source",
               all(s in dc for s in SHAPES) and "defect-classes.md" not in src, dc)

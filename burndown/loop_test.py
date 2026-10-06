@@ -220,7 +220,7 @@ def test_picks_holds_a_nested_directory():
 def test_picks_does_not_treat_the_repo_root_as_a_shared_directory():
     candidates = [
         {"tickets": [1], "files": ["AGENTS.md"]},
-        {"tickets": [2], "files": ["CONTEXT.md"]},
+        {"tickets": [2], "files": ["GLOSSARY.md"]},
     ]
     picked, held = loop.picks(loop.frontier(candidates, []), 2)
     assert [c["tickets"] for c in picked] == [[1], [2]]

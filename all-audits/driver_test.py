@@ -383,7 +383,7 @@ def test_decide_and_head_sha_ignore_leaked_git_dir():
 
         with _leaked_git_env(victim):
             leaked_sha = driver.head_sha(repo)
-            d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
+            d = driver.decide(repo, "domain-drift", ["GLOSSARY.md"], base=cache_dir)
 
         assert leaked_sha == sha, "head_sha must read the repo it was handed, not the leaked GIT_DIR"
         assert d.run is False, d
@@ -429,7 +429,7 @@ def test_cache_decision_bad_sha_forces_run():
                 "report_dir": os.path.join(cache_dir, "nope"),
             }
         })
-        d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
+        d = driver.decide(repo, "domain-drift", ["GLOSSARY.md"], base=cache_dir)
         assert d.run is True, d
 
 
@@ -446,7 +446,7 @@ def test_cache_decision_clean_recent_repo_skips():
                 "report_dir": report_dir,
             }
         })
-        d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
+        d = driver.decide(repo, "domain-drift", ["GLOSSARY.md"], base=cache_dir)
         assert d.run is False, d
         assert d.report_dir == report_dir
 
@@ -462,7 +462,7 @@ def test_corrupt_cache_record_forces_run():
         os.makedirs(os.path.dirname(record_path), exist_ok=True)
         with open(record_path, "w") as f:
             f.write('{"domain-drift": {"last_s')  # truncated mid-write
-        d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
+        d = driver.decide(repo, "domain-drift", ["GLOSSARY.md"], base=cache_dir)
         assert d.run is True, d
 
 
@@ -477,7 +477,7 @@ def test_legacy_cache_entry_missing_report_dir_forces_run():
                 # no "report_dir" — a legacy/incomplete entry
             }
         })
-        d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
+        d = driver.decide(repo, "domain-drift", ["GLOSSARY.md"], base=cache_dir)
         assert d.run is True, d
 
 
@@ -744,6 +744,11 @@ def test_mutation_worktree_is_removed_even_when_the_failure_report_raises():
         except OSError:
             pass
         assert os.listdir(run.worktrees) == [], "the worktree must be removed on every exit path"
+
+
+def test_domain_drift_is_gated_on_the_glossary_file():
+    assert "GLOSSARY.md" in driver.GATED["domain-drift"], driver.GATED["domain-drift"]
+    assert "CONTEXT.md" not in driver.GATED["domain-drift"], driver.GATED["domain-drift"]
 
 
 def main():

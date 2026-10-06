@@ -6,7 +6,7 @@ argument-hint: "[path]"
 ---
 
 Sweep the code in scope and check it against the project's own ubiquitous
-language — the terms `CONTEXT.md` and `docs/adr/` already define. Code that
+language — the terms `GLOSSARY.md` and `docs/adr/` already define. Code that
 drifts from those terms makes every reader re-translate between what the docs
 call a thing and what the code calls it.
 
@@ -30,15 +30,15 @@ disagreement — and only that — is in scope.
 
 ## Extract the term set first — and print it
 
-Before judging anything, read every `CONTEXT.md` in the repo (root and
-nested, e.g. `<some-skill>/docs/CONTEXT.md`) and every file under
+Before judging anything, read every `GLOSSARY.md` in the repo (root and
+nested, e.g. `<some-skill>/docs/GLOSSARY.md`) and every file under
 `docs/adr/`, and build the term set: each defined noun/verb, its definition,
 and its source file. Glossary entries (`**Term** — definition`) and ADR
 decision titles/bodies that name a concept both count.
 
 Print this term set at the top of the report, verbatim — term, one-line gloss,
 source. **A wrong or incomplete extraction must be visible in the report, not
-silent** — if the repo has no `CONTEXT.md`/`docs/adr/`, the term set is empty
+silent** — if the repo has no `GLOSSARY.md`/`docs/adr/`, the term set is empty
 and the report says so plainly; that is a correct, boring result, not an
 error to paper over.
 
@@ -49,20 +49,20 @@ error to paper over.
   term is `Order`; `process()` where the term is `reconcile`).
 - **`consolidate`** / `synonym-sprawl` — two (or more) code names refer to the
   same concept the glossary treats as one term (`job` and `task` both meaning
-  what `CONTEXT.md` calls a `Run`).
+  what `GLOSSARY.md` calls a `Run`).
 - **`misuse`** / `term-misuse` — a defined term is used in code for something
   the glossary says it is not (a variable named `parent` holding what the
-  glossary defines as a `blocker` — `CONTEXT.md`'s own `_Avoid_` note may name
-  the mix-up directly).
+  glossary defines as a `blocker` — `GLOSSARY.md`'s own `_Avoid_` note may
+  name the mix-up directly).
 
 `extra` carries `should_be` (the displaced/correct term) and `source` (where
-it's defined, e.g. `CONTEXT.md` or `docs/adr/0001-....md`). The displaced term
-must be named in both `failure` and `extra.should_be` — a finding that can't
-name the term it displaces is not a finding, per the one test above.
+it's defined, e.g. `GLOSSARY.md` or `docs/adr/0001-....md`). The displaced
+term must be named in both `failure` and `extra.should_be` — a finding that
+can't name the term it displaces is not a finding, per the one test above.
 
 ## The audit, worked
 
-`CONTEXT.md` defines **Run** — "one orchestrator invocation, loops
+`GLOSSARY.md` defines **Run** — "one orchestrator invocation, loops
 plan→execute until the backlog drains." The code has two names fighting over
 that concept:
 
@@ -73,13 +73,13 @@ function runTask(id: string) { ... }        // scheduler.ts — same invocation
 
 Neither name is *wrong* on its own — `startJob` and `runTask` both read fine
 in isolation, which is exactly why a style pass would pass them. Set beside
-`CONTEXT.md`'s `Run`, they're two names for the one term the glossary already
+`GLOSSARY.md`'s `Run`, they're two names for the one term the glossary already
 settled: a `consolidate` / `synonym-sprawl` finding, `should_be: "Run"`,
-`source: "CONTEXT.md"`.
+`source: "GLOSSARY.md"`.
 
 Contrast a name the audit leaves alone: `cfg` in the same file. Generic,
-sure — but nothing in `CONTEXT.md` or the ADRs defines a term `cfg` displaces.
-No finding.
+sure — but nothing in `GLOSSARY.md` or the ADRs defines a term `cfg`
+displaces. No finding.
 
 ## Out of scope
 
@@ -138,7 +138,7 @@ specific, sourced term.
   drifted), `bucket` (`rename` / `consolidate` / `misuse`), `category`
   (`generic-standin` / `synonym-sprawl` / `term-misuse`), and `failure` naming
   the displaced term and the concrete confusion it causes ("reader sees `data`
-  and can't tell this is the `Order` `CONTEXT.md` defines without opening the
+  and can't tell this is the `Order` `GLOSSARY.md` defines without opening the
   file"). `extra` carries `should_be` and `source`.
 - **Summary** — the term set (term, gloss, source) printed in full at the
   top, then the verdict, the `N findings · R rename · C consolidate · M
