@@ -61,3 +61,33 @@ Daily classifier peaks: 10-03 had 29 denials over 9,091 calls (3.2/1k), and
 
 No tenfold rise in any measured series. The largest is hook blocks at about
 3.8x absolute.
+
+## Breakdown (second pass, same transcripts)
+
+Hook blocks come almost entirely from `block-dangerous-git.sh`: 75 before
+09-22 and 127 from 09-22 on. `require-agent-model.sh` accounts for 5 in all.
+Of the pattern names the block messages carry, the matches were
+`git branch -D` 44, `gh pr merge` 22 and `git reset --hard` / `reset --hard`
+14. The other messages carry no pattern name.
+
+The 10-03 and 10-04 classifier denials, 39 with a readable tool input:
+
+- 34 Bash, 4 Edit, 1 Skill.
+- Several are read-only commands: `resolve-controller` (3), `gh issue view`,
+  `claude auto-mode config | grep`, `grep` of RULES.md, `readlink`/`grep` of
+  settings, `git merge-base`/`git show`, `sed -n` of settings.json, and
+  `git status`/`git diff --quiet`.
+- They cluster in sessions that were editing `autoMode` or
+  `flow/claude/settings.json`, or probing a hook (implement-1366's
+  `probe-mod`). There, Self-Modification, Auto-Mode Bypass and Instruction
+  Poisoning fire on follow-up reads as well as on the edits.
+- The same shape recurred on 2026-10-06. A read-only
+  `git ls-files | wc -l; git status --porcelain | wc -l` was denied as
+  Irreversible Local Destruction right after the git hook blocked a
+  `git reset --hard`.
+
+Reading: the spike is contextual. Once a transcript holds a settings edit or
+a blocked destructive command, the classifier judges benign follow-up reads
+as pursuit of that outcome. The rule text alone does not account for it.
+Response (2026-10-06): an `autoMode.allow` entry for read-only git
+inspection, covering that shape explicitly.
