@@ -180,7 +180,7 @@ Rules:
 - Use active voice. Write "the importer skips the row", not "the row is skipped".
 - Use the present tense.
 - Use the same word for the same thing every time. Do not swap in synonyms.
-- Use the **target repo's own domain terms** exactly — its `CONTEXT.md` names them if it has one. Do not invent new names for them.
+- Use the **target repo's own domain terms** exactly — its `GLOSSARY.md` names them if it has one. Do not invent new names for them.
 - Keep real technical terms — module, regex, parser, atomic write, race condition, dataclass. These are the correct names, not jargon.
 - Remove the figurative and insider terms from the written finding. **This skill uses metaphors to steer _you_ — "code judo", "spaghetti", "thermo-nuclear", "leaks across the seam" — but they must not appear in the review.** Translate each into plain words that say what is actually true:
   - "there's a code-judo move here" → "one change removes the extra code"

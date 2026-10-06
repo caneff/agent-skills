@@ -3,7 +3,7 @@
 Pointer target for `CLAUDE.md` § Work, for a session doing this with no
 `implement` or `burndown` skill loaded; those skills carry the dispatch,
 review and merge procedure themselves. One lane: dispatch, control, wait,
-status, merge preconditions, end. Terms as `~/.agents/skills/CONTEXT.md`
+status, merge preconditions, end. Terms as `~/.agents/skills/GLOSSARY.md`
 defines them.
 
 ## Dispatch
@@ -131,7 +131,7 @@ defines them.
 
 - The dispatching session is the worker's **controller**: what passes
   between them is `implement/SKILL.md` § Control, and what the controller
-  escalates to me is its entry in `~/.agents/skills/CONTEXT.md`.
+  escalates to me is its entry in `~/.agents/skills/GLOSSARY.md`.
 - A subagent or teammate sends its final report with `SendMessage` to the
   agent that sent the brief, by that agent's name, as the last act of its
   turn — never to team-lead or main by default. If that agent has exited,

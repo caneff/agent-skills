@@ -51,7 +51,7 @@ A `§ <Heading>` cross-reference in Markdown is checked by
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 ## End-to-end seam
 

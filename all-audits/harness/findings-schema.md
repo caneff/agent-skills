@@ -44,7 +44,7 @@ for the facts: the summary is drawn from this file, never the reverse. Fields:
   bending the shared schema to fit it. Examples: a tool-confidence percentage
   carried through unmodified (`{"confidence": 60}`), a suggested replacement
   value (`{"suggested_type": "Sequence[int]", "severity": "blanket"}`), a
-  ground-truth citation (`{"should_be": "Order", "source": "CONTEXT.md"}`), a
+  ground-truth citation (`{"should_be": "Order", "source": "GLOSSARY.md"}`), a
   clone-size metric (`{"clone_tokens": 42}`), or a mutation-test outcome
   (`{"mutant": "flip <", "killed": false, "survived": true}`). Omit entirely
   when a skill has nothing extra to say.

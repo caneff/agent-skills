@@ -12,7 +12,7 @@
 ## Where things are
 
 - Coding + testing standards → [`CODING_STANDARDS.md`](CODING_STANDARDS.md)
-- Domain / context → `CONTEXT.md` (see `docs/agents/` for consumer rules)
+- Domain / context → `GLOSSARY.md` (see `docs/agents/` for consumer rules)
 - Source: `src/<pkg>/`; tests are interleaved as `*_test.py` next to the code
 
 ## Conventions (summary — full rules in CODING_STANDARDS.md)

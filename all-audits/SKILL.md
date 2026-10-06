@@ -76,7 +76,7 @@ decision; `driver.decide`/`driver.update_cache` gather git state, read/write the
 location that survives the run-dir TTL prune (`RunDir` owns that folder layout
 and the 3-day prune, for both the sweep and mutation mode). Skip holds only when the tree is
 clean, fewer than `N` files (default 10) changed since the last-run SHA, no
-change touched `domain-drift`'s ground-truth (`CONTEXT.md`, `docs/adr/`), and the
+change touched `domain-drift`'s ground-truth (`GLOSSARY.md`, `docs/adr/`), and the
 last run is within the time backstop (default 30 days).
 
 **Ignore file.** A repo can carry `.audit-ignore.md` at its root to suppress

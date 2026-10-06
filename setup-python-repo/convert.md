@@ -13,7 +13,7 @@ Read and note the current state:
 - Layout — flat (`<pkg>/` at root) vs src (`src/<pkg>/`).
 - Test naming — `test_*.py` (legacy) vs `*_test.py` (target).
 - Existing `.pre-commit-config.yaml`, CI workflows, `.githooks/`, hooks.
-- `CLAUDE.md` / `AGENTS.md` / `CONTEXT.md` — don't overwrite prose a human wrote.
+- `CLAUDE.md` / `AGENTS.md` / `GLOSSARY.md` — don't overwrite prose a human wrote.
 
 Present a short before→after diff and the migration plan. Get a nod before
 editing if anything is destructive.

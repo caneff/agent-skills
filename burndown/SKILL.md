@@ -7,7 +7,7 @@ disable-model-invocation: true
 A **burn**: one mixed-origin ticket queue, drained to empty as one run. You
 are the **controller** — a session on a primary checkout's default branch,
 dispatching a worker per clump and ruling on what comes back. The terms are
-`~/.agents/skills/CONTEXT.md`'s; a worker's own job is
+`~/.agents/skills/GLOSSARY.md`'s; a worker's own job is
 [`implement`](~/.agents/skills/implement/SKILL.md).
 
 One spec's slices are a different run and a different policy:
@@ -437,7 +437,7 @@ does is send the closing report (§ The closing report) to Chris rather than
 dispatch again.
 
 **Escalation.** The controller's escalation list lives in
-[`CONTEXT.md`](../CONTEXT.md)'s Controller entry. Two of its shapes are this
+[`GLOSSARY.md`](../GLOSSARY.md)'s Controller entry. Two of its shapes are this
 run's to recognise: *the spec is silent on something the user needs*, which is
 a gap and not a change to a ruling, and *a lane-mandated step the harness
 refuses*, the one escalation where the controller **structurally** cannot
