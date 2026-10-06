@@ -1,5 +1,5 @@
 interface:
   display_name: "To Tickets"
-  short_description: "Turn a plan into one ticket, or a few parallel ones"
+  short_description: "Break a plan into tracer-bullet tickets, each sized for one worker"
 policy:
   allow_implicit_invocation: false

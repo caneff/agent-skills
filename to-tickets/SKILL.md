@@ -1,11 +1,11 @@
 ---
 name: to-tickets
-description: Turn a plan, spec, or the current conversation into tickets on the configured tracker — one ticket by default, sliced only into pieces on disjoint files that can run at the same time, each declaring its blocking edges.
+description: Break a plan, spec, or the current conversation into tracer-bullet tickets on the configured tracker, each sized for one fresh worker and declaring its blocking edges.
 ---
 
 # To Tickets
 
-Turn a plan, spec, or conversation into **tickets**. The default output is **one** ticket. Slice into more only where the pieces touch disjoint files and can run at the same time; each slice declares the tickets that **block** it.
+Break a plan, spec, or conversation into a set of **tickets**: tracer-bullet vertical slices, each sized for one worker and each declaring the tickets that **block** it.
 
 The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
 
@@ -27,41 +27,41 @@ If you have not already explored the codebase, do so to understand the current s
 
 Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
 
-### 3. Draft the ticket, then slice only if you must
+### 3. Draft vertical slices
 
-Start from one ticket that carries the whole plan. Slice it only when pieces touch **disjoint files** and can run **at the same time**, so slicing buys parallel work. State in each slice's body **why each slice exists**: the disjoint files and what runs beside it. A piece that would take under a day's agent work is not a slice, and neither is a tracer-bullet shape for its own sake: fold it into a neighbour.
+Break the work into **tracer bullet** tickets.
 
-<slice-rules>
+<vertical-slice-rules>
 
-- A slice that is not disjoint from another is not a slice: merge them, or order them with a blocking edge when one must land first
+- Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests): vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable or verifiable on its own
-- Any prefactoring is done first, inside the first ticket that needs it
+- Each slice is sized to fit in a single fresh context window: a plan too big for one worker is sliced until each piece fits
+- Any prefactoring should be done first
 - With more than one slice, the last slice is blocked by every other slice, and a spec's end-to-end test and spec-level check go in its PR as a closing-check section the spec run appends once those blockers land (`implement-spec/SKILL.md` § The closing check), never in a ticket of their own
 
-</slice-rules>
+</vertical-slice-rules>
 
 Give each ticket its **blocking edges** — the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
 
 Give each ticket its **seams under test** — the public boundaries `/implement` will write its failing tests against (see the `tdd` skill for what a seam is). Name the interface, not the internals. Agreeing them here is what makes them the "pre-agreed seams" `/implement` needs, so implementation never starts without a place to put the red test.
 
-**Wide refactors are the exception to the one-ticket default.** A **wide refactor** is one mechanical change — rename a column, retype a shared symbol — whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no single slice can land green. Don't force it into one ticket; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch, and put the final verification in the last batch's PR — green is promised only there.
+**Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change — rename a column, retype a shared symbol — whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch, and put the final verification in the last batch's PR — green is promised only there.
 
 ### 4. Quiz the user
 
 Present the proposed breakdown as a numbered list. For each ticket, show:
 
 - **Title**: short descriptive name
-- **Why this slice exists**: the disjoint files and what runs beside it (omit for a single ticket)
 - **Blocked by**: which other tickets (if any) must complete first
 - **What it delivers**: the end-to-end behaviour this ticket makes work
 - **Seams under test**: the public boundaries its tests will be written against
 
 Ask the user:
 
-- Is one ticket enough? (the default; each extra slice needs its reason above)
+- Does the granularity feel right? (too coarse / too fine)
 - Are the blocking edges correct — does each ticket only depend on tickets that genuinely gate it?
 - Are the seams the right ones to test at?
-- Should any slices be merged into a neighbour?
+- Should any tickets be merged or split further?
 
 Iterate until the user approves the breakdown.
 
@@ -87,8 +87,6 @@ When the source was a tracker issue — a spec or plan these tickets now decompo
 **TL;DR:** one or two sentences of plain English — what this ticket gets working, said so anyone (non-engineer included) understands it. No domain jargon, no coined terms, no glossary words that need a gloss. Everything below this line may use the project's full technical vocabulary freely.
 
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective — not a layer-by-layer implementation list.
-
-**Why this slice exists:** the disjoint files and what runs beside it, when the work is sliced; omit for a single ticket.
 
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None — can start immediately".
 
@@ -119,10 +117,6 @@ The end-to-end behaviour this ticket makes work, from the user's perspective —
 
 - [ ] Criterion 1
 - [ ] Criterion 2
-
-## Why this slice exists
-
-The disjoint files and what runs beside it, when the work is sliced; omit this section for a single ticket.
 
 ## Blocked by
 
