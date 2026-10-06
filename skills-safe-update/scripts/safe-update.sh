@@ -8,7 +8,18 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
-git(){ command git -c user.email=skills@local -c user.name=skills "$@"; }
+
+# commit_staged <message> — commit what is staged, with the checkout's own
+# identity (no `-c user.*` override: the commit-identity guard refuses one, #1450).
+# Returns 0 when it committed, 3 when nothing was staged, and git's own status
+# when git refused — with its stderr left visible. A refusal must never read as
+# "nothing to commit".
+commit_staged(){
+  local rc=0
+  git diff --cached --quiet HEAD || rc=$?
+  case $rc in 0) return 3 ;; 1) ;; *) return "$rc" ;; esac
+  git commit -qm "$1" >/dev/null
+}
 
 # ---------------------------------------------------------- three-way merge
 
@@ -219,9 +230,8 @@ protect_skills(){
   # The commit gate. Markers in the tree must never reach a commit.
   [ ${#conflicted[@]} -eq 0 ] || return 0
   git add -A
-  if ! git diff --cached --quiet HEAD; then
-    git commit -qm "merge local edits with upstream (three-way)" >/dev/null
-  fi
+  local crc=0; commit_staged "merge local edits with upstream (three-way)" || crc=$?
+  [ "$crc" -eq 0 ] || [ "$crc" -eq 3 ] || return "$crc"
 }
 
 # ------------------------------------------------------------------- update
@@ -245,7 +255,10 @@ snap_lock(){ [ -f "$LOCK" ] && cp "$LOCK" "$SKILLS/.skill-lock.json"; }
 # 2. snapshot current state (so PRE holds your edits)
 snap_lock
 git add -A
-git commit -qm "pre-update snapshot $(date +%F)" >/dev/null 2>&1 || true
+rc=0; commit_staged "pre-update snapshot $(date +%F)" || rc=$?
+if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+  echo "pre-update snapshot commit failed (exit $rc) — nothing was updated" >&2; exit "$rc"
+fi
 PRE=$(git rev-parse HEAD)
 
 # capture the lock's upstream hashes BEFORE updating. skillFolderHash IS the
@@ -273,9 +286,12 @@ fi
 # 4. record upstream result (npx rewrote the live lock — mirror the new one in)
 snap_lock
 git add -A
-if ! git commit -qm "upstream: skills update $(date +%F)" >/dev/null 2>&1; then
-  echo "no upstream changes."; exit 0
-fi
+rc=0; commit_staged "upstream: skills update $(date +%F)" || rc=$?
+case $rc in
+  0) ;;
+  3) echo "no upstream changes."; exit 0 ;;
+  *) echo "upstream commit failed (exit $rc) — the update is staged, uncommitted" >&2; exit "$rc" ;;
+esac
 POST=$(git rev-parse HEAD)
 
 # 5. protect locally-edited skills: merge YOUR version with upstream's.
