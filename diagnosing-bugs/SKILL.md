@@ -1,6 +1,7 @@
 ---
 name: diagnosing-bugs
-description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
+description: >-
+  Diagnose hard bugs, hangs, and performance regressions. Use when the user says "diagnose" or "debug this", or reports something broken, failing, hanging, getting cut off, behaving weirdly, or stuck waiting.
 ---
 
 # Diagnosing Bugs
@@ -19,7 +20,7 @@ If the redacted output is not enough to diagnose the bug, say so and ask the use
 
 **This is the skill.** Everything else is mechanical. If you have a **tight** pass/fail signal for the bug (one that goes red on _this_ bug), you will find the cause; bisection, hypothesis-testing, and instrumentation all just consume it. If you don't have one, no amount of staring at code will save you.
 
-Spend disproportionate effort here. **Be aggressive. Be creative. Refuse to give up.**
+Spend disproportionate effort here: try the constructions below until one meets the completion criterion.
 
 ### Ways to construct one, in roughly this order
 

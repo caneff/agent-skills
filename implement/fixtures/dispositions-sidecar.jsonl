@@ -1,0 +1,3 @@
+{"id": "S1", "outcome": "fixed", "sha": "0123abc"}
+{"id": "P1", "outcome": "disputed", "reason": "the ticket's AC 2 asks for exactly this wording"}
+{"id": "C1", "outcome": "moved", "ticket": 1234}
