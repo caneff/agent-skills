@@ -2578,17 +2578,22 @@ fn the_integration_branch_push_never_overwrites_one_pushed_since_the_fetch() {
     f.reset_home(true);
     let name = "sudokumaker-custom-constraints";
     let repo = f.mkfixture(name, "main");
-    // Another session's clone, holding a spec-395 it pushes in the gap.
-    let other = f.tmp.path().join("other");
     let origin = origin_of(&f, name);
-    let git = |dir: &std::path::Path, args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(dir).args(args).status().unwrap().success(), "git {args:?}");
-    git(f.tmp.path(), &["clone", "-q", origin.to_str().unwrap(), other.to_str().unwrap()]);
-    git(&other, &["-c", "user.email=o@example.com", "-c", "user.name=o", "commit", "-q", "--allow-empty", "-m", "theirs"]);
-    let theirs = git_out(&other, &["rev-parse", "HEAD"]);
-    let before = format!("\"$REAL_GIT\" -C '{}' push -q origin HEAD:refs/heads/spec-395", other.display());
+    // Another session's spec-395, one commit past origin/main, pushed in the
+    // gap between this run's fetch and its push. Made in this clone so the
+    // commit-identity guard can read it: the refusal must be git's own.
+    let theirs = String::from_utf8(
+        std::process::Command::new("git").arg("-C").arg(&repo).args(["commit-tree", "-m", "theirs", "-p", "origin/main", "origin/main^{tree}"]).output().unwrap().stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    let before = format!("\"$REAL_GIT\" -C '{}' push -q origin {theirs}:refs/heads/spec-395", repo.display());
     let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "3"), ("GIT_BEFORE_PUSH", &before)]);
     let out = f.dispatch_with_git_hang(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario, "no-call-hangs-1458");
-    assert!(!out.status.success(), "{}", out_text(&out));
-    assert!(out_text(&out).contains("pushing the integration branch failed"), "{}", out_text(&out));
+    let text = out_text(&out);
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("pushing the integration branch failed"), "{text}");
+    assert!(!text.contains("commit-identity guard"), "refused by the guard, not by git: {text}");
     assert_eq!(git_out(&origin, &["rev-parse", "refs/heads/spec-395"]), theirs, "the push overwrote another session's spec-395");
 }
