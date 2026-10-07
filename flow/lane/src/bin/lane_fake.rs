@@ -378,7 +378,8 @@ fn run_gh(args: &[String]) -> ExitCode {
 
 /// `pr list --head <b> --state merged --json ... --jq ...`: a merged PR #7
 /// for each branch with a file under `$GH_PR_HEADS` (`/` spelled `__`)
-/// holding the sha that PR merged at; nothing for any other branch.
+/// holding the sha that PR merged at, and the base it merged into; nothing
+/// for any other branch.
 /// The `closingIssuesReferences` form is answered separately, from
 /// `$GH_PR_CLOSES`.
 fn gh_pr_list(args: &[String]) -> ExitCode {
@@ -399,23 +400,28 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
         }
         return ExitCode::SUCCESS;
     };
-    // One merged PR per line, `<number> <oid>`. A line holding an oid alone
-    // is PR 7, the one-PR shape every fixture but the branch-name-reuse one
-    // records.
-    let prs: Vec<(String, String)> = body
+    // One merged PR per line, `<number> <oid> [<base>]`, the base `main`
+    // when the line names none. A line holding an oid alone is PR 7 into
+    // main, the one-PR shape every fixture but the branch-name-reuse and
+    // slice ones records.
+    let prs: Vec<(String, String, String)> = body
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| match l.split_whitespace().collect::<Vec<_>>()[..] {
-            [n, oid] => (n.to_string(), oid.to_string()),
-            _ => ("7".to_string(), l.trim().to_string()),
+            [n, oid, base] => (n.to_string(), oid.to_string(), base.to_string()),
+            [n, oid] => (n.to_string(), oid.to_string(), "main".to_string()),
+            _ => ("7".to_string(), l.trim().to_string(), "main".to_string()),
         })
         .collect();
     if jq {
-        for (n, oid) in &prs {
-            println!("{n} {oid}");
+        for (n, oid, base) in &prs {
+            println!("{n} {oid} {base}");
         }
     } else {
-        let items: Vec<String> = prs.iter().map(|(n, oid)| format!("{{\"number\":{n},\"headRefOid\":\"{oid}\"}}")).collect();
+        let items: Vec<String> = prs
+            .iter()
+            .map(|(n, oid, base)| format!("{{\"number\":{n},\"headRefOid\":\"{oid}\",\"baseRefName\":\"{base}\"}}"))
+            .collect();
         println!("[{}]", items.join(","));
     }
     ExitCode::SUCCESS

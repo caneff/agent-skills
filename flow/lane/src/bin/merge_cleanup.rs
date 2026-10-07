@@ -97,10 +97,19 @@ One holding files refuses with their true count and their real names, so
 directory the walk cannot read is not known to be empty, so it still
 refuses.
 
+Merged means landed on the default branch, by a merged PR whose head is the
+tip or, without gh, the tip being an ancestor of origin/<default>. A slice of
+a spec — a branch whose recorded base, `git config branch.<branch>.base`, is
+spec-<p> — also counts as merged once it has landed on spec-<p> the same way.
+A PR into any other base is not a landing: a branch with no recorded base
+merged only into some spec-* branch is refused.
+
 The claim clears with the merge: every ticket the branch's merged PR closes
 in this repo, plus the branch's own implement-<n>, loses its in-progress
 label and its assignees once that issue is closed. A clump lands as one PR
-closing several tickets, and its closingIssuesReferences is that list.
+closing several tickets, and its closingIssuesReferences is that list. A
+slice landed on spec-<p> clears its own ticket's claim while the ticket is
+still open, and leaves it open: the spec's integration PR closes it.
 
 Every local branch delete first records the tip under
 refs/deleted/<branch>@<short sha>, which
@@ -232,6 +241,9 @@ struct Merged {
     at: String,
     by: String,
     pr: Option<String>,
+    /// The spec integration branch it landed on, for a slice merged there
+    /// rather than into the default branch (#1460).
+    slice_of: Option<String>,
 }
 
 struct Cleanup {
@@ -1426,7 +1438,15 @@ impl Cleanup {
     /// merged and deleted 87 unlanded commits.) Without gh, fall back to the
     /// ancestor test — fetching first, since it reads origin/<default> and a
     /// stale ref there deletes a branch that is not merged.
+    ///
+    /// A slice (#1460) lands on its spec's integration branch first: the
+    /// base `implement-dispatch` recorded, `spec-<p>`, counts as a landing
+    /// alongside the default branch. Only those two do — a PR into any
+    /// other base, or a lone ticket's PR into some `spec-*`, is not this
+    /// branch's landing.
     fn is_merged(&self, path: &str, b: &str) -> Option<Merged> {
+        let default = default_branch(Path::new(path));
+        let slice_of = recorded_spec_base(path, b);
         if on_path("gh")
             && let Some(slug) = origin_slug(Path::new(path))
         {
@@ -1435,26 +1455,33 @@ impl Cleanup {
             let prs = quiet_stdout(
                 "gh",
                 &[
-                    "pr", "list", "--repo", &slug, "--head", b, "--state", "merged", "--json", "number,headRefOid", "--jq",
-                    r#".[] | "\(.number) \(.headRefOid)""#,
+                    "pr", "list", "--repo", &slug, "--head", b, "--state", "merged", "--json", "number,headRefOid,baseRefName", "--jq",
+                    r#".[] | "\(.number) \(.headRefOid) \(.baseRefName)""#,
                 ],
             )
             .unwrap_or_default();
             for line in prs.lines() {
                 let mut f = line.split_whitespace();
-                let (n, h) = (f.next().unwrap_or(""), f.next().unwrap_or(""));
-                if !h.is_empty() && h == tip {
-                    return Some(Merged { at: h.to_string(), by: format!("PR #{n}"), pr: Some(n.to_string()) });
+                let (n, h, into) = (f.next().unwrap_or(""), f.next().unwrap_or(""), f.next().unwrap_or(""));
+                if h.is_empty() || h != tip {
+                    continue;
+                }
+                let slice = slice_of.as_deref().filter(|s| *s == into).map(str::to_string);
+                if into == default || slice.is_some() {
+                    return Some(Merged { at: h.to_string(), by: format!("PR #{n}"), pr: Some(n.to_string()), slice_of: slice });
                 }
             }
         }
         quiet_ok("git", &["-C", path, "fetch", "-q", "origin"]);
-        let base = format!("origin/{}", default_branch(Path::new(path)));
-        if !quiet_ok("git", &["-C", path, "merge-base", "--is-ancestor", b, &base]) {
-            return None;
+        let landings = std::iter::once((default, None)).chain(slice_of.map(|s| (s.clone(), Some(s))));
+        for (into, slice) in landings {
+            let base = format!("origin/{into}");
+            if quiet_ok("git", &["-C", path, "merge-base", "--is-ancestor", b, &base]) {
+                let at = quiet_stdout("git", &["-C", path, "rev-parse", &base]).unwrap_or_default();
+                return Some(Merged { at, by: base, pr: None, slice_of: slice });
+            }
         }
-        let at = quiet_stdout("git", &["-C", path, "rev-parse", &base]).unwrap_or_default();
-        Some(Merged { at, by: base, pr: None })
+        None
     }
 
     /// Step 4's delete. `-d` first: it is the honest question, and it
@@ -1652,7 +1679,8 @@ impl Cleanup {
         // (the sweep table's "cleaned" word, and `main`'s gate on
         // `report_stale`). It sets `claim_clear_failed` instead, for the
         // caller to fold into its own exit code, same as `remote_delete_failed`.
-        self.claim_clear_failed = !self.clear_landed_claims(path, b, merged.as_ref().and_then(|m| m.pr.as_deref()));
+        let (pr, slice_of) = merged.as_ref().map_or((None, None), |m| (m.pr.as_deref(), m.slice_of.as_deref()));
+        self.claim_clear_failed = !self.clear_landed_claims(path, b, pr, slice_of);
         true
     }
 
@@ -1670,7 +1698,13 @@ impl Cleanup {
     /// which is what actually fails the run's exit code — with the exact
     /// re-run command on stderr, since that command is the only record of
     /// the edit that still needs to happen.
-    fn clear_landed_claims(&self, path: &str, b: &str, pr: Option<&str>) -> bool {
+    ///
+    /// A slice landing on its spec's integration branch (#1460, `slice_of`)
+    /// clears the branch's own ticket while it is still open: the
+    /// integration PR into the default branch closes it later, and GitHub
+    /// fills `closingIssuesReferences` only for a PR into the default
+    /// branch, so the ticket stays open until then.
+    fn clear_landed_claims(&self, path: &str, b: &str, pr: Option<&str>, slice_of: Option<&str>) -> bool {
         let Some(n) = ticket_number(b) else { return true };
         let what = format!("clearing #{n}'s in-progress label and assignee");
         if !on_path("gh") {
@@ -1714,7 +1748,8 @@ impl Cleanup {
 
         let mut cleared: Vec<String> = Vec::new();
         for t in &tickets {
-            match self.clear_one(&slug, t) {
+            let open_ok = slice_of.is_some() && t == n;
+            match self.clear_one(&slug, t, open_ok) {
                 Cleared::Done => cleared.push(format!("#{t}")),
                 Cleared::Failed => ok = false,
                 Cleared::Nothing => {}
@@ -1732,14 +1767,15 @@ impl Cleanup {
     /// One ticket's claim. A `gh issue view` that fails is reported, not
     /// treated as an open issue — an outage must not silently reproduce the
     /// stale claim #821 was filed over — but is still `Nothing`, since there
-    /// was never a known edit to lose.
-    fn clear_one(&self, slug: &str, n: &str) -> Cleared {
+    /// was never a known edit to lose. `open_ok` clears an open issue too:
+    /// a slice's own ticket, which its integration PR closes later.
+    fn clear_one(&self, slug: &str, n: &str, open_ok: bool) -> Cleared {
         let what = format!("clearing #{n}'s in-progress label and assignee");
         let Some(issue) = lane::issue_state::read(slug, n) else {
             skip(&what, "gh issue view failed");
             return Cleared::Nothing;
         };
-        if issue.state != "CLOSED" || !issue.has_label("in-progress") {
+        if !(issue.state == "CLOSED" || open_ok) || !issue.has_label("in-progress") {
             return Cleared::Nothing;
         }
         let mut edit = vec!["issue", "edit", n, "--repo", slug, "--remove-label", "in-progress"];
@@ -1896,6 +1932,15 @@ fn pr_closed_tickets(slug: &str, pr: Option<&str>) -> Result<Vec<u64>, String> {
         tickets.push(number);
     }
     Ok(tickets)
+}
+
+/// The spec integration branch `implement-dispatch` recorded `b` as a slice
+/// of (#1458): `branch.<b>.base` when it reads `spec-<digits>`, the only base
+/// dispatch records. Any other value is a key set by hand, and no slice.
+fn recorded_spec_base(path: &str, b: &str) -> Option<String> {
+    let base = quiet_stdout("git", &["-C", path, "config", "--get", &format!("branch.{b}.base")])?;
+    let p = base.strip_prefix("spec-")?;
+    (!p.is_empty() && p.chars().all(|c| c.is_ascii_digit())).then_some(base)
 }
 
 /// The ticket a plain `implement-<n>` branch was cut for: the digits after

@@ -2983,3 +2983,123 @@ fn a_clean_nested_worktree_in_an_untracked_directory_is_removed_with_its_parent(
     assert!(run.ok && !wt.exists(), "{}", run.text());
     assert!(!registered_names(&c, &other).contains("timing"), "{}", registered_names(&c, &other));
 }
+
+// --- #1460: a slice merged into its spec's integration branch ----------------
+
+/// A slice of spec 900 at `implement-<n>`, held by a linked worktree under the
+/// repo's `.claude/worktrees/`, as a dispatched slice's workspace is.
+fn slice_workspace(c: &Cleanup, rel: &str, n: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let r = c.mkfixture(rel);
+    c.mk_slice_branch(&r, n, "900");
+    let wt = r.join(".claude/worktrees").join(format!("implement-{n}"));
+    c.worktree_add(&r, &[s(&wt), &format!("implement-{n}")]);
+    (r, wt)
+}
+
+#[test]
+fn a_slice_merged_into_its_spec_branch_is_cleaned_up() {
+    let c = Cleanup::new();
+    let (r, wt) = slice_workspace(&c, "s1", "71");
+    let tip = c.rev(&r, "implement-71");
+    c.squash_into(&r, "implement-71", "spec-900");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-71"], &[("GH_STATE", "OPEN"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "implement-71"), "{}", run.text());
+    assert!(!c.has_branch(&c.root().join("s1.origin.git"), "implement-71"), "remote branch survived");
+    let short = c.git_out(&["-C", s(&r), "rev-parse", "--short", &tip]);
+    assert_eq!(c.rev(&r, &format!("refs/deleted/implement-71@{short}")), tip);
+}
+
+#[test]
+fn a_slice_merged_nowhere_is_refused() {
+    let c = Cleanup::new();
+    let (r, wt) = slice_workspace(&c, "s2", "72");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-72"], &[]);
+    assert!(!run.ok && run.stderr.contains("implement-72 is not merged"), "{}", run.text());
+    assert!(wt.exists() && c.has_branch(&r, "implement-72"), "{}", run.text());
+}
+
+#[test]
+fn a_lone_ticket_merged_only_into_a_spec_branch_is_refused() {
+    // No recorded base: a PR into spec-900 is not this branch's landing.
+    let c = Cleanup::new();
+    let (r, wt) = slice_workspace(&c, "s3", "73");
+    c.git_ok(&["-C", s(&r), "config", "--unset", "branch.implement-73.base"]);
+    c.squash_into(&r, "implement-73", "spec-900");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-73"], &[]);
+    assert!(!run.ok && run.stderr.contains("implement-73 is not merged"), "{}", run.text());
+    assert!(wt.exists() && c.has_branch(&r, "implement-73"), "{}", run.text());
+}
+
+#[test]
+fn a_slice_merged_into_another_specs_branch_is_refused() {
+    let c = Cleanup::new();
+    let (r, wt) = slice_workspace(&c, "s4", "74");
+    c.git_ok(&["-C", s(&r), "push", "-q", "origin", "main:spec-901"]);
+    c.squash_into(&r, "implement-74", "spec-901");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-74"], &[]);
+    assert!(!run.ok && run.stderr.contains("implement-74 is not merged"), "{}", run.text());
+    assert!(wt.exists() && c.has_branch(&r, "implement-74"), "{}", run.text());
+}
+
+#[test]
+fn a_recorded_base_that_names_no_spec_branch_is_no_slice() {
+    // `spec-<p>` is the only base dispatch records; any other value is a key
+    // set by hand, and a PR into it is not a landing.
+    let c = Cleanup::new();
+    let (r, wt) = slice_workspace(&c, "s5", "75");
+    c.git_ok(&["-C", s(&r), "push", "-q", "origin", "main:feature-x"]);
+    c.git_ok(&["-C", s(&r), "config", "branch.implement-75.base", "feature-x"]);
+    c.squash_into(&r, "implement-75", "feature-x");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-75"], &[]);
+    assert!(!run.ok && run.stderr.contains("implement-75 is not merged"), "{}", run.text());
+    assert!(wt.exists() && c.has_branch(&r, "implement-75"), "{}", run.text());
+}
+
+#[test]
+fn without_gh_a_slice_on_origin_spec_is_cleaned_and_a_lone_ticket_there_is_refused() {
+    let c = Cleanup::new();
+    let (r, wt) = slice_workspace(&c, "s6", "76");
+    // A real merge: origin/spec-900 fast-forwards to the slice's tip.
+    c.git_ok(&["-C", s(&r), "push", "-q", "origin", "implement-76:spec-900"]);
+    c.git_ok(&["-C", s(&r), "config", "--unset", "branch.implement-76.base"]);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-76"], &[]);
+    assert!(!run.ok && run.stderr.contains("implement-76 is not merged"), "{}", run.text());
+    assert!(wt.exists() && c.has_branch(&r, "implement-76"), "{}", run.text());
+
+    c.git_ok(&["-C", s(&r), "config", "branch.implement-76.base", "spec-900"]);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-76"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "implement-76"), "{}", run.text());
+}
+
+#[test]
+fn a_slice_landing_clears_its_open_tickets_claim_and_leaves_it_open() {
+    // The integration PR into main closes the slice ticket later; the claim
+    // is over now.
+    let c = Cleanup::new();
+    let (r, _wt) = slice_workspace(&c, "s7", "77");
+    c.squash_into(&r, "implement-77", "spec-900");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-77"],
+        &[("GH_STATE", "OPEN"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff")],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("clearing #77's in-progress label and assignee"), "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 77 --repo"), "{}", c.calls());
+    assert!(c.calls().contains("--remove-label in-progress") && c.calls().contains("--remove-assignee caneff"), "{}", c.calls());
+    assert!(!c.calls().contains("issue close") && !c.calls().contains("--state closed"), "{}", c.calls());
+}
+
+#[test]
+fn a_lone_tickets_open_claim_is_still_left_alone_after_a_main_merge() {
+    // The slice rule is the recorded base's, not every implement branch's.
+    let c = Cleanup::new();
+    let r = c.mkfixture("s8");
+    c.mk_implement_branch(&r, "78");
+    c.git_ok(&["-C", s(&r), "config", "branch.implement-78.base", "spec-900"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-78"], &[("GH_STATE", "OPEN"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!c.calls().contains("gh issue edit 78"), "{}", c.calls());
+}
