@@ -11,7 +11,9 @@
 //! HERDR_STALL for implement-dispatch; GH_PR_HEADS, HERDR_AGENTS,
 //! HERDR_WORKSPACES, HERDR_LIST_FAIL (only `agent list` fails), HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
 //! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup;
-//! GH_PR_STATUS for controller-restore's `--json number,state` PR lookup.
+//! GH_PR_STATUS for controller-restore's `--json number,state` PR lookup;
+//! GH_SUBISSUES_<n>, GH_PARENT_<n> and the `git` role's GIT_BEFORE_PUSH for a
+//! spec's integration branch (#1458).
 //! A third role, `git`, is a passthrough proxy to the real binary (`REAL_GIT`,
 //! an absolute path) rather than a scenario stub, since replicating real git
 //! is not this fake's job; `GIT_HANG`/`GH_HANG` (#849) make it or `gh` hang
@@ -220,6 +222,14 @@ fn run_git(args: &[String]) -> ExitCode {
         eprintln!("lane-fake: invoked as git with no REAL_GIT set; refusing rather than re-entering this proxy");
         return ExitCode::FAILURE;
     };
+    // `GIT_BEFORE_PUSH` (#1458): a shell command run just before a `push`
+    // reaches the real git, standing in for another session pushing between
+    // this run's fetch and its push.
+    if args.iter().any(|a| a == "push") {
+        if let Ok(cmd) = env::var("GIT_BEFORE_PUSH") {
+            let _ = std::process::Command::new("sh").args(["-c", &cmd]).status();
+        }
+    }
     match std::process::Command::new(&real).args(args).status() {
         Ok(status) => match status.code() {
             Some(0) => ExitCode::SUCCESS,
@@ -254,6 +264,17 @@ fn run_gh(args: &[String]) -> ExitCode {
             }
             let body = env::var(format!("GH_BODY_{n}")).or_else(|_| env::var("GH_BODY")).unwrap_or_default();
             println!("{body}");
+            return ExitCode::SUCCESS;
+        }
+        // `--json subIssuesSummary` is a spec's slice count (#1458):
+        // GH_SUBISSUES_<n>, else GH_SUBISSUES, else 0, as gh answers an
+        // issue with none; GH_SUBISSUES_FAIL_<n> fails the read.
+        if args.iter().any(|a| a == "subIssuesSummary") {
+            if env::var(format!("GH_SUBISSUES_FAIL_{n}")).is_ok() {
+                eprintln!("sub-issue read failed");
+                return ExitCode::FAILURE;
+            }
+            println!("{}", env::var(format!("GH_SUBISSUES_{n}")).or_else(|_| env::var("GH_SUBISSUES")).unwrap_or_else(|_| "0".into()));
             return ExitCode::SUCCESS;
         }
         let row = match env::var(format!("GH_ISSUE_{n}")) {
@@ -301,6 +322,26 @@ fn run_gh(args: &[String]) -> ExitCode {
         // Tab-delimited, matching lane::issue_state::read's `-q` query: a
         // label or login can hold a space but never a tab.
         println!("{row}");
+    }
+    // `api repos/<o>/<r>/issues/<n>/parent` (#1458): GH_PARENT_<n> is the
+    // parent's number; unset is gh's own 404 for a ticket with no parent,
+    // and GH_PARENT_FAIL_<n> any other failure.
+    let parent_of = if a0 == "api" { a1.strip_suffix("/parent").and_then(|p| p.rsplit('/').next()) } else { None };
+    if let Some(n) = parent_of {
+        if env::var(format!("GH_PARENT_FAIL_{n}")).is_ok() {
+            eprintln!("gh: Server Error (HTTP 502)");
+            return ExitCode::FAILURE;
+        }
+        return match env::var(format!("GH_PARENT_{n}")) {
+            Ok(p) => {
+                println!("{p}");
+                ExitCode::SUCCESS
+            }
+            Err(_) => {
+                eprintln!("gh: No parent issue found (HTTP 404)");
+                ExitCode::FAILURE
+            }
+        };
     }
     if (a0, a1) == ("issue", "edit") {
         // A comma-separated list of the ticket numbers whose edit fails, so

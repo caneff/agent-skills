@@ -315,7 +315,7 @@ pub fn out_text(out: &Output) -> String {
 }
 
 pub fn default_scenario() -> Vec<(&'static str, &'static str)> {
-    vec![("GH_STATE", "OPEN"), ("GH_LABELS", "enhancement,ready-for-agent"), ("HERDR_RUNNING", "true")]
+    vec![("GH_STATE", "OPEN"), ("GH_LABELS", "enhancement,ready-for-agent"), ("HERDR_RUNNING", "true"), ("GH_SUBISSUES", "1")]
 }
 
 pub fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
