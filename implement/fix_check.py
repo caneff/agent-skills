@@ -32,7 +32,10 @@ A slice of a spec run (#1459) runs no review wave: the spec is reviewed once
 on its integration branch. The check reads that from the base dispatch
 recorded, `git config branch.implement-<ticket>.base` naming `spec-<p>`, never
 from a missing dispositions file (defect class 1), and on such a branch it
-looks for no review file at all. No key, or a key naming anything else, is an
+looks for no review file at all. `origin/spec-<p>` must exist: a key left from
+an ended spec, or set by hand, is refused rather than read as a slice. It is
+not required to be an ancestor of the branch, since another slice landing
+moves it past a slice already built. No key, or a key naming anything else, is an
 ordinary ticket.
 
 A review the ledger records as skipped (`review_ledger.py append --type
@@ -70,8 +73,11 @@ class Unanswerable(Exception):
     """The environment cannot answer (git, gh or the cache): exit 2, not a verdict."""
 
 
-def git(*args):
+def git(*args, absent=None):
+    """git's stdout; None when it exits with `absent`, git's own "not there" code for the call."""
     done = subprocess.run(["git", *args], capture_output=True, text=True)
+    if absent is not None and done.returncode == absent:
+        return None
     if done.returncode != 0:
         raise Unanswerable(f"`git {' '.join(args)}` failed: {done.stderr.strip()}")
     return done.stdout.strip()
@@ -79,14 +85,8 @@ def git(*args):
 
 def slice_base(n):
     """`spec-<p>` when dispatch recorded ticket `n` as a slice of spec <p>, else None."""
-    done = subprocess.run(["git", "config", "--get", f"branch.implement-{n}.base"],
-                          capture_output=True, text=True)
-    if done.returncode == 1:  # git config's "key not set"
-        return None
-    if done.returncode != 0:
-        raise Unanswerable(f"`git config --get branch.implement-{n}.base` failed: {done.stderr.strip()}")
-    base = done.stdout.strip()
-    return base if SPEC_BASE.match(base) else None
+    base = git("config", "--get", f"branch.implement-{n}.base", absent=1)
+    return base if base and SPEC_BASE.match(base) else None
 
 
 def reviews_dir():
@@ -263,6 +263,9 @@ def check_disposition(obj, n, branch):
 def check(n, branch_name):
     if (spec := slice_base(n)):
         git("rev-parse", "--verify", f"{branch_name}^{{commit}}")
+        if git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{spec}", absent=1) is None:
+            return [f"branch.implement-{n}.base names {spec}, but origin/{spec} does not exist — a key "
+                    "left from an ended spec or set by hand is no slice; fetch, or remove the key"], ""
         return [], (f"{branch_name} is a slice of {spec}, no review wave: the spec is reviewed once on "
                     f"{spec} (branch.implement-{n}.base)")
     reviews = reviews_dir()

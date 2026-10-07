@@ -286,17 +286,18 @@ seam is the convergence check.
 branch dispatch recorded on a spec's integration branch:
 `git config branch.implement-<n>.base` reads `spec-<p>`, and the brief says
 so. The spec is reviewed once on `spec-<p>` after its last slice lands, so a
-slice keeps § Build: TDD with mutation and reuse before
-writing. Then it does three things. It merges `origin/spec-<p>` in with
+slice keeps § Build: TDD with mutation and reuse before writing. Then it does
+three things. It merges `origin/spec-<p>` in with
 `git fetch origin && git merge --no-edit origin/spec-<p>`. It runs
 `bash tests/all.sh --changed origin/spec-<p>` as its one suite run. It passes
 § Before the PR step 5's pre-report gate. No review wave, no Codex pass, no
 `dispositions-<n>.jsonl`, and no review-ledger row, not even a skip row: a
 skip row would read as an ablated review in the escape count. The merge check
 reads the same recorded key: `fix-check.sh <n>` exits 0 on a slice branch
-with no review files, saying `slice of spec-<p>, no review wave`, and the
-pre-report gate's clean-tree, ancestor and `.scratch/` checks still run. A
-branch with no recorded base is an ordinary ticket, and a missing
+with no review files, saying `slice of spec-<p>, no review wave`, as long as
+`origin/spec-<p>` exists; a key naming a spec branch that is gone is refused.
+The pre-report gate's clean-tree, ancestor and `.scratch/` checks still run.
+A branch with no recorded base is an ordinary ticket, and a missing
 dispositions file still fails it.
 
 1. **Run the wave.** The three axes of `/multi-axis-code-review` —

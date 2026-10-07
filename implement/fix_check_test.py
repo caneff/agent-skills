@@ -181,8 +181,21 @@ def slice_branch():
         w.git(w.primary, "config", "branch.implement-5.base", "main")
         case("a recorded base that is no spec-<p> keeps the review check", w, 1, "dispositions-5.jsonl is missing")
         w.git(w.primary, "config", "branch.implement-5.base", "spec-3")
+        case("a recorded spec-3 with no origin/spec-3 is no live slice: a stale or hand-set key", w, 1,
+             "origin/spec-3 does not exist")
+        w.git(w.primary, "push", "-q", "origin", "main:spec-3")
+        w.git(w.primary, "fetch", "-q", "origin")
         case("a slice of spec-3 needs no review sidecars and no dispositions", w, 0,
              "slice of spec-3, no review wave")
+        real_git = shutil.which("git", path=os.environ["PATH"])
+        with open(os.path.join(w.bin, "git"), "w") as fh:
+            fh.write('#!/usr/bin/env bash\n'
+                     'if [ "$1 $2" = "config --get" ]; then echo "bad config line 9" >&2; exit 3; fi\n'
+                     f'exec {real_git} "$@"\n')
+        os.chmod(os.path.join(w.bin, "git"), 0o755)
+        case("a recorded base git cannot read is the environment's, exit 2, never an ordinary ticket", w, 2,
+             "bad config line 9")
+        os.remove(os.path.join(w.bin, "git"))
         code, out = w.run(w.primary, "origin/implement-5")
         if code != 2 or "origin/implement-5" not in out:
             FAILS.append(f"FAIL: a slice head that was never pushed is still no PR head — want exit 2, got {code}: {out}")

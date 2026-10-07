@@ -201,6 +201,7 @@ git -C "$repo" worktree remove --force "$tmp/implement-7"
 # holds. A branch with no recorded base and no dispositions still fails.
 git -C "$repo" worktree add -q -b implement-8 "$tmp/implement-8" main
 git -C "$repo" config branch.implement-8.base spec-2
+git -C "$repo" branch -q spec-2 main; git -C "$repo" fetch -q origin  # the live integration branch the key names
 echo slice > "$tmp/implement-8/slice.txt"; git -C "$tmp/implement-8" add -A; git -C "$tmp/implement-8" commit -qm slice
 slice_tip=$(git -C "$tmp/implement-8" rev-parse HEAD)
 slice() { local sha=$1; shift; (cd "$tmp/implement-8" && HOME="$cache_home" "$@" bash "$gate" "$sha" 2>&1); }
