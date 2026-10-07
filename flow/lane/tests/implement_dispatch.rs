@@ -2433,7 +2433,7 @@ fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
     let wt = repo.join(".claude/worktrees/implement-395");
     assert_eq!(git_out(&wt, &["rev-parse", "HEAD"]), landed, "the slice did not branch from origin/spec-500");
     assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "spec-500");
-    let prompt = f.calls().lines().find(|l| l.starts_with("herdr agent prompt")).unwrap_or_default().to_string();
+    let prompt = prompt_line(&f);
     assert!(prompt.contains("/implement 395 --tier heavy --controller \"skills-ctl\" -- Slice of spec #500"), "{prompt}");
     assert!(prompt.contains("gh pr create --base spec-500"), "no PR base in the brief: {prompt}");
     assert!(prompt.contains("--changed origin/spec-500"), "no seam base in the brief: {prompt}");
@@ -2454,7 +2454,7 @@ fn a_lone_ticket_dispatches_from_origin_default_even_with_a_spec_branch_on_origi
     let wt = repo.join(".claude/worktrees/implement-395");
     assert_eq!(git_out(&wt, &["rev-parse", "HEAD"]), git_out(&repo, &["rev-parse", "origin/main"]));
     assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "", "a lone ticket got a base key");
-    let prompt = f.calls().lines().find(|l| l.starts_with("herdr agent prompt")).unwrap_or_default().to_string();
+    let prompt = prompt_line(&f);
     assert!(prompt.contains("/implement 395 --tier heavy --controller \"skills-ctl\" --wait"), "{prompt}");
     assert!(!prompt.to_lowercase().contains("slice"), "{prompt}");
 }
@@ -2468,11 +2468,13 @@ fn a_slice_whose_spec_has_no_integration_branch_dispatches_from_origin_default()
     push_spec_branch(&repo, "spec-600");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
-    assert!(out.status.success(), "{}", out_text(&out));
+    // Red here, not below, when a parent with no origin/spec-500 is read as
+    // a slice: its worktree add from origin/spec-500 fails.
+    assert!(out.status.success(), "a slice of a spec with no integration branch must dispatch from origin/main: {}", out_text(&out));
     let wt = repo.join(".claude/worktrees/implement-395");
     assert_eq!(git_out(&wt, &["rev-parse", "HEAD"]), git_out(&repo, &["rev-parse", "origin/main"]));
     assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "");
-    let prompt = f.calls().lines().find(|l| l.starts_with("herdr agent prompt")).unwrap_or_default().to_string();
+    let prompt = prompt_line(&f);
     assert!(!prompt.to_lowercase().contains("slice"), "{prompt}");
 }
 
@@ -2509,4 +2511,84 @@ fn a_clump_of_slices_of_one_spec_builds_on_its_integration_branch() {
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(git_out(&repo.join(".claude/worktrees/implement-395"), &["rev-parse", "HEAD"]), landed);
     assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "spec-500");
+}
+
+#[test]
+fn spec_mode_refuses_a_spec_with_no_linked_slices() {
+    // A spec is labelled when /to-tickets slices it, so no sub-issue means
+    // its slices are not linked, not that it has none.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "0")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "#395 has no sub-issues"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_ticket_whose_body_names_a_parent_with_no_sub_issue_link_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_spec_branch(&repo, "spec-500");
+    for body in ["## Parent\n\n#500\n", "Part of [Spec: x](https://github.com/caneff/sudokumaker-custom-constraints/issues/500).\n"] {
+        f.reset_home(true);
+        let scenario = with(&default_scenario(), &[("GH_BODY_395", body)]);
+        let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+        assert!(refused(&out, &f.calls(), &repo, "395", "no sub-issue link"), "{body:?}: {}", out_text(&out));
+    }
+}
+
+#[test]
+fn a_ticket_whose_body_says_its_parent_is_none_dispatches_as_a_lone_ticket() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_spec_branch(&repo, "spec-500");
+    let scenario = with(&default_scenario(), &[("GH_BODY_395", "## Parent\n\nNone\n\n## Blocked by\n\n- #12\n")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "");
+}
+
+#[test]
+fn a_spec_branch_deleted_on_origin_is_not_read_as_present() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_spec_branch(&repo, "spec-500");
+    let git = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&repo).args(args).status().unwrap().success(), "git {args:?}");
+    git(&["fetch", "-q", "origin"]);
+    // Deleted on origin itself, as GitHub deletes a branch: this clone's
+    // tracking ref survives until a fetch prunes it.
+    let origin = origin_of(&f, "sudokumaker-custom-constraints");
+    assert!(std::process::Command::new("git").arg("-C").arg(&origin).args(["update-ref", "-d", "refs/heads/spec-500"]).status().unwrap().success());
+    assert_ne!(git_out(&repo, &["rev-parse", "--verify", "-q", "origin/spec-500"]), "", "fixture: the stale ref should still be here");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let wt = repo.join(".claude/worktrees/implement-395");
+    assert_eq!(git_out(&wt, &["rev-parse", "HEAD"]), git_out(&repo, &["rev-parse", "origin/main"]), "a deleted spec-500 was built on");
+    assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "");
+}
+
+#[test]
+fn the_integration_branch_push_never_overwrites_one_pushed_since_the_fetch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let name = "sudokumaker-custom-constraints";
+    let repo = f.mkfixture(name, "main");
+    // Another session's clone, holding a spec-395 it pushes in the gap.
+    let other = f.tmp.path().join("other");
+    let origin = origin_of(&f, name);
+    let git = |dir: &std::path::Path, args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(dir).args(args).status().unwrap().success(), "git {args:?}");
+    git(f.tmp.path(), &["clone", "-q", origin.to_str().unwrap(), other.to_str().unwrap()]);
+    git(&other, &["-c", "user.email=o@example.com", "-c", "user.name=o", "commit", "-q", "--allow-empty", "-m", "theirs"]);
+    let theirs = git_out(&other, &["rev-parse", "HEAD"]);
+    let before = format!("\"$REAL_GIT\" -C '{}' push -q origin HEAD:refs/heads/spec-395", other.display());
+    let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "3"), ("GIT_BEFORE_PUSH", &before)]);
+    let out = f.dispatch_with_git_hang(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario, "no-call-hangs-1458");
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("pushing the integration branch failed"), "{}", out_text(&out));
+    assert_eq!(git_out(&origin, &["rev-parse", "refs/heads/spec-395"]), theirs, "the push overwrote another session's spec-395");
 }

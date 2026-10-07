@@ -12,7 +12,8 @@
 //! HERDR_WORKSPACES, HERDR_LIST_FAIL (only `agent list` fails), HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
 //! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup;
 //! GH_PR_STATUS for controller-restore's `--json number,state` PR lookup;
-//! GH_SUBISSUES_<n> and GH_PARENT_<n> for a spec's integration branch (#1458).
+//! GH_SUBISSUES_<n>, GH_PARENT_<n> and the `git` role's GIT_BEFORE_PUSH for a
+//! spec's integration branch (#1458).
 //! A third role, `git`, is a passthrough proxy to the real binary (`REAL_GIT`,
 //! an absolute path) rather than a scenario stub, since replicating real git
 //! is not this fake's job; `GIT_HANG`/`GH_HANG` (#849) make it or `gh` hang
@@ -221,6 +222,14 @@ fn run_git(args: &[String]) -> ExitCode {
         eprintln!("lane-fake: invoked as git with no REAL_GIT set; refusing rather than re-entering this proxy");
         return ExitCode::FAILURE;
     };
+    // `GIT_BEFORE_PUSH` (#1458): a shell command run just before a `push`
+    // reaches the real git, standing in for another session pushing between
+    // this run's fetch and its push.
+    if args.iter().any(|a| a == "push") {
+        if let Ok(cmd) = env::var("GIT_BEFORE_PUSH") {
+            let _ = std::process::Command::new("sh").args(["-c", &cmd]).status();
+        }
+    }
     match std::process::Command::new(&real).args(args).status() {
         Ok(status) => match status.code() {
             Some(0) => ExitCode::SUCCESS,
@@ -258,14 +267,14 @@ fn run_gh(args: &[String]) -> ExitCode {
             return ExitCode::SUCCESS;
         }
         // `--json subIssuesSummary` is a spec's slice count (#1458):
-        // GH_SUBISSUES_<n>, else 0, as gh answers an issue with none;
-        // GH_SUBISSUES_FAIL_<n> fails the read.
+        // GH_SUBISSUES_<n>, else GH_SUBISSUES, else 0, as gh answers an
+        // issue with none; GH_SUBISSUES_FAIL_<n> fails the read.
         if args.iter().any(|a| a == "subIssuesSummary") {
             if env::var(format!("GH_SUBISSUES_FAIL_{n}")).is_ok() {
                 eprintln!("sub-issue read failed");
                 return ExitCode::FAILURE;
             }
-            println!("{}", env::var(format!("GH_SUBISSUES_{n}")).unwrap_or_else(|_| "0".into()));
+            println!("{}", env::var(format!("GH_SUBISSUES_{n}")).or_else(|_| env::var("GH_SUBISSUES")).unwrap_or_else(|_| "0".into()));
             return ExitCode::SUCCESS;
         }
         let row = match env::var(format!("GH_ISSUE_{n}")) {

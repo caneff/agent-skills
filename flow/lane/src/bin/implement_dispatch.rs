@@ -769,6 +769,39 @@ fn parent_of(slug: &str, n: &str) -> Result<Option<String>, String> {
     }
 }
 
+/// Whether a ticket body declares a parent issue the way `/to-tickets` and
+/// frontier.py read one: a `Part of` line naming an issue, or an issue
+/// reference under a `Parent` heading. Fenced blocks are skipped; `None`
+/// under the heading names no issue, so it is no parent.
+fn body_names_parent(body: &str) -> bool {
+    fn names_issue(line: &str) -> bool {
+        let refs = |sep: &str| line.match_indices(sep).any(|(i, _)| line[i + sep.len()..].starts_with(|c: char| c.is_ascii_digit()));
+        refs("#") || refs("/issues/")
+    }
+    let (mut fenced, mut in_parent) = (false, false);
+    for line in body.lines() {
+        let t = line.trim_start();
+        if line.len() - t.len() > 3 {
+            continue;
+        }
+        if t.starts_with("```") || t.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        if t.starts_with('#') && t.trim_start_matches('#').starts_with([' ', '\t']) {
+            in_parent = t.trim_start_matches('#').trim().eq_ignore_ascii_case("parent");
+            continue;
+        }
+        if (in_parent || t.to_ascii_lowercase().starts_with("part of")) && names_issue(t) {
+            return true;
+        }
+    }
+    false
+}
+
 /// A plain dispatch's base: `Slice` when every ticket's spec parent has an
 /// integration branch on origin, `Default` when none does, refused when the
 /// clump is split between bases. No `origin/spec-*` at all means no ticket
@@ -781,8 +814,23 @@ fn slice_base(primary: &str, slug: &str, ns: &[String]) -> Result<Base, String> 
     }
     let mut bases: Vec<Option<String>> = Vec::new();
     for n in ns {
-        let spec = parent_of(slug, n)?.filter(|p| integration.contains(&format!("spec-{p}").as_str()));
-        bases.push(spec);
+        let parent = match parent_of(slug, n)? {
+            Some(p) => Some(p),
+            None => {
+                // frontier.py reads a body's parent line as a slice too; a
+                // slice declared only there would be built off the default
+                // branch here, so it refuses instead of guessing.
+                let body = lane::issue_state::body_timeout(slug, n, gh_query_timeout())?
+                    .ok_or_else(|| format!("cannot read the body of #{n} to check it names no parent"))?;
+                if body_names_parent(&body) {
+                    return Err(format!(
+                        "#{n} names a parent in its body but has no sub-issue link; link it (gh issue edit <parent> --repo {slug} --add-sub-issue {n}) and dispatch again"
+                    ));
+                }
+                None
+            }
+        };
+        bases.push(parent.filter(|p| integration.contains(&format!("spec-{p}").as_str())));
     }
     if bases.windows(2).any(|w| w[0] != w[1]) {
         let each: Vec<String> =
@@ -1157,7 +1205,7 @@ fn run() -> Result<(), ExitCode> {
         return Err(die(format!("herdr agent {agent} already exists")));
     }
     let fetch_timeout = fetch_timeout();
-    if !quiet_ok_timeout("git", &["-C", &primary, "fetch", "-q", "origin"], fetch_timeout) {
+    if !quiet_ok_timeout("git", &["-C", &primary, "fetch", "-q", "--prune", "origin"], fetch_timeout) {
         return Err(die(format!("git fetch failed or exceeded its {fetch_timeout:?} bound in {primary}")));
     }
     let registered_worktree = quiet_stdout_bounded("git", &["-C", &primary, "worktree", "list", "--porcelain"], git_query_timeout())
@@ -1173,13 +1221,7 @@ fn run() -> Result<(), ExitCode> {
         return Err(die(format!("branch {branch} already exists")));
     }
     let default = git_origin::default_branch_timeout(Path::new(&primary), git_query_timeout()).map_err(die)?;
-    if !quiet_ok_bounded(
-        "git",
-        &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/remotes/origin/{default}")],
-        git_query_timeout(),
-    )
-    .map_err(die)?
-    {
+    if !remote_branch_exists(&primary, &default).map_err(die)? {
         return Err(die(format!("no origin/{default} to branch from")));
     }
     // Where the workspace branches from (#1458), settled before the claim so
@@ -1187,6 +1229,13 @@ fn run() -> Result<(), ExitCode> {
     let base = match mode {
         Mode::Spec { .. } => {
             let slices = slice_count(&slug, &n).map_err(die)?;
+            // A spec is labelled when /to-tickets slices it, so no sub-issue
+            // means slices it never linked, not a spec with none.
+            if slices == 0 {
+                return Err(die(format!(
+                    "#{n} has no sub-issues; link its slices (gh issue edit {n} --repo {slug} --add-sub-issue <slice>) and dispatch again"
+                )));
+            }
             if remote_branch_exists(&primary, &branch).map_err(die)? {
                 Base::Integration { created: false }
             } else if slices > 1 {
@@ -1266,7 +1315,7 @@ fn run() -> Result<(), ExitCode> {
     let claim = Claim { tickets: &tickets, slug: &slug, wt: &wt };
 
     let start = match &base {
-        Base::Integration { created: false, .. } => format!("origin/{branch}"),
+        Base::Integration { created: false } => format!("origin/{branch}"),
         Base::Slice { spec } => format!("origin/spec-{spec}"),
         _ => format!("origin/{default}"),
     };
@@ -1279,14 +1328,15 @@ fn run() -> Result<(), ExitCode> {
     claim.step("git worktree add", wa, None)?;
     match &base {
         // The one recorded fact the gate, the slice merge and the spec
-        // review read a slice's base from: never a missing file or a gh call.
+        // review are to read a slice's base from (#1459, #1460, #1461),
+        // never a missing file or a gh call.
         Base::Slice { spec } => {
             let set = run_timeout("git", &["-C", &primary, "config", &format!("branch.{branch}.base"), &format!("spec-{spec}")], git_query_timeout());
             claim.step("recording the slice's base", set, None)?;
         }
         // A plain push, never forced: a branch someone pushed since the
         // fetch is refused here rather than overwritten.
-        Base::Integration { created: true, .. } => {
+        Base::Integration { created: true } => {
             let push = run_timeout("git", &["-C", &primary, "push", "-q", "origin", &format!("refs/heads/{branch}:refs/heads/{branch}")], fetch_timeout);
             claim.step("pushing the integration branch", push, None)?;
         }
@@ -1363,13 +1413,13 @@ fn run() -> Result<(), ExitCode> {
                 Some(id) => (format!(" --run {id}"), format!(", run {id}")),
                 None => (String::new(), String::new()),
             };
-            let (slice_note, slice_desc) = match &base {
+            let (base_note, base_desc) = match &base {
                 Base::Slice { spec } => (slice_note(spec), format!(", slice of #{spec} on spec-{spec}")),
                 _ => (String::new(), String::new()),
             };
             (
-                format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{run_flag}{slice_note}{note}", ns.join(" ")),
-                format!("{tier} tier{strip_note}{merger}{run_note}{slice_desc}"),
+                format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{run_flag}{base_note}{note}", ns.join(" ")),
+                format!("{tier} tier{strip_note}{merger}{run_note}{base_desc}"),
             )
         }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
