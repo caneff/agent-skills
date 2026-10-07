@@ -665,7 +665,7 @@ gh pr create --repo <owner/name> --title "<title>" --body-file ~/.cache/agent-re
 ```
 
 A slice (§ Review) adds `--base spec-<p>`: without it the PR opens against
-`<default>`, which the slice check in § The merge, above, refuses.
+`<default>`, which the slice check in § The merge, below, refuses.
 
 The body has these sections and nothing else:
 
