@@ -64,6 +64,8 @@ import runfile  # noqa: E402
 
 AXES = ("standards", "spec", "correctness")
 RATINGS = ("CONFIRMED", "PLAUSIBLE")
+# The same shape flow/lane/src/bin/merge_cleanup.rs `recorded_spec_base` accepts;
+# a change to one is a change to both.
 SPEC_BASE = re.compile(r"spec-\d+\Z")
 SHA = re.compile(r"[0-9a-f]{7,40}\Z")
 CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #(\d+)", re.IGNORECASE)

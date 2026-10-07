@@ -664,6 +664,9 @@ git push -u origin implement-<n>
 gh pr create --repo <owner/name> --title "<title>" --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md
 ```
 
+A slice (§ Review) adds `--base spec-<p>`: without it the PR opens against
+`<default>`, which the slice check in § The merge, below, refuses.
+
 The body has these sections and nothing else:
 
 - **Closes #\<n\>** — a bare line, not inside backticks or a code fence
@@ -786,6 +789,27 @@ The controller merges on a repo Chris owns; Chris reads it after via
 `/landed`, and revert is the undo. There is no review step here: the review
 wave ran in the worker's § Review, and what the controller checks is
 mechanical.
+
+**A slice merges into its spec's integration branch** (#1460). A slice
+(§ Review) is known by its recorded base, read in the primary checkout. The
+spec run is its controller and merges it by these steps with three
+substitutions:
+
+- **The base is `spec-<p>`.** Read it for `<default>` throughout, the merge
+  sha of step 6 included. Step 2 adds `baseRefName` to its `gh pr view`
+  fields, and it must read `spec-<p>`: fix-check passes a slice with no
+  review files, so a slice PR opened against `<default>` would land there
+  unreviewed. Such a PR goes back to the worker for
+  `gh pr edit <pr> --repo <owner/name> --base spec-<p>`.
+- **The seam rerun compares against `origin/spec-<p>`**: step 3's skip test,
+  its worktree's start point and its `--changed` all name it.
+- **`closingIssuesReferences` is not required.** GitHub fills it only for a
+  PR into the default branch, so a slice PR's reads empty and blocks nothing.
+  The slice ticket stays open until the spec's integration PR closes it, so
+  step 5 has no closed issue to confirm.
+
+Not-draft, CLEAN, fix-check and `--match-head-commit` still apply, and step
+4's `merge-cleanup` line is unchanged: it reads the same recorded base.
 
 1. **Check who merges twice**: the live labels
    (`gh issue view <n> --repo <owner/name> --json labels`) are the primary

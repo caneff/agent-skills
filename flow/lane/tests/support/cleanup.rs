@@ -251,6 +251,37 @@ impl Cleanup {
         self.record_pr_head(repo, &b, &b);
     }
 
+    /// A slice of spec `p` (#1460), as `implement-dispatch` leaves one:
+    /// `spec-<p>` pushed off main, `implement-<n>` cut from it with one
+    /// commit and pushed, and `branch.implement-<n>.base` set to `spec-<p>`.
+    /// Nothing is merged: each test lands it where its case needs.
+    pub fn mk_slice_branch(&self, repo: &Path, n: &str, p: &str) {
+        let d = repo.to_str().unwrap();
+        let (spec, b) = (format!("spec-{p}"), format!("implement-{n}"));
+        self.git_ok(&["-C", d, "branch", &spec, "main"]);
+        self.git_ok(&["-C", d, "push", "-q", "origin", &spec]);
+        self.git_ok(&["-C", d, "checkout", "-q", "-b", &b, &spec]);
+        self.commit_line(d, &b, &b);
+        self.git_ok(&["-C", d, "push", "-q", "-u", "origin", &b]);
+        self.git_ok(&["-C", d, "checkout", "-q", "main"]);
+        self.git_ok(&["-C", d, "config", &format!("branch.{b}.base"), &spec]);
+    }
+
+    /// Squash-merges `branch` into `base` on origin, and records merged PR 7
+    /// at `branch`'s tip with `base` as the branch it merged into.
+    pub fn squash_into(&self, repo: &Path, branch: &str, base: &str) {
+        let d = repo.to_str().unwrap();
+        let work = self.root().join(format!("squash-{}", branch.replace('/', "__")));
+        let w = work.to_str().unwrap();
+        self.git_ok(&["-C", d, "worktree", "add", "-q", "--detach", w, &format!("origin/{base}")]);
+        self.git_ok(&["-C", w, "merge", "-q", "--squash", branch]);
+        self.git_ok(&["-C", w, "commit", "-qm", &format!("squash of {branch}")]);
+        self.git_ok(&["-C", w, "push", "-q", "origin", &format!("HEAD:{base}")]);
+        self.git_ok(&["-C", d, "worktree", "remove", "--force", w]);
+        let tip = self.rev(repo, branch);
+        std::fs::write(self.pr_heads().join(branch.replace('/', "__")), format!("7 {tip} {base}")).unwrap();
+    }
+
     /// The bash suite's `mk_lane_repo`: caneff/trivial is merged into main,
     /// and origin/main is one commit ahead that touches flow/lane or not.
     pub fn mk_lane_repo(&self, rel: &str, touch_lane: bool) -> PathBuf {
