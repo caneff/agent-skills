@@ -204,7 +204,10 @@ git -C "$repo" config branch.implement-8.base spec-2
 git -C "$repo" branch -q spec-2 main; git -C "$repo" fetch -q origin  # the live integration branch the key names
 echo slice > "$tmp/implement-8/slice.txt"; git -C "$tmp/implement-8" add -A; git -C "$tmp/implement-8" commit -qm slice
 slice_tip=$(git -C "$tmp/implement-8" rev-parse HEAD)
-slice() { local sha=$1; shift; (cd "$tmp/implement-8" && HOME="$cache_home" "$@" bash "$gate" "$sha" 2>&1); }
+# fix-check reads the slice PR's base off GitHub; before `gh pr create` there is none.
+mkdir -p "$tmp/fakebin"
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "pr list" ] && exit 0\nexit 1\n' >"$tmp/fakebin/gh"; chmod +x "$tmp/fakebin/gh"
+slice() { local sha=$1; shift; (cd "$tmp/implement-8" && HOME="$cache_home" PATH="$tmp/fakebin:$PATH" "$@" bash "$gate" "$sha" 2>&1); }
 out=$(slice "$slice_tip" env); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"slice of spec-2"* ]]; then
   echo "PASS: a slice branch with no dispositions passes, naming its recorded base"
@@ -244,6 +247,31 @@ else
   echo "FAIL: no base, no dispositions — want exit 1 + 'dispositions-9.jsonl is missing', got $rc: $out"; fails=1
 fi
 git -C "$repo" worktree remove --force "$tmp/implement-9"
+
+# The fix round of a spec run (#1461) happens on spec-<n>, its integration
+# branch, and its review is keyed on the spec number: the gate runs the merge
+# check there too, against spec-<n> itself.
+git -C "$repo" worktree add -q -b spec-6 "$tmp/spec-6" main
+echo fix > "$tmp/spec-6/spec-fix.txt"; git -C "$tmp/spec-6" add -A; git -C "$tmp/spec-6" commit -qm spec-fix
+spec_tip=$(git -C "$tmp/spec-6" rev-parse HEAD)
+for a in standards spec correctness; do : >"$reviews/findings-$a-6.jsonl"; : >"$reviews/findings-$a-6.done"; done
+printf '%s\n' '{"repo": "repo", "ticket": 6, "tickets": [6], "type": "codex-gate", "status": {"fields": {"findings": {"status": "skipped"}}}}' \
+  >>"$cache_home/.cache/agent-reviews/ledger.jsonl"
+printf '%s\n' '{"id": "P1", "axis": "spec", "severity": "hard", "file": "f", "title": "t"}' >"$reviews/findings-spec-6.jsonl"
+out=$(cd "$tmp/spec-6" && HOME="$cache_home" bash "$gate" HEAD 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"no disposition for P1"* ]]; then
+  echo "PASS: a spec-<n> branch with an undisposed finding of the spec review fails"
+else
+  echo "FAIL: spec review undisposed — want exit 1 + 'no disposition for P1', got $rc: $out"; fails=1
+fi
+printf '%s\n' "{\"id\": \"P1\", \"outcome\": \"fixed\", \"sha\": \"$spec_tip\"}" >"$reviews/dispositions-6.jsonl"
+out=$(cd "$tmp/spec-6" && HOME="$cache_home" bash "$gate" HEAD 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"1 findings, each disposed once"* ]]; then
+  echo "PASS: a spec-<n> branch with every finding disposed passes, quoting the check"
+else
+  echo "FAIL: spec review disposed — want exit 0 + the check's line, got $rc: $out"; fails=1
+fi
+git -C "$repo" worktree remove --force "$tmp/spec-6"
 
 # Off an implement-<n> branch there is no ticket to look a sidecar up by: the
 # gate still passes and says the sidecar was not looked for.
