@@ -69,7 +69,10 @@ def test_the_review_reads_the_integration_branch_and_no_sha_list():
     # so the range is the review's own and the cherry-pick procedure is gone.
     import re
     got = T.body(repo(), spec=366, surfaces=[])
-    assert "`origin/main...spec-366`" in got, got
+    review = got.split("### The spec-level review", 1)[1].split("###", 1)[0]
+    assert "`origin/main...spec-366`" in review, review
+    acceptance = got.split("### Acceptance criteria", 1)[1]
+    assert "`origin/main...spec-366`" in acceptance, acceptance
     assert "/multi-axis-code-review origin/main" in got, got
     assert "codex-usage-gate.py" in got, got
     assert "git cherry-pick" not in got, got
