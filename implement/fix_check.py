@@ -35,8 +35,17 @@ from a missing dispositions file (defect class 1), and on such a branch it
 looks for no review file at all. `origin/spec-<p>` must exist: a key left from
 an ended spec, or set by hand, is refused rather than read as a slice. It is
 not required to be an ancestor of the branch, since another slice landing
-moves it past a slice already built. No key, or a key naming anything else, is an
+moves it past a slice already built. An open PR from `implement-<ticket>` must
+target `spec-<p>`, read from GitHub: a slice PR into the default branch would
+land there unreviewed. No open PR yet passes and says so, since the worker's
+gate runs before `gh pr create`. No key, or a key naming anything else, is an
 ordinary ticket.
+
+A spec's own review (#1461) is keyed on the spec number: `<ticket>` is the
+spec and the branch is `spec-<ticket>` (the controller passes
+`origin/spec-<ticket>`), so every `fixed` sha is a commit on the integration
+branch past the default branch, and a finding `moved` onto a slice the
+integration PR closes is refused like any other closed-by-this-PR ticket.
 
 A review the ledger records as skipped (`review_ledger.py append --type
 <axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
@@ -89,6 +98,19 @@ def slice_base(n):
     """`spec-<p>` when dispatch recorded ticket `n` as a slice of spec <p>, else None."""
     base = git("config", "--get", f"branch.implement-{n}.base", absent=1)
     return base if base and SPEC_BASE.match(base) else None
+
+
+def slice_prs(n):
+    """`(number, base)` of each open PR from `implement-<n>`, as GitHub holds it (#1460's S4): a
+    slice runs no review, so a slice PR into anything but its integration branch would land
+    unreviewed.
+    None open is the worker's gate before `gh pr create`; the controller's merge has one."""
+    done = subprocess.run(["gh", "pr", "list", "--head", f"implement-{n}", "--state", "open",
+                           "--json", "number,baseRefName", "--jq", '.[] | "\\(.number) \\(.baseRefName)"'],
+                          capture_output=True, text=True)
+    if done.returncode != 0:
+        raise Unanswerable(f"`gh pr list --head implement-{n}` failed: {done.stderr.strip() or 'no output'}")
+    return [tuple(line.split(" ", 1)) for line in done.stdout.splitlines() if line.strip()]
 
 
 def reviews_dir():
@@ -268,8 +290,16 @@ def check(n, branch_name):
         if git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{spec}", absent=1) is None:
             return [f"branch.implement-{n}.base names {spec}, but origin/{spec} does not exist — a key "
                     "left from an ended spec or set by hand is no slice; fetch, or remove the key"], ""
-        return [], (f"{branch_name} is a slice of {spec}, no review wave: the spec is reviewed once on "
-                    f"{spec} (branch.implement-{n}.base)")
+        summary = (f"{branch_name} is a slice of {spec}, no review wave: the spec is reviewed once on "
+                   f"{spec} (branch.implement-{n}.base)")
+        prs = slice_prs(n)
+        wrong = [f"PR #{number} from implement-{n} targets {base}, not {spec}: it would land there "
+                 f"unreviewed — gh pr edit {number} --base {spec}" for number, base in prs if base != spec]
+        if wrong:
+            return wrong, ""
+        if not prs:
+            return [], f"{summary}; no open PR from implement-{n} yet, its base is checked at the merge"
+        return [], f"{summary}; " + ", ".join(f"PR #{number} into {base}" for number, base in prs)
     reviews = reviews_dir()
     branch = Branch(branch_name)
     skipped = skipped_types(reviews, n)

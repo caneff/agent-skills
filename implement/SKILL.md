@@ -295,10 +295,16 @@ three things. It merges `origin/spec-<p>` in with
 skip row would read as an ablated review in the escape count. The merge check
 reads the same recorded key: `fix-check.sh <n>` exits 0 on a slice branch
 with no review files, saying `slice of spec-<p>, no review wave`, as long as
-`origin/spec-<p>` exists; a key naming a spec branch that is gone is refused.
-The pre-report gate's clean-tree, ancestor and `.scratch/` checks still run.
+`origin/spec-<p>` exists; a key naming an integration branch that is gone is
+refused. It also reads the base of any open PR from `implement-<n>` off
+GitHub and refuses one that does not target `spec-<p>`. The pre-report gate's
+clean-tree, ancestor and `.scratch/` checks still run.
 A branch with no recorded base is an ordinary ticket, and a missing
 dispositions file still fails it.
+
+**The spec's own review** runs once on its integration branch, and its fix
+round follows steps 2–3 below keyed on the spec number:
+`implement-spec/SKILL.md` § The integration branch.
 
 1. **Run the wave.** The three axes of `/multi-axis-code-review` —
    standards, spec and correctness, all three waited for
@@ -596,7 +602,8 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
    no `PRE_REPORT_KEEP_SCRATCH` naming why. It also runs the merge check
-   (`fix-check.sh`, § Review step 3) on an `implement-<n>` branch and
+   (`fix-check.sh`, § Review step 3) on an `implement-<n>` branch, or on a
+   spec run's `spec-<n>` keyed on the spec number, and
    refuses, exit 1, naming each problem: a finding with no disposition, a
    `fixed` sha off the branch, a `moved` ticket that is closed, a missing
    `dispositions-<n>.jsonl` (#1188) or an empty findings sidecar with no
@@ -799,7 +806,8 @@ substitutions:
   sha of step 6 included. Step 2 adds `baseRefName` to its `gh pr view`
   fields, and it must read `spec-<p>`: fix-check passes a slice with no
   review files, so a slice PR opened against `<default>` would land there
-  unreviewed. Such a PR goes back to the worker for
+  unreviewed. Fix-check reads the same base off GitHub and refuses such a
+  PR too. It goes back to the worker for
   `gh pr edit <pr> --repo <owner/name> --base spec-<p>`.
 - **The seam rerun compares against `origin/spec-<p>`**: step 3's skip test,
   its worktree's start point and its `--changed` all name it.
@@ -810,6 +818,11 @@ substitutions:
 
 Not-draft, CLEAN, fix-check and `--match-head-commit` still apply, and step
 4's `merge-cleanup` line is unchanged: it reads the same recorded base.
+
+**The integration PR** (base `<default>`, head `spec-<p>`) merges by these
+steps unchanged, its merge check keyed on the spec number:
+`fix-check.sh <p> origin/spec-<p>`. Step 5 confirms every slice and the spec
+closed.
 
 1. **Check who merges twice**: the live labels
    (`gh issue view <n> --repo <owner/name> --json labels`) are the primary

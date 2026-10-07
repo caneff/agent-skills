@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The spec's closing check: the end-to-end seam it names, and what that
-seam is blind to. The text is a section appended to the last slice's body,
-not a ticket of its own (#1402).
+seam is blind to, and the spec-level review. The text is a section for the
+spec's integration PR (#1461), or for the slice of a one-slice spec, never a
+ticket of its own (#1402).
 
 On #781's spec run the closing ticket said "write one end-to-end test over
 the whole spec's acceptance criteria" and named no seam, so the closing
@@ -17,6 +18,7 @@ The declaration grammar and the evidence: `references/closing-ticket.md`.
 import argparse
 import os
 import re
+import subprocess
 import sys
 
 # #890's fence reader, imported rather than reimplemented: a fenced region is
@@ -31,6 +33,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 os.pardir, "burndown"))
 from frontier import key_line, unfenced, visible  # noqa: E402
+from loop import LoopError, origin_default  # noqa: E402
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 # A list item's marker: a bare `**Key**:` line also matches `key_line`, by
@@ -149,59 +152,6 @@ def seam_of(root, seam=None, blind_to=None):
     return seam, blind_to
 
 
-def _review_procedure(spec, shas):
-    """How to run the spec-level review over a list of commits.
-
-    `/multi-axis-code-review` pins **one** fixed point and reads
-    `<fixed point>...HEAD`, so it cannot take disjoint commits. A ticket that
-    names the shas and stops states a procedure nothing can carry out, and
-    the worker falls back to inventing a range on a shared default branch —
-    which is the failure the sha list exists to prevent. So the comparison is
-    **built** first, out of the shas themselves.
-    """
-    first, rest = shas[0], shas[1:]
-    tree = f"../review-spec-{spec}"
-    lines = [
-        "`/multi-axis-code-review` takes one fixed point and reads",
-        "`<fixed point>...HEAD`, so build the comparison out of those commits",
-        "first — never a range on the default branch, which carries every",
-        "other session's work:",
-        "",
-        "```",
-        f"git worktree add {tree} --detach {first}",
-        f"cd {tree}",
-    ]
-    lines += [f"git cherry-pick {sha}" for sha in rest]
-    lines += [
-        f"/multi-axis-code-review {first}~1",
-        f"git worktree remove {tree}",
-        "```",
-        "",
-        f"HEAD is then this spec's commits and nothing else, and `{first}~1` "
-        "is what",
-        "the first of them landed on.",
-    ]
-    if rest:
-        lines += [
-            "",
-            "Where a cherry-pick **conflicts** — the spec's own squash commits "
-            "usually",
-            "apply clean, but a spec that rewrote its own work may not — abort "
-            "it and",
-            "review the commits one at a time instead, each against its own "
-            "parent:",
-            "",
-            "```",
-            "git cherry-pick --abort",
-        ]
-        for sha in shas:
-            lines += [f"git worktree add ../review-{sha[:7]} --detach {sha}",
-                      f"cd ../review-{sha[:7]} && /multi-axis-code-review {sha}~1",
-                      f"cd - && git worktree remove ../review-{sha[:7]}"]
-        lines.append("```")
-    return "\n".join(lines)
-
-
 def _settled(key, root, declared, explored):
     """One half of the seam: the declaration where there is one, and the
     exploration pass's answer only where there is not. An emphasis-only
@@ -224,18 +174,22 @@ def _settled(key, root, declared, explored):
     return value
 
 
-def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
-    """The closing check for one spec, a section for the last slice's body: the
-    seam it drives, what that seam cannot see, and the merge shas the
-    spec-level review is handed.
+def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
+         one_slice=False):
+    """The closing check for one spec: the seam it drives, what that seam
+    cannot see, and the spec-level review.
 
-    `shas` are the squash commits of the slices that landed before the last
-    one, read off the run file; the last slice's own diff gets its own review
-    round. A spec with one slice has no earlier landings: the list is empty,
-    and the section drops the spec-level review it has nothing to read. They are
-    a **list**, never a range: `<first>..origin/main` on a shared `main` held
-    this spec's three commits and ~17 unrelated ones from other sessions, and
-    `/multi-axis-code-review` takes one fixed point.
+    A spec with more than one slice lands on `<default>` in one integration PR
+    from `spec-<spec>` (#1461), and this is that PR's section. The review reads
+    `origin/<default>...spec-<spec>`: the integration branch holds this spec's
+    slices and merges of `<default>`, nothing else, so the range is the
+    review's own. The merge-sha list and its cherry-pick procedure, which a
+    spec landing slice by slice on a shared `main` needed (#781's range held
+    ~17 unrelated commits), are gone.
+
+    A one-slice spec has no integration branch (ruling 3a of #1457): its slice
+    lands on `<default>` with its own review wave, so `one_slice` makes a
+    section for that slice's body with no spec-level review.
     """
     if surfaces is None:
         # Not defaulted to none: the #781 failure was a user-visible surface
@@ -246,56 +200,103 @@ def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
             "user-visible surface the seam cannot reach — pass the surfaces, "
             "or an empty list to say there are none")
     seam, blind_to = seam_of(root, seam, blind_to)
-    shas = [s.strip() for s in shas if s and s.strip()]
     surfaces = [s.strip() for s in surfaces if s and s.strip()]
+    branch = f"spec-{spec}"
+    # The slices merged into origin/spec-<n> on GitHub; the spec run's own
+    # spec-<n> takes them in first, or the review reads none of them.
+    merge_in = (f"git fetch origin && git merge --ff-only origin/{branch} "
+                f"&& git merge --no-edit origin/{default} && git push origin "
+                f"{branch}")
 
-    lines = ["## Closing check", "",
-             f"This is the last slice of spec #{spec}: its PR also carries one "
-             "end-to-end test at this repo's seam"
-             + (" and the spec-level review. " if shas else ". ")
-             + f"Add a bare `Closes #{spec}` line to the PR body and to the "
-             "last commit: the spec closes when this slice merges.",
-             "",
-             "### The seam",
-             "",
-             f"- **Seam**: {seam}",
-             f"- **Blind to**: {blind_to}",
-             ""]
+    if one_slice:
+        lines = ["## Closing check", "",
+                 f"This is the only slice of spec #{spec}: its PR also carries "
+                 "one end-to-end test at this repo's seam, and its own review "
+                 f"wave is the spec's review. Add a bare `Closes #{spec}` line "
+                 "to the PR body and to the last commit: the spec closes when "
+                 "this slice merges.", ""]
+    else:
+        lines = ["## Closing check", "",
+                 f"The closing check of spec #{spec}, run on its integration "
+                 f"PR: base `{default}`, head `{branch}`, opened once every "
+                 f"slice has landed on `{branch}`. Its body carries a bare "
+                 "`Closes #<slice>` line for every slice of the spec and a "
+                 f"bare `Closes #{spec}`.", ""]
+    lines += ["### The seam", "",
+              f"- **Seam**: {seam}",
+              f"- **Blind to**: {blind_to}",
+              ""]
     if surfaces:
         lines += ["The spec touches a user-visible surface this seam cannot "
                   "reach:", ""]
         lines += [f"- {s}" for s in surfaces]
         lines.append("")
-    if shas:
-        lines += ["### The spec-level review", "",
-                  "The merge commits of this spec's earlier slices, from the "
-                  "run file, in landing order:", ""]
-        lines += [f"- `{sha}`" for sha in shas]
-        lines += ["", _review_procedure(spec, shas)]
-    lines += ["", "### Acceptance criteria", "",
+    if not one_slice:
+        lines += [
+            f"The end-to-end check is that seam run on `{branch}` merged with "
+            f"current `origin/{default}`.", "",
+            "### The spec-level review", "",
+            f"In the workspace on `{branch}`, take in the slices landed on "
+            f"`origin/{branch}`, then merge `origin/{default}` in, and do "
+            "both again before the integration PR goes up — a merge, never a "
+            "rebase, which would rewrite the shas the dispositions name:", "",
+            "```", merge_in, "```", "",
+            f"Then one wave over `origin/{default}...{branch}` from a "
+            f"workspace on `{branch}`: `/multi-axis-code-review "
+            f"origin/{default}`'s three axes and one Codex pass behind "
+            "`codex-usage-gate.py`. The ticket text they judge against is "
+            f"spec #{spec} and every slice, bodies and comments. The findings "
+            f"sidecars, `dispositions-{spec}.jsonl` and the review-ledger "
+            f"rows are keyed on #{spec}. One fix worker disposes of every "
+            "finding (steps 2–3 of `implement/SKILL.md` § Review) and runs the "
+            f"full seam; `fix-check.sh {spec} origin/{branch}` then exits 0.",
+            ""]
+    lines += ["### Acceptance criteria", "",
               "- [ ] One end-to-end test drives the whole spec's acceptance "
               f"criteria at the seam above, and lives where `{seam}` runs it",
               "- [ ] What the seam is blind to is stated in the test's own "
               "comment, so the next reader knows what a green run does not "
               "cover"]
-    if shas:
-        lines.append("- [ ] `/multi-axis-code-review` run over the merge shas "
-                     "listed above, every finding disposed of")
+    if not one_slice:
+        lines.append(f"- [ ] The spec-level review run over "
+                     f"`origin/{default}...{branch}`, every finding disposed "
+                     f"of, and `fix-check.sh {spec} origin/{branch}` exits 0")
     for surface in surfaces:
         lines.append(f"- [ ] One open of the real thing: {surface} — checked "
                      "in the shipping surface, not in the seam")
     return "\n".join(lines) + "\n"
 
 
+def default_branch(root):
+    """`<default>` off the repo's `origin/HEAD` by `loop.origin_default`, the
+    burn's own reader, or None when git cannot say."""
+    def run(args):
+        done = subprocess.run(["git", "-C", root, *args], capture_output=True,
+                              text=True)
+        if done.returncode != 0:
+            raise LoopError(done.stderr.strip() or "git failed")
+        return done.stdout
+    try:
+        ref = origin_default(run)
+    except (LoopError, OSError):
+        return None
+    return ref[len("origin/"):] if ref.startswith("origin/") else None
+
+
 def main(argv):
     parser = argparse.ArgumentParser(
         prog="closing_ticket.py",
-        description="The closing check section of a spec's last slice.")
+        description="The closing check section of a spec's integration PR, "
+                    "or of the slice of a one-slice spec.")
     parser.add_argument("root", help="the repo root whose AGENTS.md declares "
                                      "the end-to-end seam")
     parser.add_argument("spec", type=int, help="the spec's issue number")
-    parser.add_argument("--shas", required=True, action="append", default=[],
-                        help="this run's merge shas, comma-separated; repeatable")
+    parser.add_argument("--one-slice", action="store_true",
+                        help="the spec has one slice and no integration "
+                             "branch: a section for that slice's body")
+    parser.add_argument("--default",
+                        help="the default branch; read off the root's "
+                             "origin/HEAD when omitted")
     surfaces = parser.add_mutually_exclusive_group(required=True)
     surfaces.add_argument("--surface", action="append", default=[],
                           help="a user-visible surface the seam cannot reach; "
@@ -306,10 +307,17 @@ def main(argv):
     parser.add_argument("--blind-to", help="what that seam cannot see")
     args = parser.parse_args(argv[1:])
 
-    shas = [sha for group in args.shas for sha in group.split(",")]
+    default = args.default or default_branch(args.root)
     try:
-        print(body(args.root, args.spec, shas, args.surface, args.seam,
-                   args.blind_to), end="")
+        # A one-slice section names no range, so it needs no default branch.
+        if not default and not args.one_slice:
+            # Never assumed to be `main`: a section naming the wrong range
+            # sends the review at the wrong diff.
+            raise SeamError(f"{args.root} has no readable origin/HEAD: pass "
+                            "--default <branch>")
+        print(body(args.root, args.spec, args.surface, args.seam,
+                   args.blind_to, default=default, one_slice=args.one_slice),
+              end="")
     except SeamError as exc:
         print(f"closing_ticket.py: {exc}", file=sys.stderr)
         return 1

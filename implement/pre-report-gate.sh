@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # The pre-report gate: run from the worktree before reporting a sha.
 # Fails unless the tree is clean, <sha> is an ancestor of <tip>, the
-# workspace's .scratch/ is empty, and — on an implement-<n> branch — the
-# merge check (fix-check.sh, #1401) passes: every review finding has
-# one disposition, a `fixed` sha is a commit on the branch, a `moved` ticket is
-# open: the ways a "done" report has described work that was not on the
-# branch, left cleanup for later, or dropped a finding. A slice of a spec
-# run, its base recorded as spec-<p>, has no review to dispose of, and
-# fix-check.sh says so (#1459); every other check here still runs.
+# workspace's .scratch/ is empty, and — on an implement-<n> branch, or a spec
+# run's spec-<n> keyed on the spec number (#1461) — the merge check
+# (fix-check.sh, #1401) passes: every review finding has one disposition, a
+# `fixed` sha is a commit on the branch, a `moved` ticket is open: the ways a
+# "done" report has described work that was not on the branch, left cleanup
+# for later, or dropped a finding. A slice of a spec run, its base recorded as
+# spec-<p>, has no review to dispose of, and fix-check.sh says so (#1459);
+# every other check here still runs.
 # A non-empty .scratch/ the worker cannot commit and must keep is named in
 # the PR-up report by setting PRE_REPORT_KEEP_SCRATCH="<why>", which passes
 # the check and folds the reason into the pass line itself.
@@ -59,24 +60,25 @@ if ! git merge-base --is-ancestor "$sha" "$tip_sha"; then
 fi
 
 # The merge check: on an implement-<n> branch every review finding of ticket
-# <n> is disposed (fix-check.sh). Off an implement-<n> branch there is
-# no ticket to look up, and the pass line says so.
+# <n> is disposed (fix-check.sh), and on a spec run's spec-<n> every finding
+# of the spec review, keyed on the spec number (#1461). Off those branches
+# there is no ticket to look up, and the pass line says so.
 branch=$(git rev-parse --abbrev-ref HEAD)
-if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
-  n=${BASH_REMATCH[1]}
+if [[ "$branch" =~ ^(implement|spec)-([0-9]+)$ ]]; then
+  n=${BASH_REMATCH[2]}
   # The Codex lane runs no review wave and waives the check by naming why.
   # Light tier never runs this gate.
   if [ -n "${PRE_REPORT_NO_FIX_CHECK:-}" ]; then
     dispositions_status="fix check waived, acknowledged: $PRE_REPORT_NO_FIX_CHECK"
   else
-    check=$(bash "$(dirname "${BASH_SOURCE[0]}")/fix-check.sh" "$n" 2>&1)
+    check=$(bash "$(dirname "${BASH_SOURCE[0]}")/fix-check.sh" "$n" "$branch" 2>&1)
     rc=$?
     [ "$rc" -ne 1 ] || { echo "pre-report gate: $check" >&2; exit 1; }
     [ "$rc" -eq 0 ] || { echo "pre-report gate: fix-check.sh could not run (exit $rc): $check" >&2; exit 2; }
     dispositions_status="$check"
   fi
 else
-  dispositions_status="branch '$branch' is not implement-<n>, dispositions not looked for"
+  dispositions_status="branch '$branch' is not implement-<n> or spec-<n>, dispositions not looked for"
 fi
 
 echo "pre-report gate: clean tree, ${scratch_status}, ${dispositions_status}, ${sha:0:12} is an ancestor of ${tip} (${tip_sha:0:12})"

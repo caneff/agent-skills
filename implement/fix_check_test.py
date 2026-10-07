@@ -33,9 +33,11 @@ Next steps:
 
 
 class World:
-    """One repo, one branch `implement-5` with one commit past main."""
+    """One repo, one branch (`implement-5` unless named) with commits past main, and the
+    review cache keyed on `ticket`."""
 
-    def __init__(self, author_date=None):
+    def __init__(self, author_date=None, ticket=5, branch="implement-5"):
+        self.n = ticket
         self.tmp = tempfile.mkdtemp(prefix="fix-check-")
         self.home = os.path.join(self.tmp, "home")
         self.bin = os.path.join(self.tmp, "bin")
@@ -53,7 +55,7 @@ class World:
         self.git(self.primary, "push", "-q", "origin", "main")
         self.git(self.primary, "remote", "set-head", "origin", "main")
         self.work = os.path.join(self.tmp, "wt")
-        self.git(self.primary, "worktree", "add", "-q", "-b", "implement-5", self.work)
+        self.git(self.primary, "worktree", "add", "-q", "-b", branch, self.work)
         self.base_sha = self.git(self.primary, "rev-parse", "HEAD")
         self.fix_sha = self.commit(self.work, "fix")
         # A second commit, so the branch's history is read across commits: one of them closes #6.
@@ -61,6 +63,7 @@ class World:
         self.reviews = os.path.join(self.home, ".cache", "agent-reviews", "skills-repo")
         os.makedirs(self.reviews)
         self.tickets = {}
+        self.prs = []
         self.write_gh()
         self.ledger_skip("codex-gate")  # no Codex record unless a case writes one
 
@@ -78,10 +81,14 @@ class World:
 
     def write_gh(self):
         """A `gh issue view <n> --json state --jq .state` that answers from self.tickets (a ticket
-        not in it fails, as an unreachable gh does)."""
+        not in it fails, as an unreachable gh does), and a `gh pr list` that prints self.prs, one
+        `<number> <base>` line per open PR, or fails when self.prs is None."""
         table = "\n".join(f"{n}) echo {s};;" for n, s in self.tickets.items())
+        prs = ("echo 'gh: no network' >&2; exit 1" if self.prs is None
+               else "".join(f"echo '{number} {base}'; " for number, base in self.prs) + "exit 0")
         with open(os.path.join(self.bin, "gh"), "w") as fh:
-            fh.write(f'#!/usr/bin/env bash\ncase "$3" in\n{table}\n*) echo "no such issue" >&2; exit 1;;\nesac\n')
+            fh.write(f'#!/usr/bin/env bash\nif [ "$1 $2" = "pr list" ]; then {prs}; fi\n'
+                     f'case "$3" in\n{table}\n*) echo "no such issue" >&2; exit 1;;\nesac\n')
         os.chmod(os.path.join(self.bin, "gh"), 0o755)
 
     def put(self, name, text):
@@ -92,14 +99,15 @@ class World:
         """Write the three sidecars (axis -> ids), each beside its completion marker."""
         for axis in ("standards", "spec", "correctness"):
             ids = by_axis.get(axis, [])
-            self.put(f"findings-{axis}-5.jsonl",
+            self.put(f"findings-{axis}-{self.n}.jsonl",
                      "".join(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t",
                                          **({"rating": "CONFIRMED"} if axis == "correctness" else {})}) + "\n"
                              for i in ids))
-            self.put(f"findings-{axis}-5.done", "")
+            self.put(f"findings-{axis}-{self.n}.done", "")
 
-    def ledger_skip(self, rtype, ticket=5):
+    def ledger_skip(self, rtype, ticket=None):
         """A ledger row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
+        ticket = self.n if ticket is None else ticket
         row = {"repo": "skills-repo", "ticket": ticket, "tickets": [ticket], "type": rtype,
                "status": {"fields": {"findings": {"status": "skipped", "reason": "test"}}}}
         path = os.path.join(self.home, ".cache", "agent-reviews", "ledger.jsonl")
@@ -107,17 +115,17 @@ class World:
             fh.write(json.dumps(row) + "\n")
 
     def dispositions(self, *lines):
-        self.put("dispositions-5.jsonl", "".join(json.dumps(line) + "\n" for line in lines))
+        self.put(f"dispositions-{self.n}.jsonl", "".join(json.dumps(line) + "\n" for line in lines))
 
     def codex(self, status=0, launch=None, completion=None, out=CODEX_OUT):
         sha = self.git(self.work, "rev-parse", "HEAD")
-        self.put("codex-adversarial-5-gate.json", json.dumps({
-            "ticket": 5, "phase": "gate", "status": status,
+        self.put(f"codex-adversarial-{self.n}-gate.json", json.dumps({
+            "ticket": self.n, "phase": "gate", "status": status,
             "launch_sha": launch or sha, "completion_sha": completion or sha}))
-        self.put("codex-adversarial-5-gate.out", out)
+        self.put(f"codex-adversarial-{self.n}-gate.out", out)
 
     def run(self, cwd=None, *args):
-        done = subprocess.run(["bash", CHECK, "5", *args], cwd=cwd or self.work, env=self.env,
+        done = subprocess.run(["bash", CHECK, str(self.n), *args], cwd=cwd or self.work, env=self.env,
                               capture_output=True, text=True)
         return done.returncode, done.stdout + done.stderr
 
@@ -187,6 +195,22 @@ def slice_branch():
         w.git(w.primary, "fetch", "-q", "origin")
         case("a slice of spec-3 needs no review sidecars and no dispositions", w, 0,
              "slice of spec-3, no review wave")
+        case("before its PR exists, the slice says its base is checked at the merge", w, 0,
+             "no open PR from implement-5 yet")
+        # #1460's S4: fix-check passes a slice with no review, so a slice PR opened against main
+        # would land there unreviewed; the base GitHub holds is read, not the one dispatch meant.
+        w.prs = [(40, "spec-3")]
+        w.write_gh()
+        case("a slice PR into its spec-3 passes", w, 0, "PR #40 into spec-3")
+        w.prs = [(40, "main")]
+        w.write_gh()
+        case("a slice PR opened against main is refused before the merge", w, 1,
+             "PR #40 from implement-5 targets main, not spec-3")
+        w.prs = None
+        w.write_gh()
+        case("a gh that cannot list the slice's PR is the environment's, exit 2", w, 2, "gh: no network")
+        w.prs = []
+        w.write_gh()
         real_git = shutil.which("git", path=os.environ["PATH"])
         with open(os.path.join(w.bin, "git"), "w") as fh:
             fh.write('#!/usr/bin/env bash\n'
@@ -211,9 +235,52 @@ def slice_branch():
         w.close()
 
 
+def spec_review():
+    """#1461: the spec is reviewed once on its integration branch `spec-<p>`, and the merge check
+    is keyed on the spec number: one disposition per finding of that review, every `fixed` sha
+    on `spec-<p>` past main. The branch holds a landed slice that closes #4, as a slice's squash
+    merge into `spec-3` does."""
+    w = World(ticket=3, branch="spec-3")
+    try:
+        w.commit(w.work, "slice-4", "slice 4 (#40)\n\nCloses #4")
+        w.git(w.work, "push", "-q", "origin", "spec-3")
+        w.git(w.primary, "fetch", "-q", "origin")
+        w.findings(standards=["S1"], spec=["P1"])
+        w.dispositions(fixed("S1", w.fix_sha))
+        code, out = w.run(w.primary, "origin/spec-3")
+        if code != 1 or "no disposition for P1" not in out:
+            FAILS.append(f"FAIL: a spec review with an undisposed finding — want exit 1 naming P1, got {code}: {out}")
+        else:
+            print("PASS: a spec review with an undisposed finding is refused, keyed on the spec number")
+        w.git(w.primary, "checkout", "-q", "-b", "elsewhere")
+        stray = w.commit(w.primary, "stray")
+        w.git(w.primary, "checkout", "-q", "main")
+        w.dispositions(fixed("S1", stray), {"id": "P1", "outcome": "disputed", "reason": "r"})
+        code, out = w.run(w.primary, "origin/spec-3")
+        if code != 1 or f"S1: fixed sha {stray} is not a hex commit on origin/spec-3" not in out:
+            FAILS.append(f"FAIL: a fixed sha off spec-3 — want exit 1 naming S1 and origin/spec-3, got {code}: {out}")
+        else:
+            print("PASS: a fixed sha that is no commit on spec-3 is refused")
+        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 4})
+        code, out = w.run(w.primary, "origin/spec-3")
+        if code != 1 or "P1: moved ticket #4 is one this PR closes" not in out:
+            FAILS.append(f"FAIL: a finding moved onto a landed slice — want exit 1, got {code}: {out}")
+        else:
+            print("PASS: a finding moved onto a slice the integration PR closes is refused")
+        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "r"})
+        code, out = w.run(w.primary, "origin/spec-3")
+        if code != 0 or "2 findings, each disposed once" not in out:
+            FAILS.append(f"FAIL: a fully disposed spec review — want exit 0, got {code}: {out}")
+        else:
+            print("PASS: a spec review with every finding disposed passes on origin/spec-3")
+    finally:
+        w.close()
+
+
 def main():
     rebased_after_review()
     slice_branch()
+    spec_review()
     w = World()
     try:
         case("nothing in the cache: the reviewers never ran", w, 1, "findings-standards-5.jsonl is missing")

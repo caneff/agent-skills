@@ -1,8 +1,9 @@
 # The closing check: the seam, and what it cannot see
 
 The policy is `implement-spec/SKILL.md` § The closing check;
-`implement-spec/closing_ticket.py` generates the section appended to the last
-slice's body. This file is the declaration grammar and the evidence.
+`implement-spec/closing_ticket.py` generates the section for the spec's
+integration PR, or for the only slice of a one-slice spec. This file is the
+declaration grammar and the evidence.
 
 ## The declaration
 
@@ -76,26 +77,26 @@ surface per surface. This is the end-of-spec form of the standing rule that a
 ruling about runtime behaviour is checked against the thing that ships, not
 against a proxy for it.
 
-## The shas, and the procedure that can actually run over them
+## The range, and the sha list it replaced
 
-The spec-level review is handed the run file's landings as a list. On #781
-the range a reader would reach for — the spec's first slice to
-`origin/main` — held the spec's three squash commits and ~17 unrelated
-commits from other sessions.
+The spec-level review reads `origin/<default>...spec-<n>`, the spec's
+integration branch against the default branch (#1461). That range is the
+review's own because the integration branch holds the spec's slices and
+merges of `<default>`, nothing else, and three-dot compares against the
+merge-base, so `<default>`'s own commits stay out.
 
-The list alone is not enough, because `/multi-axis-code-review` pins **one**
-fixed point and reads `<fixed point>...HEAD`: it cannot take disjoint
-commits. A closing check that names the shas and stops states a procedure
-nothing can carry out, and a worker handed one invents the range the list
-exists to prevent. So the generated section carries the procedure that builds
-the comparison out of those commits: a detached worktree at the first sha, the
-rest cherry-picked on in landing order, and the review run against
-`<first>~1`, with the worktree removed after. HEAD is then this spec's commits
-and nothing else. Where a cherry-pick conflicts, the fallback is one run per
-sha against its own parent — also written out, because "fall back to per-sha"
-with no commands is the same unexecutable instruction one level down.
+Before #1461, slices landed on `main` one by one, and the range a reader
+would reach for there — on #781, the spec's first slice to `origin/main` —
+held the spec's three squash commits and ~17 unrelated commits from other
+sessions. The closing check therefore carried the run file's merge shas as a
+list, and a procedure that built a comparison out of them: a detached
+worktree at the first sha, the rest cherry-picked on, the review against
+`<first>~1`, and one run per sha where a cherry-pick conflicted. The
+integration branch removed the problem that procedure solved, so the
+generator no longer writes it.
 
-An empty sha list is the one-slice spec: the slice has no earlier landings,
-so the generated section omits the spec-level review and keeps the seam, the
-blind spot and the surfaces. It is not a refusal, because a refusal would
-leave every one-slice spec with no closing check at all.
+A one-slice spec has no integration branch (ruling 3a of #1457): its slice
+lands on the default branch with its own review wave. `--one-slice` makes a
+section for that slice's body that keeps the seam, the blind spot and the
+surfaces and names no spec-level review. It is not a refusal, because a
+refusal would leave every one-slice spec with no closing check at all.

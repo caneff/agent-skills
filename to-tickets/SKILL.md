@@ -37,7 +37,7 @@ Break the work into **tracer bullet** tickets.
 - A completed slice is demoable or verifiable on its own
 - Each slice is sized to fit in a single fresh context window
 - Any prefactoring should be done first
-- With more than one slice, the last slice is blocked by every other slice, and a spec's end-to-end test and spec-level check go in its PR as a closing-check section the spec run appends once those blockers land (`implement-spec/SKILL.md` § The closing check), never in a ticket of their own
+- A spec's end-to-end test and spec-level review are never a ticket of their own. With more than one slice they run on the spec's integration PR, in a closing-check section the spec run generates once every slice has landed on `spec-<n>`; a one-slice spec's section goes in its only slice (`implement-spec/SKILL.md` § The closing check)
 
 </vertical-slice-rules>
 

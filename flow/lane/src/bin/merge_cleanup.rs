@@ -1472,8 +1472,8 @@ impl Cleanup {
                 }
                 // Said, so the refusal below does not read as "no PR merged":
                 // GitHub shows this one merged, into a base that is no landing.
-                let recorded = slice_of.as_deref().map_or("no recorded spec base".to_string(), |s| format!("its recorded base {s}"));
-                eprintln!("merge-cleanup: PR #{n} merged {b} into {into}, which is neither {default} nor {recorded}");
+                let landing = slice_of.as_deref().map_or(format!("which is not {default}, and {b} has no recorded spec base"), |s| format!("which is neither {default} nor its recorded base {s}"));
+                eprintln!("merge-cleanup: PR #{n} merged {b} into {into}, {landing}");
             }
         }
         quiet_ok("git", &["-C", path, "fetch", "-q", "origin"]);

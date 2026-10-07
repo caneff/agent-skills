@@ -29,10 +29,13 @@ DECLARED = """# Fixture repo
 - **Blind to**: the live editor — grid rendering at 4x4 and 6x6
 """
 
-SHAS = ["a866bf3f0000000000000000000000000000abcd",
-        "b12cafe10000000000000000000000000000abcd"]
-
 FIXTURES = []
+
+
+def body(*args, **kwargs):
+    """`T.body` with the default branch every case but the refusal names."""
+    kwargs.setdefault("default", "main")
+    return T.body(*args, **kwargs)
 
 
 def repo(agents=DECLARED):
@@ -55,50 +58,153 @@ def clean_fixtures():
 
 
 
-def test_the_body_is_a_section_of_the_last_slice_not_a_ticket_of_its_own():
-    # Stage 2 of the process redesign: the end-to-end test and the spec-level
-    # review run in the last slice's PR, so the body is appended to that
-    # slice and never filed as a closing ticket.
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+def test_the_body_is_a_section_for_the_integration_pr():
+    # #1461: a spec with more than one slice lands on main in one PR from its
+    # integration branch, and the closing check runs there, not in the last
+    # slice's body.
+    got = body(repo(), spec=366, surfaces=[])
     assert got.startswith("## Closing check"), got
-    assert "last slice" in got, got
+    assert "integration PR" in got, got
+    assert "base `main`, head `spec-366`" in got, got
+    assert "last slice" not in got, got
     assert "Close out the spec" not in got, got
 
 
+def test_the_review_reads_the_integration_branch_and_no_sha_list():
+    # The integration branch holds this spec and current main, nothing else,
+    # so the range is the review's own and the cherry-pick procedure is gone.
+    import re
+    got = body(repo(), spec=366, surfaces=[])
+    review = got.split("### The spec-level review", 1)[1].split("###", 1)[0]
+    assert "`origin/main...spec-366`" in review, review
+    acceptance = got.split("### Acceptance criteria", 1)[1]
+    assert "`origin/main...spec-366`" in acceptance, acceptance
+    assert "/multi-axis-code-review origin/main" in got, got
+    assert "codex-usage-gate.py" in got, got
+    assert "git cherry-pick" not in got, got
+    assert "merge shas" not in got, got
+    assert not re.search(r"\b[0-9a-f]{7,40}\b", got), got
+
+
+def test_the_review_is_keyed_on_the_spec_number():
+    got = body(repo(), spec=366, surfaces=[])
+    assert "dispositions-366.jsonl" in got, got
+    assert "fix-check.sh 366 origin/spec-366" in got, got
+
+
+def test_main_is_merged_in_never_rebased():
+    got = body(repo(), spec=366, surfaces=[])
+    assert "git merge --no-edit origin/main" in got, got
+    assert "rebase" in got and "never" in got, got
+
+
+def test_the_landed_slices_are_brought_in_before_main():
+    # The slices merge into origin/spec-366 on GitHub; the spec run's own
+    # spec-366 stays where dispatch cut it until it takes them in (#1461's
+    # review, P1/C2), or the review reads none of them.
+    got = body(repo(), spec=366, surfaces=[])
+    block = got.split("```\n", 2)[1]
+    assert block.index("git merge --ff-only origin/spec-366") < block.index(
+        "git merge --no-edit origin/main"), block
+
+
+def test_the_default_branch_is_never_assumed():
+    try:
+        T.body(repo(), spec=366, surfaces=[])
+    except TypeError as exc:
+        assert "default" in str(exc), exc
+    else:
+        raise AssertionError("body() assumed a default branch")
+
+
+
+
+def test_the_integration_pr_closes_every_slice_and_the_spec():
+    got = body(repo(), spec=366, surfaces=[])
+    assert "`Closes #366`" in got, got
+    assert "`Closes #<slice>`" in got, got
+
+
+def test_the_default_branch_is_the_one_named():
+    got = body(repo(), spec=366, surfaces=[], default="trunk")
+    assert "`origin/trunk...spec-366`" in got, got
+    assert "base `trunk`" in got, got
+    assert "origin/main" not in got, got
+
+
+def test_a_one_slice_spec_gets_the_seam_in_its_slice_and_no_spec_review():
+    # Ruling 3a of #1457: a one-slice spec has no integration branch, its
+    # slice lands on main with its own review wave, so the section goes in
+    # that slice's body and names no spec-level review.
+    got = body(repo(), spec=366, surfaces=[], one_slice=True)
+    assert "grid rendering at 4x4 and 6x6" in got, got
+    assert "`Closes #366`" in got, got
+    assert "only slice" in got, got
+    assert "spec-level review" not in got, got
+    assert "spec-366" not in got, got
+    assert "integration" not in got, got
+
+
+def test_the_cli_reads_the_default_branch_off_the_repo():
+    import subprocess
+    root = repo()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    for args in (["init", "-q", "-b", "trunk"],
+                 ["remote", "add", "origin", root],
+                 ["symbolic-ref", "refs/remotes/origin/HEAD",
+                  "refs/remotes/origin/trunk"]):
+        subprocess.run(["git", "-C", root, *args], check=True, env=env)
+    out = subprocess.run([sys.executable, GENERATOR, root, "366",
+                          "--no-surface"], capture_output=True, text=True,
+                         env=env)
+    assert out.returncode == 0, out.stderr
+    assert "`origin/trunk...spec-366`" in out.stdout, out.stdout
+
+
+def test_the_cli_refuses_when_the_default_branch_cannot_be_read():
+    import subprocess
+    # A fixture under a TMPDIR inside some checkout must still read as no
+    # repo: the ceiling stops git's discovery at the fixture's parent.
+    root = repo()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_CEILING_DIRECTORIES"] = os.path.dirname(root)
+    out = subprocess.run([sys.executable, GENERATOR, root, "366",
+                          "--no-surface"], capture_output=True, text=True,
+                         env=env)
+    assert out.returncode == 1, out.stdout
+    assert "--default" in out.stderr, out.stderr
+
+
+def test_the_cli_takes_a_one_slice_spec():
+    import subprocess
+    out = subprocess.run([sys.executable, GENERATOR, repo(), "366",
+                          "--one-slice", "--no-surface"],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert "only slice" in out.stdout, out.stdout
+
+
 def test_the_body_names_what_the_seam_is_blind_to():
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    got = body(repo(), spec=366, surfaces=[])
     assert "grid rendering at 4x4 and 6x6" in got, got
     assert "blind" in got.lower(), got
 
 
 def test_a_surface_beyond_the_seam_buys_one_open_of_the_real_thing():
-    got = T.body(repo(), spec=366, shas=SHAS,
+    got = body(repo(), spec=366,
                  surfaces=["the ring header in the live editor"])
     assert "the ring header in the live editor" in got, got
     assert "open of the real thing" in got, got
 
 
 def test_with_no_surface_beyond_the_seam_the_body_asks_for_no_manual_open():
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    got = body(repo(), spec=366, surfaces=[])
     assert "open of the real thing" not in got, got
-
-
-def test_the_review_is_handed_the_merge_shas_and_no_git_range():
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
-    for sha in SHAS:
-        assert sha in got, got
-    # `a866bf3..origin/main` held this spec's three squash commits and ~17
-    # unrelated commits from other sessions. What must not appear is a range
-    # against the default branch; `../review-spec-366` and the skill's own
-    # `<fixed point>...HEAD` are not that.
-    import re
-    assert "origin/" not in got, got
-    assert not re.search(r"[0-9a-f]{7,40}\.\.[^.]", got), got
 
 
 def test_a_repo_that_declares_no_seam_is_refused():
     try:
-        T.body(repo(agents="# Fixture repo\n"), spec=366, shas=SHAS,
+        body(repo(agents="# Fixture repo\n"), spec=366,
                surfaces=[])
     except T.SeamError as exc:
         assert "End-to-end seam" in str(exc), exc
@@ -107,7 +213,7 @@ def test_a_repo_that_declares_no_seam_is_refused():
 
 
 def test_the_exploration_pass_can_supply_a_seam_the_repo_does_not_declare():
-    got = T.body(repo(agents="# Fixture repo\n"), spec=366, shas=SHAS,
+    got = body(repo(agents="# Fixture repo\n"), spec=366,
                  surfaces=[], seam="`pytest tests/e2e`",
                  blind_to="anything the browser draws")
     assert "`pytest tests/e2e`" in got, got
@@ -118,12 +224,12 @@ def test_a_seam_with_no_blind_spot_is_refused():
     # Naming the seam is necessary and not sufficient: the seam that existed
     # on #781 had diverged from the live editor inside that same spec.
     try:
-        T.body(repo(agents="""# Fixture repo
+        body(repo(agents="""# Fixture repo
 
 ## End-to-end seam
 
 - **Seam**: `npm run test:e2e`
-"""), spec=366, shas=SHAS, surfaces=[])
+"""), spec=366, surfaces=[])
     except T.SeamError as exc:
         assert "Blind to" in str(exc), exc
     else:
@@ -164,19 +270,19 @@ def test_the_cli_prints_the_body():
     import subprocess
     out = subprocess.run(
         [sys.executable, GENERATOR, repo(), "366",
-         "--shas", ",".join(SHAS),
+         "--default", "main",
          "--surface", "the ring header in the live editor"],
         capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert "open of the real thing" in out.stdout, out.stdout
-    assert SHAS[0] in out.stdout, out.stdout
+    assert "origin/main...spec-366" in out.stdout, out.stdout
 
 
 def test_the_cli_fails_loud_when_no_seam_is_declared():
     import subprocess
     out = subprocess.run(
         [sys.executable, GENERATOR, repo(agents="# Fixture repo\n"), "366",
-         "--shas", SHAS[0], "--no-surface"],
+         "--default", "main", "--no-surface"],
         capture_output=True, text=True)
     assert out.returncode == 1, out.stdout
     assert "End-to-end seam" in out.stderr, out.stderr
@@ -197,7 +303,7 @@ def test_a_fenced_example_is_not_a_declaration():
 ```
 """
     try:
-        T.body(repo(agents=fenced), spec=366, shas=SHAS, surfaces=[])
+        body(repo(agents=fenced), spec=366, surfaces=[])
     except T.SeamError as exc:
         assert "declares no" in str(exc), exc
     else:
@@ -225,13 +331,13 @@ def test_the_colon_may_sit_inside_the_emphasis():
     # `- **Seam:** x` is as common in the wild as `- **Seam**: x`, and read
     # by the stricter grammar it yields a seam beginning with `**` — silently,
     # into the ticket body.
-    got = T.body(repo(agents="""# Fixture repo
+    got = body(repo(agents="""# Fixture repo
 
 ## End-to-end seam
 
 - **Seam:** `npm run e2e`
 - **Blind to:** the live editor
-"""), spec=366, shas=SHAS, surfaces=[])
+"""), spec=366, surfaces=[])
     assert "- **Seam**: `npm run e2e`" in got, got
     assert "**Seam**: **" not in got, got
 
@@ -239,13 +345,13 @@ def test_the_colon_may_sit_inside_the_emphasis():
 def test_a_colon_inside_the_emphasis_needs_no_space_before_a_code_span():
     # `- **Seam:**`npm run e2e`` is a balanced key followed directly by a
     # code span. The lookahead grammar left the closing `**` in the value.
-    got = T.body(repo(agents="""# Fixture repo
+    got = body(repo(agents="""# Fixture repo
 
 ## End-to-end seam
 
 - **Seam:**`npm run e2e`
 - **Blind to:**the live editor
-"""), spec=366, shas=SHAS, surfaces=[])
+"""), spec=366, surfaces=[])
     assert "- **Seam**: `npm run e2e`" in got, got
     assert "**Seam**: **" not in got, got
 
@@ -273,7 +379,7 @@ def test_a_root_that_is_not_a_directory_is_not_a_missing_declaration():
     # A typo'd root reported as "this repo declares no seam" sends the
     # operator to edit an `AGENTS.md` that was never the problem.
     try:
-        T.body(os.path.join(repo(), "no-such-dir"), spec=366, shas=SHAS,
+        body(os.path.join(repo(), "no-such-dir"), spec=366,
                surfaces=[])
     except T.SeamError as exc:
         assert "not a directory" in str(exc), exc
@@ -290,29 +396,11 @@ def test_an_agents_file_that_is_not_utf8_is_reported_not_raised():
     # ticket in is unattended, and a five-frame traceback from `<frozen
     # codecs>` reads as a broken tool, not as a repo with an odd byte.
     try:
-        T.body(root, spec=366, shas=SHAS, surfaces=[])
+        body(root, spec=366, surfaces=[])
     except T.SeamError as exc:
         assert "Blind to" in str(exc), exc
     else:
         raise AssertionError("the latin-1 seam declaration was not read")
-
-
-def test_a_one_slice_spec_has_no_earlier_landings_and_still_gets_the_seam():
-    # The last slice of a one-slice spec has no earlier landings: the section
-    # still names the seam, and drops the spec-level review it has nothing to
-    # read (C1/P3 of #1402).
-    got = T.body(repo(), spec=366, shas=[], surfaces=[])
-    assert "grid rendering at 4x4 and 6x6" in got, got
-    assert "spec-level review" not in got, got
-    assert "merge shas" not in got, got
-    assert "git cherry-pick" not in got, got
-
-
-def test_the_last_slice_pr_closes_the_spec():
-    # "The spec closes when its last slice merges" needs a closing line in the
-    # PR; nothing else in the run writes one for the spec (C4 of #1402).
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
-    assert "`Closes #366`" in got, got
 
 
 def test_the_surfaces_question_must_be_answered():
@@ -320,7 +408,7 @@ def test_the_surfaces_question_must_be_answered():
     # asked about. An unanswered question is refused, an explicit none is
     # fine.
     try:
-        T.body(repo(), spec=366, shas=SHAS)
+        body(repo(), spec=366)
     except T.SeamError as exc:
         assert "surface" in str(exc), exc
     else:
@@ -328,7 +416,7 @@ def test_the_surfaces_question_must_be_answered():
 
 
 def test_the_body_says_where_the_test_goes():
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    got = body(repo(), spec=366, surfaces=[])
     assert "`npm run test:e2e` over the headless solver bundle" in got, got
     assert "runs it" in got, got
 
@@ -336,7 +424,7 @@ def test_the_body_says_where_the_test_goes():
 def test_the_cli_takes_an_explicit_none_for_the_surfaces():
     import subprocess
     out = subprocess.run(
-        [sys.executable, GENERATOR, repo(), "366", "--shas", SHAS[0],
+        [sys.executable, GENERATOR, repo(), "366", "--default", "main",
          "--no-surface"],
         capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
@@ -346,7 +434,7 @@ def test_the_cli_takes_an_explicit_none_for_the_surfaces():
 def test_the_cli_refuses_an_unanswered_surfaces_question():
     import subprocess
     out = subprocess.run(
-        [sys.executable, GENERATOR, repo(), "366", "--shas", SHAS[0]],
+        [sys.executable, GENERATOR, repo(), "366", "--default", "main"],
         capture_output=True, text=True)
     assert out.returncode != 0, out.stdout
     assert "surface" in (out.stderr + out.stdout), out.stderr
@@ -357,7 +445,7 @@ def test_the_declaration_outranks_the_exploration_pass():
     # declaration: a stale exploration result would replace the repo's
     # canonical seam and nothing would say so.
     try:
-        T.body(repo(), spec=366, shas=SHAS, surfaces=[],
+        body(repo(), spec=366, surfaces=[],
                seam="`pytest tests/e2e`", blind_to="the browser")
     except T.SeamError as exc:
         assert "npm run test:e2e" in str(exc), exc
@@ -374,46 +462,16 @@ def test_the_exploration_pass_fills_only_what_the_declaration_omits():
 
 - **Seam**: `npm run test:e2e` over the headless solver bundle
 """
-    got = T.body(repo(agents=half), spec=366, shas=SHAS, surfaces=[],
+    got = body(repo(agents=half), spec=366, surfaces=[],
                  blind_to="anything the browser draws")
     assert "`npm run test:e2e` over the headless solver bundle" in got, got
     assert "anything the browser draws" in got, got
 
 
 def test_an_exploration_value_equal_to_the_declaration_is_not_a_conflict():
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[],
+    got = body(repo(), spec=366, surfaces=[],
                  seam="`npm run test:e2e` over the headless solver bundle")
     assert "`npm run test:e2e` over the headless solver bundle" in got, got
-
-
-def test_the_review_procedure_is_executable_over_the_sha_list():
-    # `/multi-axis-code-review` pins one fixed point and reads
-    # `<fixed point>...HEAD`; it cannot take disjoint commits. A ticket that
-    # says "review these shas" and stops leaves the worker to invent a
-    # range — the shared-`main` failure this criterion exists to prevent.
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
-    assert f"git worktree add" in got, got
-    # HEAD is the last of this spec's commits, the fixed point is what the
-    # first one landed on, and the cherry-picks put the rest in between.
-    assert f"/multi-axis-code-review {SHAS[0]}~1" in got, got
-    assert f"git cherry-pick {SHAS[1]}" in got, got
-    assert "origin/main" not in got, got
-
-
-def test_a_single_sha_needs_no_cherry_pick():
-    got = T.body(repo(), spec=366, shas=[SHAS[0]], surfaces=[])
-    assert "git cherry-pick" not in got, got
-    assert f"/multi-axis-code-review {SHAS[0]}~1" in got, got
-
-
-def test_the_procedure_says_how_to_fall_back_and_how_to_tear_down():
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
-    # A cherry-pick of a spec's own squash commits usually applies, but a
-    # conflict must not leave the worker inventing a range either.
-    assert "conflict" in got, got
-    assert f"/multi-axis-code-review {SHAS[1]}~1" in got, got
-    assert "git worktree remove" in got, got
-
 
 
 WRAPPED = """# Fixture repo
@@ -439,7 +497,7 @@ def test_a_wrapped_blind_spot_is_read_whole():
 
 
 def test_a_wrapped_value_reaches_the_ticket_body():
-    got = T.body(repo(agents=WRAPPED), spec=366, shas=SHAS, surfaces=[])
+    got = body(repo(agents=WRAPPED), spec=366, surfaces=[])
     assert "what the share sheet shows" in got, got
 
 
