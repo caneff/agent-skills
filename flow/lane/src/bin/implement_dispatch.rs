@@ -5,7 +5,8 @@
 
 use lane::herdr::{AgentNameError, HERDR_QUERY_TIMEOUT};
 use lane::runner::{
-    self, quiet_ok_bounded, quiet_ok_timeout, quiet_stdout_bounded, quiet_stdout_timeout, run_in_timeout, run_timeout, CommandOutput,
+    self, quiet_ok_bounded, quiet_ok_timeout, quiet_stdout_bounded, quiet_stdout_timeout, run_in_timeout, run_timeout, stdout_bounded,
+    CommandOutput,
 };
 use lane::{git_origin, herdr, proc_info, safe_print, safe_println, sessions, worktree};
 use serde_json::Value;
@@ -75,6 +76,20 @@ Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
 "<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
 the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
 positive integer, 5 when omitted, and refused without --spec.
+
+Integration branch: a spec with more than one slice (its sub-issues, open or
+closed) has spec-<n> pushed to origin off origin/<default> as its integration
+branch; an origin/spec-<n> already there is reused unmoved and the spec run's
+workspace starts from it. A one-slice spec gets none. A slice count that
+cannot be read refuses.
+
+A plain dispatch whose tickets' spec parent <p> (the sub-issue parent link)
+has origin/spec-<p> is a slice: its workspace branches from origin/spec-<p>,
+git config branch.implement-<n>.base reads spec-<p>, and the brief names
+spec-<p> as its PR base, seam base and merge-in base and says it runs no
+review wave. A clump split between bases, or a parent that cannot be read
+while some origin/spec-* exists, refuses. Every other ticket branches from
+origin/<default> with no base recorded, as before.
 
 The controller is --controller, else the herdr agent name of the Claude
 session running this (the nearest ancestor process whose
@@ -697,6 +712,89 @@ impl Claim<'_> {
     }
 }
 
+/// Where a dispatch's workspace branches from (#1458).
+enum Base {
+    /// `origin/<default>`, as every dispatch did before #1458. `slices` is a
+    /// spec run's slice count, there to say why it got no integration branch.
+    Default { slices: Option<u64> },
+    /// A spec run with more than one slice: its workspace branch `spec-<n>`
+    /// is the integration branch, `created` here off `origin/<default>` and
+    /// pushed, or found on origin already and reused from there unmoved.
+    Integration { created: bool },
+    /// A slice of spec `#<spec>`, whose `origin/spec-<spec>` exists: it
+    /// branches from there and lands there.
+    Slice { spec: String },
+}
+
+/// What a slice's worker is told beyond `/implement`'s own text: the base
+/// for everything it would otherwise point at the default branch.
+fn slice_note(spec: &str) -> String {
+    format!(
+        " -- Slice of spec #{spec}: your base is spec-{spec}, never the default branch: merge origin/spec-{spec} in, \
+run the seam narrowed with --changed origin/spec-{spec}, open the PR with gh pr create --base spec-{spec}; \
+a slice runs no review wave, since the spec is reviewed once on spec-{spec}."
+    )
+}
+
+/// How many slices spec `#<n>` has: its sub-issues, open or closed, the
+/// links `/to-tickets` makes. A read that fails refuses: an unread count is
+/// not "one slice".
+fn slice_count(slug: &str, n: &str) -> Result<u64, String> {
+    let out = quiet_stdout_bounded(
+        "gh",
+        &["issue", "view", n, "--repo", slug, "--json", "subIssuesSummary", "-q", ".subIssuesSummary.total"],
+        gh_query_timeout(),
+    )?;
+    let text = out.ok_or_else(|| format!("cannot read the slices of #{n} (gh issue view --json subIssuesSummary failed)"))?;
+    text.trim().parse().map_err(|_| format!("cannot read the slices of #{n}: gh answered {text:?}, not a count"))
+}
+
+/// Whether `origin/<branch>` exists, as of this run's fetch.
+fn remote_branch_exists(primary: &str, branch: &str) -> Result<bool, String> {
+    quiet_ok_bounded("git", &["-C", primary, "show-ref", "-q", "--verify", &format!("refs/remotes/origin/{branch}")], git_query_timeout())
+}
+
+/// The parent issue of `#<n>` by the sub-issue link, `None` for gh's own 404
+/// (no parent). Any other failure refuses: a call that did not answer is not
+/// an answer of "no parent".
+fn parent_of(slug: &str, n: &str) -> Result<Option<String>, String> {
+    let out = run_timeout("gh", &["api", &format!("repos/{slug}/issues/{n}/parent"), "--jq", ".number"], gh_query_timeout())
+        .map_err(|e| format!("cannot read the parent of #{n}: {e}"))?;
+    let text = out.combined.trim();
+    match out.success {
+        true if !text.is_empty() && text.chars().all(|c| c.is_ascii_digit()) => Ok(Some(text.to_string())),
+        true => Err(format!("cannot read the parent of #{n}: gh answered {text:?}, not an issue number")),
+        false if text.contains("(HTTP 404)") => Ok(None),
+        false => Err(format!("cannot read the parent of #{n}: {text}")),
+    }
+}
+
+/// A plain dispatch's base: `Slice` when every ticket's spec parent has an
+/// integration branch on origin, `Default` when none does, refused when the
+/// clump is split between bases. No `origin/spec-*` at all means no ticket
+/// can be a slice of one, so the parent is never asked for.
+fn slice_base(primary: &str, slug: &str, ns: &[String]) -> Result<Base, String> {
+    let refs = stdout_bounded("git", &["-C", primary, "for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin/spec-*"], git_query_timeout())?;
+    let integration: Vec<&str> = refs.lines().collect();
+    if integration.is_empty() {
+        return Ok(Base::Default { slices: None });
+    }
+    let mut bases: Vec<Option<String>> = Vec::new();
+    for n in ns {
+        let spec = parent_of(slug, n)?.filter(|p| integration.contains(&format!("spec-{p}").as_str()));
+        bases.push(spec);
+    }
+    if bases.windows(2).any(|w| w[0] != w[1]) {
+        let each: Vec<String> =
+            ns.iter().zip(&bases).map(|(n, b)| format!("#{n} on {}", b.as_ref().map_or("the default branch".to_string(), |p| format!("spec-{p}")))).collect();
+        return Err(format!("a clump builds on one base: {}", each.join(", ")));
+    }
+    Ok(match bases.into_iter().next().flatten() {
+        Some(spec) => Base::Slice { spec },
+        None => Base::Default { slices: None },
+    })
+}
+
 fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
     let mut cur = v;
     for p in path {
@@ -1084,6 +1182,21 @@ fn run() -> Result<(), ExitCode> {
     {
         return Err(die(format!("no origin/{default} to branch from")));
     }
+    // Where the workspace branches from (#1458), settled before the claim so
+    // a refusal here still leaves nothing claimed.
+    let base = match mode {
+        Mode::Spec { .. } => {
+            let slices = slice_count(&slug, &n).map_err(die)?;
+            if remote_branch_exists(&primary, &branch).map_err(die)? {
+                Base::Integration { created: false }
+            } else if slices > 1 {
+                Base::Integration { created: true }
+            } else {
+                Base::Default { slices: Some(slices) }
+            }
+        }
+        Mode::Plain => slice_base(&primary, &slug, &ns).map_err(die)?,
+    };
 
     // Past here the clump is claimed; a failure says how to release it. A
     // ready-for-human ticket keeps its ready label through the build, so the
@@ -1152,13 +1265,33 @@ fn run() -> Result<(), ExitCode> {
     drop(claim_lock);
     let claim = Claim { tickets: &tickets, slug: &slug, wt: &wt };
 
+    let start = match &base {
+        Base::Integration { created: false, .. } => format!("origin/{branch}"),
+        Base::Slice { spec } => format!("origin/spec-{spec}"),
+        _ => format!("origin/{default}"),
+    };
     let wa = run_in_timeout(
         None,
         "git",
-        &["-C", &primary, "worktree", "add", "-q", "--no-track", "-b", &branch, wt.to_str().unwrap_or(""), &format!("origin/{default}")],
+        &["-C", &primary, "worktree", "add", "-q", "--no-track", "-b", &branch, wt.to_str().unwrap_or(""), &start],
         git_mutation_timeout(),
     );
     claim.step("git worktree add", wa, None)?;
+    match &base {
+        // The one recorded fact the gate, the slice merge and the spec
+        // review read a slice's base from: never a missing file or a gh call.
+        Base::Slice { spec } => {
+            let set = run_timeout("git", &["-C", &primary, "config", &format!("branch.{branch}.base"), &format!("spec-{spec}")], git_query_timeout());
+            claim.step("recording the slice's base", set, None)?;
+        }
+        // A plain push, never forced: a branch someone pushed since the
+        // fetch is refused here rather than overwritten.
+        Base::Integration { created: true, .. } => {
+            let push = run_timeout("git", &["-C", &primary, "push", "-q", "origin", &format!("refs/heads/{branch}:refs/heads/{branch}")], fetch_timeout);
+            claim.step("pushing the integration branch", push, None)?;
+        }
+        _ => {}
+    }
 
     let lock = format!("{home}/.claude.json.implement-dispatch.lock");
     let self_exe = env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "implement-dispatch".to_string());
@@ -1230,9 +1363,13 @@ fn run() -> Result<(), ExitCode> {
                 Some(id) => (format!(" --run {id}"), format!(", run {id}")),
                 None => (String::new(), String::new()),
             };
+            let (slice_note, slice_desc) = match &base {
+                Base::Slice { spec } => (slice_note(spec), format!(", slice of #{spec} on spec-{spec}")),
+                _ => (String::new(), String::new()),
+            };
             (
-                format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{run_flag}{note}", ns.join(" ")),
-                format!("{tier} tier{strip_note}{merger}{run_note}"),
+                format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{run_flag}{slice_note}{note}", ns.join(" ")),
+                format!("{tier} tier{strip_note}{merger}{run_note}{slice_desc}"),
             )
         }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
@@ -1291,6 +1428,13 @@ fn run() -> Result<(), ExitCode> {
     safe_println!("agent:    {agent}");
     safe_println!("session:  {session}");
     safe_println!("cleanup:  {cleanup}");
+    match &base {
+        Base::Integration { created, .. } => {
+            safe_println!("integration branch: {branch} ({})", if *created { "created" } else { "reused" });
+        }
+        Base::Default { slices: Some(k) } => safe_println!("integration branch: none ({k} slice{})", if *k == 1 { "" } else { "s" }),
+        _ => {}
+    }
     Ok(())
 }
 

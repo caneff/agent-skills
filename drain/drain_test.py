@@ -55,7 +55,10 @@ elif args[0] == "api":
                 save()
         out([issues])
     elif m and m.group(2):
-        sys.stderr.write("gh: Not Found (HTTP 404)\n"); sys.exit(1)
+        parent = state["issues"][m.group(1)].get("parent")
+        if parent is None:
+            sys.stderr.write("gh: Not Found (HTTP 404)\n"); sys.exit(1)
+        out(dict(number=parent, labels=names(state["issues"][str(parent)])))
     elif m:
         out({"state": state["issues"][m.group(1)]["state"]})
 elif args[:2] == ["issue", "edit"]:
@@ -798,6 +801,25 @@ class DrainTest(Sandbox):
             self.assertIn(f"--anchor #{n} is not an open, ready, unblocked ticket", r.stdout)
         self.assertEqual(self.dispatch_runs(), [])
         self.assertEqual(self.labels(1), ["ready-for-agent"])
+
+    def test_a_ready_slice_is_never_the_anchor_and_never_joins_a_bundle(self):
+        # Ruling 7 of #1457: a slice is built inside its spec run only, even
+        # one older than every lone ticket and one the chooser asks for.
+        spec = {"labels": ["spec"], "body": "the spec"}
+        self.write_state({1: {"parent": 9}, 2: {}, 3: {"parent": 9}, 4: {}, 9: spec})
+        r = self.drain("--once", env={"TAKE": "3"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c["tickets"] for c in self.dispatch_runs()], [["2"]])
+        prompt = self.chooser_runs()[0]["prompt"]
+        self.assertIn("#2 is the anchor", prompt)
+        self.assertIn("- #4 ticket 4", prompt)
+        self.assertNotIn("#1 ", prompt)
+        self.assertNotIn("#3 ", prompt)
+        self.assertEqual(self.labels(1), ["ready-for-agent"])
+        self.assertEqual(self.labels(3), ["ready-for-agent"])
+        r = self.drain("--anchor", "3")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--anchor #3 is not an open, ready, unblocked ticket", r.stdout)
 
     # --- review fixes (#1415) --------------------------------------------------
 

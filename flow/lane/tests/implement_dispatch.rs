@@ -761,6 +761,8 @@ fn help_documents_both_modes() {
         "Several issue numbers are one clump",
         "a clump is always heavy",
         "for the lowest number named",
+        "Integration branch: a spec with more than one slice",
+        "git config branch.implement-<n>.base reads spec-<p>",
     ] {
         assert!(text.contains(want), "help lacks {want:?}:\n{text}");
     }
@@ -2335,4 +2337,176 @@ fn a_show_ref_that_hangs_fails_instead_of_being_read_as_branch_absent() {
     assert!(!text.contains("already exists"), "{}", out_text(&out));
     assert!(!f.calls().contains("worktree open"), "{}", f.calls());
     assert!(!f.calls().contains("issue edit"), "{}", f.calls());
+}
+
+// --- #1458: a spec's integration branch, and slices built on it ------------
+
+fn git_out(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+/// The scratch origin `mkfixture` made for `name`.
+fn origin_of(f: &Fixture, name: &str) -> std::path::PathBuf {
+    f.tmp.path().join("github.com/caneff").join(format!("{name}.git"))
+}
+
+/// Pushes `branch` to origin one commit past origin/main, standing in for an
+/// integration branch slices have already landed on; returns its sha.
+fn push_spec_branch(repo: &std::path::Path, branch: &str) -> String {
+    let run = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(repo).args(args).status().unwrap().success(), "git {args:?}");
+    run(&["checkout", "-q", "-b", "landed-slice", "origin/main"]);
+    std::fs::write(repo.join("slice"), "landed\n").unwrap();
+    run(&["add", "slice"]);
+    run(&["commit", "-qm", "a landed slice"]);
+    run(&["push", "-q", "origin", &format!("landed-slice:refs/heads/{branch}")]);
+    let sha = git_out(repo, &["rev-parse", "HEAD"]);
+    run(&["checkout", "-q", "main"]);
+    run(&["branch", "-q", "-D", "landed-slice"]);
+    sha
+}
+
+const SPEC: &str = "spec,ready-for-agent";
+
+#[test]
+fn spec_mode_on_a_multi_slice_spec_creates_and_pushes_its_integration_branch_off_origin_default() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let name = "sudokumaker-custom-constraints";
+    let repo = f.mkfixture(name, "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "3")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let origin = origin_of(&f, name);
+    assert_eq!(git_out(&origin, &["rev-parse", "--verify", "-q", "refs/heads/spec-395"]), git_out(&origin, &["rev-parse", "refs/heads/main"]));
+    assert!(out_text(&out).contains("integration branch: spec-395 (created)"), "{}", out_text(&out));
+}
+
+#[test]
+fn spec_mode_reuses_an_existing_integration_branch_without_moving_it() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let name = "sudokumaker-custom-constraints";
+    let repo = f.mkfixture(name, "main");
+    let landed = push_spec_branch(&repo, "spec-395");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "3")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(git_out(&origin_of(&f, name), &["rev-parse", "refs/heads/spec-395"]), landed, "the integration branch moved");
+    // The spec run's own workspace sees the slices already landed.
+    assert_eq!(git_out(&repo.join(".claude/worktrees/spec-395"), &["rev-parse", "HEAD"]), landed);
+    assert!(out_text(&out).contains("integration branch: spec-395 (reused)"), "{}", out_text(&out));
+}
+
+#[test]
+fn spec_mode_on_a_one_slice_spec_creates_no_integration_branch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let name = "sudokumaker-custom-constraints";
+    let repo = f.mkfixture(name, "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(git_out(&origin_of(&f, name), &["rev-parse", "--verify", "-q", "refs/heads/spec-395"]), "", "a one-slice spec got an integration branch");
+    assert!(out_text(&out).contains("integration branch: none (1 slice)"), "{}", out_text(&out));
+}
+
+#[test]
+fn spec_mode_refuses_when_its_slice_count_cannot_be_read() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_FAIL_395", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "slices of #395"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let landed = push_spec_branch(&repo, "spec-500");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let wt = repo.join(".claude/worktrees/implement-395");
+    assert_eq!(git_out(&wt, &["rev-parse", "HEAD"]), landed, "the slice did not branch from origin/spec-500");
+    assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "spec-500");
+    let prompt = f.calls().lines().find(|l| l.starts_with("herdr agent prompt")).unwrap_or_default().to_string();
+    assert!(prompt.contains("/implement 395 --tier heavy --controller \"skills-ctl\" -- Slice of spec #500"), "{prompt}");
+    assert!(prompt.contains("gh pr create --base spec-500"), "no PR base in the brief: {prompt}");
+    assert!(prompt.contains("--changed origin/spec-500"), "no seam base in the brief: {prompt}");
+    assert!(prompt.contains("merge origin/spec-500 in"), "no merge-in base in the brief: {prompt}");
+    assert!(prompt.contains("no review wave"), "the brief does not say the slice runs no review wave: {prompt}");
+    assert!(out_text(&out).contains("slice of #500 on spec-500"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_lone_ticket_dispatches_from_origin_default_even_with_a_spec_branch_on_origin() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_spec_branch(&repo, "spec-500");
+    // No GH_PARENT_395: the parent endpoint answers 404, no parent.
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let wt = repo.join(".claude/worktrees/implement-395");
+    assert_eq!(git_out(&wt, &["rev-parse", "HEAD"]), git_out(&repo, &["rev-parse", "origin/main"]));
+    assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "", "a lone ticket got a base key");
+    let prompt = f.calls().lines().find(|l| l.starts_with("herdr agent prompt")).unwrap_or_default().to_string();
+    assert!(prompt.contains("/implement 395 --tier heavy --controller \"skills-ctl\" --wait"), "{prompt}");
+    assert!(!prompt.to_lowercase().contains("slice"), "{prompt}");
+}
+
+#[test]
+fn a_slice_whose_spec_has_no_integration_branch_dispatches_from_origin_default() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // Another spec's integration branch exists; this slice's spec has none.
+    push_spec_branch(&repo, "spec-600");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let wt = repo.join(".claude/worktrees/implement-395");
+    assert_eq!(git_out(&wt, &["rev-parse", "HEAD"]), git_out(&repo, &["rev-parse", "origin/main"]));
+    assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "");
+    let prompt = f.calls().lines().find(|l| l.starts_with("herdr agent prompt")).unwrap_or_default().to_string();
+    assert!(!prompt.to_lowercase().contains("slice"), "{prompt}");
+}
+
+#[test]
+fn a_parent_that_cannot_be_read_refuses_the_dispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_spec_branch(&repo, "spec-500");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_FAIL_395", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "parent of #395"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_clump_mixing_a_slice_with_a_lone_ticket_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_spec_branch(&repo, "spec-500");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395", "396"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "one base"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_clump_of_slices_of_one_spec_builds_on_its_integration_branch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let landed = push_spec_branch(&repo, "spec-500");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500"), ("GH_PARENT_396", "500")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395", "396"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(git_out(&repo.join(".claude/worktrees/implement-395"), &["rev-parse", "HEAD"]), landed);
+    assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "spec-500");
 }
