@@ -37,6 +37,9 @@ wave and land on the default branch as before (ruling 3a).
 
 - The fix worker is the spec run itself, in its own workspace on
   `spec-<n>`: git refuses a second checkout of a branch a workspace holds.
+  This is #1461's worker's choice, not one of the rulings above; the spec
+  asked for a worker dispatched by the spec run, and nothing dispatches one
+  onto a branch a workspace already holds.
   The pre-report gate runs the merge check on `spec-<n>`, and the merge
   check, findings sidecars, Codex record, dispositions and ledger rows are
   keyed on the spec number.
