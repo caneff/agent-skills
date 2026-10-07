@@ -1,6 +1,6 @@
 ---
 name: implement-spec
-description: "Drive one sliced spec as a nested run — the burn's worker, its own slices' controller, with an exploration pass, a closing check in the last slice and a spec-level review."
+description: "Drive one sliced spec as a nested run — the burn's worker, its own slices' controller, with an exploration pass, an integration branch its slices land on, one spec-level review and fix round, and one integration PR to the default branch."
 disable-model-invocation: true
 ---
 
@@ -13,9 +13,10 @@ Picking the next clump, starting it, waiting, refilling as slots free, the
 box reading before each dispatch, clumping, the frontier and the run file:
 all of that is [`burndown/SKILL.md`](../burndown/SKILL.md) § The loop, which
 is its single home. Read it there and run it as written. This file is
-**policy over that loop**, and states only the four things a spec run does
-differently: the nesting, the exploration pass, the closing check, and the
-spec-level review. Anything it does not override, the loop decides.
+**policy over that loop**, and states only the five things a spec run does
+differently: the nesting, the exploration pass, the integration branch, the
+closing check, and the spec-level review. Anything it does not override, the
+loop decides.
 
 ## The nesting
 
@@ -61,24 +62,70 @@ first: the channel that reaches Chris is the one that has to stay clean.
 The three verdicts, that boundary, the input the reader takes, and the run
 this rule came from: [`references/exploration.md`](references/exploration.md).
 
+## The integration branch
+
+A spec with more than one slice is built on its **integration branch**,
+`spec-<n>`, and reaches the default branch in one PR (#1457, rulings 1a, 2a,
+4y, 5y; ADR 0006). `implement-dispatch --spec <n>` pushes `spec-<n>` off
+`origin/<default>`, or reuses an `origin/spec-<n>` already there, and this
+run's own workspace is on it. Each slice is dispatched onto it: its workspace
+branches from `origin/spec-<n>`, and it builds with TDD, its narrowed seam and
+the pre-report gate but no review wave (`implement/SKILL.md` § Review). This
+run merges each slice PR into `spec-<n>` by `implement/SKILL.md` § The merge
+with its slice substitutions; a slice ticket stays open until the
+integration PR closes it.
+
+When the last slice has landed:
+
+1. **Keep current.** Merge `origin/<default>` into `spec-<n>` in this
+   workspace, `git fetch origin && git merge --no-edit origin/<default>`,
+   and push. Never a rebase: it rewrites the shas the dispositions name. A
+   conflict is the fix round's first job.
+2. **One review.** Run the spec-level review (§ The spec-level review).
+3. **One fix round.** This run is the spec's one fix worker, in its own
+   workspace on `spec-<n>`: git refuses a second checkout of a branch a
+   workspace already holds. It follows `implement/SKILL.md` § Review steps
+   2–3 with the spec number for `<n>`: every finding gets one disposition in
+   `dispositions-<spec>.jsonl`, and the full seam runs, `bash tests/all.sh`
+   from a tree with `origin/<default>` merged in again. The pre-report gate
+   runs the merge check on `spec-<n>` keyed on the spec number, so
+   `fix-check.sh <spec> spec-<spec>` must exit 0 before the PR goes up.
+4. **The integration PR.** Merge `origin/<default>` in once more, push, and
+   open it: `gh pr create --base <default> --head spec-<n>`. Its body is
+   `implement/SKILL.md` § The PR's, keyed on the spec number, with a bare
+   `Closes #<slice>` line for every slice and a bare `Closes #<spec>`.
+   Report it to this run's own controller as "PR up" in that section's
+   shape, with `fix-check.sh <spec> origin/spec-<spec>` as the controller's
+   merge check. The controller merges it by § The merge unchanged, step 5's
+   check that each `Closes` issue closed included; a `ready-for-human` spec
+   hands Chris the merge line.
+
+A one-slice spec gets no integration branch (ruling 3a): its slice branches
+from and lands on the default branch with its own review wave, as a lone
+ticket does.
+
 ## The closing check
 
-The spec has no ticket of its own for it. The end-to-end test and the
-spec-level review run in the last slice's PR, and the spec closes when its
-last slice merges. The last slice is the one blocked by every other, so when
-its blockers have all landed the shas of those landings exist. The spec run
-then generates the section with
-[`closing_ticket.py`](closing_ticket.py) and appends it to the last slice's
-body (`gh issue edit`) before dispatching it. A spec with one slice has no
-earlier landings: the section is generated with no shas and carries no
-spec-level review, and the slice's own review round is the review. The
-generator refuses to omit two things a worker left to write the section on
-its own would otherwise have to invent:
+The spec has no ticket of its own for it. Once the last slice has landed on
+`spec-<n>`, this run generates the closing-check section for the integration
+PR with [`closing_ticket.py`](closing_ticket.py) and posts it as a comment on
+the spec issue (`gh issue comment <spec> --body-file`), so the review and the
+fix round read it with the spec. The end-to-end test runs there, at the seam
+on `spec-<n>` merged with current `<default>`. A one-slice spec has no
+integration PR: `--one-slice` makes a section for that slice's body, appended
+before it is dispatched (`gh issue edit`), with no spec-level review, since
+the slice's own review wave is the review. The generator refuses to omit two
+things a worker left to write the section on its own would otherwise have to
+invent:
 
 ```
-python3 implement-spec/closing_ticket.py <repo-root> <spec> --shas <sha>,<sha> [--surface <what>]...
-python3 implement-spec/closing_ticket.py <repo-root> <spec> --shas "" --no-surface   # one-slice spec
+python3 implement-spec/closing_ticket.py <repo-root> <spec> --surface <what> [--surface <what>]...
+python3 implement-spec/closing_ticket.py <repo-root> <spec> --no-surface
+python3 implement-spec/closing_ticket.py <repo-root> <spec> --one-slice --no-surface   # one-slice spec
 ```
+
+`<default>` is read off the repo's `origin/HEAD`, or given with `--default`;
+the generator refuses rather than assume `main`.
 
 - It names the repo's **end-to-end seam** and **what that seam is blind
   to** — from the repo's `## End-to-end seam` declaration, which outranks
@@ -95,14 +142,19 @@ The declaration grammar and the evidence:
 
 ## The spec-level review
 
-The closing check hands the review the **list of merge shas** — this run's
-earlier landings, read off the run file — and **never a git range**. The last
-slice's own diff is covered by its own review round. On a shared default
-branch the obvious range holds every other session's work
-([`references/closing-ticket.md`](references/closing-ticket.md) has the run).
+One wave, after the last slice lands and `origin/<default>` is merged in,
+over `origin/<default>...spec-<n>` from this run's workspace on `spec-<n>`:
+the three axes of `/multi-axis-code-review origin/<default>` and one Codex
+pass behind `codex-usage-gate.py`, which still answers the kill switch, the
+reserve ceiling and the size threshold (`implement/SKILL.md` § The Codex
+pass). The integration branch holds this spec's slices and merges of
+`<default>`, nothing else, so the range is the review's own; the merge-sha
+list and the cherry-picked comparison a spec landing slice by slice needed
+are gone.
 
-`/multi-axis-code-review` pins one fixed point, so the list alone is not a
-procedure it can run. The generated section carries the one that builds the
-comparison out of those commits — a detached worktree, the rest cherry-picked
-on, the review against the first sha's parent — so that the worker is never
-left inventing the range this replaces.
+The ticket text the review judges against is the spec and every slice,
+bodies and comments, each rendered as `implement/SKILL.md` § The brief
+renders a ticket. The findings sidecars, the Codex record, the review-ledger
+rows and `dispositions-<spec>.jsonl` are all keyed on the spec number, so
+the escape count attributes a later bug to the review that missed it. The
+slices recorded no review rows at all, not skip rows.

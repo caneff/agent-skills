@@ -25,3 +25,13 @@ changes a harness by removing one component at a time and measuring escapes.
 
 The spec that carries ADR 0004's review shape also defines the escape count
 and the ablation order.
+
+## Note, 2026-10-07: per-slice review waves removed
+
+ADR 0006 removes the review wave of each slice of a multi-slice spec: the
+spec is reviewed once on its integration branch instead. It is recorded here
+as a removal, the kind of change this ADR allows, and it was built under
+Chris's 2026-10-06 rulings on #1457, which outrank this ADR's freeze on new
+machinery tickets. The Codex kill switch still governs the one
+integration-branch pass, so the running ablation (`docs/agents/ablations.md`)
+is not ended early.

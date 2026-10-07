@@ -296,9 +296,17 @@ skip row would read as an ablated review in the escape count. The merge check
 reads the same recorded key: `fix-check.sh <n>` exits 0 on a slice branch
 with no review files, saying `slice of spec-<p>, no review wave`, as long as
 `origin/spec-<p>` exists; a key naming a spec branch that is gone is refused.
-The pre-report gate's clean-tree, ancestor and `.scratch/` checks still run.
+It also reads the base of any open PR from `implement-<n>` off GitHub and
+refuses one that does not target `spec-<p>`. The pre-report gate's clean-tree, ancestor and `.scratch/` checks still run.
 A branch with no recorded base is an ordinary ticket, and a missing
 dispositions file still fails it.
+
+**The spec's own review** runs on its integration branch once the last slice
+has landed: one wave over `origin/<default>...spec-<p>`, and the spec run,
+in its workspace on `spec-<p>`, is the one fix worker. It runs steps 2–3
+below with the spec number for `<n>`, and the pre-report gate runs the merge
+check on `spec-<p>` (`implement-spec/SKILL.md` § The integration branch,
+ADR 0006).
 
 1. **Run the wave.** The three axes of `/multi-axis-code-review` —
    standards, spec and correctness, all three waited for
@@ -799,7 +807,8 @@ substitutions:
   sha of step 6 included. Step 2 adds `baseRefName` to its `gh pr view`
   fields, and it must read `spec-<p>`: fix-check passes a slice with no
   review files, so a slice PR opened against `<default>` would land there
-  unreviewed. Such a PR goes back to the worker for
+  unreviewed. Fix-check reads the same base off GitHub and refuses such a
+  PR too. It goes back to the worker for
   `gh pr edit <pr> --repo <owner/name> --base spec-<p>`.
 - **The seam rerun compares against `origin/spec-<p>`**: step 3's skip test,
   its worktree's start point and its `--changed` all name it.
@@ -810,6 +819,11 @@ substitutions:
 
 Not-draft, CLEAN, fix-check and `--match-head-commit` still apply, and step
 4's `merge-cleanup` line is unchanged: it reads the same recorded base.
+
+**The integration PR** (base `<default>`, head `spec-<p>`) merges by these
+steps unchanged, its merge check keyed on the spec number:
+`fix-check.sh <p> origin/spec-<p>`. Step 5 confirms every slice and the spec
+closed.
 
 1. **Check who merges twice**: the live labels
    (`gh issue view <n> --repo <owner/name> --json labels`) are the primary
