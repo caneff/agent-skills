@@ -5,7 +5,9 @@
 # merge check (fix-check.sh, #1401) passes: every review finding has
 # one disposition, a `fixed` sha is a commit on the branch, a `moved` ticket is
 # open: the ways a "done" report has described work that was not on the
-# branch, left cleanup for later, or dropped a finding.
+# branch, left cleanup for later, or dropped a finding. A slice of a spec
+# run, its base recorded as spec-<p>, has no review to dispose of, and
+# fix-check.sh says so (#1459); every other check here still runs.
 # A non-empty .scratch/ the worker cannot commit and must keep is named in
 # the PR-up report by setting PRE_REPORT_KEEP_SCRATCH="<why>", which passes
 # the check and folds the reason into the pass line itself.

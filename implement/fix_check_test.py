@@ -170,8 +170,37 @@ def rebased_after_review():
         w.close()
 
 
+def slice_branch():
+    """#1459: a slice of a spec run is reviewed once on its integration branch, so its own
+    branch runs no wave. The skip is read from the base dispatch recorded, never from the
+    missing dispositions file (defect class 1)."""
+    w = World()
+    try:
+        w.git(w.primary, "config", "branch.implement-6.base", "spec-3")
+        case("a base recorded for another ticket excuses nothing", w, 1, "dispositions-5.jsonl is missing")
+        w.git(w.primary, "config", "branch.implement-5.base", "main")
+        case("a recorded base that is no spec-<p> keeps the review check", w, 1, "dispositions-5.jsonl is missing")
+        w.git(w.primary, "config", "branch.implement-5.base", "spec-3")
+        case("a slice of spec-3 needs no review sidecars and no dispositions", w, 0,
+             "slice of spec-3, no review wave")
+        code, out = w.run(w.primary, "origin/implement-5")
+        if code != 2 or "origin/implement-5" not in out:
+            FAILS.append(f"FAIL: a slice head that was never pushed is still no PR head — want exit 2, got {code}: {out}")
+        else:
+            print("PASS: a slice head that was never pushed is still no PR head")
+        w.git(w.work, "push", "-q", "origin", "implement-5")
+        code, out = w.run(w.primary, "origin/implement-5")
+        if code != 0 or "slice of spec-3" not in out:
+            FAILS.append(f"FAIL: the controller's origin/implement-5 reads the same recorded base — got {code}: {out}")
+        else:
+            print("PASS: the controller's origin/implement-5 reads the same recorded base")
+    finally:
+        w.close()
+
+
 def main():
     rebased_after_review()
+    slice_branch()
     w = World()
     try:
         case("nothing in the cache: the reviewers never ran", w, 1, "findings-standards-5.jsonl is missing")

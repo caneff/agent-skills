@@ -282,6 +282,23 @@ One review wave, one fix round, then the seam (ADR 0004,
 `docs/adr/0004-workers-fix-their-own-findings.md`). There is no re-review: the
 seam is the convergence check.
 
+**A slice runs none of this** (#1457, ruling 6y). A slice is a ticket whose
+branch dispatch recorded on a spec's integration branch:
+`git config branch.implement-<n>.base` reads `spec-<p>`, and the brief says
+so. The spec is reviewed once on `spec-<p>` after its last slice lands, so a
+slice keeps § Build: TDD with mutation and reuse before
+writing. Then it does three things. It merges `origin/spec-<p>` in with
+`git fetch origin && git merge --no-edit origin/spec-<p>`. It runs
+`bash tests/all.sh --changed origin/spec-<p>` as its one suite run. It passes
+§ Before the PR step 5's pre-report gate. No review wave, no Codex pass, no
+`dispositions-<n>.jsonl`, and no review-ledger row, not even a skip row: a
+skip row would read as an ablated review in the escape count. The merge check
+reads the same recorded key: `fix-check.sh <n>` exits 0 on a slice branch
+with no review files, saying `slice of spec-<p>, no review wave`, and the
+pre-report gate's clean-tree, ancestor and `.scratch/` checks still run. A
+branch with no recorded base is an ordinary ticket, and a missing
+dispositions file still fails it.
+
 1. **Run the wave.** The three axes of `/multi-axis-code-review` —
    standards, spec and correctness, all three waited for
    (`multi-axis-code-review/SKILL.md` § Why separate axes, which says why
@@ -582,7 +599,8 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    refuses, exit 1, naming each problem: a finding with no disposition, a
    `fixed` sha off the branch, a `moved` ticket that is closed, a missing
    `dispositions-<n>.jsonl` (#1188) or an empty findings sidecar with no
-   completion marker, so a disposition is fixed now, not by the controller. The
+   completion marker, so a disposition is fixed now, not by the controller. On
+   a slice the merge check passes with no review files (§ Review). The
    Codex lane runs no review wave and runs the gate with
    `PRE_REPORT_NO_FIX_CHECK="<why>"`, named in the PR-up report.
 6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
@@ -794,7 +812,8 @@ mechanical.
    key, so no repo name is filled in, and `origin/implement-<n>` is the head
    the PR merges, which the `fixed` shas must be on: the local branch can hold
    a commit that was never pushed. Exit 2 is the environment's (git, `gh`), not
-   a refusal the worker can fix. A Codex-lane PR is
+   a refusal the worker can fix. A slice passes it on its recorded base, with
+   no review files (§ Review). A Codex-lane PR is
    exempt: its worker's waiver is in the "PR up" report. Then read the report's
    `Cleanup blockers` field: every line but the worker's own `live-session` is
    ruled on now, while the worker is alive to commit or move it — kept

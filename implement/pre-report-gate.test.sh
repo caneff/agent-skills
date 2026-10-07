@@ -196,6 +196,54 @@ else
 fi
 git -C "$repo" worktree remove --force "$tmp/implement-7"
 
+# A slice of a spec run (#1459): dispatch recorded its base as spec-<p>, so
+# the gate passes with no review files at all, and every other check still
+# holds. A branch with no recorded base and no dispositions still fails.
+git -C "$repo" worktree add -q -b implement-8 "$tmp/implement-8" main
+git -C "$repo" config branch.implement-8.base spec-2
+echo slice > "$tmp/implement-8/slice.txt"; git -C "$tmp/implement-8" add -A; git -C "$tmp/implement-8" commit -qm slice
+slice_tip=$(git -C "$tmp/implement-8" rev-parse HEAD)
+slice() { local sha=$1; shift; (cd "$tmp/implement-8" && HOME="$cache_home" "$@" bash "$gate" "$sha" 2>&1); }
+out=$(slice "$slice_tip" env); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"slice of spec-2"* ]]; then
+  echo "PASS: a slice branch with no dispositions passes, naming its recorded base"
+else
+  echo "FAIL: slice branch — want exit 0 + 'slice of spec-2', got $rc: $out"; fails=1
+fi
+echo dirty > "$tmp/implement-8/dirty.txt"
+out=$(slice "$slice_tip" env); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"uncommitted"* ]]; then
+  echo "PASS: a slice branch with a dirty tree still fails"
+else
+  echo "FAIL: dirty slice — want exit 1 + 'uncommitted', got $rc: $out"; fails=1
+fi
+rm "$tmp/implement-8/dirty.txt"
+out=$(slice "$offbranch" env); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"not an ancestor"* ]]; then
+  echo "PASS: a slice branch reporting a sha off the branch still fails"
+else
+  echo "FAIL: non-ancestor on a slice — want exit 1 + 'not an ancestor', got $rc: $out"; fails=1
+fi
+mkdir -p "$tmp/implement-8/.scratch"; echo left > "$tmp/implement-8/.scratch/left.txt"
+out=$(slice "$slice_tip" env); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *".scratch/ still has content"* ]]; then
+  echo "PASS: a slice branch with a non-empty .scratch/ still fails"
+else
+  echo "FAIL: .scratch/ on a slice — want exit 1 + '.scratch/ still has content', got $rc: $out"; fails=1
+fi
+rm -rf "$tmp/implement-8/.scratch"
+git -C "$repo" worktree remove --force "$tmp/implement-8"
+
+git -C "$repo" worktree add -q -b implement-9 "$tmp/implement-9" main
+echo plain > "$tmp/implement-9/plain.txt"; git -C "$tmp/implement-9" add -A; git -C "$tmp/implement-9" commit -qm plain
+out=$(cd "$tmp/implement-9" && HOME="$cache_home" bash "$gate" HEAD 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"dispositions-9.jsonl is missing"* ]]; then
+  echo "PASS: a branch with no recorded base and no dispositions still fails"
+else
+  echo "FAIL: no base, no dispositions — want exit 1 + 'dispositions-9.jsonl is missing', got $rc: $out"; fails=1
+fi
+git -C "$repo" worktree remove --force "$tmp/implement-9"
+
 # Off an implement-<n> branch there is no ticket to look a sidecar up by: the
 # gate still passes and says the sidecar was not looked for.
 out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$(git -C "$repo" rev-parse HEAD)" 2>&1); rc=$?
