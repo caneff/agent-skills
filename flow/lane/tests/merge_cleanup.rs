@@ -3036,7 +3036,7 @@ fn a_lone_ticket_merged_only_into_a_spec_branch_is_refused() {
     let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-73"], &[]);
     assert_refused(&c, &r, &wt, "73", &run);
     assert!(
-        run.stderr.contains("PR #7 merged implement-73 into spec-900, which is neither main nor no recorded spec base"),
+        run.stderr.contains("PR #7 merged implement-73 into spec-900, which is not main, and implement-73 has no recorded spec base"),
         "{}",
         run.text()
     );

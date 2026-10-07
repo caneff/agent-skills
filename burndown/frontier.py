@@ -438,7 +438,12 @@ def _parent_number(body, repo):
     resolve is not "no parent" (#1406). `None` under it, as `Blocked by`
     says it, is no parent. A `Part of` line outside the heading that names
     another repo's issue and none in this one raises too; a `Part of` line
-    naming no issue at all is prose."""
+    naming no issue at all is prose.
+
+    `flow/lane/src/bin/implement_dispatch.rs` `body_names_parent` reads the
+    same grammar to ask only whether a parent is declared; a change to one
+    is a change to both.
+    """
     link = re.compile(_ISSUE_LINK.format(repo=re.escape(repo)), re.IGNORECASE)
     in_parent = False
     unread = None  # the `## Parent` section's text while it names nothing

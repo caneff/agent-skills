@@ -714,9 +714,9 @@ impl Claim<'_> {
 
 /// Where a dispatch's workspace branches from (#1458).
 enum Base {
-    /// `origin/<default>`, as every dispatch did before #1458. `slices` is a
-    /// spec run's slice count, there to say why it got no integration branch.
-    Default { slices: Option<u64> },
+    /// `origin/<default>`, as every dispatch did before #1458. A spec run
+    /// lands here only with one slice, which is what it prints.
+    Default,
     /// A spec run with more than one slice: its workspace branch `spec-<n>`
     /// is the integration branch, `created` here off `origin/<default>` and
     /// pushed, or found on origin already and reused from there unmoved.
@@ -772,7 +772,10 @@ fn parent_of(slug: &str, n: &str) -> Result<Option<String>, String> {
 /// Whether a ticket body declares a parent issue the way `/to-tickets` and
 /// frontier.py read one: a `Part of` line naming an issue, or an issue
 /// reference under a `Parent` heading. Fenced blocks are skipped; `None`
-/// under the heading names no issue, so it is no parent.
+/// under the heading names no issue, so it is no parent. A second reader of
+/// `burndown/frontier.py`'s `_parent_number` grammar, coarser on purpose: it
+/// answers only whether a parent is declared. A change to one is a change to
+/// both.
 fn body_names_parent(body: &str) -> bool {
     fn names_issue(line: &str) -> bool {
         let refs = |sep: &str| line.match_indices(sep).any(|(i, _)| line[i + sep.len()..].starts_with(|c: char| c.is_ascii_digit()));
@@ -810,7 +813,7 @@ fn slice_base(primary: &str, slug: &str, ns: &[String]) -> Result<Base, String> 
     let refs = stdout_bounded("git", &["-C", primary, "for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin/spec-*"], git_query_timeout())?;
     let integration: Vec<&str> = refs.lines().collect();
     if integration.is_empty() {
-        return Ok(Base::Default { slices: None });
+        return Ok(Base::Default);
     }
     let mut bases: Vec<Option<String>> = Vec::new();
     for n in ns {
@@ -839,7 +842,7 @@ fn slice_base(primary: &str, slug: &str, ns: &[String]) -> Result<Base, String> 
     }
     Ok(match bases.into_iter().next().flatten() {
         Some(spec) => Base::Slice { spec },
-        None => Base::Default { slices: None },
+        None => Base::Default,
     })
 }
 
@@ -1241,7 +1244,7 @@ fn run() -> Result<(), ExitCode> {
             } else if slices > 1 {
                 Base::Integration { created: true }
             } else {
-                Base::Default { slices: Some(slices) }
+                Base::Default
             }
         }
         Mode::Plain => slice_base(&primary, &slug, &ns).map_err(die)?,
@@ -1478,11 +1481,12 @@ fn run() -> Result<(), ExitCode> {
     safe_println!("agent:    {agent}");
     safe_println!("session:  {session}");
     safe_println!("cleanup:  {cleanup}");
-    match &base {
-        Base::Integration { created, .. } => {
+    match (&base, mode) {
+        (Base::Integration { created }, _) => {
             safe_println!("integration branch: {branch} ({})", if *created { "created" } else { "reused" });
         }
-        Base::Default { slices: Some(k) } => safe_println!("integration branch: none ({k} slice{})", if *k == 1 { "" } else { "s" }),
+        // No sub-issue is refused and more than one is an integration branch.
+        (Base::Default, Mode::Spec { .. }) => safe_println!("integration branch: none (1 slice)"),
         _ => {}
     }
     Ok(())
