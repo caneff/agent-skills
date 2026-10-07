@@ -15,6 +15,7 @@ One line per friction point a controller or worker hits, instead of a prevention
 - 2026-10-04, twitch-rules-scroller: implement/SKILL.md § The merge step 3 says the seam is `bash tests/all.sh` "here",
   but the seam is per repo (AGENTS.md § End-to-end seam);
   twitch-rules-scroller has no tests/all.sh, and the workers for #587 and #593 in burn-trs-2026-10-04 each stopped to note it. Cost: a check per worker and per merge.
+- 2026-10-07, agent-skills: the commit-identity pre-push guard reported git's non-fast-forward rejection as "no ref updates were read on stdin" when #1458's worker (skills-spec-1457) pushed. Cost: a misleading message the worker had to see past to the real rejection.
 
 Commit each line on its own with the subject `friction: <what happened>`.
 A burn's closing report counts them by that subject; the rule is
