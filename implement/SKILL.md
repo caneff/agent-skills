@@ -665,7 +665,7 @@ gh pr create --repo <owner/name> --title "<title>" --body-file ~/.cache/agent-re
 ```
 
 A slice (§ Review) adds `--base spec-<p>`: without it the PR opens against
-`<default>`, and § The merge refuses it.
+`<default>`, and the slice check of § The merge refuses it.
 
 The body has these sections and nothing else:
 
@@ -791,7 +791,7 @@ wave ran in the worker's § Review, and what the controller checks is
 mechanical.
 
 **A slice merges into its spec's integration branch** (#1460). A slice is the
-ticket § Review names by its recorded base: `git config
+ticket named by its recorded base (§ Review): `git config
 branch.implement-<n>.base` reads `spec-<p>` in the primary checkout. The spec
 run is its controller and merges it by these steps with three substitutions:
 
