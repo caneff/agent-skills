@@ -87,20 +87,21 @@ When the last slice has landed:
 2. **One review.** Run the spec-level review (§ The spec-level review).
 3. **One fix round.** This run is the spec's one fix worker, in its own
    workspace on `spec-<n>`: git refuses a second checkout of a branch a
-   workspace already holds. It follows `implement/SKILL.md` § Review steps
-   2–3 with the spec number for `<n>`: every finding gets one disposition in
+   workspace already holds. It follows steps 2–3 of
+   `implement/SKILL.md` § Review, with the spec number for `<n>`: every finding gets one disposition in
    `dispositions-<spec>.jsonl`, and the full seam runs, `bash tests/all.sh`
    from a tree with `origin/<default>` merged in again. The pre-report gate
    runs the merge check on `spec-<n>` keyed on the spec number, so
    `fix-check.sh <spec> spec-<spec>` must exit 0 before the PR goes up.
-4. **The integration PR.** Run step 1's block once more, and open it: `gh pr create --base <default> --head spec-<n>`. Its body is
+4. **The integration PR.** Run step 1's block once more, and open it:
+   `gh pr create --base <default> --head spec-<n>`. Its body is
    `implement/SKILL.md` § The PR's, keyed on the spec number, with a bare
    `Closes #<slice>` line for every slice and a bare `Closes #<spec>`.
    Report it to this run's own controller as "PR up" in that section's
    shape, with `fix-check.sh <spec> origin/spec-<spec>` as the controller's
-   merge check. The controller merges it by § The merge unchanged, step 5's
-   check that each `Closes` issue closed included; a `ready-for-human` spec
-   hands Chris the merge line.
+   merge check. The controller merges it unchanged by
+   `implement/SKILL.md` § The merge, with step 5's check that each `Closes`
+   issue closed; a `ready-for-human` spec hands Chris the merge line.
 
 A one-slice spec gets no integration branch (ruling 3a): its slice branches
 from and lands on the default branch with its own review wave, as a lone

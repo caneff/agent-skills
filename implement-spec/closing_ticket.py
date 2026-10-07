@@ -248,7 +248,7 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
             f"spec #{spec} and every slice, bodies and comments. The findings "
             f"sidecars, `dispositions-{spec}.jsonl` and the review-ledger "
             f"rows are keyed on #{spec}. One fix worker disposes of every "
-            "finding (`implement/SKILL.md` § Review steps 2–3) and runs the "
+            "finding (steps 2–3 of `implement/SKILL.md` § Review) and runs the "
             f"full seam; `fix-check.sh {spec} origin/{branch}` then exits 0.",
             ""]
     lines += ["### Acceptance criteria", "",
