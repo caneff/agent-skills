@@ -241,9 +241,9 @@ struct Merged {
     at: String,
     by: String,
     pr: Option<String>,
-    /// The spec integration branch it landed on, for a slice merged there
-    /// rather than into the default branch (#1460).
-    slice_of: Option<String>,
+    /// A slice that landed on its spec's integration branch rather than the
+    /// default branch (#1460).
+    slice: bool,
 }
 
 struct Cleanup {
@@ -1466,19 +1466,23 @@ impl Cleanup {
                 if h.is_empty() || h != tip {
                     continue;
                 }
-                let slice = slice_of.as_deref().filter(|s| *s == into).map(str::to_string);
-                if into == default || slice.is_some() {
-                    return Some(Merged { at: h.to_string(), by: format!("PR #{n}"), pr: Some(n.to_string()), slice_of: slice });
+                let slice = slice_of.as_deref() == Some(into);
+                if into == default || slice {
+                    return Some(Merged { at: h.to_string(), by: format!("PR #{n}"), pr: Some(n.to_string()), slice });
                 }
+                // Said, so the refusal below does not read as "no PR merged":
+                // GitHub shows this one merged, into a base that is no landing.
+                let recorded = slice_of.as_deref().map_or("no recorded spec base".to_string(), |s| format!("its recorded base {s}"));
+                eprintln!("merge-cleanup: PR #{n} merged {b} into {into}, which is neither {default} nor {recorded}");
             }
         }
         quiet_ok("git", &["-C", path, "fetch", "-q", "origin"]);
-        let landings = std::iter::once((default, None)).chain(slice_of.map(|s| (s.clone(), Some(s))));
+        let landings = std::iter::once((default, false)).chain(slice_of.map(|s| (s, true)));
         for (into, slice) in landings {
             let base = format!("origin/{into}");
             if quiet_ok("git", &["-C", path, "merge-base", "--is-ancestor", b, &base]) {
                 let at = quiet_stdout("git", &["-C", path, "rev-parse", &base]).unwrap_or_default();
-                return Some(Merged { at, by: base, pr: None, slice_of: slice });
+                return Some(Merged { at, by: base, pr: None, slice });
             }
         }
         None
@@ -1679,8 +1683,8 @@ impl Cleanup {
         // (the sweep table's "cleaned" word, and `main`'s gate on
         // `report_stale`). It sets `claim_clear_failed` instead, for the
         // caller to fold into its own exit code, same as `remote_delete_failed`.
-        let (pr, slice_of) = merged.as_ref().map_or((None, None), |m| (m.pr.as_deref(), m.slice_of.as_deref()));
-        self.claim_clear_failed = !self.clear_landed_claims(path, b, pr, slice_of);
+        let (pr, slice) = merged.as_ref().map_or((None, false), |m| (m.pr.as_deref(), m.slice));
+        self.claim_clear_failed = !self.clear_landed_claims(path, b, pr, slice);
         true
     }
 
@@ -1699,12 +1703,12 @@ impl Cleanup {
     /// re-run command on stderr, since that command is the only record of
     /// the edit that still needs to happen.
     ///
-    /// A slice landing on its spec's integration branch (#1460, `slice_of`)
+    /// A slice landing on its spec's integration branch (#1460, `slice`)
     /// clears the branch's own ticket while it is still open: the
     /// integration PR into the default branch closes it later, and GitHub
     /// fills `closingIssuesReferences` only for a PR into the default
     /// branch, so the ticket stays open until then.
-    fn clear_landed_claims(&self, path: &str, b: &str, pr: Option<&str>, slice_of: Option<&str>) -> bool {
+    fn clear_landed_claims(&self, path: &str, b: &str, pr: Option<&str>, slice: bool) -> bool {
         let Some(n) = ticket_number(b) else { return true };
         let what = format!("clearing #{n}'s in-progress label and assignee");
         if !on_path("gh") {
@@ -1748,7 +1752,7 @@ impl Cleanup {
 
         let mut cleared: Vec<String> = Vec::new();
         for t in &tickets {
-            let open_ok = slice_of.is_some() && t == n;
+            let open_ok = slice && t == n;
             match self.clear_one(&slug, t, open_ok) {
                 Cleared::Done => cleared.push(format!("#{t}")),
                 Cleared::Failed => ok = false,
@@ -1937,6 +1941,8 @@ fn pr_closed_tickets(slug: &str, pr: Option<&str>) -> Result<Vec<u64>, String> {
 /// The spec integration branch `implement-dispatch` recorded `b` as a slice
 /// of (#1458): `branch.<b>.base` when it reads `spec-<digits>`, the only base
 /// dispatch records. Any other value is a key set by hand, and no slice.
+/// `implement/fix_check.py`'s `SPEC_BASE` reads the same key with the same
+/// shape; a change to one is a change to both.
 fn recorded_spec_base(path: &str, b: &str) -> Option<String> {
     let base = quiet_stdout("git", &["-C", path, "config", "--get", &format!("branch.{b}.base")])?;
     let p = base.strip_prefix("spec-")?;

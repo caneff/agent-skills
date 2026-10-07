@@ -790,10 +790,10 @@ The controller merges on a repo Chris owns; Chris reads it after via
 wave ran in the worker's § Review, and what the controller checks is
 mechanical.
 
-**A slice merges into its spec's integration branch** (#1460). A slice is the
-ticket named by its recorded base (§ Review): `git config
-branch.implement-<n>.base` reads `spec-<p>` in the primary checkout. The spec
-run is its controller and merges it by these steps with three substitutions:
+**A slice merges into its spec's integration branch** (#1460). A slice
+(§ Review) is known by its recorded base, read in the primary checkout. The
+spec run is its controller and merges it by these steps with three
+substitutions:
 
 - **The base is `spec-<p>`.** Read it for `<default>` throughout, the merge
   sha of step 6 included. Step 2 adds `baseRefName` to its `gh pr view`
@@ -808,10 +808,8 @@ run is its controller and merges it by these steps with three substitutions:
   The slice ticket stays open until the spec's integration PR closes it, so
   step 5 has no closed issue to confirm.
 
-Not-draft, CLEAN, fix-check and `--match-head-commit` still apply.
-`merge-cleanup` reads the same recorded base: a slice landed on
-`origin/spec-<p>` counts as merged, and its ticket loses `in-progress` and its
-assignee while it stays open.
+Not-draft, CLEAN, fix-check and `--match-head-commit` still apply, and step
+4's `merge-cleanup` line is unchanged: it reads the same recorded base.
 
 1. **Check who merges twice**: the live labels
    (`gh issue view <n> --repo <owner/name> --json labels`) are the primary

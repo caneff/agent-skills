@@ -2996,6 +2996,13 @@ fn slice_workspace(c: &Cleanup, rel: &str, n: &str) -> (std::path::PathBuf, std:
     (r, wt)
 }
 
+/// merge-cleanup on `implement-<n>` refused it as unmerged and left its
+/// workspace and branch in place.
+fn assert_refused(c: &Cleanup, r: &std::path::Path, wt: &std::path::Path, n: &str, run: &support::cleanup::Run) {
+    assert!(!run.ok && run.stderr.contains(&format!("implement-{n} is not merged")), "{}", run.text());
+    assert!(wt.exists() && c.has_branch(r, &format!("implement-{n}")), "{}", run.text());
+}
+
 #[test]
 fn a_slice_merged_into_its_spec_branch_is_cleaned_up() {
     let c = Cleanup::new();
@@ -3015,20 +3022,24 @@ fn a_slice_merged_nowhere_is_refused() {
     let c = Cleanup::new();
     let (r, wt) = slice_workspace(&c, "s2", "72");
     let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-72"], &[]);
-    assert!(!run.ok && run.stderr.contains("implement-72 is not merged"), "{}", run.text());
-    assert!(wt.exists() && c.has_branch(&r, "implement-72"), "{}", run.text());
+    assert_refused(&c, &r, &wt, "72", &run);
 }
 
 #[test]
 fn a_lone_ticket_merged_only_into_a_spec_branch_is_refused() {
-    // No recorded base: a PR into spec-900 is not this branch's landing.
+    // No recorded base: a PR into spec-900 is not this branch's landing,
+    // and the refusal says which PR GitHub shows merged, and where.
     let c = Cleanup::new();
     let (r, wt) = slice_workspace(&c, "s3", "73");
     c.git_ok(&["-C", s(&r), "config", "--unset", "branch.implement-73.base"]);
     c.squash_into(&r, "implement-73", "spec-900");
     let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-73"], &[]);
-    assert!(!run.ok && run.stderr.contains("implement-73 is not merged"), "{}", run.text());
-    assert!(wt.exists() && c.has_branch(&r, "implement-73"), "{}", run.text());
+    assert_refused(&c, &r, &wt, "73", &run);
+    assert!(
+        run.stderr.contains("PR #7 merged implement-73 into spec-900, which is neither main nor no recorded spec base"),
+        "{}",
+        run.text()
+    );
 }
 
 #[test]
@@ -3038,22 +3049,23 @@ fn a_slice_merged_into_another_specs_branch_is_refused() {
     c.git_ok(&["-C", s(&r), "push", "-q", "origin", "main:spec-901"]);
     c.squash_into(&r, "implement-74", "spec-901");
     let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-74"], &[]);
-    assert!(!run.ok && run.stderr.contains("implement-74 is not merged"), "{}", run.text());
-    assert!(wt.exists() && c.has_branch(&r, "implement-74"), "{}", run.text());
+    assert_refused(&c, &r, &wt, "74", &run);
+    assert!(run.stderr.contains("into spec-901, which is neither main nor its recorded base spec-900"), "{}", run.text());
 }
 
 #[test]
 fn a_recorded_base_that_names_no_spec_branch_is_no_slice() {
-    // `spec-<p>` is the only base dispatch records; any other value is a key
-    // set by hand, and a PR into it is not a landing.
-    let c = Cleanup::new();
-    let (r, wt) = slice_workspace(&c, "s5", "75");
-    c.git_ok(&["-C", s(&r), "push", "-q", "origin", "main:feature-x"]);
-    c.git_ok(&["-C", s(&r), "config", "branch.implement-75.base", "feature-x"]);
-    c.squash_into(&r, "implement-75", "feature-x");
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-75"], &[]);
-    assert!(!run.ok && run.stderr.contains("implement-75 is not merged"), "{}", run.text());
-    assert!(wt.exists() && c.has_branch(&r, "implement-75"), "{}", run.text());
+    // `spec-<digits>` is the only base dispatch records; any other value is a
+    // key set by hand, and a PR into it is not a landing.
+    for (n, base) in [("75", "feature-x"), ("79", "spec-x")] {
+        let c = Cleanup::new();
+        let (r, wt) = slice_workspace(&c, &format!("s5-{n}"), n);
+        c.git_ok(&["-C", s(&r), "push", "-q", "origin", &format!("main:{base}")]);
+        c.git_ok(&["-C", s(&r), "config", &format!("branch.implement-{n}.base"), base]);
+        c.squash_into(&r, &format!("implement-{n}"), base);
+        let run = c.mc(Tools::Full, &["--repo", s(&r), &format!("implement-{n}")], &[]);
+        assert_refused(&c, &r, &wt, n, &run);
+    }
 }
 
 #[test]
@@ -3064,8 +3076,7 @@ fn without_gh_a_slice_on_origin_spec_is_cleaned_and_a_lone_ticket_there_is_refus
     c.git_ok(&["-C", s(&r), "push", "-q", "origin", "implement-76:spec-900"]);
     c.git_ok(&["-C", s(&r), "config", "--unset", "branch.implement-76.base"]);
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-76"], &[]);
-    assert!(!run.ok && run.stderr.contains("implement-76 is not merged"), "{}", run.text());
-    assert!(wt.exists() && c.has_branch(&r, "implement-76"), "{}", run.text());
+    assert_refused(&c, &r, &wt, "76", &run);
 
     c.git_ok(&["-C", s(&r), "config", "branch.implement-76.base", "spec-900"]);
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-76"], &[]);
@@ -3090,6 +3101,20 @@ fn a_slice_landing_clears_its_open_tickets_claim_and_leaves_it_open() {
     assert!(c.calls().contains("gh issue edit 77 --repo"), "{}", c.calls());
     assert!(c.calls().contains("--remove-label in-progress") && c.calls().contains("--remove-assignee caneff"), "{}", c.calls());
     assert!(!c.calls().contains("issue close") && !c.calls().contains("--state closed"), "{}", c.calls());
+}
+
+#[test]
+fn a_slice_landing_leaves_another_open_tickets_claim_alone() {
+    // Only the slice's own ticket is cleared while open: any other ticket
+    // its PR names is still someone's claim until it closes.
+    let c = Cleanup::new();
+    let (r, _wt) = slice_workspace(&c, "s9", "80");
+    c.squash_into(&r, "implement-80", "spec-900");
+    c.record_pr_closes("7", &["81"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-80"], &[("GH_STATE", "OPEN"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 80 --repo"), "{}", c.calls());
+    assert!(!c.calls().contains("gh issue edit 81"), "{}", c.calls());
 }
 
 #[test]
