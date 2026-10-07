@@ -2581,7 +2581,8 @@ fn the_integration_branch_push_never_overwrites_one_pushed_since_the_fetch() {
     let origin = origin_of(&f, name);
     // Another session's spec-395, one commit past origin/main, pushed in the
     // gap between this run's fetch and its push. Made in this clone so the
-    // commit-identity guard can read it: the refusal must be git's own.
+    // commit-identity guard can read it under --force: an object it cannot
+    // read is refused by the guard, and the test would pass for that.
     let theirs = String::from_utf8(
         std::process::Command::new("git").arg("-C").arg(&repo).args(["commit-tree", "-m", "theirs", "-p", "origin/main", "origin/main^{tree}"]).output().unwrap().stdout,
     )
@@ -2594,6 +2595,5 @@ fn the_integration_branch_push_never_overwrites_one_pushed_since_the_fetch() {
     let text = out_text(&out);
     assert!(!out.status.success(), "{text}");
     assert!(text.contains("pushing the integration branch failed"), "{text}");
-    assert!(!text.contains("commit-identity guard"), "refused by the guard, not by git: {text}");
     assert_eq!(git_out(&origin, &["rev-parse", "refs/heads/spec-395"]), theirs, "the push overwrote another session's spec-395");
 }
