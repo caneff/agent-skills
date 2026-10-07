@@ -295,9 +295,10 @@ three things. It merges `origin/spec-<p>` in with
 skip row would read as an ablated review in the escape count. The merge check
 reads the same recorded key: `fix-check.sh <n>` exits 0 on a slice branch
 with no review files, saying `slice of spec-<p>, no review wave`, as long as
-`origin/spec-<p>` exists; a key naming a spec branch that is gone is refused.
-It also reads the base of any open PR from `implement-<n>` off GitHub and
-refuses one that does not target `spec-<p>`. The pre-report gate's clean-tree, ancestor and `.scratch/` checks still run.
+`origin/spec-<p>` exists; a key naming an integration branch that is gone is
+refused. It also reads the base of any open PR from `implement-<n>` off
+GitHub and refuses one that does not target `spec-<p>`. The pre-report gate's
+clean-tree, ancestor and `.scratch/` checks still run.
 A branch with no recorded base is an ordinary ticket, and a missing
 dispositions file still fails it.
 
@@ -604,7 +605,8 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
    no `PRE_REPORT_KEEP_SCRATCH` naming why. It also runs the merge check
-   (`fix-check.sh`, § Review step 3) on an `implement-<n>` branch and
+   (`fix-check.sh`, § Review step 3) on an `implement-<n>` branch, or on a
+   spec run's `spec-<n>` keyed on the spec number, and
    refuses, exit 1, naming each problem: a finding with no disposition, a
    `fixed` sha off the branch, a `moved` ticket that is closed, a missing
    `dispositions-<n>.jsonl` (#1188) or an empty findings sidecar with no

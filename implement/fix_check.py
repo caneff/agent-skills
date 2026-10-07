@@ -102,7 +102,8 @@ def slice_base(n):
 
 def slice_prs(n):
     """`(number, base)` of each open PR from `implement-<n>`, as GitHub holds it (#1460's S4): a
-    slice runs no review, so a slice PR into anything but its spec branch would land unreviewed.
+    slice runs no review, so a slice PR into anything but its integration branch would land
+    unreviewed.
     None open is the worker's gate before `gh pr create`; the controller's merge has one."""
     done = subprocess.run(["gh", "pr", "list", "--head", f"implement-{n}", "--state", "open",
                            "--json", "number,baseRefName", "--jq", '.[] | "\\(.number) \\(.baseRefName)"'],
