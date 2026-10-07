@@ -9,9 +9,10 @@ review cache under a fake HOME:
 - a slice on `spec-3` (its base recorded as dispatch records it) passes the
   pre-report gate with no review files, and the merge check refuses its PR
   once it targets `main` instead of `spec-3`;
-- the slice lands on `spec-3`, and `main`, moved on meanwhile, is merged in;
+- the slice lands on `origin/spec-3`, and `main` moves on meanwhile;
 - `closing_ticket.py` writes the integration PR's section, naming
-  `origin/main...spec-3` and no sha list;
+  `origin/main...spec-3` and no sha list, and its keep-current block, run as
+  written in the spec run's workspace, takes the slice in and merges `main`;
 - the spec review is keyed on #3: the pre-report gate on `spec-3` refuses an
   undisposed finding, and with every finding disposed it and the
   controller's `fix-check.sh 3 origin/spec-3` pass.
@@ -120,13 +121,11 @@ class SpecLife(unittest.TestCase):
         code, out = self.run_tool(slice_ws, "bash", FIX_CHECK, "4")
         self.assertEqual(code, 0, out)
 
-        # The slice lands on spec-3; main moves on and is merged in, never rebased.
+        # The slice lands on origin/spec-3, as its PR's merge does on GitHub; main moves on.
         self.git(slice_ws, "push", "-q", "origin", "HEAD:spec-3")
         Path(self.prs).write_text("")
         self.commit(self.primary, "elsewhere")
         self.git(self.primary, "push", "-q", "origin", "main")
-        self.git(spec_ws, "pull", "-q", "--ff-only", "origin", "spec-3")
-        self.git(spec_ws, "merge", "-q", "--no-edit", "origin/main")
 
         # The closing check is the integration PR's.
         code, section = self.run_tool(self.primary, "python3", CLOSING, self.primary, "3",
@@ -135,6 +134,16 @@ class SpecLife(unittest.TestCase):
         self.assertIn("base `main`, head `spec-3`", section)
         self.assertIn("`origin/main...spec-3`", section)
         self.assertNotIn("cherry-pick", section)
+
+        # Its keep-current block, run as written in the spec run's workspace: the slice comes
+        # in, main is merged (never rebased), and the push lands.
+        block = section.split("### The spec-level review", 1)[1].split("```\n", 2)[1]
+        code, out = self.run_tool(spec_ws, "bash", "-c", block)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.git(spec_ws, "rev-parse", "HEAD"), self.git(spec_ws, "rev-parse", "origin/spec-3"))
+        reviewed = self.git(spec_ws, "log", "--format=%s", "origin/main...spec-3")
+        self.assertIn("slice 4", reviewed)
+        self.git(spec_ws, "merge-base", "--is-ancestor", "origin/main", "spec-3")
 
         # One review keyed on #3, one fix round on spec-3.
         for axis in ("standards", "spec", "correctness"):

@@ -33,6 +33,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 os.pardir, "burndown"))
 from frontier import key_line, unfenced, visible  # noqa: E402
+from loop import LoopError, origin_default  # noqa: E402
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 # A list item's marker: a bare `**Key**:` line also matches `key_line`, by
@@ -173,7 +174,7 @@ def _settled(key, root, declared, explored):
     return value
 
 
-def body(root, spec, surfaces=None, seam=None, blind_to=None, default="main",
+def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
          one_slice=False):
     """The closing check for one spec: the seam it drives, what that seam
     cannot see, and the spec-level review.
@@ -201,7 +202,11 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, default="main",
     seam, blind_to = seam_of(root, seam, blind_to)
     surfaces = [s.strip() for s in surfaces if s and s.strip()]
     branch = f"spec-{spec}"
-    merge_in = f"git fetch origin && git merge --no-edit origin/{default}"
+    # The slices merged into origin/spec-<n> on GitHub; the spec run's own
+    # spec-<n> takes them in first, or the review reads none of them.
+    merge_in = (f"git fetch origin && git merge --ff-only origin/{branch} "
+                f"&& git merge --no-edit origin/{default} && git push origin "
+                f"{branch}")
 
     if one_slice:
         lines = ["## Closing check", "",
@@ -231,9 +236,10 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, default="main",
             f"The end-to-end check is that seam run on `{branch}` merged with "
             f"current `origin/{default}`.", "",
             "### The spec-level review", "",
-            f"Merge `origin/{default}` into `{branch}` first, and again before "
-            "the integration PR goes up — a merge, never a rebase, which "
-            "would rewrite the shas the dispositions name:", "",
+            f"In the workspace on `{branch}`, take in the slices landed on "
+            f"`origin/{branch}`, then merge `origin/{default}` in, and do "
+            "both again before the integration PR goes up — a merge, never a "
+            "rebase, which would rewrite the shas the dispositions name:", "",
             "```", merge_in, "```", "",
             f"Then one wave over `origin/{default}...{branch}` from a "
             f"workspace on `{branch}`: `/multi-axis-code-review "
@@ -262,17 +268,19 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, default="main",
 
 
 def default_branch(root):
-    """`<default>` off the repo's `origin/HEAD`, or None when git cannot say."""
+    """`<default>` off the repo's `origin/HEAD` by `loop.origin_default`, the
+    burn's own reader, or None when git cannot say."""
+    def run(args):
+        done = subprocess.run(["git", "-C", root, *args], capture_output=True,
+                              text=True)
+        if done.returncode != 0:
+            raise LoopError(done.stderr.strip() or "git failed")
+        return done.stdout
     try:
-        done = subprocess.run(["git", "-C", root, "symbolic-ref", "--short",
-                               "refs/remotes/origin/HEAD"],
-                              capture_output=True, text=True)
-    except OSError:
+        ref = origin_default(run)
+    except (LoopError, OSError):
         return None
-    ref = done.stdout.strip()
-    if done.returncode != 0 or not ref.startswith("origin/"):
-        return None
-    return ref[len("origin/"):]
+    return ref[len("origin/"):] if ref.startswith("origin/") else None
 
 
 def main(argv):
@@ -308,7 +316,8 @@ def main(argv):
             raise SeamError(f"{args.root} has no readable origin/HEAD: pass "
                             "--default <branch>")
         print(body(args.root, args.spec, args.surface, args.seam,
-                   args.blind_to, default, args.one_slice), end="")
+                   args.blind_to, default=default, one_slice=args.one_slice),
+              end="")
     except SeamError as exc:
         print(f"closing_ticket.py: {exc}", file=sys.stderr)
         return 1

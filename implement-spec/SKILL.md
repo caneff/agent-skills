@@ -77,10 +77,13 @@ integration PR closes it.
 
 When the last slice has landed:
 
-1. **Keep current.** Merge `origin/<default>` into `spec-<n>` in this
-   workspace, `git fetch origin && git merge --no-edit origin/<default>`,
-   and push. Never a rebase: it rewrites the shas the dispositions name. A
-   conflict is the fix round's first job.
+1. **Keep current.** In this workspace, take in the slices first: they
+   merged into `origin/spec-<n>` on GitHub, and the local `spec-<n>` stays
+   where dispatch cut it until it does. Then merge `origin/<default>` in and
+   push: `git fetch origin && git merge --ff-only origin/spec-<n> && git
+   merge --no-edit origin/<default> && git push origin spec-<n>`, the block
+   the closing check carries. Never a rebase: it rewrites the shas the
+   dispositions name. A conflict is the fix round's first job.
 2. **One review.** Run the spec-level review (§ The spec-level review).
 3. **One fix round.** This run is the spec's one fix worker, in its own
    workspace on `spec-<n>`: git refuses a second checkout of a branch a
@@ -90,8 +93,7 @@ When the last slice has landed:
    from a tree with `origin/<default>` merged in again. The pre-report gate
    runs the merge check on `spec-<n>` keyed on the spec number, so
    `fix-check.sh <spec> spec-<spec>` must exit 0 before the PR goes up.
-4. **The integration PR.** Merge `origin/<default>` in once more, push, and
-   open it: `gh pr create --base <default> --head spec-<n>`. Its body is
+4. **The integration PR.** Run step 1's block once more, and open it: `gh pr create --base <default> --head spec-<n>`. Its body is
    `implement/SKILL.md` § The PR's, keyed on the spec number, with a bare
    `Closes #<slice>` line for every slice and a bare `Closes #<spec>`.
    Report it to this run's own controller as "PR up" in that section's

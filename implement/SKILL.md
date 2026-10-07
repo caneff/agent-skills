@@ -302,12 +302,9 @@ clean-tree, ancestor and `.scratch/` checks still run.
 A branch with no recorded base is an ordinary ticket, and a missing
 dispositions file still fails it.
 
-**The spec's own review** runs on its integration branch once the last slice
-has landed: one wave over `origin/<default>...spec-<p>`, and the spec run,
-in its workspace on `spec-<p>`, is the one fix worker. It runs steps 2–3
-below with the spec number for `<n>`, and the pre-report gate runs the merge
-check on `spec-<p>` (`implement-spec/SKILL.md` § The integration branch,
-ADR 0006).
+**The spec's own review** runs once on its integration branch, and its fix
+round follows steps 2–3 below keyed on the spec number:
+`implement-spec/SKILL.md` § The integration branch.
 
 1. **Run the wave.** The three axes of `/multi-axis-code-review` —
    standards, spec and correctness, all three waited for
