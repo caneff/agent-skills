@@ -133,18 +133,24 @@ print(env.get("CHOOSER_SAY") or "thinking...\ndrain bundle: " + " ".join([anchor
 # closed, no PR), DISPATCH_REFUSE, DRAFT_TICKETS, STATUS (merge state),
 # NO_ANCHOR / UNCLOSED (what the PR's closing keywords leave out), EXTRA_CLOSE
 # (tickets the PR closes that were never in the bundle), RESET_TO_OLD (build on
-# the commit before main's tip).
+# the commit before main's tip), SPEC_SLICES (what a `--spec` dispatch's run
+# claims and its PR closes beside the spec).
 STUB_DISPATCH = r"""#!/usr/bin/env python3
 import json, os, subprocess, sys
 env, argv = os.environ, sys.argv[1:]
 repo = argv[argv.index("--repo") + 1]
-tickets = [a for a in argv if a.isdigit()]
-n = str(min(int(t) for t in tickets))
+spec = "--spec" in argv
+if spec:  # a spec run: the spec itself, then the slices (SPEC_SLICES) its run claims
+    n = argv[argv.index("--spec") + 1]
+    tickets = [n] + env.get("SPEC_SLICES", "").split()
+else:
+    tickets = [a for a in argv if a.isdigit()]
+    n = str(min(int(t) for t in tickets))
 with open(env["DISPATCH_LOG"], "a") as f:
     f.write(json.dumps({"n": n, "tickets": tickets, "argv": argv}) + "\n")
 if env.get("DISPATCH_REFUSE"):
     sys.stderr.write("implement-dispatch: no herdr server is running (herdr status)\n"); sys.exit(1)
-branch = "implement-" + n
+branch = ("spec-" if spec else "implement-") + n
 wt = os.path.join(repo, ".claude", "worktrees", branch)
 if os.path.exists(wt):
     sys.stderr.write("implement-dispatch: %s already exists\n" % wt); sys.exit(1)
@@ -299,7 +305,7 @@ class Sandbox(unittest.TestCase):
         return {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
                 "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
                 "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
-                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3",
+                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
                 "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
 
     def drain(self, *argv, env=None):
@@ -991,18 +997,153 @@ class DrainTest(Sandbox):
         self.assertEqual(self.dispatch_runs(), [])
 
 
+class SpecTest(Sandbox):
+    """A spec parent in the `spec` bucket is a bundle in its own right (#1477):
+    drain starts it with `implement-dispatch --spec` and merges the integration
+    PR its run reports. The stub dispatch claims `SPEC_SLICES` as the spec run
+    would and its PR closes them with the spec."""
+
+    SPEC = {"labels": ["ready-for-agent", "spec"], "body": "the spec\n## Blocked by\n\n- None\n"}
+
+    def spec_state(self, slices=(2, 3), extra=None):
+        self.write_state({1: self.SPEC, **{n: {"parent": 1} for n in slices}, **(extra or {})})
+
+    def test_a_queue_of_one_spec_and_its_slices_is_dispatched_as_a_spec_run_and_merged(self):
+        self.spec_state()
+        r = self.drain("--once", env={"SPEC_SLICES": "2 3"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c["argv"] for c in self.dispatch_runs()],
+                         [["--repo", self.repo, "--controller", "drain", "--spec", "1"]])
+        self.assertEqual(self.chooser_runs(), [], "a spec's slices are its own bundle: no chooser")
+        st = self.state()
+        self.assertEqual([i["state"] for i in st["issues"].values()], ["closed"] * 3)
+        self.assertIn(["1", "drain anchor: spec-1"], st["comments"])
+        self.assertIn("spec-1", read(self.cleanup_log))
+        self.assertIn(["agent", "get", "repo-spec-1"], self.herdr_calls())
+        self.assertIn("bundle started: #1 ticket 1  pane repo-spec-1", r.stdout)
+        self.assertIn("merged:\n  #1 #2 #3  https://example.test/pull/101", r.stdout)
+
+    def test_the_lowest_numbered_unit_goes_first_whether_a_ticket_or_a_spec(self):
+        self.write_state({1: {}, 2: self.SPEC, 3: {"parent": 2}, 4: {"parent": 2}, 5: {}})
+        r = self.drain(env={"SPEC_SLICES": "3 4"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        runs = self.dispatch_runs()
+        self.assertEqual([c["n"] for c in runs], ["1", "2", "5"])
+        self.assertEqual(["--spec" in c["argv"] for c in runs], [False, True, False])
+        prompt = self.chooser_runs()[0]["prompt"]
+        self.assertNotIn("#2 ", prompt)
+        self.assertNotIn("#3 ", prompt)
+
+    def test_a_spec_without_the_ready_label_is_not_dispatched(self):
+        # `implement-dispatch --spec` refuses a spec that is not `ready-for-agent`.
+        self.write_state({1: {"labels": ["spec"]}, 2: {"parent": 1}, 3: {"parent": 1}})
+        r = self.drain()
+        self.assertIn("nothing to drain", r.stdout)
+        self.assertIn("waiting: ready slices of spec #1, which drain cannot start", r.stdout)
+        self.assertEqual(self.dispatch_runs(), [])
+
+    def test_a_blocked_spec_is_not_dispatched(self):
+        self.write_state({1: {**self.SPEC, "body": "## Blocked by\n\n- #9\n"}, 2: {"parent": 1}, 9: {"labels": []}})
+        r = self.drain()
+        self.assertIn("nothing to drain", r.stdout)
+        self.assertEqual(self.dispatch_runs(), [])
+
+    def test_a_spec_pr_may_close_more_tickets_than_bundle_max_when_all_are_its_slices(self):
+        self.spec_state(slices=(2, 3, 4, 5))
+        r = self.drain("--once", "--bundle-max", "2", env={"SPEC_SLICES": "2 3 4 5"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state()["merged"][0][0], [1, 2, 3, 4, 5])
+
+    def test_a_spec_pr_that_closes_a_ticket_that_is_not_its_slice_is_a_failed_build(self):
+        self.spec_state(slices=(2,), extra={9: {}})
+        r = self.drain("--once", env={"SPEC_SLICES": "2", "EXTRA_CLOSE": "9"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("closes #9 which is not a slice of spec #1", self.handed_comment(1)[0])
+        self.assertNotIn("merged", self.state())
+
+    def test_a_spec_pr_that_does_not_close_the_spec_is_a_failed_build(self):
+        self.spec_state()
+        self.drain("--once", env={"SPEC_SLICES": "2 3", "NO_ANCHOR": "1"})
+        self.assertIn("does not close the anchor #1", self.handed_comment(1)[0])
+
+    def test_a_spec_run_that_fails_hands_the_spec_and_its_claimed_slices_over_and_closes_every_pane(self):
+        # Ticket 8 is another run's claim; 9's parent line names another repo, so its parent cannot be read.
+        self.spec_state(extra={8: {"labels": ["in-progress"]},
+                               9: {"labels": ["in-progress"], "body": "Part of other/repo#12\n"}})
+        self.drain("--once", env={"SPEC_SLICES": "2 3", "FAIL_TICKETS": "1"})
+        for n in (8, 9):
+            self.assertEqual(self.labels(n), ["in-progress"], "not this spec's: left alone")
+            self.assertNotIn(["agent", "get", f"repo-{n}"], self.herdr_calls())
+        for n in (1, 2, 3):
+            self.assertIn("ready-for-human", self.labels(n))
+            self.assertNotIn("in-progress", self.labels(n))
+            self.assertEqual(len(self.handed_comment(n)), 1)
+        self.assertIn("The worktree spec-1 is kept", self.handed_comment(1)[0])
+        closes = [c for c in self.herdr_calls() if c[:2] == ["pane", "close"]]
+        self.assertEqual(len(closes), 3, "the spec run's pane and each slice worker's")
+        self.assertIn(["agent", "get", "repo-3"], self.herdr_calls())
+
+    def test_a_one_slice_spec_whose_run_lands_it_without_an_integration_pr_is_reported_landed(self):
+        self.spec_state(slices=(2,))
+        r = self.drain("--once", env={"SPEC_SLICES": "2", "LIGHT": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("#1  (landed on main, no PR)", r.stdout)
+        self.assertIn("spec-1", read(self.cleanup_log))
+
+    def test_an_anchor_note_that_names_another_ticket_or_is_malformed_is_not_resumed(self):
+        for note in ("drain anchor: spec-2", "drain anchor: implement-1 extra", "drain anchor: whatever"):
+            self.write_state({1: {"labels": ["in-progress"]}}, comments=[["1", note]])
+            self.drain("--once", env={"HERDR_GONE": "1"})
+            self.assertEqual(self.dispatch_runs(), [], note)
+            self.assertEqual(self.handed_comment(1), [], note)
+
+    def test_a_spec_whose_workspace_is_kept_is_not_picked_again(self):
+        self.spec_state()
+        os.makedirs(self.repo + "/.claude/worktrees/spec-1")
+        r = self.drain()
+        self.assertIn("nothing to drain", r.stdout)
+
+    def test_a_rerun_resumes_a_spec_it_started_and_never_dispatches_it_twice(self):
+        self.write_state({1: {**self.SPEC, "labels": ["spec", "in-progress"]},
+                          2: {"parent": 1, "labels": ["in-progress"]}},
+                         comments=[["1", "drain anchor: spec-1"]])
+        self.drain("--once", env={"HERDR_GONE": "1"})
+        self.assertEqual(self.dispatch_runs(), [])
+        self.assertIn("the worker repo-spec-1 is gone", self.handed_comment(1)[0])
+
+    def test_a_spec_the_run_did_not_start_is_never_taken(self):
+        # A burn's spec run: in-progress, no `drain anchor:` comment, and its
+        # slices still read `slice` on the frontier.
+        self.write_state({1: {**self.SPEC, "labels": ["spec", "in-progress"]}, 2: {"parent": 1}})
+        r = self.drain()
+        self.assertIn("nothing to drain", r.stdout)
+        self.assertEqual(self.dispatch_runs(), [])
+
+    def test_anchor_may_name_a_spec(self):
+        self.write_state({1: {}, 2: self.SPEC, 3: {"parent": 2}})
+        r = self.drain("--anchor", "2", "--once", env={"SPEC_SLICES": "3"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["2"])
+        self.assertEqual(self.labels(1), ["ready-for-agent"])
+
+
 class WaitTest(Sandbox):
     """`wait_for_worker`'s wall clock, in-process: a three-hour clock has no
     command-line witness."""
+
+    PATCHED = ("WALL_CLOCK_SECONDS", "SPEC_WALL_CLOCK_SECONDS", "IDLE_GRACE_SECONDS", "POLL_SECONDS", "agent_status",
+               "slices_working", "open_pr", "gh_json", "claimed_slices")
 
     def setUp(self):
         super().setUp()
         import drain
         self.drain_mod = drain
-        self.old = (drain.WALL_CLOCK_SECONDS, drain.POLL_SECONDS, drain.agent_status)
+        self.old = tuple(getattr(drain, k) for k in self.PATCHED)
+        self.ctx = type("Ctx", (), {"repo": "o/r", "root": "/x/repo"})()
 
     def tearDown(self):
-        self.drain_mod.WALL_CLOCK_SECONDS, self.drain_mod.POLL_SECONDS, self.drain_mod.agent_status = self.old
+        for key, value in zip(self.PATCHED, self.old):
+            setattr(self.drain_mod, key, value)
         super().tearDown()
 
     def test_a_worker_that_never_goes_idle_fails_at_the_wall_clock(self):
@@ -1011,6 +1152,44 @@ class WaitTest(Sandbox):
         with self.assertRaises(self.drain_mod.DrainError) as caught:
             self.drain_mod.wait_for_worker(None, "implement-1", "repo-1", [1])
         self.assertIn("passed the 0.3s wall clock", str(caught.exception))
+
+    def test_a_spec_run_idle_while_its_slice_workers_work_is_not_a_failed_build(self):
+        d = self.drain_mod
+        d.IDLE_GRACE_SECONDS, d.POLL_SECONDS = 0.2, 0.05
+        d.agent_status, d.gh_json = lambda name: "idle", lambda *args: {"state": "open"}
+        start = time.monotonic()
+        d.slices_working = lambda ctx, spec: time.monotonic() - start < 0.6
+        d.open_pr = lambda ctx, branch: {"number": 1} if time.monotonic() - start > 0.8 else None
+        self.assertEqual(d.wait_for_worker(self.ctx, "spec-1", "repo-spec-1", [1], spec=1), "pr")
+
+    def test_a_slice_worker_counts_as_working_only_while_it_is_working(self):
+        d = self.drain_mod
+        d.claimed_slices = lambda ctx, spec: [2, 3]
+        for statuses, expected in (({"repo-2": "idle", "repo-3": "working"}, True),
+                                   ({"repo-2": "idle", "repo-3": "blocked"}, False),
+                                   ({"repo-2": "done", "repo-3": None}, False)):
+            d.agent_status = statuses.get
+            self.assertIs(d.slices_working(self.ctx, 1), expected, statuses)
+
+    def test_the_same_idle_wait_with_no_slice_working_fails_at_the_grace(self):
+        d = self.drain_mod
+        d.IDLE_GRACE_SECONDS, d.POLL_SECONDS = 0.2, 0.05
+        d.agent_status, d.gh_json = lambda name: "idle", lambda *args: {"state": "open"}
+        d.slices_working = lambda ctx, spec: False
+        d.open_pr = lambda ctx, branch: None
+        with self.assertRaises(d.DrainError) as caught:
+            d.wait_for_worker(self.ctx, "spec-1", "repo-spec-1", [1], spec=1)
+        self.assertIn("is idle with no PR", str(caught.exception))
+
+    def test_a_spec_run_gets_the_spec_wall_clock_not_the_tickets(self):
+        d = self.drain_mod
+        d.WALL_CLOCK_SECONDS, d.SPEC_WALL_CLOCK_SECONDS, d.POLL_SECONDS = 0.1, 0.4, 0.05
+        d.agent_status = lambda name: "working"
+        started = time.monotonic()
+        with self.assertRaises(d.DrainError) as caught:
+            d.wait_for_worker(self.ctx, "spec-1", "repo-spec-1", [1], spec=1)
+        self.assertIn("passed the 0.4s wall clock", str(caught.exception))
+        self.assertGreaterEqual(time.monotonic() - started, 0.4)
 
     def test_run_group_kills_what_a_command_started(self):
         pidfile = os.path.join(self.tmp.name, "pid")

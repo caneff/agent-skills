@@ -3,10 +3,11 @@
 [--anchor <n>]`: work the `ready-for-agent` queue unattended, serially, one PR
 at a time (#1403).
 
-The **anchor** is the oldest unblocked ready ticket (`burndown/frontier.py`),
-or, for the first bundle drain picks, the ticket `--anchor <n>` names (refused
-unless `<n>` is open, ready, unblocked and without a kept workspace; a resumed
-bundle goes first and the anchor waits for the next pick). Tickets numbered
+The **anchor** is the oldest unblocked ready ticket (`burndown/frontier.py`)
+or clear spec parent, whichever has the lower number, or, for the first bundle
+drain picks, the ticket or spec `--anchor <n>` names (refused unless `<n>` is
+open, ready, unblocked and without a kept workspace; a resumed bundle goes
+first and the anchor waits for the next pick). Tickets numbered
 below the anchor never join its bundle, because the worker's branch and herdr
 agent are named for the lowest ticket of a clump.
 
@@ -23,6 +24,26 @@ and `drain` waits for it: its PR appears and its pane goes idle, under a
 three-hour wall clock. A worker that sits idle or blocked with no PR for half
 an hour is a failed build (the ticket's own evidence of a healthy wait on a
 reviewer is 22 minutes). `drain` does no directory or closure grouping.
+
+A **spec parent** is a bundle of its own (#1477). The frontier's `spec` bucket
+holds the parents `implement-dispatch --spec` accepts (`ready-for-agent`, not
+claimed, not blocked), so only they anchor: a spec without the ready label, or
+one a burn already runs, leaves its slices unbuilt, as a slice never is built as
+a lone ticket. `drain` starts it with `implement-dispatch --spec <n>` (that
+command's own slot default) and no chooser, since the spec's slices are its
+bundle. When nothing else is startable, a `waiting:` line names each spec whose
+slices are ready but which `drain` cannot start. The spec
+run is the worker: pane `<repo-short>-spec-<n>`, workspace and branch
+`spec-<n>`, and it drives its slices itself (`implement-spec/SKILL.md`). Its
+stop is the integration PR up and the pane idle, and the wait differs in three
+ways: the half-hour idle grace does not run while a slice worker is `working`,
+the wall clock is twelve hours (`SPEC_WALL_CLOCK_SECONDS`), and the PR must
+close the spec and may close any number of its slices (a ticket whose parent is
+the spec), with no `--bundle-max` cap, since the spec's size is its own. A
+failed spec run is handed to Chris with the spec, its claimed slices and every
+pane of theirs closed. A spec with one slice has no integration branch and no
+`spec-<n>` PR: its run lands the slice itself, and `drain` reports the spec as
+landed with no PR, its own PR check never having run.
 `--max` stops the loop after that many tickets (a bundle counts all of its
 tickets); `--once` stops after one bundle.
 
@@ -93,6 +114,8 @@ MAX_CONSECUTIVE_FAILURES = 2
 # session of its own: drain waits for it and never kills it.
 MEMORY_CAP_BYTES = 32 << 30
 WALL_CLOCK_SECONDS = 3 * 60 * 60
+# A spec run builds every slice and reviews the whole, so its clock is longer.
+SPEC_WALL_CLOCK_SECONDS = float(os.environ.get("DRAIN_SPEC_WALL_CLOCK_SECONDS", 12 * 60 * 60))
 # Never a permission-skipping flag: the bundle chooser runs in the mode the
 # harness already trusts for unattended work. (A worker's own mode is
 # `implement-dispatch`'s.)
@@ -123,6 +146,8 @@ CONTROLLER = "drain"
 _ORIGIN = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 Ctx = collections.namedtuple("Ctx", "root repo default log_dir bundle_max want")
+# What an anchor is: a ticket built by a worker, or a spec parent built by a spec run.
+TICKET, SPEC = "ticket", "spec"
 
 
 class DrainError(Exception):
@@ -203,9 +228,12 @@ def origin_slug(root):
     return f"{m.group(1)}/{m.group(2)}"
 
 
-def pick(ctx):
-    """`[(number, title)]`: the unblocked ready queue, oldest first; the
-    anchor is the first."""
+def read_frontier(ctx):
+    """`(queue, waiting)`. `queue` is `[(number, title, kind)]`: the unblocked
+    ready tickets and the clear spec parents, oldest first; the anchor is the
+    first. A slice is neither: it is built inside its spec's run. `waiting` is
+    the numbers of specs that have a ready slice and are not in the queue
+    (not ready-for-agent, claimed, blocked), which drain cannot start."""
     issues = {}
 
     def fetch(r, label):
@@ -214,14 +242,27 @@ def pick(ctx):
         return got
 
     try:
-        queue = frontier.frontier(ctx.repo, READY, fetch=fetch)["unblocked"]
+        buckets = frontier.frontier(ctx.repo, READY, fetch=fetch)
     except frontier.FrontierError as exc:
         raise DrainError(f"frontier: {exc}") from exc
-    return [(t["number"], t["title"]) for t in queue if HUMAN not in labels_of(issues[t["number"]])]
+    queue = [(t["number"], t["title"], kind) for kind, bucket in ((TICKET, "unblocked"), (SPEC, "spec"))
+             for t in buckets[bucket]]
+    queue = sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
+    waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
+    return queue, sorted(waiting)
 
 
-def workspace_path(ctx, n):
-    return os.path.join(ctx.root, ".claude", "worktrees", f"implement-{n}")
+def pick(ctx):
+    return read_frontier(ctx)[0]
+
+
+def branch_of(n, kind):
+    """The branch and workspace name `implement-dispatch` gives an anchor."""
+    return f"{'spec' if kind == SPEC else 'implement'}-{n}"
+
+
+def workspace_path(ctx, n, kind):
+    return os.path.join(ctx.root, ".claude", "worktrees", branch_of(n, kind))
 
 
 def anchors(ctx, queue):
@@ -229,7 +270,7 @@ def anchors(ctx, queue):
     workspace. A ticket drain handed to Chris keeps its workspace, and
     `implement-dispatch` refuses to start where one exists, so a re-readied one
     would stop every later run at it."""
-    return [t for t in queue if not os.path.isdir(workspace_path(ctx, t[0]))]
+    return [t for t in queue if not os.path.isdir(workspace_path(ctx, t[0], t[2]))]
 
 
 def put_first(queue, want):
@@ -259,7 +300,18 @@ def claim_lock(ctx):
         yield
 
 
-def note_anchor(ctx, anchor):
+_ANCHOR_NOTE = re.compile(re.escape(ANCHOR_NOTE) + r" (implement|spec)-(\d+)")
+
+
+def anchor_kind(note, n):
+    """`SPEC` or `TICKET` for the issue `n`'s own anchor note, `None` for a note
+    that is not exactly what `note_anchor` writes: an unreadable note is never
+    resumed as a ticket by default."""
+    m = _ANCHOR_NOTE.fullmatch(note.strip())
+    return {"implement": TICKET, "spec": SPEC}[m.group(1)] if m and int(m.group(2)) == n else None
+
+
+def note_anchor(ctx, anchor, kind):
     """True when the anchor is still ready and drain left its `drain anchor:`
     note, False when another claim took it since the pick (read again under the
     lock, as `implement-dispatch` does). The claim itself is `implement-dispatch`'s
@@ -270,14 +322,15 @@ def note_anchor(ctx, anchor):
         view = gh_json("issue", "view", str(anchor), "--repo", ctx.repo, "--json", "state,labels")
         if view["state"].lower() != "open" or READY not in labels_of(view) or CLAIMED in labels_of(view):
             return False
-        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body", f"{ANCHOR_NOTE} implement-{anchor}")
+        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body", f"{ANCHOR_NOTE} {branch_of(anchor, kind)}")
     return True
 
 
 def resumable(ctx, ended):
-    """The lowest open in-progress ticket whose latest drain comment is its
-    anchor note, or `None`. A worker `implement-dispatch` started has none, and
-    a ticket drain handed to Chris ends in `HANDED_NOTE`, so neither is taken.
+    """`(number, kind)` of the lowest open in-progress ticket or spec whose
+    latest drain comment is its anchor note, or `None`. A worker
+    `implement-dispatch` started has none, and a ticket drain handed to Chris
+    ends in `HANDED_NOTE`, so neither is taken.
     The open list can still carry a ticket just closed, so each candidate's
     state and labels are read again, and an anchor this run already took up
     (`ended`) is never taken twice."""
@@ -292,8 +345,9 @@ def resumable(ctx, ended):
         if view["state"].lower() != "open" or CLAIMED not in labels_of(view):
             continue
         marks = [c["body"] for c in view["comments"] if c["body"].startswith((ANCHOR_NOTE, HANDED_NOTE))]
-        if marks and marks[-1].startswith(ANCHOR_NOTE):
-            return issue["number"]
+        kind = anchor_kind(marks[-1], issue["number"]) if marks and marks[-1].startswith(ANCHOR_NOTE) else None
+        if kind:
+            return issue["number"], kind
     return None
 
 
@@ -307,10 +361,54 @@ def noted(ctx, anchor):
             for x in re.findall(r"\d+", c["body"])} - {anchor}
 
 
-def bundle_of(ctx, anchor, branch):
+_PARENTS = {}  # (repo, number) -> parent number or None; a ticket's parent does not change mid-run
+
+
+def parent_number(ctx, issue):
+    """The number of the parent `issue` (a dict with `number` and `body`) names
+    by the sub-issue link or a `Part of` line, or `None`. Read once per ticket:
+    the idle wait asks every poll."""
+    key = (ctx.repo, issue["number"])
+    if key not in _PARENTS:
+        try:
+            parent = frontier.fetch_parent(ctx.repo, issue)
+        except frontier.FrontierError as exc:
+            raise DrainError(f"parent of #{issue['number']}: {exc}") from exc
+        _PARENTS[key] = parent and parent["number"]
+    return _PARENTS[key]
+
+
+def is_slice_of(ctx, n, spec):
+    """Whether ticket `n` (read live) has `spec` as its parent."""
+    body = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "body")["body"]
+    return parent_number(ctx, {"number": n, "body": body}) == spec
+
+
+def claimed_slices(ctx, spec):
+    """The in-progress tickets whose parent is `spec`: the slices its run holds.
+    Read live, since the spec run claims them, not drain."""
+    try:
+        claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
+    except frontier.FrontierError as exc:
+        raise DrainError(f"frontier: {exc}") from exc
+    held = []
+    for i in claimed:
+        if i["number"] == spec or i.get("pull_request") or HUMAN in labels_of(i):
+            continue
+        try:
+            if parent_number(ctx, i) == spec:
+                held.append(i["number"])
+        except DrainError:  # an unrelated ticket whose parent cannot be read is not this spec's, and not a reason to fail it
+            continue
+    return sorted(held)
+
+
+def bundle_of(ctx, anchor, branch, kind):
     """The anchor plus the tickets it is still holding: those the agent named
     and those an open PR closes, each read live, so a closed, human-held or
-    unclaimed one is not the bundle's."""
+    unclaimed one is not the bundle's. A spec's are the slices its run holds."""
+    if kind == SPEC:
+        return [anchor] + claimed_slices(ctx, anchor)
     hint = noted(ctx, anchor)
     if open_pr(ctx, branch):
         view = gh_json("pr", "view", branch, "--repo", ctx.repo, "--json", "closingIssuesReferences")
@@ -323,11 +421,11 @@ def bundle_of(ctx, anchor, branch):
     return [anchor] + held
 
 
-def agent_name(ctx, lead):
+def agent_name(ctx, lead, kind):
     """The herdr agent `implement-dispatch` names its worker: the checkout's
-    directory name cut to fit 32 characters with `-<lead>`, as that command
-    does (`implement_dispatch.rs`)."""
-    suffix = f"-{lead}"
+    directory name cut to fit 32 characters with `-<lead>` (`-spec-<lead>` for a
+    spec run), as that command does (`implement_dispatch.rs`)."""
+    suffix = f"-spec-{lead}" if kind == SPEC else f"-{lead}"
     return os.path.basename(ctx.root)[:32 - len(suffix)] + suffix
 
 
@@ -418,15 +516,16 @@ def choose_bundle(ctx, anchor, others, log):
     return [anchor] + picked[:ctx.bundle_max - 1], None
 
 
-def dispatch(ctx, bundle):
+def dispatch(ctx, bundle, kind):
     """Start the bundle's worker through `implement-dispatch`, the one dispatch
     path: claim, worktree, herdr pane, brief. A refusal claims and creates
     nothing, so it is the environment's (herdr down, onboarding) and stops the
     run rather than looping over one ticket. A failure after the claim (herdr
     failing once the workspace exists) leaves the claim and the workspace in
     place: that is this bundle's failed build, not the environment's."""
-    out = subprocess.run(["implement-dispatch", "--repo", ctx.root, "--controller", CONTROLLER,
-                          *[str(n) for n in bundle]], capture_output=True, text=True)
+    which = ["--spec", str(bundle[0])] if kind == SPEC else [str(n) for n in bundle]
+    out = subprocess.run(["implement-dispatch", "--repo", ctx.root, "--controller", CONTROLLER, *which],
+                         capture_output=True, text=True)
     if out.returncode:
         reason = "implement-dispatch failed: " + one_line(out.stderr or out.stdout, 250)
         view = gh_json("issue", "view", str(bundle[0]), "--repo", ctx.repo, "--json", "labels")
@@ -435,18 +534,31 @@ def dispatch(ctx, bundle):
         raise DrainStop(reason.replace("failed", "refused", 1))
 
 
-def wait_for_worker(ctx, branch, agent, bundle):
+def slices_working(ctx, spec):
+    """Whether any slice worker of `spec` is `working`: the spec run's pane sits
+    idle while it waits on them, which is no failed build."""
+    for n in claimed_slices(ctx, spec):
+        status = agent_status(agent_name(ctx, n, TICKET))
+        if status is not None and status not in IDLE and status not in STALLED:
+            return True
+    return False
+
+
+def wait_for_worker(ctx, branch, agent, bundle, spec=None):
     """`"pr"` once the branch has an open PR and its worker has gone idle (or is
     gone), `"landed"` when it went idle with every ticket closed and no PR (the
     light tier lands on main itself). A worker idle or blocked with no PR past
     the grace, a vanished one with neither, and the wall clock are failed
     builds. A look that errors (`gh`, herdr) is tried again; `LOOK_ERRORS` in a
-    row end the wait."""
-    deadline, stalled_since, errors = time.monotonic() + WALL_CLOCK_SECONDS, None, 0
+    row end the wait. `spec` is the spec number when the worker is a spec run:
+    its wall clock is `SPEC_WALL_CLOCK_SECONDS`, and a slice worker at work
+    restarts its idle grace."""
+    limit = SPEC_WALL_CLOCK_SECONDS if spec else WALL_CLOCK_SECONDS
+    deadline, stalled_since, errors = time.monotonic() + limit, None, 0
     while True:
         try:
             status = agent_status(agent)
-            outcome = None
+            outcome, busy = None, False
             if status is None or status in IDLE:
                 if open_pr(ctx, branch):
                     outcome = "pr"
@@ -455,6 +567,8 @@ def wait_for_worker(ctx, branch, agent, bundle):
                     outcome = "landed"
                 elif status is None:
                     raise WorkerGone(f"the worker {agent} is gone and the build has no PR")
+            if spec and not outcome and status is not None and (status in IDLE or status in STALLED):
+                busy = slices_working(ctx, spec)
             errors = 0
         except WorkerGone:
             raise
@@ -465,14 +579,14 @@ def wait_for_worker(ctx, branch, agent, bundle):
         else:
             if outcome:
                 return outcome
-            if status in IDLE or status in STALLED:
+            if (status in IDLE or status in STALLED) and not busy:
                 stalled_since = stalled_since or time.monotonic()
                 if time.monotonic() - stalled_since >= IDLE_GRACE_SECONDS:
                     raise DrainError(f"the worker {agent} is {status} with no PR")
             else:
                 stalled_since = None
         if time.monotonic() > deadline:
-            raise DrainError(f"the worker {agent} passed the {WALL_CLOCK_SECONDS}s wall clock")
+            raise DrainError(f"the worker {agent} passed the {limit}s wall clock")
         time.sleep(POLL_SECONDS)
 
 
@@ -564,7 +678,7 @@ def full_run(ctx, merged):
     return None
 
 
-def verify_pr(ctx, branch, anchor):
+def verify_pr(ctx, branch, anchor, kind):
     view = gh_json("pr", "view", branch, "--repo", ctx.repo, "--json",
                    "isDraft,mergeStateStatus,headRefOid,number,url,closingIssuesReferences")
     if view["isDraft"]:
@@ -574,12 +688,18 @@ def verify_pr(ctx, branch, anchor):
     closed = {r["number"] for r in view["closingIssuesReferences"]}
     if anchor not in closed:
         raise DrainError(f"{view['url']} does not close the anchor #{anchor}")
-    unrecorded = closed - {anchor} - noted(ctx, anchor)
-    if unrecorded:
-        raise DrainError(f"{view['url']} closes " + ", ".join(f"#{n}" for n in sorted(unrecorded))
-                         + f" which no {BUNDLE_NOTE} comment on #{anchor} names")
-    if len(closed) > ctx.bundle_max:
-        raise DrainError(f"{view['url']} closes {len(closed)} tickets, over --bundle-max {ctx.bundle_max}")
+    if kind == SPEC:  # the spec and its slices are one bundle, whatever their number
+        foreign = [n for n in sorted(closed - {anchor}) if not is_slice_of(ctx, n, anchor)]
+        if foreign:
+            raise DrainError(f"{view['url']} closes " + ", ".join(f"#{n}" for n in foreign)
+                             + f" which is not a slice of spec #{anchor}")
+    else:
+        unrecorded = closed - {anchor} - noted(ctx, anchor)
+        if unrecorded:
+            raise DrainError(f"{view['url']} closes " + ", ".join(f"#{n}" for n in sorted(unrecorded))
+                             + f" which no {BUNDLE_NOTE} comment on #{anchor} names")
+        if len(closed) > ctx.bundle_max:
+            raise DrainError(f"{view['url']} closes {len(closed)} tickets, over --bundle-max {ctx.bundle_max}")
     seam(ctx, view["headRefOid"], os.path.join(ctx.log_dir, f"{branch}-seam.log"))
     view["closes"] = sorted(closed)
     return view
@@ -610,7 +730,7 @@ def finish_landed(ctx, branch, tickets):
     return {"tickets": tickets, "pr": "(landed on main, no PR)", "sha": sha, "note": "; ".join(notes)}
 
 
-def finish(ctx, anchor, branch, view):
+def finish(ctx, anchor, branch, view, kind):
     """After the merge: the squash sha, `merge-cleanup`, and the tickets the
     agent claimed that the PR did not close back to the queue. A step that
     fails is a note on a merged PR, never a reason to build again."""
@@ -621,7 +741,7 @@ def finish(ctx, anchor, branch, view):
         notes.append(f"squash sha unread, head shown: {one_line(exc, 100)}")
     notes += cleanup_notes(ctx, branch)
     try:
-        for n in set(bundle_of(ctx, anchor, branch)) - set(view["closes"]):
+        for n in set(bundle_of(ctx, anchor, branch, kind)) - set(view["closes"]):
             gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", READY,
                "--remove-assignee", "@me")
     except DrainError as exc:
@@ -629,21 +749,24 @@ def finish(ctx, anchor, branch, view):
     return {"tickets": view["closes"], "pr": view["url"], "sha": sha, "note": "; ".join(notes)}
 
 
-def nudge_text(reason, pr_up):
+def nudge_text(reason, pr_up, kind):
     head = "Unattended run, no controller: "
     if pr_up:
         return (head + f"the PR is up but drain's check of it failed: {reason} Fix that, push to the PR branch, "
                 "and send no messages.")
+    if kind == SPEC:
+        return head + (f"the PR is not up yet ({reason}). Finish /implement-spec for this spec now, the slices, "
+                       "the spec-level review and the integration PR, and send no messages.")
     return head + (f"the PR is not up yet ({reason}). Finish /implement for this ticket now, the build, the "
                    "review wave and the PR, and send no messages.")
 
 
-def nudge(ctx, agent, branch, reason):
+def nudge(ctx, agent, branch, reason, kind):
     """Prompt the worker with why the first try failed and wait for it to start
     working, so the next look at it is not the idle it was in before the prompt."""
     if agent_status(agent) is None:
         raise WorkerGone(f"the worker {agent} is gone; nothing to prompt")
-    code, text = run_group(["herdr", "agent", "prompt", agent, nudge_text(reason, bool(open_pr(ctx, branch))),
+    code, text = run_group(["herdr", "agent", "prompt", agent, nudge_text(reason, bool(open_pr(ctx, branch)), kind),
                             "--wait", "--until", "working", "--until", "blocked", "--timeout", "30000"],
                            ctx.root, 60)
     if code:
@@ -663,64 +786,69 @@ def title_of(ctx, n):
         return "(title unread)"
 
 
-def announce(ctx, anchor, tickets):
+def announce(ctx, anchor, tickets, kind):
     """The `bundle started:` line: every ticket with its title and the worker's
     herdr pane, said the moment the bundle's worker exists."""
     say("bundle started: " + "; ".join(f"#{n} {title_of(ctx, n)}" for n in tickets)
-        + f"  pane {agent_name(ctx, anchor)}")
+        + f"  pane {agent_name(ctx, anchor, kind)}")
 
 
-def work(ctx, anchor, others, resumed, started):
+def work(ctx, anchor, others, resumed, started, kind):
     """`(merge result, None)` or `(None, the second failure's one-line reason)`;
     appends the bundle's tickets to `started` once its worker exists.
     Attempt 1 starts the worker (a resumed run finds it or its PR already
     there); attempt 2 prompts the same worker with the first failure's reason,
     since its workspace exists and a second dispatch would refuse it."""
-    branch, agent, reason, bundle = f"implement-{anchor}", agent_name(ctx, anchor), "", [anchor]
+    branch, agent, reason, bundle = branch_of(anchor, kind), agent_name(ctx, anchor, kind), "", [anchor]
     # The worker's branch and agent are named for the lowest ticket in the
     # clump, so every ticket bundled with the anchor is a higher number.
     others = [t for t in others if t[0] > anchor]
     for attempt in (1, 2):
         try:
             if attempt == 2:
-                nudge(ctx, agent, branch, reason)
+                nudge(ctx, agent, branch, reason, kind)
             elif not resumed:
-                bundle, why = choose_bundle(ctx, anchor, others, os.path.join(ctx.log_dir, f"{branch}-choose.log"))
-                if why:
-                    gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
-                       f"{CHOOSER_NOTE} #{anchor} alone: {why}")
-                if len(bundle) > 1:
-                    gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
-                       f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)}")
-                dispatch(ctx, bundle)
-            tickets = [anchor] + sorted(noted(ctx, anchor))
+                if kind == TICKET:  # a spec's slices are its bundle: nothing to choose
+                    bundle, why = choose_bundle(ctx, anchor, others, os.path.join(ctx.log_dir, f"{branch}-choose.log"))
+                    if why:
+                        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
+                           f"{CHOOSER_NOTE} #{anchor} alone: {why}")
+                    if len(bundle) > 1:
+                        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
+                           f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)}")
+                dispatch(ctx, bundle, kind)
+            tickets = [anchor] + (sorted(noted(ctx, anchor)) if kind == TICKET else [])
             if attempt == 1:
-                announce(ctx, anchor, tickets)
+                announce(ctx, anchor, tickets, kind)
                 started[:] = tickets
-            if wait_for_worker(ctx, branch, agent, tickets) == "landed":
+            if wait_for_worker(ctx, branch, agent, tickets, spec=anchor if kind == SPEC else None) == "landed":
                 return finish_landed(ctx, branch, tickets), None
-            view = verify_pr(ctx, branch, anchor)
+            view = verify_pr(ctx, branch, anchor, kind)
             gh("pr", "merge", str(view["number"]), "--squash", "--match-head-commit", view["headRefOid"],
                "--repo", ctx.repo)
         except DrainError as exc:
             reason = one_line(exc)
             if not started:  # a failure before the announce (a dispatch that failed after the claim): the bundle was still worked
-                announce(ctx, anchor, bundle)
+                announce(ctx, anchor, bundle, kind)
                 started[:] = bundle
         else:
-            return finish(ctx, anchor, branch, view), None
+            return finish(ctx, anchor, branch, view, kind), None
     return None, reason
 
 
-def hand_to_chris(ctx, anchor, reason):
-    stop_worker(agent_name(ctx, anchor))
-    bundle = bundle_of(ctx, anchor, f"implement-{anchor}")
+def hand_to_chris(ctx, anchor, reason, kind):
+    branch = branch_of(anchor, kind)
+    stop_worker(agent_name(ctx, anchor, kind))
+    bundle = bundle_of(ctx, anchor, branch, kind)
+    if kind == SPEC:  # the spec run's slice workers would otherwise keep working with nobody to merge them
+        for n in bundle[1:]:
+            stop_worker(agent_name(ctx, n, TICKET))
     for n in bundle:
         gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", HUMAN,
            "--remove-assignee", "@me")
         gh("issue", "comment", str(n), "--repo", ctx.repo, "--body",
            f"{HANDED_NOTE} this ticket (bundle {' '.join(f'#{x}' for x in bundle)}) after two attempts. "
-           f"Last failure: {reason} The worktree implement-{anchor} is kept for inspection and its worker's "
+           f"Last failure: {reason} The worktree {branch} is kept for inspection and its worker's "
            "pane is closed; drain skips this ticket until that worktree is removed.")
     return bundle
 
@@ -734,23 +862,28 @@ def drain(ctx, limit):
         if want:  # refuse before any work, and not only when the loop gets there
             put_first(anchors(ctx, pick(ctx)), want)
         while done < limit:
-            anchor = resumable(ctx, ended)
-            resumed, others = anchor is not None, []
-            if not resumed:
-                queue = pick(ctx)
+            taken = resumable(ctx, ended)
+            resumed, others = taken is not None, []
+            if resumed:
+                anchor, kind = taken
+            else:
+                queue, waiting = read_frontier(ctx)
                 candidates = anchors(ctx, queue)
                 if not candidates:
+                    for spec in waiting:
+                        say(f"waiting: ready slices of spec #{spec}, which drain cannot start (it is not "
+                            "ready-for-agent, is claimed, or is blocked)")
                     break
                 if want:
                     if not any(t[0] == want for t in candidates):
                         raise DrainStop(f"--anchor #{want} left the ready queue before drain reached it")
                     candidates, want = put_first(candidates, want), None
-                anchor = candidates[0][0]
-                others = [t for t in queue if t[0] != anchor]
-                if not note_anchor(ctx, anchor):
+                anchor, _, kind = candidates[0]
+                others = [(n, title) for n, title, k in queue if k == TICKET and n != anchor]
+                if not note_anchor(ctx, anchor, kind):
                     continue
             ended.add(anchor)
-            result, reason = work(ctx, anchor, others, resumed, started)
+            result, reason = work(ctx, anchor, others, resumed, started, kind)
             if result:
                 say(f"bundle ended: {' '.join(f'#{n}' for n in result['tickets'])}  merged  {result['pr']}  "
                     f"{result['sha']}")
@@ -758,7 +891,7 @@ def drain(ctx, limit):
                 merged.append(result)
                 done, failures = done + len(result["tickets"]), 0
             else:
-                bundle = hand_to_chris(ctx, anchor, reason)
+                bundle = hand_to_chris(ctx, anchor, reason, kind)
                 say(f"bundle ended: {' '.join(f'#{n}' for n in bundle)}  handed to Chris: {reason}")
                 started.clear()
                 handed.append((bundle, reason))

@@ -27,6 +27,10 @@ by that controller's rules, and it dispatches, rules on and merges its slices
 the way any controller does. What a controller rules on is
 `implement/SKILL.md` § Control, and the merge is that file's § The merge.
 
+A controller named `drain` is no session (`drain/drain.py` dispatches spec
+runs too, #1477): `implement/SKILL.md` § Control's rule for it governs this
+run's upward half, with the integration PR up and this run idle as its stop.
+
 Its slots are **debited from the dispatching burn's budget**, not added
 beside it. One budget, one box: a nested run that counted its own slots
 separately would double-spend the machine the box reading is there to

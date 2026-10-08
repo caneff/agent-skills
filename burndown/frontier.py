@@ -389,6 +389,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             else:
                 if parent and SPEC_LABEL in _labels(parent):
                     entry["blockers"] = []
+                    entry["spec"] = parent["number"]
                     entry["why"] = (
                         f"a slice of spec #{parent['number']}: hand off with "
                         + _handoff(parent["number"])
