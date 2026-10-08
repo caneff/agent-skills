@@ -1222,19 +1222,21 @@ def test_fetch_landed_ignores_a_mention_that_is_not_a_closes_line():
 def test_fetch_landed_lets_a_failed_lookup_raise():
     def run(args):
         raise F.FrontierError("gh down")
+    raised = False
     try:
         F.fetch_landed("owner/repo", "spec-483", run=run)
     except F.FrontierError:
-        return
-    raise AssertionError("a failed lookup was read as nothing landed")
+        raised = True
+    assert raised, "a failed lookup was read as nothing landed"
 
 
 def test_fetch_landed_refuses_an_answer_that_is_not_a_list():
+    raised = False
     try:
         F.fetch_landed("owner/repo", "spec-483", run=lambda a: {"message": "x"})
     except F.FrontierError:
-        return
-    raise AssertionError("a non-list answer was read as nothing landed")
+        raised = True
+    assert raised, "a non-list answer was read as nothing landed"
 
 
 def blocker(number, state="open", repo="owner/repo"):
@@ -1262,29 +1264,32 @@ def test_fetch_native_blockers_reads_every_page():
 
 
 def test_fetch_native_blockers_refuses_a_blocker_in_another_repo():
+    raised = False
     try:
         F.fetch_native_blockers("owner/repo", issue(2),
                                 run=native_run([blocker(1, repo="other/repo")]))
     except F.FrontierError:
-        return
-    raise AssertionError("a foreign blocker was read as a local one")
+        raised = True
+    assert raised, "a foreign blocker was read as a local one"
 
 
 def test_fetch_native_blockers_refuses_a_malformed_entry():
     for bad in ([{"state": "open"}], ["nope"], [{"number": "1", "state": "open"}]):
+        raised = False
         try:
             F.fetch_native_blockers("owner/repo", issue(2), run=native_run(bad))
         except F.FrontierError:
-            continue
-        raise AssertionError(f"malformed entry {bad!r} was accepted")
+            raised = True
+        assert raised, f"malformed entry {bad!r} was accepted"
 
 
 def test_fetch_native_blockers_refuses_an_answer_that_is_not_pages():
+    raised = False
     try:
         F.fetch_native_blockers("owner/repo", issue(2), run=lambda a: {"message": "x"})
     except F.FrontierError:
-        return
-    raise AssertionError("a non-list answer was read as no blockers")
+        raised = True
+    assert raised, "a non-list answer was read as no blockers"
 
 
 def main():
