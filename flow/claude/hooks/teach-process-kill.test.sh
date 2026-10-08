@@ -78,10 +78,16 @@ copy_tree
 rm "$tmp/tree/claude/hooks/teach-lib.sh"
 expect_has "missing teach-lib.sh is reported" \
   "$(context "$tmp/tree/claude/hooks/teach-process-kill.sh" l1 "ps aux")" "teach-lib.sh is missing"
+# A command bigger than the pipe buffer makes the SIGPIPE race of #1456
+# deterministic (see teach-testlib.sh context): it was 141 under load.
+big=$(head -c 300000 /dev/zero | tr '\0' 'x')
+expect_has "an error path that ignores a large stdin is still reported" \
+  "$(context "$tmp/tree/claude/hooks/teach-process-kill.sh" l2 "ps aux # $big")" "teach-lib.sh is missing"
 nojq="$tmp/nojq"
 mkdir -p "$nojq"
 for f in /usr/bin/*; do [ "${f##*/}" = jq ] || ln -s "$f" "$nojq/${f##*/}"; done
-got=$(printf '%s' '{"session_id":"j1","tool_input":{"command":"ps aux"}}' | PATH="$nojq" bash "$hook" 2>&1)
+printf '%s' '{"session_id":"j1","tool_input":{"command":"ps aux"}}' > "$tmp/jq-in.json"
+got=$(PATH="$nojq" bash "$hook" 2>&1 < "$tmp/jq-in.json")
 if [[ "$got" == *"jq is not on PATH"* ]]; then echo "PASS: missing jq is reported"
 else echo "FAIL: missing jq is reported — got: ${got:0:300}"; fails=1; fi
 
