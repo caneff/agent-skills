@@ -3128,3 +3128,143 @@ fn a_lone_tickets_open_claim_is_still_left_alone_after_a_main_merge() {
     assert!(run.ok, "{}", run.text());
     assert!(!c.calls().contains("gh issue edit 78"), "{}", c.calls());
 }
+
+// --- #1464: a branch with no commit past its fork point has landed nothing ----
+
+/// `implement-<n>` cut from the local main, which sits behind `origin/main`:
+/// a freshly dispatched workspace whose base has since moved. No commit of its
+/// own, so its tip is an ancestor of `origin/main` without ever having landed.
+/// `forkpoint` records the key `implement-dispatch` writes.
+fn fresh_workspace(c: &Cleanup, rel: &str, n: &str, forkpoint: bool) -> (std::path::PathBuf, std::path::PathBuf) {
+    let r = c.mkfixture(rel);
+    let b = format!("implement-{n}");
+    c.git_ok(&["-C", s(&r), "branch", &b, "main"]);
+    if forkpoint {
+        let at = c.rev(&r, &b);
+        c.git_ok(&["-C", s(&r), "config", &format!("branch.{b}.forkpoint"), &at]);
+    }
+    let wt = r.join(".claude/worktrees").join(&b);
+    c.worktree_add(&r, &[s(&wt), &b]);
+    (r, wt)
+}
+
+/// One commit in `wt`, rebased onto `origin/main` and pushed there: the light
+/// tier's landing.
+fn land_one_commit(c: &Cleanup, wt: &std::path::Path) {
+    std::fs::write(wt.join("g"), "own\n").unwrap();
+    c.git_ok(&["-C", s(wt), "add", "g"]);
+    c.git_ok(&["-C", s(wt), "commit", "-qm", "own"]);
+    c.git_ok(&["-C", s(wt), "fetch", "-q", "origin"]);
+    c.git_ok(&["-C", s(wt), "rebase", "-q", "origin/main"]);
+    c.git_ok(&["-C", s(wt), "push", "-q", "origin", "HEAD:main"]);
+}
+
+#[test]
+fn a_fresh_branch_at_its_fork_point_is_refused_whatever_moved_on_its_base() {
+    for (tools, n) in [(Tools::NoGh, "81"), (Tools::Full, "82")] {
+        let c = Cleanup::new();
+        let (r, wt) = fresh_workspace(&c, &format!("f1-{n}"), n, true);
+        let run = c.mc(tools, &["--repo", s(&r), &format!("implement-{n}")], &[]);
+        assert_refused(&c, &r, &wt, n, &run);
+    }
+}
+
+#[test]
+fn reap_skips_a_fresh_branch_at_its_fork_point() {
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "f2", "83", true);
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has(&format!("  {}  not merged, not removed", wt.display())), "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "implement-83"), "{}", run.text());
+}
+
+#[test]
+fn a_light_tier_landing_one_commit_past_the_fork_point_is_cleaned_up() {
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "f3", "84", true);
+    land_one_commit(&c, &wt);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-84"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "implement-84"), "{}", run.text());
+}
+
+#[test]
+fn a_slice_with_commits_pushed_to_its_spec_branch_is_cleaned_up_with_a_fork_point_recorded() {
+    let c = Cleanup::new();
+    let (r, wt) = slice_workspace(&c, "f4", "85");
+    let fork = c.rev(&r, "spec-900");
+    c.git_ok(&["-C", s(&r), "config", "branch.implement-85.forkpoint", &fork]); // as implement-dispatch records it
+    c.git_ok(&["-C", s(&r), "push", "-q", "origin", "implement-85:spec-900"]);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-85"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "implement-85"), "{}", run.text());
+}
+
+#[test]
+fn without_a_fork_point_key_the_reflog_names_where_the_branch_started() {
+    let c = Cleanup::new();
+    // No commits past its creation: refused.
+    let (r, wt) = fresh_workspace(&c, "f5", "86", false);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-86"], &[]);
+    assert_refused(&c, &r, &wt, "86", &run);
+    // One commit past it, landed by fast-forward: cleaned.
+    land_one_commit(&c, &wt);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-86"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "implement-86"), "{}", run.text());
+}
+
+#[test]
+fn with_neither_a_fork_point_key_nor_a_reflog_an_ancestor_branch_is_refused() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("f6");
+    // caneff/ff-merged is a real fast-forward merge that the reflog test above
+    // would clean; with its reflog gone nothing says where it started.
+    let log = c.git_out(&["-C", s(&r), "rev-parse", "--git-path", "logs/refs/heads/caneff/ff-merged"]);
+    let log = if std::path::Path::new(&log).is_absolute() { std::path::PathBuf::from(log) } else { r.join(log) };
+    assert!(log.is_file(), "fixture has no reflog to remove: {}", log.display());
+    std::fs::remove_file(&log).unwrap();
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "caneff/ff-merged"], &[]);
+    assert!(!run.ok && c.has_branch(&r, "caneff/ff-merged"), "{}", run.text());
+    assert!(run.stderr.contains("caneff/ff-merged is not merged"), "{}", run.text());
+}
+
+#[test]
+fn a_refused_fresh_branch_keeps_its_idle_workers_pane() {
+    // The harm #1464 was filed over: an idle worker waiting on a question had
+    // its pane closed by the live guard once the ancestor test read it merged.
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "f7", "87", true);
+    c.set_agents(&format!(r#"[{{"name":"skills-87","pane_id":"w87:p1","cwd":"{}","agent_status":"idle"}}]"#, wt.display()));
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-87"], &[]);
+    assert_refused(&c, &r, &wt, "87", &run);
+    assert!(!c.calls().contains("pane close"), "{}", c.calls());
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.has(&format!("  {}  not merged, not removed", wt.display())), "{}", run.text());
+    assert!(!c.calls().contains("pane close"), "{}", c.calls());
+}
+
+#[test]
+fn a_fork_point_key_that_is_no_sha_is_refused_not_read_as_a_moved_tip() {
+    // A recorded value carrying stderr noise never equals the tip; it must
+    // read as no fork point, not as "the branch moved on".
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "f8", "88", true);
+    let at = c.rev(&r, "implement-88");
+    c.git_ok(&["-C", s(&r), "config", "branch.implement-88.forkpoint", &format!("warning: noise\n{at}")]);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-88"], &[]);
+    assert_refused(&c, &r, &wt, "88", &run);
+}
+
+#[test]
+fn the_refusal_says_which_cause_it_hit() {
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "f9", "89", true);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-89"], &[]);
+    assert_refused(&c, &r, &wt, "89", &run);
+    assert!(run.stderr.contains("implement-89 is still at its fork point"), "{}", run.text());
+    c.git_ok(&["-C", s(&r), "config", "branch.implement-89.forkpoint", "nonsense"]);
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-89"], &[]);
+    assert!(run.stderr.contains("no fork point or tip could be read for implement-89"), "{}", run.text());
+}

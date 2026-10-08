@@ -87,7 +87,8 @@ A plain dispatch whose tickets' spec parent <p> (the sub-issue parent link)
 has origin/spec-<p> is a slice: its workspace branches from origin/spec-<p>,
 git config branch.implement-<n>.base reads spec-<p>, and the brief names
 spec-<p> as its PR base, seam base and merge-in base and says it runs no
-review wave. A clump split between bases, or a parent that cannot be read
+review wave. Every dispatch records the sha it branched from as git config
+branch.implement-<n>.forkpoint, which merge-cleanup reads (#1464). A clump split between bases, or a parent that cannot be read
 while some origin/spec-* exists, refuses. Every other ticket branches from
 origin/<default> with no base recorded, as before.
 
@@ -1329,6 +1330,15 @@ fn run() -> Result<(), ExitCode> {
         git_mutation_timeout(),
     );
     claim.step("git worktree add", wa, None)?;
+    // Where the branch started (#1464): merge-cleanup counts a branch as
+    // landed by the ancestor test only when its tip has moved off this sha.
+    let fork = claim.step("reading the fork point", run_timeout("git", &["-C", &primary, "rev-parse", "--verify", &format!("refs/heads/{branch}^{{commit}}")], git_query_timeout()), None)?;
+    let fork = fork.trim().to_string();
+    if fork.len() != 40 || !fork.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(claim.fail("reading the fork point", &format!("not a commit sha: {fork}")));
+    }
+    let set = run_timeout("git", &["-C", &primary, "config", &format!("branch.{branch}.forkpoint"), &fork], git_query_timeout());
+    claim.step("recording the fork point", set, None)?;
     match &base {
         // The one recorded fact the gate, the slice merge and the spec
         // review are to read a slice's base from (#1459, #1460, #1461),

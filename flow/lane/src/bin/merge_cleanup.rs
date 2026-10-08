@@ -104,6 +104,12 @@ spec-<p> — also counts as merged once it has landed on spec-<p> the same way.
 A PR into any other base is not a landing: a branch with no recorded base
 merged only into some spec-* branch is refused.
 
+The ancestor test never counts a branch still at its fork point (#1464): a
+fresh workspace is an ancestor of any base that moved past it, and has landed
+nothing. The fork point is `git config branch.<branch>.forkpoint`, recorded by
+implement-dispatch, else the oldest entry of the branch's reflog. With neither,
+the branch is not merged.
+
 The claim clears with the merge: every ticket the branch's merged PR closes
 in this repo, plus the branch's own implement-<n>, loses its in-progress
 label and its assignees once that issue is closed. A clump lands as one PR
@@ -1477,6 +1483,21 @@ impl Cleanup {
             }
         }
         quiet_ok("git", &["-C", path, "fetch", "-q", "origin"]);
+        // A tip still at its fork point has landed nothing: it is an ancestor
+        // of a base that moved on without it (#1464). A fork point or tip
+        // that cannot be read is the same answer, never "merged".
+        let tip = quiet_stdout("git", &["-C", path, "rev-parse", "--verify", "-q", &format!("refs/heads/{b}")]).unwrap_or_default();
+        match fork_point(path, b) {
+            Some(fork) if !tip.is_empty() && tip != fork => {}
+            Some(_) if !tip.is_empty() => {
+                eprintln!("merge-cleanup: {b} is still at its fork point, so no ancestor test can show it landed");
+                return None;
+            }
+            _ => {
+                eprintln!("merge-cleanup: no fork point or tip could be read for {b}, so no ancestor test can show it landed");
+                return None;
+            }
+        }
         let landings = std::iter::once((default, false)).chain(slice_of.map(|s| (s, true)));
         for (into, slice) in landings {
             let base = format!("origin/{into}");
@@ -1947,6 +1968,19 @@ fn recorded_spec_base(path: &str, b: &str) -> Option<String> {
     let base = quiet_stdout("git", &["-C", path, "config", "--get", &format!("branch.{b}.base")])?;
     let p = base.strip_prefix("spec-")?;
     (!p.is_empty() && p.chars().all(|c| c.is_ascii_digit())).then_some(base)
+}
+
+/// Where `b` started (#1464): the sha `implement-dispatch` recorded in
+/// `branch.<b>.forkpoint`, else the oldest entry of the branch's own reflog
+/// for one dispatched before the key existed. `None` when neither reads.
+fn fork_point(path: &str, b: &str) -> Option<String> {
+    let sha = |s: String| (s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())).then_some(s);
+    // A key that is set but is no sha is a malformed answer: not merged, not
+    // a fall-through to the reflog.
+    match quiet_stdout("git", &["-C", path, "config", "--get", &format!("branch.{b}.forkpoint")]) {
+        Some(key) => sha(key),
+        None => quiet_stdout("git", &["-C", path, "reflog", "show", "--format=%H", &format!("refs/heads/{b}")]).and_then(|log| log.lines().last().map(str::to_string)).and_then(sha),
+    }
 }
 
 /// The ticket a plain `implement-<n>` branch was cut for: the digits after
