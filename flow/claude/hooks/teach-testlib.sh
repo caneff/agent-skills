@@ -20,14 +20,17 @@ fails=0
 # say nothing.
 context() {
   local hook=$1 session=$2 cmd=$3 out rc
-  out=$(printf '%s' "$cmd" \
-        | jq -Rs --arg s "$session" --arg cwd "${RUN_CWD:-$tmp}" --arg a "${RUN_AGENT:-}" \
-            '{session_id:$s,cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:.}}
-             + (if $a == "" then {} else {agent_id:$a} end)' \
-        | PATH="${STUB_PATH:-}${STUB_PATH:+:}$PATH" bash "$hook" 2>"$tmp/stderr")
+  # The hook reads a file, never a pipe: an error-path hook exits without
+  # reading stdin, and a writer left on a closed pipe dies of SIGPIPE, which
+  # pipefail reports as 141 in place of the hook's answer (#1456).
+  printf '%s' "$cmd" \
+    | jq -Rs --arg s "$session" --arg cwd "${RUN_CWD:-$tmp}" --arg a "${RUN_AGENT:-}" \
+        '{session_id:$s,cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:.}}
+         + (if $a == "" then {} else {agent_id:$a} end)' > "$tmp/stdin.json"
+  out=$(PATH="${STUB_PATH:-}${STUB_PATH:+:}$PATH" bash "$hook" 2>"$tmp/stderr" < "$tmp/stdin.json")
   rc=$?
   if [ "$rc" != 0 ]; then
-    echo "FAIL: $hook exited $rc on '$cmd': $(cat "$tmp/stderr")" >&2; fails=1; return
+    echo "FAIL: $hook exited $rc on '${cmd:0:200}': $(cat "$tmp/stderr")" >&2; fails=1; return
   fi
   [ -n "$out" ] || return 0
   printf '%s' "$out" | jq -er 'select(.hookSpecificOutput.hookEventName == "PreToolUse")
