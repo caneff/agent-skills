@@ -78,10 +78,8 @@ copy_tree
 rm "$tmp/tree/claude/hooks/teach-lib.sh"
 expect_has "missing teach-lib.sh is reported" \
   "$(context "$tmp/tree/claude/hooks/teach-process-kill.sh" l1 "ps aux")" "teach-lib.sh is missing"
-# An error-path hook exits without reading stdin. A command bigger than the
-# pipe buffer makes that deterministic: the writer is still writing when the
-# reader is gone, and a piped driver under pipefail reports 141 (SIGPIPE) in
-# place of the message. This failed once under load at a small size (#1456).
+# A command bigger than the pipe buffer makes the SIGPIPE race of #1456
+# deterministic (see teach-testlib.sh context): it was 141 under load.
 big=$(head -c 300000 /dev/zero | tr '\0' 'x')
 expect_has "an error path that ignores a large stdin is still reported" \
   "$(context "$tmp/tree/claude/hooks/teach-process-kill.sh" l2 "ps aux # $big")" "teach-lib.sh is missing"

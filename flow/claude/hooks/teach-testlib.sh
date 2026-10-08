@@ -18,6 +18,9 @@ fails=0
 # A non-zero exit or output that is not the PreToolUse shape is a failure of
 # its own, reported here, so an empty answer always means the hook chose to
 # say nothing.
+# context_fail <message>: context runs inside $(...), where an assignment to
+# `fails` is lost, so the failure is also recorded in a file `finish` reads.
+context_fail() { echo "FAIL: $1" >&2; : > "$tmp/context-failed"; fails=1; }
 context() {
   local hook=$1 session=$2 cmd=$3 out rc
   # The hook reads a file, never a pipe: an error-path hook exits without
@@ -26,16 +29,17 @@ context() {
   printf '%s' "$cmd" \
     | jq -Rs --arg s "$session" --arg cwd "${RUN_CWD:-$tmp}" --arg a "${RUN_AGENT:-}" \
         '{session_id:$s,cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:.}}
-         + (if $a == "" then {} else {agent_id:$a} end)' > "$tmp/stdin.json"
+         + (if $a == "" then {} else {agent_id:$a} end)' > "$tmp/stdin.json" \
+    || { context_fail "could not build the hook's input for '${cmd:0:200}'"; return; }
   out=$(PATH="${STUB_PATH:-}${STUB_PATH:+:}$PATH" bash "$hook" 2>"$tmp/stderr" < "$tmp/stdin.json")
   rc=$?
   if [ "$rc" != 0 ]; then
-    echo "FAIL: $hook exited $rc on '${cmd:0:200}': $(cat "$tmp/stderr")" >&2; fails=1; return
+    context_fail "$hook exited $rc on '${cmd:0:200}': $(cat "$tmp/stderr")"; return
   fi
   [ -n "$out" ] || return 0
   printf '%s' "$out" | jq -er 'select(.hookSpecificOutput.hookEventName == "PreToolUse")
                                | .hookSpecificOutput.additionalContext' 2>/dev/null \
-    || { echo "FAIL: $hook printed a non-PreToolUse answer on '$cmd': $out" >&2; fails=1; }
+    || context_fail "$hook printed a non-PreToolUse answer on '${cmd:0:200}': $out"
 }
 
 # expect_has <name> <context> <substring>...: every substring is present.
@@ -82,4 +86,4 @@ copy_tree() {
   cp "$src"/hooks/*.sh "$tmp/tree/claude/hooks/"
 }
 
-finish() { [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }; }
+finish() { [ "$fails" = 0 ] && [ ! -e "$tmp/context-failed" ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }; }
