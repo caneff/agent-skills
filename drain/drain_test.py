@@ -47,7 +47,9 @@ elif args[0] == "api":
         label = re.search(r"labels=([^&]+)", url).group(1)
         issues = [dict(number=int(n), title=i["title"], body=i["body"], state="open", labels=names(i),
                        assignees=[dict(login=a) for a in i.get("assignees", [])])
-                  for n, i in state["issues"].items() if i["state"] == "open" and label in i["labels"]]
+                  for n, i in state["issues"].items()
+                  if (i["state"] == "open" or n in os.environ.get("STALE_LISTING", "").split())
+                  and (label in i["labels"] or (label == "in-progress" and n in os.environ.get("STALE_LABELS", "").split()))]
         for t in os.environ.get("TAKE_AFTER_PICK", "").split() if label == "ready-for-agent" else []:
             if "ready-for-agent" in state["issues"][t]["labels"]:
                 state["issues"][t]["labels"].remove("ready-for-agent")
@@ -79,6 +81,9 @@ elif args[:2] == ["issue", "comment"]:
     save()
 elif args[:2] == ["issue", "view"]:
     issue = state["issues"][args[2]]
+    if args[2] in os.environ.get("STALE_VIEW", "").split() and opt("--json") == "state,labels,comments":
+        # resumable()'s reread, the one read GitHub has not caught up on
+        issue = dict(issue, state="open", labels=issue["labels"] + ["in-progress"])
     out({"state": issue["state"], "labels": names(issue), "title": issue["title"], "body": issue["body"],
          "comments": [dict(body=b) for n, b in state.get("comments", []) if n == args[2]]})
 elif args[:2] == ["pr", "list"]:
@@ -640,6 +645,36 @@ class DrainTest(Sandbox):
         self.drain("--once", env={"HERDR_GONE": "1"})
         self.assertEqual(self.dispatch_runs(), [], "a resumed ticket is waited on, never dispatched twice")
         self.assertIn("ready-for-human", self.labels(1))
+
+    def test_a_merged_ticket_the_open_list_still_carries_is_not_resumed(self):
+        self.write_state({1: {}})
+        r = self.drain("--max", "3", env={"STALE_LISTING": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.dispatch_runs()), 1)
+        self.assertEqual([m[0] for m in self.state()["merged"]], [[1]])
+        self.assertEqual(len(self.ended_lines(r)), 1, r.stdout)
+        self.assertNotIn("landed on main, no PR", r.stdout)
+
+    def test_a_closed_ticket_the_open_list_carries_is_not_resumed_by_a_fresh_run(self):
+        self.write_state({1: {"state": "closed", "labels": ["in-progress"]}, 2: {}},
+                         comments=[["1", "drain anchor: implement-1"]])
+        r = self.drain("--once", env={"STALE_LISTING": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["2"], r.stdout)
+        self.assertEqual([m[0] for m in self.state()["merged"]], [[2]])
+
+    def test_an_open_ticket_the_list_carries_after_losing_in_progress_is_not_resumed(self):
+        self.write_state({1: {"labels": []}, 2: {}}, comments=[["1", "drain anchor: implement-1"]])
+        r = self.drain("--once", env={"STALE_LABELS": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["2"], r.stdout)
+
+    def test_an_anchor_this_run_ended_is_not_resumed_even_when_its_reread_is_stale(self):
+        self.write_state({1: {}})
+        r = self.drain("--max", "3", env={"STALE_LISTING": "1", "STALE_VIEW": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.ended_lines(r)), 1, r.stdout)
+        self.assertNotIn("landed on main, no PR", r.stdout)
 
     def test_a_rerun_checks_an_open_pr_without_rebuilding(self):
         self.write_state({1: {"labels": ["in-progress"]}}, comments=[["1", "drain anchor: implement-1"]])
