@@ -2597,3 +2597,28 @@ fn the_integration_branch_push_never_overwrites_one_pushed_since_the_fetch() {
     assert!(text.contains("pushing the integration branch failed"), "{text}");
     assert_eq!(git_out(&origin, &["rev-parse", "refs/heads/spec-395"]), theirs, "the push overwrote another session's spec-395");
 }
+
+// --- #1464: the fork point is recorded at dispatch ----------------------------
+
+#[test]
+fn dispatch_records_the_sha_a_lone_ticket_branched_from_as_its_fork_point() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let origin_main = git_out(&repo, &["rev-parse", "origin/main"]);
+    assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.forkpoint"]), origin_main, "{}", out_text(&out));
+}
+
+#[test]
+fn dispatch_records_the_sha_a_slice_branched_from_as_its_fork_point() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let landed = push_spec_branch(&repo, "spec-500");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.forkpoint"]), landed, "{}", out_text(&out));
+}

@@ -1329,6 +1329,11 @@ fn run() -> Result<(), ExitCode> {
         git_mutation_timeout(),
     );
     claim.step("git worktree add", wa, None)?;
+    // Where the branch started (#1464): merge-cleanup counts a branch as
+    // landed by the ancestor test only when its tip has moved off this sha.
+    let fork = claim.step("reading the fork point", run_timeout("git", &["-C", &primary, "rev-parse", &format!("refs/heads/{branch}")], git_query_timeout()), None)?;
+    let set = run_timeout("git", &["-C", &primary, "config", &format!("branch.{branch}.forkpoint"), fork.trim()], git_query_timeout());
+    claim.step("recording the fork point", set, None)?;
     match &base {
         // The one recorded fact the gate, the slice merge and the spec
         // review are to read a slice's base from (#1459, #1460, #1461),
