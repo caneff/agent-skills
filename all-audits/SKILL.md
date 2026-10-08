@@ -113,10 +113,10 @@ When you are invoked in-session as `/all-audits [path]`:
 
 3. **Report the index, then grill.** The script prints `index: <path>` and opens
    that page itself — do not open it again. Print its absolute path and list the
-   audits, then continue straight into the grill — no separate ask needed —
-   which walks every report widest-first per
-   [`harness/GRILLING.md`](harness/GRILLING.md).
-   Its first step is a one-time offer of a batch mode (`harness/GRILLING.md` § Offer the batch mode).
+   audits, then continue straight into the grill — no separate ask to start
+   it — which walks every report widest-first per
+   [`harness/GRILLING.md`](harness/GRILLING.md). It opens with one question,
+   `harness/GRILLING.md` § Offer the batch mode.
 
 ## After the sweep
 

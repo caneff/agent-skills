@@ -4,6 +4,18 @@
 sweep continues straight into this, the grill's own walk of every report it
 produced, without being asked and without the user naming one to start.
 
+## Check the ignore-file path, in both modes
+
+Before the offer below, and so before the first DROP is written, look for
+rejections kept anywhere in the audited repo other than `.audit-ignore.md` —
+a `docs/audit-ignores.md`, an `audit-ignore` section in another file. The
+driver reads only the one path in `IGNORE-FILE.md` § Location, so an entry
+anywhere else never reaches an audit's prompt and its finding comes back in
+this sweep as fresh. If you find one, ask the user about it now, in the same
+message as the offer, with a recommendation, whichever mode follows. Until
+the user answers, treat each finding such an entry rejected as a reversal of
+an ignore-file entry: in the batch mode it is asked, never decided.
+
 ## Offer the batch mode
 
 Right after the index, ask one question before the first report:
@@ -12,20 +24,21 @@ Right after the index, ask one question before the first report:
 > and ask only the contested ones?
 
 A user reply in that spirit selects the batch mode too — "your recs to
-everything except controversial stuff" is one. No answer, or anything else,
-is the default: grill every fresh finding per § Grilling a report,
-unchanged. Ask once per sweep; never re-offer between reports.
+everything except controversial stuff" is one. Any other reply is the
+default: grill every fresh finding per § Grilling a report, unchanged. Ask
+once per sweep; never re-offer between reports.
 
 The per-finding grill exists because a decision is the user's, not the
 agent's (#526, #579). The batch mode keeps that: the user opted in, and these
 categories still go to the user as questions, never decided by the agent:
 
-- a doc-vs-code contradiction — the owner's precedence rules make it the
-  owner's call;
+- a doc-vs-code contradiction — the user's precedence rules make it the
+  user's call;
 - anything irreversible, or anything that needs a golden re-freeze;
-- a reversal of an ADR or of an existing ignore-file entry;
+- a reversal of an ADR or of an existing ignore-file entry, wherever that
+  entry is kept;
 - a choice where the evidence is thin, or where the audit itself defers to
-  the owner ("your ruling which").
+  the user ("your ruling which").
 
 For every other finding, the agent decides, walking the reports in the same
 order as the default mode:
@@ -35,29 +48,25 @@ order as the default mode:
   the claims behind each DROP. A finding is the audit's claim, not a fact.
 - **Apply the auto-carry rule unchanged** (below).
 - **Write each DROP to the ignore file as it is decided**, exactly per
-  § Grilling a report.
+  § Grilling a report. A contested finding is not decided until the user
+  answers, so its DROP is written then.
 
 When the walk is done, send **one reply** carrying:
 
 1. the contested questions, numbered, each with a recommendation;
 2. **Calls I applied without asking** — a short list of the close calls the
    agent decided that were reversible, so the user can overrule any one;
-3. the spec and ticket draft (§ Land one spec for the whole sweep, step 1).
+3. the spec and ticket draft (§ Land one spec for the whole sweep, step 1),
+   written as if every recommendation in item 1 were taken.
 
 That reply is the single confirmation gate of § Land one spec for the whole
-sweep, step 2, unchanged: nothing reaches the tracker until the user approves
-it, with the contested questions answered.
-
-## Check the ignore-file path, in both modes
-
-Before the first DROP is written, look for rejections kept anywhere in the
-audited repo other than `.audit-ignore.md` — a `docs/audit-ignores.md`, an
-`audit-ignore` section in another file. `driver.py`'s `audit_prompt` reads
-only `<repo>/.audit-ignore.md`, so an entry anywhere else never reaches an
-audit's prompt and the same finding returns every sweep. If you find one,
-raise it as a contested question — in the default mode, before the first
-report's grill; in the batch mode, among the numbered questions — and keep
-writing new DROPs to `.audit-ignore.md` meanwhile.
+sweep, step 2, unchanged. An answer that differs from a recommendation, or
+an overrule of an applied call, is a change to the draft: apply it, then show
+the redrafted spec and tickets again before anything is filed. An answer
+that makes a finding a DROP writes its ignore entry right then. An overrule
+that turns a written DROP into an ACT deletes that entry, and its ADR if it
+got one (`IGNORE-FILE.md` § Reversing a rejection) — otherwise every later
+sweep keeps hiding the finding its ticket is about.
 
 ## Grilling a report
 
