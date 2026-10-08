@@ -647,16 +647,24 @@ class DrainTest(Sandbox):
 
     def test_a_merged_ticket_the_open_list_still_carries_is_not_resumed(self):
         self.write_state({1: {}})
-        r = self.drain(env={"STALE_LISTING": "1"})
+        r = self.drain("--max", "3", env={"STALE_LISTING": "1"})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(len(self.dispatch_runs()), 1)
         self.assertEqual([m[0] for m in self.state()["merged"]], [[1]])
         self.assertEqual(len(self.ended_lines(r)), 1, r.stdout)
         self.assertNotIn("landed on main, no PR", r.stdout)
 
+    def test_a_closed_ticket_the_open_list_carries_is_not_resumed_by_a_fresh_run(self):
+        self.write_state({1: {"state": "closed", "labels": ["in-progress"]}, 2: {}},
+                         comments=[["1", "drain anchor: implement-1"]])
+        r = self.drain("--once", env={"STALE_LISTING": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c["n"] for c in self.dispatch_runs()], ["2"], r.stdout)
+        self.assertEqual([m[0] for m in self.state()["merged"]], [[2]])
+
     def test_an_anchor_this_run_ended_is_not_resumed_even_when_its_reread_is_stale(self):
         self.write_state({1: {}})
-        r = self.drain(env={"STALE_LISTING": "1", "STALE_VIEW": "1"})
+        r = self.drain("--max", "3", env={"STALE_LISTING": "1", "STALE_VIEW": "1"})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(len(self.ended_lines(r)), 1, r.stdout)
         self.assertNotIn("landed on main, no PR", r.stdout)
