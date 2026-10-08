@@ -782,11 +782,29 @@ class DrainTest(Sandbox):
     def test_a_failed_install_is_a_failed_build_and_the_seam_never_runs(self):
         self.write_state({1: {}})
         self.lockfile_repo()
+        self.git(self.repo, "config", "land.testcmd", 'echo seam >> "$SEAM_LOG"')  # logs even without node_modules
         self.drain("--once", env={"RESET_TO_OLD": "1", "NPM_RED": "1"})
         self.assertNotIn("merged", self.state())
-        self.assertIn("npm ci", self.handed_comment(1)[0])
+        self.assertIn("`npm ci` failed", self.handed_comment(1)[0])
         runs = self.seam_runs()  # a ticket gets two tries
         self.assertTrue(runs and set(runs) == {"npm ci"}, runs)
+
+    def test_a_failed_install_before_the_full_run_stops_the_run_red(self):
+        self.write_state({1: {}})
+        self.lockfile_repo()
+        self.git(self.repo, "config", "land.testcmd", 'echo seam >> "$SEAM_LOG"')
+        r = self.drain("--once", env={"NPM_RED": "1"})  # main has not moved: only the full run installs
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("stopped: the full suite is red on main", r.stdout)
+        self.assertEqual(self.seam_runs(), ["npm ci"])
+
+    def test_an_npm_that_cannot_start_is_a_failed_build_not_a_crash(self):
+        self.write_state({1: {}})
+        self.lockfile_repo()
+        os.remove(os.path.join(self.bin, "npm"))
+        self.drain("--once", env={"RESET_TO_OLD": "1", "PATH": self.bin + os.pathsep + "/usr/bin" + os.pathsep + "/bin"})
+        self.assertNotIn("merged", self.state())
+        self.assertIn("`npm ci` could not start", self.handed_comment(1)[0])
 
     def test_one_full_run_after_the_last_bundle_and_a_red_one_stops_with_the_merges_named(self):
         self.write_state({1: {}, 2: {}})
