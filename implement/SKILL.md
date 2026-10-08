@@ -395,7 +395,8 @@ Part of the wave for a heavy Claude-lane PR; not part of a Codex-lane build
 Run `codex login status` first. Not logged in, no `codex@openai-codex` entry in
 `~/.claude/plugins/installed_plugins.json`, or the kill-switch file
 `~/.config/agent-skills/codex-reviews-off` present: no pass, append its ledger
-skip row (below), and name the skip in the PR body. A pass that launched and
+skip row (below; the kill switch's reason is `ablation`), and name the skip in
+the PR body. A pass that launched and
 errored has a record, so its ledger row is a `--refusal` row, never a skip row.
 
 Then run the gate from this workspace after `git fetch origin`, which checks
@@ -411,9 +412,8 @@ never headroom. Exit 20 also answers usage at or above the reserve ceiling, 70%
 (#1359), the 100% cap included, so the weekly audit of skipped PRs always has
 quota left; its ledger skip row takes `--skip-reason ceiling` exactly, whenever
 the printed line says `reserve ceiling`. A kill-switch exit 20 (the line `codex reviews off by
-Chris's ruling`, while `docs/agents/ablations.md`'s Codex-pass section reads
-`running`) takes `--skip-reason ablation` exactly, so the ablation's table
-counts it. An exit 30 of this PR gate, whether
+Chris's ruling`) takes `--skip-reason ablation` exactly, so the Codex-pass
+ablation's table (`docs/agents/ablations.md`) counts it. An exit 30 of this PR gate, whether
 its size check or its usage read failed, leaves a PR that may be large with no
 pass: its skip row takes `--skip-reason unmeasured` exactly, which the audit
 reads like `size`. Exit 40 (under the size threshold): its non-test,

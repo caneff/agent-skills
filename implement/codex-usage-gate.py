@@ -37,12 +37,6 @@ while it exists every check is 20, answered before the size check or any
 cache read or live fetch, so a disabled gate costs no RPC. Removing the file
 re-enables Codex reviews.
 
-`--size --base <ref>` answers only the size question (#1401),
-for a caller that needs only the size verdict: 40 `under size threshold
-(<churn> < <threshold>)`, 0 `at or above size threshold (...)`, 30 when it
-could not measure. It reads no usage, ignores the kill switch and the forcing
-label, and writes nothing: a small PR is small whether or not Codex may run.
-
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
 
 RESERVE_PERCENT is the reserve ceiling: every launch stops there, its line
@@ -222,20 +216,9 @@ def check(base: str | None = None, tickets: list[str] = (), audit: bool = False)
     return PROCEED, f"codex usage {pct:g}% — ok, resets {when}" + (f"; {why}" if why else "")
 
 
-def size_only(base: str) -> tuple[int, str]:
-    """The size verdict alone: SMALL, or PROCEED for a PR at or above the threshold."""
-    try:
-        lines = churn(base)
-    except SizeCheckError as exc:
-        return UNKNOWN, f"size check failed: {exc}"
-    if lines < SIZE_THRESHOLD:
-        return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
-    return PROCEED, f"at or above size threshold ({lines} >= {SIZE_THRESHOLD})"
-
-
-USAGE = "usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>... | --size --base <ref>]"
+USAGE = "usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>...]"
 # The flag sets one invocation may carry: no flags is the Codex lane's launch check.
-MODES = (set(), {"percent"}, {"audit"}, {"size", "base"}, {"base", "tickets"})
+MODES = (set(), {"percent"}, {"audit"}, {"base", "tickets"})
 
 
 class UsageError(Exception):
@@ -268,7 +251,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
     own exit 0 for help would read as proceed, and its exit 2 for an error is no status a caller has
     a rule for, so `main` maps every refusal to 30."""
     p = Parser(add_help=False, allow_abbrev=False)
-    for flag in ("percent", "audit", "size"):
+    for flag in ("percent", "audit"):
         p.add_argument(f"--{flag}", action=Once, nargs=0, default=False)
     p.add_argument("--base", action=Once)
     p.add_argument("--tickets", action=Once, nargs="+", type=ticket)
@@ -294,10 +277,6 @@ def main() -> int:
             worst = None
         print("unknown" if worst is None else f"{worst[0]:g} {int(worst[1])}")
         return UNKNOWN if worst is None else PROCEED
-    if args.size:
-        status, line = size_only(args.base)
-        print(line)
-        return status
     try:
         status, line = check(args.base, args.tickets or [], args.audit)
     except Exception as exc:

@@ -7,7 +7,8 @@ claims the bundle and builds as the worker would (commit, push, PR), a stub
 `herdr` that reports the worker's status, and a stub `merge-cleanup`. Each case
 is a queue in, labels / merges / summary out. `HOME` and the global git config
 are the test's own, so no case reads the real ones. A last class tests the wait
-on a worker in-process, since a three-hour clock has no command-line witness.
+on a worker in-process, since a three-hour clock has no command-line witness,
+and one `excerpt` case, since the fake `gh` cannot offer a natively unblocked empty ticket.
 """
 import json
 import os
