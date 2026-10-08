@@ -3292,26 +3292,36 @@ fn a_branch_fast_forwarded_onto_its_moved_base_with_no_commit_is_refused() {
             assert_ne!(c.rev(&r, &format!("implement-{n}")), c.rev(&r, "main"), "the sync must move the tip off the fork point");
             let run = c.mc(tools, &["--repo", s(&r), &format!("implement-{n}")], &[]);
             assert_refused(&c, &r, &wt, &n, &run);
-            assert!(run.stderr.contains("no commit of its own"), "{}", run.text());
+            assert!(run.stderr.contains("no commit entry could be read in the reflog"), "{}", run.text());
         }
     }
 }
 
 #[test]
-fn reap_and_sweep_skip_a_branch_fast_forwarded_with_no_commit() {
+fn reap_skips_a_branch_fast_forwarded_with_no_commit_and_keeps_its_pane() {
     let c = Cleanup::new();
     let (r, wt) = fresh_workspace(&c, "g2", "95", true);
     sync_without_committing(&c, &wt, &["merge", "-q", "--ff-only", "origin/main"]);
+    c.set_agents(&format!(r#"[{{"name":"skills-95","pane_id":"w95:p1","cwd":"{}","agent_status":"idle"}}]"#, wt.display()));
     let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
     assert!(run.ok, "{}", run.text());
     assert!(run.has(&format!("  {}  not merged, not removed", wt.display())), "{}", run.text());
     assert!(wt.is_dir() && c.has_branch(&r, "implement-95"), "{}", run.text());
-    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&c.root()), "--yes"], &[]);
-    assert!(wt.is_dir() && c.has_branch(&r, "implement-95"), "{}", run.text());
+    assert!(!c.calls().contains("pane close"), "{}", c.calls());
 }
 
 #[test]
-fn a_fast_forwarded_branch_with_an_unreadable_reflog_is_refused() {
+fn sweep_skips_a_branch_fast_forwarded_with_no_commit() {
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "g4", "97", true);
+    sync_without_committing(&c, &wt, &["merge", "-q", "--ff-only", "origin/main"]);
+    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&c.root()), "--yes"], &[]);
+    assert!(run.stderr.contains("no commit entry could be read in the reflog of implement-97"), "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "implement-97"), "{}", run.text());
+}
+
+#[test]
+fn a_committed_branch_whose_reflog_is_gone_is_refused() {
     let c = Cleanup::new();
     let (r, wt) = fresh_workspace(&c, "g3", "96", true);
     land_one_commit(&c, &wt); // committed: would clean up with its reflog
@@ -3321,4 +3331,5 @@ fn a_fast_forwarded_branch_with_an_unreadable_reflog_is_refused() {
     std::fs::remove_file(&log).unwrap();
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-96"], &[]);
     assert_refused(&c, &r, &wt, "96", &run);
+    assert!(run.stderr.contains("no commit entry could be read in the reflog of implement-96"), "{}", run.text());
 }

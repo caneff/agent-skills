@@ -113,7 +113,9 @@ the branch is not merged.
 Nor does it count a branch with no commit of its own (#1470): a worker that
 syncs onto a moved base before its first commit fast-forwards off the fork
 point. The branch's reflog must hold a `commit` entry; a fast-forward or
-rebase sync writes none, and an unreadable reflog is not merged.
+rebase sync writes none, and an unreadable reflog is not merged. Work that
+reached the branch only by cherry-pick, revert or a merge commit writes other
+entries, so such a branch is refused too: clean it up by hand.
 
 The claim clears with the merge: every ticket the branch's merged PR closes
 in this repo, plus the branch's own implement-<n>, loses its in-progress
@@ -1504,10 +1506,9 @@ impl Cleanup {
             }
         }
         // A fast-forward sync moves the tip off the fork point with no commit
-        // of the branch's own (#1470). Only a `commit` entry in its reflog
-        // proves work; an unreadable reflog is the same answer, never "merged".
+        // of the branch's own (#1470).
         if !has_own_commit(path, b) {
-            eprintln!("merge-cleanup: {b} has no commit of its own in its reflog, so no ancestor test can show it landed");
+            eprintln!("merge-cleanup: no commit entry could be read in the reflog of {b}, so no ancestor test can show it landed");
             return None;
         }
         let landings = std::iter::once((default, false)).chain(slice_of.map(|s| (s, true)));
