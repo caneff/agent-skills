@@ -133,8 +133,8 @@ print(env.get("CHOOSER_SAY") or "thinking...\ndrain bundle: " + " ".join([anchor
 # closed, no PR), DISPATCH_REFUSE, DRAFT_TICKETS, STATUS (merge state),
 # NO_ANCHOR / UNCLOSED (what the PR's closing keywords leave out), EXTRA_CLOSE
 # (tickets the PR closes that were never in the bundle), RESET_TO_OLD (build on
-# the commit before main's tip), SPEC_SLICES (what a `--spec` dispatch's run claims and
-# its PR closes beside the spec).
+# the commit before main's tip), SPEC_SLICES (what a `--spec` dispatch's run
+# claims and its PR closes beside the spec).
 STUB_DISPATCH = r"""#!/usr/bin/env python3
 import json, os, subprocess, sys
 env, argv = os.environ, sys.argv[1:]
@@ -193,8 +193,7 @@ json.dump(st, open(env["FAKE_STATE"], "w"))
 # Stands in for herdr. `agent get` answers for the worker: HERDR_STATUS (default
 # idle), HERDR_WORKING_POLLS (that many `working` answers first), HERDR_GONE
 # (agent_not_found), HERDR_DOWN (any other failure), HERDR_FLAKY (that many
-# failures first), HERDR_HOLD_FILE (`working` for as long as that file exists),
-# HERDR_NAME_STATUS (JSON {agent name: status}, which wins for the names it holds).
+# failures first), HERDR_HOLD_FILE (`working` for as long as that file exists).
 # Every call is logged.
 STUB_HERDR = r"""#!/usr/bin/env python3
 import json, os, sys
@@ -215,7 +214,6 @@ if args[:2] == ["agent", "get"]:
     open(counter, "w").write(str(seen + 1))
     held = os.path.exists(env.get("HERDR_HOLD_FILE", "/nonexistent"))
     status = "working" if held or seen < int(env.get("HERDR_WORKING_POLLS", 0)) else env.get("HERDR_STATUS", "idle")
-    status = json.loads(env.get("HERDR_NAME_STATUS", "{}")).get(args[2], status)
     print(json.dumps({"result": {"agent": {"agent_status": status, "pane_id": "w9:p1"}}}))
 """
 
@@ -307,7 +305,7 @@ class Sandbox(unittest.TestCase):
         return {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
                 "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
                 "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
-                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3",
+                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
                 "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
 
     def drain(self, *argv, env=None):
@@ -1015,7 +1013,7 @@ class SpecTest(Sandbox):
         r = self.drain("--once", env={"SPEC_SLICES": "2 3"})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual([c["argv"] for c in self.dispatch_runs()],
-                         [["--repo", self.repo, "--controller", "drain", "--spec", "1", "--slots", "5"]])
+                         [["--repo", self.repo, "--controller", "drain", "--spec", "1"]])
         self.assertEqual(self.chooser_runs(), [], "a spec's slices are its own bundle: no chooser")
         st = self.state()
         self.assertEqual([i["state"] for i in st["issues"].values()], ["closed"] * 3)
@@ -1041,6 +1039,7 @@ class SpecTest(Sandbox):
         self.write_state({1: {"labels": ["spec"]}, 2: {"parent": 1}, 3: {"parent": 1}})
         r = self.drain()
         self.assertIn("nothing to drain", r.stdout)
+        self.assertIn("waiting: ready slices of spec #1, which drain cannot start", r.stdout)
         self.assertEqual(self.dispatch_runs(), [])
 
     def test_a_blocked_spec_is_not_dispatched(self):
@@ -1068,8 +1067,13 @@ class SpecTest(Sandbox):
         self.assertIn("does not close the anchor #1", self.handed_comment(1)[0])
 
     def test_a_spec_run_that_fails_hands_the_spec_and_its_claimed_slices_over_and_closes_every_pane(self):
-        self.spec_state()
+        # Ticket 8 is another run's claim; 9's parent line names another repo, so its parent cannot be read.
+        self.spec_state(extra={8: {"labels": ["in-progress"]},
+                               9: {"labels": ["in-progress"], "body": "Part of other/repo#12\n"}})
         self.drain("--once", env={"SPEC_SLICES": "2 3", "FAIL_TICKETS": "1"})
+        for n in (8, 9):
+            self.assertEqual(self.labels(n), ["in-progress"], "not this spec's: left alone")
+            self.assertNotIn(["agent", "get", f"repo-{n}"], self.herdr_calls())
         for n in (1, 2, 3):
             self.assertIn("ready-for-human", self.labels(n))
             self.assertNotIn("in-progress", self.labels(n))
@@ -1078,6 +1082,20 @@ class SpecTest(Sandbox):
         closes = [c for c in self.herdr_calls() if c[:2] == ["pane", "close"]]
         self.assertEqual(len(closes), 3, "the spec run's pane and each slice worker's")
         self.assertIn(["agent", "get", "repo-3"], self.herdr_calls())
+
+    def test_a_one_slice_spec_whose_run_lands_it_without_an_integration_pr_is_reported_landed(self):
+        self.spec_state(slices=(2,))
+        r = self.drain("--once", env={"SPEC_SLICES": "2", "LIGHT": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("#1  (landed on main, no PR)", r.stdout)
+        self.assertIn("spec-1", read(self.cleanup_log))
+
+    def test_an_anchor_note_that_names_another_ticket_or_is_malformed_is_not_resumed(self):
+        for note in ("drain anchor: spec-2", "drain anchor: implement-1 extra", "drain anchor: whatever"):
+            self.write_state({1: {"labels": ["in-progress"]}}, comments=[["1", note]])
+            self.drain("--once", env={"HERDR_GONE": "1"})
+            self.assertEqual(self.dispatch_runs(), [], note)
+            self.assertEqual(self.handed_comment(1), [], note)
 
     def test_a_spec_whose_workspace_is_kept_is_not_picked_again(self):
         self.spec_state()
@@ -1114,14 +1132,14 @@ class WaitTest(Sandbox):
     command-line witness."""
 
     PATCHED = ("WALL_CLOCK_SECONDS", "SPEC_WALL_CLOCK_SECONDS", "IDLE_GRACE_SECONDS", "POLL_SECONDS", "agent_status",
-               "slices_working", "open_pr", "gh_json")
+               "slices_working", "open_pr", "gh_json", "claimed_slices")
 
     def setUp(self):
         super().setUp()
         import drain
         self.drain_mod = drain
         self.old = tuple(getattr(drain, k) for k in self.PATCHED)
-        self.ctx = type("Ctx", (), {"repo": "o/r"})()
+        self.ctx = type("Ctx", (), {"repo": "o/r", "root": "/x/repo"})()
 
     def tearDown(self):
         for key, value in zip(self.PATCHED, self.old):
@@ -1143,6 +1161,15 @@ class WaitTest(Sandbox):
         d.slices_working = lambda ctx, spec: time.monotonic() - start < 0.6
         d.open_pr = lambda ctx, branch: {"number": 1} if time.monotonic() - start > 0.8 else None
         self.assertEqual(d.wait_for_worker(self.ctx, "spec-1", "repo-spec-1", [1], spec=1), "pr")
+
+    def test_a_slice_worker_counts_as_working_only_while_it_is_working(self):
+        d = self.drain_mod
+        d.claimed_slices = lambda ctx, spec: [2, 3]
+        for statuses, expected in (({"repo-2": "idle", "repo-3": "working"}, True),
+                                   ({"repo-2": "idle", "repo-3": "blocked"}, False),
+                                   ({"repo-2": "done", "repo-3": None}, False)):
+            d.agent_status = statuses.get
+            self.assertIs(d.slices_working(self.ctx, 1), expected, statuses)
 
     def test_the_same_idle_wait_with_no_slice_working_fails_at_the_grace(self):
         d = self.drain_mod

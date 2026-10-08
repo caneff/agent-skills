@@ -810,6 +810,7 @@ def test_a_slice_entry_names_its_parent_and_the_handoff():
     why = got["slice"][0]["why"]
     assert "#483" in why, why
     assert "implement-dispatch --spec 483 --slots" in why, why
+    assert got["slice"][0]["spec"] == 483, got["slice"][0]  # the field drain reads (#1477)
 
 
 def test_a_slice_under_a_parent_without_spec_is_ordinary():

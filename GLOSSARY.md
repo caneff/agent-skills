@@ -46,7 +46,7 @@ The oldest unblocked `ready-for-agent` ticket or clear spec parent (or the one `
 _Avoid_: seed, lead ticket
 
 **Bundle**:
-The anchor plus the tickets the agent chose to fix with it, at most `--bundle-max` (8): one agent, one worktree, one PR that closes every one, one review wave. A one-turn session chooses it after reading the queue; `drain` groups nothing by directory or closure. A spec parent is a bundle of its own: the spec and all its slices, built by one `implement-dispatch --spec` run and closed by its one integration PR, with no `--bundle-max` cap. Unlike a clump, which the burn's controller computes from file closures before dispatch.
+The anchor plus the tickets the agent chose to fix with it, at most `--bundle-max` (8): one agent, one worktree, one PR that closes every one, one review wave. A one-turn session chooses it after reading the queue; `drain` groups nothing by directory or closure. A spec parent is a bundle of its own: the spec and all its slices, built by one `implement-dispatch --spec` run. Unlike a clump, which the burn's controller computes from file closures before dispatch.
 _Avoid_: clump (the burn's term), batch
 
 **Tier**:

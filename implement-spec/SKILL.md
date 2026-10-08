@@ -28,10 +28,8 @@ the way any controller does. What a controller rules on is
 `implement/SKILL.md` § Control, and the merge is that file's § The merge.
 
 A controller named `drain` is no session (`drain/drain.py` dispatches spec
-runs too, #1477): the upward half is `implement/SKILL.md` § Control's
-`drain` paragraph unchanged. Send nothing; the integration PR up and this run
-idle is the stop `drain` waits for, and a question this run cannot decide
-itself leaves it idle with no PR, which `drain` hands to Chris.
+runs too, #1477): `implement/SKILL.md` § Control's rule for it governs this
+run's upward half, with the integration PR up and this run idle as its stop.
 
 Its slots are **debited from the dispatching burn's budget**, not added
 beside it. One budget, one box: a nested run that counted its own slots

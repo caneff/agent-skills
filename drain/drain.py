@@ -29,8 +29,10 @@ A **spec parent** is a bundle of its own (#1477). The frontier's `spec` bucket
 holds the parents `implement-dispatch --spec` accepts (`ready-for-agent`, not
 claimed, not blocked), so only they anchor: a spec without the ready label, or
 one a burn already runs, leaves its slices unbuilt, as a slice never is built as
-a lone ticket. `drain` starts it with `implement-dispatch --spec <n> --slots 5`
-(`SPEC_SLOTS`) and no chooser, since the spec's slices are its bundle. The spec
+a lone ticket. `drain` starts it with `implement-dispatch --spec <n>` (that
+command's own slot default) and no chooser, since the spec's slices are its
+bundle. When nothing else is startable, a `waiting:` line names each spec whose
+slices are ready but which `drain` cannot start. The spec
 run is the worker: pane `<repo-short>-spec-<n>`, workspace and branch
 `spec-<n>`, and it drives its slices itself (`implement-spec/SKILL.md`). Its
 stop is the integration PR up and the pane idle, and the wait differs in three
@@ -40,7 +42,8 @@ close the spec and may close any number of its slices (a ticket whose parent is
 the spec), with no `--bundle-max` cap, since the spec's size is its own. A
 failed spec run is handed to Chris with the spec, its claimed slices and every
 pane of theirs closed. A spec with one slice has no integration branch and no
-`spec-<n>` PR, so it ends as a failed build.
+`spec-<n>` PR: its run lands the slice itself, and `drain` reports the spec as
+landed with no PR, its own PR check never having run.
 `--max` stops the loop after that many tickets (a bundle counts all of its
 tickets); `--once` stops after one bundle.
 
@@ -112,9 +115,7 @@ MAX_CONSECUTIVE_FAILURES = 2
 MEMORY_CAP_BYTES = 32 << 30
 WALL_CLOCK_SECONDS = 3 * 60 * 60
 # A spec run builds every slice and reviews the whole, so its clock is longer.
-SPEC_WALL_CLOCK_SECONDS = 12 * 60 * 60
-# The slots a spec run is given (`implement-dispatch`'s own default, stated).
-SPEC_SLOTS = 5
+SPEC_WALL_CLOCK_SECONDS = float(os.environ.get("DRAIN_SPEC_WALL_CLOCK_SECONDS", 12 * 60 * 60))
 # Never a permission-skipping flag: the bundle chooser runs in the mode the
 # harness already trusts for unattended work. (A worker's own mode is
 # `implement-dispatch`'s.)
@@ -227,10 +228,12 @@ def origin_slug(root):
     return f"{m.group(1)}/{m.group(2)}"
 
 
-def pick(ctx):
-    """`[(number, title, kind)]`: the unblocked ready tickets and the clear spec
-    parents, oldest first; the anchor is the first. A slice is neither: it is
-    built inside its spec's run."""
+def read_frontier(ctx):
+    """`(queue, waiting)`. `queue` is `[(number, title, kind)]`: the unblocked
+    ready tickets and the clear spec parents, oldest first; the anchor is the
+    first. A slice is neither: it is built inside its spec's run. `waiting` is
+    the numbers of specs that have a ready slice and are not in the queue
+    (not ready-for-agent, claimed, blocked), which drain cannot start."""
     issues = {}
 
     def fetch(r, label):
@@ -244,7 +247,13 @@ def pick(ctx):
         raise DrainError(f"frontier: {exc}") from exc
     queue = [(t["number"], t["title"], kind) for kind, bucket in ((TICKET, "unblocked"), (SPEC, "spec"))
              for t in buckets[bucket]]
-    return sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
+    queue = sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
+    waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
+    return queue, sorted(waiting)
+
+
+def pick(ctx):
+    return read_frontier(ctx)[0]
 
 
 def branch_of(n, kind):
@@ -252,7 +261,7 @@ def branch_of(n, kind):
     return f"{'spec' if kind == SPEC else 'implement'}-{n}"
 
 
-def workspace_path(ctx, n, kind=TICKET):
+def workspace_path(ctx, n, kind):
     return os.path.join(ctx.root, ".claude", "worktrees", branch_of(n, kind))
 
 
@@ -291,7 +300,18 @@ def claim_lock(ctx):
         yield
 
 
-def note_anchor(ctx, anchor, kind=TICKET):
+_ANCHOR_NOTE = re.compile(re.escape(ANCHOR_NOTE) + r" (implement|spec)-(\d+)")
+
+
+def anchor_kind(note, n):
+    """`SPEC` or `TICKET` for the issue `n`'s own anchor note, `None` for a note
+    that is not exactly what `note_anchor` writes: an unreadable note is never
+    resumed as a ticket by default."""
+    m = _ANCHOR_NOTE.fullmatch(note.strip())
+    return {"implement": TICKET, "spec": SPEC}[m.group(1)] if m and int(m.group(2)) == n else None
+
+
+def note_anchor(ctx, anchor, kind):
     """True when the anchor is still ready and drain left its `drain anchor:`
     note, False when another claim took it since the pick (read again under the
     lock, as `implement-dispatch` does). The claim itself is `implement-dispatch`'s
@@ -308,8 +328,9 @@ def note_anchor(ctx, anchor, kind=TICKET):
 
 def resumable(ctx, ended):
     """`(number, kind)` of the lowest open in-progress ticket or spec whose
-    latest drain comment is its anchor note, or `None`. A worker `implement-dispatch` started has none, and
-    a ticket drain handed to Chris ends in `HANDED_NOTE`, so neither is taken.
+    latest drain comment is its anchor note, or `None`. A worker
+    `implement-dispatch` started has none, and a ticket drain handed to Chris
+    ends in `HANDED_NOTE`, so neither is taken.
     The open list can still carry a ticket just closed, so each candidate's
     state and labels are read again, and an anchor this run already took up
     (`ended`) is never taken twice."""
@@ -324,8 +345,9 @@ def resumable(ctx, ended):
         if view["state"].lower() != "open" or CLAIMED not in labels_of(view):
             continue
         marks = [c["body"] for c in view["comments"] if c["body"].startswith((ANCHOR_NOTE, HANDED_NOTE))]
-        if marks and marks[-1].startswith(ANCHOR_NOTE):
-            return issue["number"], (SPEC if marks[-1].startswith(f"{ANCHOR_NOTE} spec-") else TICKET)
+        kind = anchor_kind(marks[-1], issue["number"]) if marks and marks[-1].startswith(ANCHOR_NOTE) else None
+        if kind:
+            return issue["number"], kind
     return None
 
 
@@ -339,14 +361,27 @@ def noted(ctx, anchor):
             for x in re.findall(r"\d+", c["body"])} - {anchor}
 
 
+_PARENTS = {}  # (repo, number) -> parent number or None; a ticket's parent does not change mid-run
+
+
 def parent_number(ctx, issue):
     """The number of the parent `issue` (a dict with `number` and `body`) names
-    by the sub-issue link or a `Part of` line, or `None`."""
-    try:
-        parent = frontier.fetch_parent(ctx.repo, issue)
-    except frontier.FrontierError as exc:
-        raise DrainError(f"parent of #{issue['number']}: {exc}") from exc
-    return parent and parent["number"]
+    by the sub-issue link or a `Part of` line, or `None`. Read once per ticket:
+    the idle wait asks every poll."""
+    key = (ctx.repo, issue["number"])
+    if key not in _PARENTS:
+        try:
+            parent = frontier.fetch_parent(ctx.repo, issue)
+        except frontier.FrontierError as exc:
+            raise DrainError(f"parent of #{issue['number']}: {exc}") from exc
+        _PARENTS[key] = parent and parent["number"]
+    return _PARENTS[key]
+
+
+def is_slice_of(ctx, n, spec):
+    """Whether ticket `n` (read live) has `spec` as its parent."""
+    body = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "body")["body"]
+    return parent_number(ctx, {"number": n, "body": body}) == spec
 
 
 def claimed_slices(ctx, spec):
@@ -356,11 +391,19 @@ def claimed_slices(ctx, spec):
         claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
     except frontier.FrontierError as exc:
         raise DrainError(f"frontier: {exc}") from exc
-    return sorted(i["number"] for i in claimed if i["number"] != spec and not i.get("pull_request")
-                  and HUMAN not in labels_of(i) and parent_number(ctx, i) == spec)
+    held = []
+    for i in claimed:
+        if i["number"] == spec or i.get("pull_request") or HUMAN in labels_of(i):
+            continue
+        try:
+            if parent_number(ctx, i) == spec:
+                held.append(i["number"])
+        except DrainError:  # an unrelated ticket whose parent cannot be read is not this spec's, and not a reason to fail it
+            continue
+    return sorted(held)
 
 
-def bundle_of(ctx, anchor, branch, kind=TICKET):
+def bundle_of(ctx, anchor, branch, kind):
     """The anchor plus the tickets it is still holding: those the agent named
     and those an open PR closes, each read live, so a closed, human-held or
     unclaimed one is not the bundle's. A spec's are the slices its run holds."""
@@ -378,7 +421,7 @@ def bundle_of(ctx, anchor, branch, kind=TICKET):
     return [anchor] + held
 
 
-def agent_name(ctx, lead, kind=TICKET):
+def agent_name(ctx, lead, kind):
     """The herdr agent `implement-dispatch` names its worker: the checkout's
     directory name cut to fit 32 characters with `-<lead>` (`-spec-<lead>` for a
     spec run), as that command does (`implement_dispatch.rs`)."""
@@ -473,14 +516,14 @@ def choose_bundle(ctx, anchor, others, log):
     return [anchor] + picked[:ctx.bundle_max - 1], None
 
 
-def dispatch(ctx, bundle, kind=TICKET):
+def dispatch(ctx, bundle, kind):
     """Start the bundle's worker through `implement-dispatch`, the one dispatch
     path: claim, worktree, herdr pane, brief. A refusal claims and creates
     nothing, so it is the environment's (herdr down, onboarding) and stops the
     run rather than looping over one ticket. A failure after the claim (herdr
     failing once the workspace exists) leaves the claim and the workspace in
     place: that is this bundle's failed build, not the environment's."""
-    which = ["--spec", str(bundle[0]), "--slots", str(SPEC_SLOTS)] if kind == SPEC else [str(n) for n in bundle]
+    which = ["--spec", str(bundle[0])] if kind == SPEC else [str(n) for n in bundle]
     out = subprocess.run(["implement-dispatch", "--repo", ctx.root, "--controller", CONTROLLER, *which],
                          capture_output=True, text=True)
     if out.returncode:
@@ -495,7 +538,7 @@ def slices_working(ctx, spec):
     """Whether any slice worker of `spec` is `working`: the spec run's pane sits
     idle while it waits on them, which is no failed build."""
     for n in claimed_slices(ctx, spec):
-        status = agent_status(agent_name(ctx, n))
+        status = agent_status(agent_name(ctx, n, TICKET))
         if status is not None and status not in IDLE and status not in STALLED:
             return True
     return False
@@ -635,7 +678,7 @@ def full_run(ctx, merged):
     return None
 
 
-def verify_pr(ctx, branch, anchor, kind=TICKET):
+def verify_pr(ctx, branch, anchor, kind):
     view = gh_json("pr", "view", branch, "--repo", ctx.repo, "--json",
                    "isDraft,mergeStateStatus,headRefOid,number,url,closingIssuesReferences")
     if view["isDraft"]:
@@ -646,8 +689,7 @@ def verify_pr(ctx, branch, anchor, kind=TICKET):
     if anchor not in closed:
         raise DrainError(f"{view['url']} does not close the anchor #{anchor}")
     if kind == SPEC:  # the spec and its slices are one bundle, whatever their number
-        foreign = [n for n in sorted(closed - {anchor}) if parent_number(
-            ctx, {"number": n, "body": gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "body")["body"]}) != anchor]
+        foreign = [n for n in sorted(closed - {anchor}) if not is_slice_of(ctx, n, anchor)]
         if foreign:
             raise DrainError(f"{view['url']} closes " + ", ".join(f"#{n}" for n in foreign)
                              + f" which is not a slice of spec #{anchor}")
@@ -688,7 +730,7 @@ def finish_landed(ctx, branch, tickets):
     return {"tickets": tickets, "pr": "(landed on main, no PR)", "sha": sha, "note": "; ".join(notes)}
 
 
-def finish(ctx, anchor, branch, view, kind=TICKET):
+def finish(ctx, anchor, branch, view, kind):
     """After the merge: the squash sha, `merge-cleanup`, and the tickets the
     agent claimed that the PR did not close back to the queue. A step that
     fails is a note on a merged PR, never a reason to build again."""
@@ -707,7 +749,7 @@ def finish(ctx, anchor, branch, view, kind=TICKET):
     return {"tickets": view["closes"], "pr": view["url"], "sha": sha, "note": "; ".join(notes)}
 
 
-def nudge_text(reason, pr_up, kind=TICKET):
+def nudge_text(reason, pr_up, kind):
     head = "Unattended run, no controller: "
     if pr_up:
         return (head + f"the PR is up but drain's check of it failed: {reason} Fix that, push to the PR branch, "
@@ -719,7 +761,7 @@ def nudge_text(reason, pr_up, kind=TICKET):
                    "review wave and the PR, and send no messages.")
 
 
-def nudge(ctx, agent, branch, reason, kind=TICKET):
+def nudge(ctx, agent, branch, reason, kind):
     """Prompt the worker with why the first try failed and wait for it to start
     working, so the next look at it is not the idle it was in before the prompt."""
     if agent_status(agent) is None:
@@ -744,14 +786,14 @@ def title_of(ctx, n):
         return "(title unread)"
 
 
-def announce(ctx, anchor, tickets, kind=TICKET):
+def announce(ctx, anchor, tickets, kind):
     """The `bundle started:` line: every ticket with its title and the worker's
     herdr pane, said the moment the bundle's worker exists."""
     say("bundle started: " + "; ".join(f"#{n} {title_of(ctx, n)}" for n in tickets)
         + f"  pane {agent_name(ctx, anchor, kind)}")
 
 
-def work(ctx, anchor, others, resumed, started, kind=TICKET):
+def work(ctx, anchor, others, resumed, started, kind):
     """`(merge result, None)` or `(None, the second failure's one-line reason)`;
     appends the bundle's tickets to `started` once its worker exists.
     Attempt 1 starts the worker (a resumed run finds it or its PR already
@@ -794,13 +836,13 @@ def work(ctx, anchor, others, resumed, started, kind=TICKET):
     return None, reason
 
 
-def hand_to_chris(ctx, anchor, reason, kind=TICKET):
+def hand_to_chris(ctx, anchor, reason, kind):
     branch = branch_of(anchor, kind)
     stop_worker(agent_name(ctx, anchor, kind))
     bundle = bundle_of(ctx, anchor, branch, kind)
     if kind == SPEC:  # the spec run's slice workers would otherwise keep working with nobody to merge them
         for n in bundle[1:]:
-            stop_worker(agent_name(ctx, n))
+            stop_worker(agent_name(ctx, n, TICKET))
     for n in bundle:
         gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", HUMAN,
            "--remove-assignee", "@me")
@@ -825,9 +867,12 @@ def drain(ctx, limit):
             if resumed:
                 anchor, kind = taken
             else:
-                queue = pick(ctx)
+                queue, waiting = read_frontier(ctx)
                 candidates = anchors(ctx, queue)
                 if not candidates:
+                    for spec in waiting:
+                        say(f"waiting: ready slices of spec #{spec}, which drain cannot start (it is not "
+                            "ready-for-agent, is claimed, or is blocked)")
                     break
                 if want:
                     if not any(t[0] == want for t in candidates):
