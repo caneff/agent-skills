@@ -110,6 +110,11 @@ nothing. The fork point is `git config branch.<branch>.forkpoint`, recorded by
 implement-dispatch, else the oldest entry of the branch's reflog. With neither,
 the branch is not merged.
 
+Nor does it count a branch with no commit of its own (#1470): a worker that
+syncs onto a moved base before its first commit fast-forwards off the fork
+point. The branch's reflog must hold a `commit` entry; a fast-forward or
+rebase sync writes none, and an unreadable reflog is not merged.
+
 The claim clears with the merge: every ticket the branch's merged PR closes
 in this repo, plus the branch's own implement-<n>, loses its in-progress
 label and its assignees once that issue is closed. A clump lands as one PR
@@ -1498,6 +1503,13 @@ impl Cleanup {
                 return None;
             }
         }
+        // A fast-forward sync moves the tip off the fork point with no commit
+        // of the branch's own (#1470). Only a `commit` entry in its reflog
+        // proves work; an unreadable reflog is the same answer, never "merged".
+        if !has_own_commit(path, b) {
+            eprintln!("merge-cleanup: {b} has no commit of its own in its reflog, so no ancestor test can show it landed");
+            return None;
+        }
         let landings = std::iter::once((default, false)).chain(slice_of.map(|s| (s, true)));
         for (into, slice) in landings {
             let base = format!("origin/{into}");
@@ -1981,6 +1993,14 @@ fn fork_point(path: &str, b: &str) -> Option<String> {
         Some(key) => sha(key),
         None => quiet_stdout("git", &["-C", path, "reflog", "show", "--format=%H", &format!("refs/heads/{b}")]).and_then(|log| log.lines().last().map(str::to_string)).and_then(sha),
     }
+}
+
+/// Whether `b`'s own reflog holds a commit entry (#1470): `commit:`,
+/// `commit (amend):`, `commit (merge):`, `commit (initial):`. A fast-forward
+/// or rebase sync writes `merge`/`rebase` entries, never `commit`. `false`
+/// when the reflog cannot be read.
+fn has_own_commit(path: &str, b: &str) -> bool {
+    quiet_stdout("git", &["-C", path, "reflog", "show", "--format=%gs", &format!("refs/heads/{b}")]).is_some_and(|log| log.lines().any(|l| l.starts_with("commit")))
 }
 
 /// The ticket a plain `implement-<n>` branch was cut for: the digits after
