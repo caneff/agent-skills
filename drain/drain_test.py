@@ -550,6 +550,11 @@ class DrainTest(Sandbox):
         self.drain("--once", env={"TAKE": ""})
         self.assertIn(["1", "drain bundle: 1 (of 3 candidates)"], self.state()["comments"])
 
+    def test_a_chooser_that_echoes_the_count_does_not_pick_it_as_a_ticket(self):
+        self.write_state({1: {}, 2: {}, 3: {}, 4: {}})
+        self.drain("--once", env={"CHOOSER_SAY": "drain bundle: 1 (of 3 candidates)"})
+        self.assertEqual(self.dispatch_runs()[0]["tickets"], ["1"])
+
     def test_a_bundle_with_no_candidates_says_zero(self):
         self.write_state({1: {}})
         self.drain("--once")

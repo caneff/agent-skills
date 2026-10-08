@@ -16,10 +16,9 @@ agent are named for the lowest ticket of a clump.
 it would naturally fix in the same PR, at most `--bundle-max` in all; the
 anchor alone, with a `drain chooser:` comment saying why, when the session
 fails), records the choice in a `drain bundle: <tickets> (of <k> candidates)`
-comment, singles included, and starts the bundle
-through `implement-dispatch`, the one dispatch path: claim, worktree, an
-interactive worker in a herdr pane named `<repo-short>-<anchor>` that shows in
-`herdr agent list` (#1415). A headless build cannot wait on its reviewers,
+comment, singles included, and starts the bundle through `implement-dispatch`,
+the one dispatch path: claim, worktree, an interactive worker in a herdr pane
+named `<repo-short>-<anchor>` that shows in `herdr agent list` (#1415). A headless build cannot wait on its reviewers,
 which is an exit in `-p` mode, so the worker is an ordinary interactive one
 and `drain` waits for it: its PR appears and its pane goes idle, under a
 three-hour wall clock. A worker that sits idle or blocked with no PR for half
@@ -105,7 +104,13 @@ import frontier  # noqa: E402
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
 ANCHOR_NOTE, BUNDLE_NOTE, HANDED_NOTE = "drain anchor:", "drain bundle:", "drain could not land"
 CHOOSER_NOTE = "drain chooser:"  # never `BUNDLE_NOTE`: its digits would read as tickets
-CANDIDATES = re.compile(r"\(of \d+ candidates\)")  # the count a `drain bundle:` note ends with: not a ticket
+# The count a `drain bundle:` note ends with, which is not a ticket.
+# `count_note` writes it and `CANDIDATES` strips it: change the two together.
+CANDIDATES = re.compile(r"\(of \d+ candidates\)")
+
+
+def count_note(k):
+    return f"(of {k} candidates)"
 BUNDLE_MAX = 8
 MAX_CONSECUTIVE_FAILURES = 2
 # The caps, stated here and nowhere else: the equivalent of `ulimit -v 32G`
@@ -652,8 +657,13 @@ def seam(ctx, head, log):
         raise DrainError(f"seam {exc} on the PR merged into main") from exc
 
 
+def repo_slug(ctx):
+    """`owner__name`: the repo as one file-name component."""
+    return ctx.repo.replace("/", "__")
+
+
 def last_green_path(ctx):
-    return os.path.join(ctx.log_dir, "last-green-" + ctx.repo.replace("/", "__"))
+    return os.path.join(ctx.log_dir, "last-green-" + repo_slug(ctx))
 
 
 def full_run(ctx, merged):
@@ -812,12 +822,12 @@ def work(ctx, anchor, others, resumed, started, kind):
                 nudge(ctx, agent, branch, reason, kind)
             elif not resumed:
                 if kind == TICKET:  # a spec's slices are its bundle: nothing to choose
-                    bundle, why = choose_bundle(ctx, anchor, others, os.path.join(ctx.log_dir, f"{ctx.repo.replace('/', '__')}-{branch}-choose.log"))
+                    bundle, why = choose_bundle(ctx, anchor, others, os.path.join(ctx.log_dir, f"{repo_slug(ctx)}-{branch}-choose.log"))
                     if why:
                         gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
                            f"{CHOOSER_NOTE} #{anchor} alone: {why}")
                     gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
-                       f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)} (of {len(others)} candidates)")
+                       f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)} {count_note(len(others))}")
                 dispatch(ctx, bundle, kind)
             tickets = [anchor] + (sorted(noted(ctx, anchor)) if kind == TICKET else [])
             if attempt == 1:
