@@ -381,6 +381,17 @@ class DrainTest(Sandbox):
         log = read(os.path.join(self.tmp.name, "logs", "implement-1-choose.log"))
         self.assertIn("- #2 ticket 2: distinctive-excerpt", log)
 
+    def test_a_candidate_with_no_body_and_no_comments_is_listed_as_empty_not_blank(self):
+        # A ticket unblocked by native dependencies alone can have an empty body; the
+        # fake gh's frontier needs a `Blocked by` body to offer one, so call excerpt directly.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("drain_under_test", DRAIN)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.gh_json = lambda *a, **k: {"body": "", "comments": []}
+        ctx = type("Ctx", (), {"repo": "o/r"})()
+        self.assertEqual(mod.excerpt(ctx, 2), "(empty body, no comments)")
+
     def test_a_candidate_whose_body_cannot_be_read_is_listed_as_unread(self):
         self.write_state({1: {}, 2: {}, 3: {"body": "readable body\n## Blocked by\n\n- None\n"}})
         r = self.drain("--once", env={"FAIL_VIEW": "2"})
