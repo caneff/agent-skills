@@ -751,6 +751,61 @@ class DrainTest(Sandbox):
         self.drain("--once", env={"RESET_TO_OLD": "1"})  # main moved: the per-merge check runs
         self.assertEqual(self.seam_runs(), ["all.sh --changed origin/main", "all.sh"])
 
+    def lockfile_repo(self, lock=True):
+        """A main with `package-lock.json` (or not), and an `npm` stub on PATH
+        whose `ci` makes `node_modules` and logs the call; the seam command
+        logs `seam` only when `node_modules` is there."""
+        write(os.path.join(self.bin, "npm"),
+              '#!/bin/sh\necho "npm $*" >> "$SEAM_LOG"\ntest "$NPM_RED" = 1 && exit 1\n'
+              'test "$1" = ci && mkdir node_modules\n', 0o755)
+        if lock:
+            write(os.path.join(self.repo, "package-lock.json"), "{}\n")
+            self.git(self.repo, "add", ".")
+            self.git(self.repo, "commit", "-qm", "lockfile")
+            self.git(self.repo, "push", "-q", "origin", "main")
+        self.git(self.repo, "config", "land.testcmd", 'test -d node_modules && echo seam >> "$SEAM_LOG"')
+
+    def test_a_lockfile_gets_its_dependencies_installed_before_the_seam_runs(self):
+        self.write_state({1: {}})
+        self.lockfile_repo()
+        r = self.drain("--once", env={"RESET_TO_OLD": "1"})  # per-PR seam, then the full run
+        self.assertEqual(self.seam_runs(), ["npm ci", "seam", "npm ci", "seam"], r.stdout)
+        self.assertEqual([m[0] for m in self.state()["merged"]], [[1]])
+
+    def test_a_repo_without_a_lockfile_installs_nothing(self):
+        self.write_state({1: {}})
+        self.lockfile_repo(lock=False)
+        self.git(self.repo, "config", "land.testcmd", 'echo seam >> "$SEAM_LOG"')
+        self.drain("--once", env={"RESET_TO_OLD": "1"})
+        self.assertEqual(self.seam_runs(), ["seam", "seam"])
+
+    def test_a_failed_install_is_a_failed_build_and_the_seam_never_runs(self):
+        self.write_state({1: {}})
+        self.lockfile_repo()
+        self.git(self.repo, "config", "land.testcmd", 'echo seam >> "$SEAM_LOG"')  # logs even without node_modules
+        self.drain("--once", env={"RESET_TO_OLD": "1", "NPM_RED": "1"})
+        self.assertNotIn("merged", self.state())
+        self.assertIn("`npm ci` failed", self.handed_comment(1)[0])
+        runs = self.seam_runs()  # a ticket gets two tries
+        self.assertTrue(runs and set(runs) == {"npm ci"}, runs)
+
+    def test_a_failed_install_before_the_full_run_stops_the_run_red(self):
+        self.write_state({1: {}})
+        self.lockfile_repo()
+        self.git(self.repo, "config", "land.testcmd", 'echo seam >> "$SEAM_LOG"')
+        r = self.drain("--once", env={"NPM_RED": "1"})  # main has not moved: only the full run installs
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("stopped: the full suite is red on main", r.stdout)
+        self.assertEqual(self.seam_runs(), ["npm ci"])
+
+    def test_an_npm_that_cannot_start_is_a_failed_build_not_a_crash(self):
+        self.write_state({1: {}})
+        self.lockfile_repo()
+        os.remove(os.path.join(self.bin, "npm"))
+        self.drain("--once", env={"RESET_TO_OLD": "1", "PATH": self.bin + os.pathsep + "/usr/bin" + os.pathsep + "/bin"})
+        self.assertNotIn("merged", self.state())
+        self.assertIn("`npm ci` could not start", self.handed_comment(1)[0])
+
     def test_one_full_run_after_the_last_bundle_and_a_red_one_stops_with_the_merges_named(self):
         self.write_state({1: {}, 2: {}})
         self.git(self.repo, "config", "land.testcmd", 'echo run >> "$SEAM_LOG"; test -z "$SEAM_RED"')
