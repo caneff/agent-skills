@@ -30,6 +30,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import warnings
 
 # The fence rule is #890's, bug-for-bug: a declaration inside ``` or ~~~ is
 # quoted material, and a fence closes CommonMark's way. Both `declaration_section`
@@ -151,7 +152,11 @@ def imported_modules(rel, text):
     one. A file that does not parse raises, because "cannot tell" read as
     "imports nothing" is a missing edge."""
     try:
-        tree = ast.parse(text)
+        with warnings.catch_warnings():
+            # A valid file's escape-sequence warning is not an import answer,
+            # and must not reach stderr or, under -W error, fail the run.
+            warnings.simplefilter("ignore")
+            tree = ast.parse(text)
     except (SyntaxError, ValueError, RecursionError) as exc:
         raise ClosureError(f"cannot read imports of {rel}: {exc}") from exc
     names = []
@@ -164,26 +169,14 @@ def imported_modules(rel, text):
     return names
 
 
-def python_edges(root, files, limit=SCAN_LIMIT, relative_to="file"):
-    """`include_edges` for the Python-imports directive: `import a.b` and
-    `from a.b import x` are edges to `a/b.py` or `a/b/__init__.py`, resolved
-    against the including file's directory or the repo root as `Paths` says.
-    A name with no tracked file (stdlib, third-party) drops out."""
-    tracked = set(files)
-    edges = {}
-    for rel in files:
-        if not rel.endswith(".py"):
-            continue
-        text = read_text(os.path.join(root, rel), limit)
-        if text is None:
-            continue
-        for name in imported_modules(rel, text):
-            stem = name.replace(".", "/")
-            for target in (f"{stem}.py", f"{stem}/__init__.py"):
-                target = resolve_reference(rel, target, relative_to)
-                if target in tracked:
-                    edges.setdefault(target, set()).add(rel)
-    return edges
+def python_references(rel, text):
+    """The paths an `.py` file's imports may name: for each module `a.b`,
+    `a/b.py` and `a/b/__init__.py`."""
+    out = []
+    for name in imported_modules(rel, text):
+        stem = name.replace(".", "/")
+        out += [f"{stem}.py", f"{stem}/__init__.py"]
+    return out
 
 
 def directive_pattern(directive):
@@ -339,19 +332,33 @@ def include_edges(root, decl, limit=SCAN_LIMIT):
     Every failure here is fatal by design: a closure resolved from a scan that
     partly failed is a precise-looking answer with a hole in it, and the hole
     is where two workers meet."""
-    if is_python_imports(decl.directive):
-        return python_edges(root, repo_files(root), limit, decl.relative_to)
-    pattern = directive_pattern(decl.directive)
+    python = is_python_imports(decl.directive)
+    pattern = None if python else directive_pattern(decl.directive)
+    files = repo_files(root)
+    tracked = set(files)
     edges = {}
-    for rel in repo_files(root):
+    for rel in files:
+        if python and not rel.endswith(".py"):
+            continue
         text = read_text(os.path.join(root, rel), limit)
         if text is None:
+            if python:
+                # A `.py` that does not read as text has imports nobody can
+                # list; "cannot tell" is not "imports nothing".
+                raise ClosureError(f"cannot read imports of {rel}: not text")
             continue
-        for line in scanned_lines(rel, text):
-            for match in pattern.finditer(line):
-                target = resolve_reference(rel, match.group(1).strip(),
-                                           decl.relative_to)
-                edges.setdefault(target, set()).add(rel)
+        if python:
+            references = python_references(rel, text)
+        else:
+            references = [m.group(1).strip()
+                          for line in scanned_lines(rel, text)
+                          for m in pattern.finditer(line)]
+        for reference in references:
+            target = resolve_reference(rel, reference, decl.relative_to)
+            # A Python name with no tracked file is stdlib or third-party.
+            if python and target not in tracked:
+                continue
+            edges.setdefault(target, set()).add(rel)
     return edges
 
 

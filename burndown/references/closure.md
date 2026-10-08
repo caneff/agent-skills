@@ -44,7 +44,7 @@ repo's convention.
   when the template ends there.
 - **`python imports`** is the one directive that is not a template (#1478): a
   Python import names a module, not a path, so no `<path>` template can match
-  it. Written `- **Directive**: `python imports``, it makes the scan read each
+  it. Written ``- **Directive**: `python imports` ``, it makes the scan read each
   tracked `.py` file's syntax tree and take `import a`, `import a.b`,
   `import a as x`, `import a, b` and `from a import x` (absolute only; a
   relative import is out of scope) as edges to `a.py` or `a/__init__.py`, and
@@ -53,7 +53,7 @@ repo's convention.
   A name that resolves to no tracked file drops out, which is what stdlib and
   third-party modules must do. Imports inside a string or comment are not
   edges, and a `.py` file that does not parse fails the resolve by name rather
-  than reading as "imports nothing". `importlib.util.spec_from_file_location`
+  than reading as "imports nothing"; so does a `.py` file that does not read as text. `importlib.util.spec_from_file_location`
   loads are not read. **Paths** picks the base: `repo-root` for scripts that
   put the repo root on `sys.path`, the default (the including file's
   directory) otherwise; only one base is tried. One hop and never empirical,

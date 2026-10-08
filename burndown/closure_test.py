@@ -852,18 +852,15 @@ PY_ROOT = ("## Include closure\n\n- **Directive**: `python imports`\n"
 PY_FILE = PY_ROOT.replace("repo-root", "relative to the including file")
 
 
-def py_repo(files, agents=PY_ROOT):
-    return repo(files, agents=agents)
-
-
 def py_closure(files, target="codec.py", agents=PY_ROOT):
-    return C.resolve_closure(py_repo(files, agents), [target])
+    return C.resolve_closure(repo(files, agents=agents), [target])
 
 
-def test_python_imports_is_a_declared_directive_not_a_template():
-    decl = C.parse_declaration(PY_ROOT)
-    assert C.mode(decl) == "closure", decl
-    assert "python imports" in C.announcement(decl)
+def test_the_directive_is_matched_whatever_its_case_and_spacing():
+    text = "## Include closure\n- **Directive**: `Python   Imports`\n"
+    got = C.resolve_closure(repo({"codec.py": "x\n", "a.py": "import codec\n"},
+                                 agents=text), ["codec.py"])
+    assert got == {"codec.py", "a.py"}, got
 
 
 def test_each_import_form_is_an_edge_to_the_module_file():
@@ -897,8 +894,35 @@ def test_a_name_with_no_tracked_file_drops_out():
 
 
 def test_a_relative_import_is_out_of_scope():
-    got = py_closure({"codec.py": "x\n", "a.py": "from . import codec\n"})
+    got = py_closure({"codec.py": "x\n", "a.py": "from . import codec\n",
+                       "b.py": "from .codec import x\n"})
     assert got == {"codec.py"}, got
+
+
+def test_a_name_with_no_tracked_file_makes_no_edge():
+    root = repo({"a.py": "import json\nimport numpy\n"}, agents=PY_ROOT)
+    assert C.include_edges(root, C.declaration(root)) == {}
+
+
+def test_a_valid_file_with_a_parse_warning_is_read_without_noise():
+    import warnings
+    root = repo({"codec.py": "x\n", "a.py": 'import codec\ns = "\\d"\n'},
+                agents=PY_ROOT)
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("error")
+        got = C.resolve_closure(root, ["codec.py"])
+    assert got == {"codec.py", "a.py"} and not seen, (got, seen)
+
+
+def test_a_python_file_that_is_not_text_fails_the_resolve_by_name():
+    root = repo({"codec.py": "x\n", "nul.py": "import codec\0\n"},
+                agents=PY_ROOT)
+    try:
+        C.resolve_closure(root, ["codec.py"])
+    except C.ClosureError as exc:
+        assert "nul.py" in str(exc), exc
+    else:
+        raise AssertionError("a non-text .py was read as importing nothing")
 
 
 def test_an_import_in_a_string_or_comment_is_not_an_edge():
@@ -925,7 +949,7 @@ def test_only_python_files_are_read_for_imports():
 
 
 def test_a_python_file_that_does_not_parse_fails_the_resolve_by_name():
-    root = py_repo({"codec.py": "x\n", "bad.py": "def (:\n"})
+    root = repo({"codec.py": "x\n", "bad.py": "def (:\n"}, agents=PY_ROOT)
     try:
         C.resolve_closure(root, ["codec.py"])
     except C.ClosureError as exc:
@@ -937,7 +961,7 @@ def test_a_python_file_that_does_not_parse_fails_the_resolve_by_name():
 def test_python_imports_split_a_flat_repo_that_none_would_not():
     files = {"codec.py": "x\n", "toolkit.py": "y\n",
              "one.py": "import codec\n", "two.py": "from toolkit import y\n"}
-    got = C.clumps(py_repo(files), [candidate(1, "one.py"), candidate(2, "two.py")])
+    got = C.clumps(repo(files, agents=PY_ROOT), [candidate(1, "one.py"), candidate(2, "two.py")])
     assert len(got["families"]) == 2, got
 
 
