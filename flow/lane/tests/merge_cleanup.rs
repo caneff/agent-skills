@@ -3268,3 +3268,68 @@ fn the_refusal_says_which_cause_it_hit() {
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-89"], &[]);
     assert!(run.stderr.contains("no fork point or tip could be read for implement-89"), "{}", run.text());
 }
+
+// --- #1470: a fast-forward sync is not a commit of the branch's own ----------
+
+/// The worker's first move: sync onto the moved base before any commit. `how`
+/// is the git command, run in the workspace; the tip leaves its fork point
+/// without a commit entry in the branch's reflog.
+fn sync_without_committing(c: &Cleanup, wt: &std::path::Path, how: &[&str]) {
+    c.git_ok(&["-C", s(wt), "fetch", "-q", "origin"]);
+    let mut args = vec!["-C", s(wt)];
+    args.extend_from_slice(how);
+    c.git_ok(&args);
+}
+
+#[test]
+fn a_branch_fast_forwarded_onto_its_moved_base_with_no_commit_is_refused() {
+    for (i, how) in [&["merge", "-q", "--ff-only", "origin/main"][..], &["rebase", "-q", "origin/main"][..]].iter().enumerate() {
+        for (forkpoint, tools) in [(true, Tools::NoGh), (false, Tools::Full)] {
+            let c = Cleanup::new();
+            let n = format!("9{i}{}", forkpoint as u8);
+            let (r, wt) = fresh_workspace(&c, &format!("g1-{n}"), &n, forkpoint);
+            sync_without_committing(&c, &wt, how);
+            assert_ne!(c.rev(&r, &format!("implement-{n}")), c.rev(&r, "main"), "the sync must move the tip off the fork point");
+            let run = c.mc(tools, &["--repo", s(&r), &format!("implement-{n}")], &[]);
+            assert_refused(&c, &r, &wt, &n, &run);
+            assert!(run.stderr.contains("no commit entry could be read in the reflog"), "{}", run.text());
+        }
+    }
+}
+
+#[test]
+fn reap_skips_a_branch_fast_forwarded_with_no_commit_and_keeps_its_pane() {
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "g2", "95", true);
+    sync_without_committing(&c, &wt, &["merge", "-q", "--ff-only", "origin/main"]);
+    c.set_agents(&format!(r#"[{{"name":"skills-95","pane_id":"w95:p1","cwd":"{}","agent_status":"idle"}}]"#, wt.display()));
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has(&format!("  {}  not merged, not removed", wt.display())), "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "implement-95"), "{}", run.text());
+    assert!(!c.calls().contains("pane close"), "{}", c.calls());
+}
+
+#[test]
+fn sweep_skips_a_branch_fast_forwarded_with_no_commit() {
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "g4", "97", true);
+    sync_without_committing(&c, &wt, &["merge", "-q", "--ff-only", "origin/main"]);
+    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&c.root()), "--yes"], &[]);
+    assert!(run.stderr.contains("no commit entry could be read in the reflog of implement-97"), "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "implement-97"), "{}", run.text());
+}
+
+#[test]
+fn a_committed_branch_whose_reflog_is_gone_is_refused() {
+    let c = Cleanup::new();
+    let (r, wt) = fresh_workspace(&c, "g3", "96", true);
+    land_one_commit(&c, &wt); // committed: would clean up with its reflog
+    let log = c.git_out(&["-C", s(&r), "rev-parse", "--git-path", "logs/refs/heads/implement-96"]);
+    let log = if std::path::Path::new(&log).is_absolute() { std::path::PathBuf::from(log) } else { r.join(log) };
+    assert!(log.is_file(), "no reflog to remove: {}", log.display());
+    std::fs::remove_file(&log).unwrap();
+    let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-96"], &[]);
+    assert_refused(&c, &r, &wt, "96", &run);
+    assert!(run.stderr.contains("no commit entry could be read in the reflog of implement-96"), "{}", run.text());
+}
