@@ -43,7 +43,7 @@ def issue(number, *, title=None, body="", assignees=(), labels=("ready-for-agent
     return out
 
 
-def read(issues, states=None, parents=None):
+def read(issues, states=None, parents=None, landed=None, native=None):
     """`frontier(repo, label)` over a fixture list, with blocker states from a
     dict instead of the tracker. A number missing from `states` is a blocker
     whose state could not be read.
@@ -51,8 +51,14 @@ def read(issues, states=None, parents=None):
     `parents` maps a ticket number to its parent issue object, `None` for a
     ticket with no parent, or an exception to raise for a parent that could
     not be read. A ticket missing from it has no parent, which is what every
-    ticket in the cases that predate slices looks like."""
+    ticket in the cases that predate slices looks like.
+
+    `landed` maps a `spec-<p>` branch to the ticket numbers whose PR merged
+    into it (an exception for a lookup that fails); `native` maps a ticket number to its native blocker
+    numbers (an exception for a list that could not be read)."""
     states = states or {}
+    native = native or {}
+    landed = landed or {}
     parents = parents or {}
 
     def parent_of(repo, ticket, run=None):
@@ -66,7 +72,23 @@ def read(issues, states=None, parents=None):
         fetch=lambda repo, label: issues,
         state_of=lambda repo, number: states.get(number),
         parent_of=parent_of,
+        landed_of=lambda repo, branch: _landed_answer(landed, branch),
+        native_blockers_of=lambda repo, ticket: _native_answer(native, ticket),
     )
+
+
+def _landed_answer(landed, branch):
+    answer = landed.get(branch, set())
+    if isinstance(answer, Exception):
+        raise answer
+    return answer
+
+
+def _native_answer(native, ticket):
+    answer = native.get(ticket["number"], [])
+    if isinstance(answer, Exception):
+        raise answer
+    return answer
 
 
 def numbers(bucket):
@@ -1083,6 +1105,185 @@ def test_a_fenced_part_of_line_is_not_a_parent_reference():
     })
     body = "```\nPart of #483\n```\n"
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=run) is None
+
+
+# --- A blocker landed on its spec's integration branch (#1466) -------------
+
+SECTION_ON_1 = "## Blocked by\n\n- #1\n"
+SPEC_483 = {"spec-483": {1}}
+
+
+def test_a_section_blocker_landed_on_its_spec_branch_is_met():
+    got = read([issue(2, body=SECTION_ON_1)], states={1: "open"},
+               landed=SPEC_483, parents={2: spec_parent(483)})
+    assert numbers(got["slice"]) == [2], got
+    assert got["blocked"] == [], got
+
+
+def test_an_open_blocker_not_landed_still_blocks():
+    got = read([issue(2, body=SECTION_ON_1)], states={1: "open"},
+               parents={2: spec_parent(483)})
+    assert numbers(got["blocked"]) == [2], got
+
+
+def test_a_landing_on_another_specs_branch_does_not_free_the_ticket():
+    got = read([issue(2, body=SECTION_ON_1)], states={1: "open"},
+               landed={"spec-999": {1}}, parents={2: spec_parent(483)})
+    assert numbers(got["blocked"]) == [2], got
+
+
+def test_a_ticket_with_no_spec_parent_is_not_freed_by_a_landing():
+    got = read([issue(2, body=SECTION_ON_1)], states={1: "open"}, landed=SPEC_483)
+    assert numbers(got["blocked"]) == [2], got
+
+
+def test_one_landed_blocker_does_not_free_a_ticket_with_another_open_one():
+    got = read([issue(3, body="## Blocked by\n\n- #1\n- #2\n")],
+               states={1: "open", 2: "open"}, landed=SPEC_483,
+               parents={3: spec_parent(483)})
+    assert numbers(got["blocked"]) == [3], got
+    assert got["blocked"][0]["blockers"] == [2], got
+
+
+def test_native_open_blocker_landed_on_its_spec_branch_is_met():
+    got = read([issue(2, blocked_by=1, total_blocked_by=1)], landed=SPEC_483,
+               native={2: [1]}, parents={2: spec_parent(483)})
+    assert numbers(got["slice"]) == [2], got
+
+
+def test_native_blockers_not_all_landed_still_block():
+    got = read([issue(3, blocked_by=2, total_blocked_by=2)], landed=SPEC_483,
+               native={3: [1, 2]}, parents={3: spec_parent(483)})
+    assert numbers(got["blocked"]) == [3], got
+
+
+def test_native_blockers_that_cannot_be_listed_stay_blocked():
+    got = read([issue(2, blocked_by=1, total_blocked_by=1)], landed=SPEC_483,
+               native={2: F.FrontierError("boom")}, parents={2: spec_parent(483)})
+    assert numbers(got["blocked"]) == [2], got
+
+
+def test_a_failed_landing_lookup_keeps_the_ticket_blocked_and_says_so():
+    got = read([issue(2, body=SECTION_ON_1)], states={1: "open"},
+               landed={"spec-483": F.FrontierError("gh down")},
+               parents={2: spec_parent(483)})
+    assert numbers(got["blocked"]) == [2], got
+    assert "landing lookup failed: gh down" in got["blocked"][0]["why"], got
+
+
+def test_landed_is_not_asked_about_a_closed_blocker():
+    asked = []
+    issues = [issue(2, body=SECTION_ON_1)]
+    F.frontier("owner/repo", "ready-for-agent",
+               fetch=lambda repo, label: issues,
+               state_of=lambda repo, number: "closed",
+               landed_of=lambda repo, branch: asked.append(branch))
+    assert asked == [], asked
+
+
+def test_a_spec_branch_is_asked_once_however_many_tickets_need_it():
+    asked = []
+    issues = [issue(2, body=SECTION_ON_1), issue(3, body=SECTION_ON_1)]
+    F.frontier("owner/repo", "ready-for-agent",
+               fetch=lambda repo, label: issues,
+               state_of=lambda repo, number: "open",
+               parent_of=lambda repo, ticket, run: spec_parent(483),
+               landed_of=lambda repo, branch: asked.append(branch) or {1})
+    assert asked == ["spec-483"], asked
+
+
+def merged_prs(*bodies):
+    return lambda args: [{"body": b} for b in bodies]
+
+
+def test_fetch_landed_reads_the_closes_lines_of_merged_prs_into_the_branch():
+    seen = []
+
+    def run(args):
+        seen.append(args)
+        return [{"body": "**Closes #1**\n\nCloses #4\nCloses #5\n"}]
+    assert F.fetch_landed("owner/repo", "spec-483", run=run) == {4, 5}
+    assert "spec-483" in seen[0] and "merged" in seen[0], seen
+
+
+def test_fetch_landed_reads_a_clumps_non_lowest_ticket():
+    got = F.fetch_landed("owner/repo", "spec-483",
+                         run=merged_prs("Closes #7\nCloses #8\n", "Closes #9"))
+    assert got == {7, 8, 9}, got
+
+
+def test_fetch_landed_ignores_a_mention_that_is_not_a_closes_line():
+    got = F.fetch_landed("owner/repo", "spec-483",
+                         run=merged_prs("Part of #3, closes #4 in prose", "`Closes #6`"))
+    assert got == set(), got
+
+
+def test_fetch_landed_lets_a_failed_lookup_raise():
+    def run(args):
+        raise F.FrontierError("gh down")
+    try:
+        F.fetch_landed("owner/repo", "spec-483", run=run)
+    except F.FrontierError:
+        return
+    raise AssertionError("a failed lookup was read as nothing landed")
+
+
+def test_fetch_landed_refuses_an_answer_that_is_not_a_list():
+    try:
+        F.fetch_landed("owner/repo", "spec-483", run=lambda a: {"message": "x"})
+    except F.FrontierError:
+        return
+    raise AssertionError("a non-list answer was read as nothing landed")
+
+
+def blocker(number, state="open", repo="owner/repo"):
+    return {"number": number, "state": state,
+            "repository_url": f"https://api.github.com/repos/{repo}"}
+
+
+def native_run(*pages):
+    def run(args):
+        assert "--paginate" in args and "--slurp" in args, args
+        return list(pages)
+    return run
+
+
+def test_fetch_native_blockers_lists_only_open_blocker_numbers():
+    got = F.fetch_native_blockers(
+        "owner/repo", issue(2), run=native_run([blocker(1), blocker(5, "closed")]))
+    assert got == [1], got
+
+
+def test_fetch_native_blockers_reads_every_page():
+    got = F.fetch_native_blockers(
+        "owner/repo", issue(2), run=native_run([blocker(1)], [blocker(40)]))
+    assert got == [1, 40], got
+
+
+def test_fetch_native_blockers_refuses_a_blocker_in_another_repo():
+    try:
+        F.fetch_native_blockers("owner/repo", issue(2),
+                                run=native_run([blocker(1, repo="other/repo")]))
+    except F.FrontierError:
+        return
+    raise AssertionError("a foreign blocker was read as a local one")
+
+
+def test_fetch_native_blockers_refuses_a_malformed_entry():
+    for bad in ([{"state": "open"}], ["nope"], [{"number": "1", "state": "open"}]):
+        try:
+            F.fetch_native_blockers("owner/repo", issue(2), run=native_run(bad))
+        except F.FrontierError:
+            continue
+        raise AssertionError(f"malformed entry {bad!r} was accepted")
+
+
+def test_fetch_native_blockers_refuses_an_answer_that_is_not_pages():
+    try:
+        F.fetch_native_blockers("owner/repo", issue(2), run=lambda a: {"message": "x"})
+    except F.FrontierError:
+        return
+    raise AssertionError("a non-list answer was read as no blockers")
 
 
 def main():

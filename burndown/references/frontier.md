@@ -109,8 +109,8 @@ read, so `unresolved` too (#1406); `None` under it is no parent.
 
 **1. The tracker's native dependencies, where it has them.** On GitHub that
 is `issue_dependencies_summary.blocked_by`, which counts **open blockers
-only** and so is the live gate: nonzero is blocked, zero is unblocked. This
-is the canonical path — the edges are queryable, the UI shows them, and
+only** and so is the live gate: nonzero is blocked, zero is unblocked (a blocker landed on the spec
+branch is met, as above). This is the canonical path — the edges are queryable, the UI shows them, and
 closing a blocker moves the count without anyone editing prose. Set them with
 `gh issue edit <n> --add-blocked-by <#>` (see `docs/agents/issue-tracker.md`).
 
@@ -134,6 +134,22 @@ the wave: read it, then either add native edges or write the section.
 Evidence: on `sudokumaker-custom-constraints` (#781) the repo had no native
 links, the edges lived in `## Blocked by` sections, and **8 of 21**
 `ready-for-agent` tickets had no such section at all.
+
+**A blocker landed on a spec branch is met** (#1466). A slice merged into its
+spec's `spec-<p>` integration branch stays open until the integration PR
+closes it, so "open" alone would block every slice after it and stall the
+spec run. The reader therefore asks of each *open* blocker, native or
+stated, whether it landed on the branch of **the dependent ticket's own
+parent spec**: the numbers on the bare `Closes #<n>` lines of the PRs merged
+into `spec-<parent>` (`gh pr list --base spec-<parent> --state merged`; GitHub's
+closing references stay empty off the default branch, so the body is the
+record, and a clump's PR names every ticket it closes). A ticket with no
+`spec` parent is never freed this way, and neither is one whose blocker
+landed on another spec's branch. Native blockers are listed, every page, from
+`issues/<n>/dependencies/blocked_by`; one outside this repo, or a malformed
+entry, is a list that cannot be read. Every lookup fails closed: a call that
+did not answer leaves the ticket `blocked`, its entry saying `landing lookup
+failed`.
 
 ## The `## Blocked by` grammar
 

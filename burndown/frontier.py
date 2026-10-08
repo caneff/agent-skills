@@ -19,6 +19,7 @@ section as "unblocked" dispatches a worker onto a ticket whose prerequisite
 is still open — the cost is a whole build. The grammar this parses, and what
 each answer means, are specified in `references/frontier.md`.
 """
+import functools
 import json
 import re
 import subprocess
@@ -262,7 +263,7 @@ def _is_clear(name, stated):
 BUCKETS = ("unblocked", "blocked", "unresolved", "spec", "slice")
 
 
-def classify(issues, state_of, parent_of):
+def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=None):
     """`{unblocked, blocked, unresolved, spec, slice}` over GitHub issue
     objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
     state; `None` means it could not be read, which is unresolved rather than
@@ -271,8 +272,37 @@ def classify(issues, state_of, parent_of):
     for a parent that could not be read, which is unresolved too. A claimed
     ticket, a ticket carrying a non-dispatchable label, and anything that is
     really a PR, is in no bucket at all — each is off the frontier by its own
-    nature, not by a blocking relationship."""
+    nature, not by a blocking relationship.
+
+    `landed_of(spec_branch) -> {numbers}` and `native_blockers_of(ticket) ->
+    [numbers]` carry the landed-blocker rule, stated in
+    `references/frontier.md` (#1466); either raises `FrontierError` when it
+    cannot answer, and neither supplied means no blocker has landed."""
     buckets = {name: [] for name in BUCKETS}
+
+    def landed_numbers(issue):
+        """`(numbers, why)`: the blockers landed on the spec branch of this
+        ticket's own parent spec. `why` names a lookup that failed, and the
+        ticket then stays blocked with that reason in its entry."""
+        if landed_of is None:
+            return set(), ""
+        try:
+            parent = parent_of(issue)
+            if not parent or SPEC_LABEL not in _labels(parent):
+                return set(), ""
+            return landed_of(f"spec-{parent['number']}"), ""
+        except FrontierError as exc:
+            return set(), f" (landing lookup failed: {exc})"
+
+    def native_open(issue, landed):
+        """The open native blockers not landed, or `None` when the list could
+        not be read, or came back empty against a summary that counted an open
+        blocker: an unknown blocker is not a met one."""
+        try:
+            listed = native_blockers_of(issue)
+        except FrontierError:
+            return None
+        return [n for n in listed if n not in landed] if listed else None
 
     def rank(issue, entry):
         """`(bucket, stated)` from this ticket's blocking state alone.
@@ -283,6 +313,13 @@ def classify(issues, state_of, parent_of):
         native = _native(issue)
         if native is not None:
             entry["why"] = "native dependencies"
+            if native and native_blockers_of is not None:
+                landed, failed = landed_numbers(issue)
+                if native_open(issue, landed) == []:
+                    entry["why"] += ", all landed on the spec branch"
+                    native = False
+                else:
+                    entry["why"] += failed
             return ("blocked" if native else "unblocked"), True
         section = blocked_by_section(issue.get("body"))
         if section is None:
@@ -305,11 +342,15 @@ def classify(issues, state_of, parent_of):
                             + ", whose state could not be read")
             return "unresolved", True
         open_blockers = [n for n, state in states if state == "open"]
+        failed = ""
+        if open_blockers:
+            landed, failed = landed_numbers(issue)
+            open_blockers = [n for n in open_blockers if n not in landed]
         if open_blockers:
             entry["blockers"] = open_blockers
-            entry["why"] = "`Blocked by` names an open ticket"
+            entry["why"] = "`Blocked by` names an open ticket" + failed
             return "blocked", True
-        entry["why"] = "`Blocked by` names only closed tickets"
+        entry["why"] = "`Blocked by` names only closed or landed tickets"
         return "unblocked", True
 
     for issue in sorted(issues, key=lambda i: i.get("number") or 0):
@@ -407,6 +448,43 @@ def fetch_state(repo, number, run=gh_json):
     return (answer or {}).get("state")
 
 
+_CLOSES = re.compile(r"^[ \t]*Closes[ \t]+#(\d+)[ \t]*$", re.IGNORECASE | re.MULTILINE)
+
+
+def fetch_landed(repo, spec_branch, run=gh_json):
+    """The ticket numbers whose PR merged into `spec_branch` (#1466, ruling
+    (a)): each merged PR's bare `Closes #<n>` body lines, which a clump's PR
+    carries once per ticket. GitHub's own closing references stay empty for a
+    PR into a non-default branch, so the body is the record. Raises
+    `FrontierError` when the list cannot be read."""
+    prs = run(["pr", "list", "--repo", repo, "--base", spec_branch,
+               "--state", "merged", "--json", "body", "--limit", "200"])
+    if not isinstance(prs, list):
+        raise FrontierError("the merged-PR list was not a list")
+    return {int(n) for pr in prs if isinstance(pr, dict)
+            for n in _CLOSES.findall(pr.get("body") or "")}
+
+
+def fetch_native_blockers(repo, ticket, run=gh_json):
+    """The numbers of `ticket`'s open native blockers, every page of them.
+    Raises `FrontierError` when the list cannot be read or names a blocker
+    outside `repo`, whose number could collide with a local one."""
+    path = (f"repos/{quote(repo, safe='/')}/issues/{int(ticket['number'])}"
+            "/dependencies/blocked_by?per_page=100")
+    pages = run(["api", "--paginate", "--slurp", path])
+    if not isinstance(pages, list) or not all(isinstance(p, list) for p in pages):
+        raise FrontierError("the dependencies endpoint answered with no pages of issues")
+    open_numbers = []
+    for blocker in (b for page in pages for b in page):
+        if not isinstance(blocker, dict) or not isinstance(blocker.get("number"), int):
+            raise FrontierError("a native blocker came back malformed")
+        if not str(blocker.get("repository_url") or "").endswith(f"/repos/{repo}"):
+            raise FrontierError(f"native blocker #{blocker['number']} is outside {repo}")
+        if blocker.get("state") == "open":
+            open_numbers.append(blocker["number"])
+    return open_numbers
+
+
 def fetch_parent(repo, ticket, run=gh_json):
     """The parent issue of `ticket`, `None` when it has none. The sub-issue
     endpoint first; a 404 there means no sub-issue link, and the body's
@@ -476,7 +554,8 @@ def _parent_number(body, repo):
 
 
 def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
-             parent_of=fetch_parent, run=gh_json):
+             parent_of=fetch_parent, run=gh_json, landed_of=fetch_landed,
+             native_blockers_of=fetch_native_blockers):
     """`(repo, label) -> {unblocked, blocked, unresolved, spec, slice}`. Each
     blocker's state is read once however many tickets name it, and so is
     each parent issue a `Part of` line names: slices of one spec share it.
@@ -493,8 +572,12 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
             answers[tuple(args)] = run(args)
         return answers[tuple(args)]
 
+    landed = functools.cache(lambda spec_branch: landed_of(repo, spec_branch))
+
     return classify(fetch(repo, label), cached,
-                    lambda ticket: parent_of(repo, ticket, run=read_once))
+                    lambda ticket: parent_of(repo, ticket, run=read_once),
+                    landed,
+                    lambda ticket: native_blockers_of(repo, ticket))
 
 
 def render(buckets):
