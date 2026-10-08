@@ -367,7 +367,7 @@ class DrainTest(Sandbox):
         prompt = self.chooser_runs()[0]["prompt"]
         for line in ("#1 is the anchor", "- #2 ticket 2", "- #3 ticket 3", "- #4 ticket 4", "at most 7 of them"):
             self.assertIn(line, prompt)
-        self.assertIn(["1", "drain bundle: 1 2 3"], self.state()["comments"][-1:])
+        self.assertIn(["1", "drain bundle: 1 2 3 (of 3 candidates)"], self.state()["comments"][-1:])
         self.assertIn("#1 #2 #3", r.stdout)
 
     def test_the_chooser_prompt_carries_each_candidates_body_and_comments_capped(self):
@@ -385,7 +385,7 @@ class DrainTest(Sandbox):
     def test_the_choose_log_holds_the_prompt_the_chooser_judged_from_even_when_it_fails(self):
         self.write_state({1: {}, 2: {"body": "distinctive-excerpt\n## Blocked by\n\n- None\n"}})
         self.drain("--once", env={"CHOOSER_FAIL": "1"})
-        log = read(os.path.join(self.tmp.name, "logs", "implement-1-choose.log"))
+        log = read(os.path.join(self.tmp.name, "logs", "me__repo-implement-1-choose.log"))
         self.assertIn("- #2 ticket 2: distinctive-excerpt", log)
 
     def test_a_candidate_with_no_body_and_no_comments_is_listed_as_empty_not_blank(self):
@@ -437,7 +437,8 @@ class DrainTest(Sandbox):
         notes = [b for i, b in self.state()["comments"] if i == "1" and b.startswith("drain chooser:")]
         self.assertEqual(len(notes), 1)
         self.assertIn("the chooser exited 1", notes[0])
-        self.assertEqual([b for i, b in self.state()["comments"] if b.startswith("drain bundle:")], [],
+        self.assertEqual([b for i, b in self.state()["comments"] if b.startswith("drain bundle:")],
+                         ["drain bundle: 1 (of 1 candidates)"],
                          "the chooser note's digits must never read as bundle members")
 
     def test_the_choosers_bundle_is_cut_to_bundle_max(self):
@@ -543,6 +544,25 @@ class DrainTest(Sandbox):
                                   "DRAFT_TICKETS": "1"})
         for n in (1, 2, 3):
             self.assertIn("ready-for-human", self.labels(n))
+
+    def test_a_single_ticket_bundle_records_the_candidates_the_chooser_saw(self):
+        self.write_state({1: {}, 2: {}, 3: {}, 4: {}})
+        self.drain("--once", env={"TAKE": ""})
+        self.assertIn(["1", "drain bundle: 1 (of 3 candidates)"], self.state()["comments"])
+
+    def test_a_bundle_with_no_candidates_says_zero(self):
+        self.write_state({1: {}})
+        self.drain("--once")
+        self.assertIn(["1", "drain bundle: 1 (of 0 candidates)"], self.state()["comments"])
+
+    def test_a_candidate_count_is_never_read_as_a_ticket(self):
+        # The count 3 equals ticket 3, another worker's live ticket: a failed
+        # build of 1 must not hand it to Chris as part of 1's bundle.
+        self.write_state({1: {}, 2: {}, 3: {"labels": ["in-progress"]}, 4: {}, 5: {}})
+        self.drain("--once", env={"FAIL_TICKETS": "1", "TAKE": ""})
+        self.assertIn(["1", "drain bundle: 1 (of 3 candidates)"], self.state()["comments"])
+        self.assertEqual(self.labels(3), ["in-progress"])
+        self.assertEqual(self.handed_comment(3), [])
 
     def test_a_bundle_comment_left_by_an_earlier_run_touches_nothing(self):
         # Ticket 5 is another worker's live ticket; the old note naming it
