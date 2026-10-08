@@ -22,6 +22,7 @@ and not ignored — so the repo must be a git repository.
 
 The grammar, the two modes and what each answers: `references/closure.md`.
 """
+import ast
 import collections
 import json
 import os
@@ -56,6 +57,10 @@ _NONE = re.compile(r"^[-*\s]*none[ \t]*([.,;:\u2014\u2013-]|$)", re.IGNORECASE)
 
 
 PATH_SLOT = "<path>"
+# The one directive that is not a template (#1478): a Python import names a
+# module, not a path, so the form is read by `python_edges` instead of matched
+# by `directive_pattern`.
+PYTHON_IMPORTS = "python imports"
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".claude"}
 MARKDOWN = {"md", "markdown"}
 # A whole file is scanned, however long. This is only the ceiling on what one
@@ -129,6 +134,56 @@ def declaration(root):
             return parse_declaration(fh.read())
     except OSError:
         return None
+
+
+def is_python_imports(directive):
+    """Whether the declared directive is the Python-imports form, whatever its
+    case or spacing."""
+    return " ".join((directive or "").lower().split()) == PYTHON_IMPORTS
+
+
+def imported_modules(rel, text):
+    """The absolute module names a Python file imports, as dotted strings,
+    plus `module.name` for each `from module import name` so a submodule
+    import resolves to its own file. Relative imports are out of scope.
+
+    Parsed rather than matched: an import inside a string or comment is not
+    one. A file that does not parse raises, because "cannot tell" read as
+    "imports nothing" is a missing edge."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError) as exc:
+        raise ClosureError(f"cannot read imports of {rel}: {exc}") from exc
+    names = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names.append(node.module)
+            names.extend(f"{node.module}.{a.name}" for a in node.names)
+    return names
+
+
+def python_edges(root, files, limit=SCAN_LIMIT, relative_to="file"):
+    """`include_edges` for the Python-imports directive: `import a.b` and
+    `from a.b import x` are edges to `a/b.py` or `a/b/__init__.py`, resolved
+    against the including file's directory or the repo root as `Paths` says.
+    A name with no tracked file (stdlib, third-party) drops out."""
+    tracked = set(files)
+    edges = {}
+    for rel in files:
+        if not rel.endswith(".py"):
+            continue
+        text = read_text(os.path.join(root, rel), limit)
+        if text is None:
+            continue
+        for name in imported_modules(rel, text):
+            stem = name.replace(".", "/")
+            for target in (f"{stem}.py", f"{stem}/__init__.py"):
+                target = resolve_reference(rel, target, relative_to)
+                if target in tracked:
+                    edges.setdefault(target, set()).add(rel)
+    return edges
 
 
 def directive_pattern(directive):
@@ -284,6 +339,8 @@ def include_edges(root, decl, limit=SCAN_LIMIT):
     Every failure here is fatal by design: a closure resolved from a scan that
     partly failed is a precise-looking answer with a hole in it, and the hole
     is where two workers meet."""
+    if is_python_imports(decl.directive):
+        return python_edges(root, repo_files(root), limit, decl.relative_to)
     pattern = directive_pattern(decl.directive)
     edges = {}
     for rel in repo_files(root):
