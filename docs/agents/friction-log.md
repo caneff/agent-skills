@@ -17,6 +17,7 @@ One line per friction point a controller or worker hits, instead of a prevention
   twitch-rules-scroller has no tests/all.sh, and the workers for #587 and #593 in burn-trs-2026-10-04 each stopped to note it. Cost: a check per worker and per merge.
 - 2026-10-07, agent-skills: the commit-identity pre-push guard reported git's non-fast-forward rejection as "no ref updates were read on stdin" when #1458's worker (skills-spec-1457) pushed. Cost: a misleading message the worker had to see past to the real rejection.
 - 2026-10-08, sudokupad-art: closure.py's subtree fallback put all 11 slices of spec #301 in one clump (every slice touches a root-level .py, and a subtree family is never split), and `None` would be false here because builds regenerate committed goldens. Cost: the run held before its first dispatch for a controller ruling.
+- 2026-10-08, sudokupad-art: resolve-controller printed sudokupad-art-c6 for spec #301's nested run, but SendMessage found no session by that name, and the socket its subscribe message came from was gone (its pane read done). Cost: the spec run stopped with its clumping question unsent.
 
 Commit each line on its own with the subject `friction: <what happened>`.
 A burn's closing report counts them by that subject; the rule is
