@@ -80,7 +80,8 @@ elif args[:2] == ["issue", "comment"]:
     save()
 elif args[:2] == ["issue", "view"]:
     issue = state["issues"][args[2]]
-    if args[2] in os.environ.get("STALE_VIEW", "").split():  # a read GitHub has not caught up on
+    if args[2] in os.environ.get("STALE_VIEW", "").split() and opt("--json") == "state,labels,comments":
+        # resumable()'s reread, the one read GitHub has not caught up on
         issue = dict(issue, state="open", labels=issue["labels"] + ["in-progress"])
     out({"state": issue["state"], "labels": names(issue), "title": issue["title"], "body": issue["body"],
          "comments": [dict(body=b) for n, b in state.get("comments", []) if n == args[2]]})
