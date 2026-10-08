@@ -845,6 +845,126 @@ def test_a_file_that_cannot_be_opened_is_not_a_file_with_no_includes():
         os.chmod(hidden, 0o644)
 
 
+# --- Python imports as include edges (#1478) -------------------------------
+
+PY_ROOT = ("## Include closure\n\n- **Directive**: `python imports`\n"
+           "- **Paths**: repo-root\n- **Generator**: `none`\n")
+PY_FILE = PY_ROOT.replace("repo-root", "relative to the including file")
+
+
+def py_closure(files, target="codec.py", agents=PY_ROOT):
+    return C.resolve_closure(repo(files, agents=agents), [target])
+
+
+def test_the_directive_is_matched_whatever_its_case_and_spacing():
+    text = "## Include closure\n- **Directive**: `Python   Imports`\n"
+    got = C.resolve_closure(repo({"codec.py": "x\n", "a.py": "import codec\n"},
+                                 agents=text), ["codec.py"])
+    assert got == {"codec.py", "a.py"}, got
+
+
+def test_each_import_form_is_an_edge_to_the_module_file():
+    forms = {"a.py": "import codec\n",
+             "b.py": "import codec as c\n",
+             "c.py": "import os, codec\n",
+             "d.py": "from codec import encode\n",
+             "e.py": "def f():\n    import codec\n"}
+    got = py_closure({"codec.py": "x = 1\n", **forms, "none.py": "import os\n"})
+    assert got == {"codec.py", *forms}, got
+
+
+def test_a_dotted_import_follows_the_path_and_a_package_is_init():
+    files = {"pkg/__init__.py": "", "pkg/sub.py": "x = 1\n",
+             "a.py": "import pkg.sub\n", "b.py": "from pkg import thing\n",
+             "c.py": "from pkg.sub import y\n"}
+    assert py_closure(files, "pkg/sub.py") == {"pkg/sub.py", "a.py", "c.py"}
+    assert py_closure(files, "pkg/__init__.py") == {"pkg/__init__.py", "b.py"}
+
+
+def test_a_from_import_of_a_submodule_is_an_edge_to_that_file():
+    files = {"pkg/__init__.py": "", "pkg/sub.py": "x = 1\n",
+             "a.py": "from pkg import sub\n"}
+    assert py_closure(files, "pkg/sub.py") == {"pkg/sub.py", "a.py"}
+
+
+def test_a_name_with_no_tracked_file_drops_out():
+    # stdlib and third-party modules must not raise or invent an edge
+    got = py_closure({"codec.py": "x\n", "a.py": "import json, numpy\nimport os.path\n"})
+    assert got == {"codec.py"}, got
+
+
+def test_a_relative_import_is_out_of_scope():
+    got = py_closure({"codec.py": "x\n", "a.py": "from . import codec\n",
+                       "b.py": "from .codec import x\n"})
+    assert got == {"codec.py"}, got
+
+
+def test_a_name_with_no_tracked_file_makes_no_edge():
+    root = repo({"a.py": "import json\nimport numpy\n"}, agents=PY_ROOT)
+    assert C.include_edges(root, C.declaration(root)) == {}
+
+
+def test_a_valid_file_with_a_parse_warning_is_read_without_noise():
+    import warnings
+    root = repo({"codec.py": "x\n", "a.py": 'import codec\ns = "\\d"\n'},
+                agents=PY_ROOT)
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("error")
+        got = C.resolve_closure(root, ["codec.py"])
+    assert got == {"codec.py", "a.py"} and not seen, (got, seen)
+
+
+def test_a_python_file_that_is_not_text_fails_the_resolve_by_name():
+    root = repo({"codec.py": "x\n", "nul.py": "import codec\0\n"},
+                agents=PY_ROOT)
+    try:
+        C.resolve_closure(root, ["codec.py"])
+    except C.ClosureError as exc:
+        assert "nul.py" in str(exc), exc
+    else:
+        raise AssertionError("a non-text .py was read as importing nothing")
+
+
+def test_an_import_in_a_string_or_comment_is_not_an_edge():
+    src = '# import codec\ns = "import codec"\n'
+    assert py_closure({"codec.py": "x\n", "a.py": src}) == {"codec.py"}
+
+
+def test_paths_repo_root_resolves_from_the_root_not_the_includer():
+    files = {"codec.py": "x\n", "puzzles/p/build.py": "import codec\n"}
+    assert py_closure(files) == {"codec.py", "puzzles/p/build.py"}
+    assert py_closure(files, agents=PY_FILE) == {"codec.py"}
+
+
+def test_paths_file_relative_resolves_against_the_includers_directory():
+    files = {"puzzles/p/helper.py": "x\n", "puzzles/p/build.py": "import helper\n"}
+    got = py_closure(files, "puzzles/p/helper.py", agents=PY_FILE)
+    assert got == {"puzzles/p/helper.py", "puzzles/p/build.py"}, got
+    assert py_closure(files, "puzzles/p/helper.py") == {"puzzles/p/helper.py"}
+
+
+def test_only_python_files_are_read_for_imports():
+    got = py_closure({"codec.py": "x\n", "notes.md": "import codec\n"})
+    assert got == {"codec.py"}, got
+
+
+def test_a_python_file_that_does_not_parse_fails_the_resolve_by_name():
+    root = repo({"codec.py": "x\n", "bad.py": "def (:\n"}, agents=PY_ROOT)
+    try:
+        C.resolve_closure(root, ["codec.py"])
+    except C.ClosureError as exc:
+        assert "bad.py" in str(exc), exc
+    else:
+        raise AssertionError("an unparseable includer was read as having no imports")
+
+
+def test_python_imports_split_a_flat_repo_that_none_would_not():
+    files = {"codec.py": "x\n", "toolkit.py": "y\n",
+             "one.py": "import codec\n", "two.py": "from toolkit import y\n"}
+    got = C.clumps(repo(files, agents=PY_ROOT), [candidate(1, "one.py"), candidate(2, "two.py")])
+    assert len(got["families"]) == 2, got
+
+
 # --- The fixtures do not outlive the run (Codex round 2 on PR #920: F2) ---
 
 def test_a_fixture_repo_is_removed_even_after_its_permissions_are_taken_away():
