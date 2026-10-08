@@ -4,6 +4,61 @@
 sweep continues straight into this, the grill's own walk of every report it
 produced, without being asked and without the user naming one to start.
 
+## Offer the batch mode
+
+Right after the index, ask one question before the first report:
+
+> Grill each report (default), or apply my recommendation to every finding
+> and ask only the contested ones?
+
+A user reply in that spirit selects the batch mode too — "your recs to
+everything except controversial stuff" is one. No answer, or anything else,
+is the default: grill every fresh finding per § Grilling a report,
+unchanged. Ask once per sweep; never re-offer between reports.
+
+The per-finding grill exists because a decision is the user's, not the
+agent's (#526, #579). The batch mode keeps that: the user opted in, and these
+categories still go to the user as questions, never decided by the agent:
+
+- a doc-vs-code contradiction — the owner's precedence rules make it the
+  owner's call;
+- anything irreversible, or anything that needs a golden re-freeze;
+- a reversal of an ADR or of an existing ignore-file entry;
+- a choice where the evidence is thin, or where the audit itself defers to
+  the owner ("your ruling which").
+
+For every other finding, the agent decides, walking the reports in the same
+order as the default mode:
+
+- **Read every report** in full, from its record (below), not its summary.
+- **Spot-check against the source** the claims it is about to act on, and
+  the claims behind each DROP. A finding is the audit's claim, not a fact.
+- **Apply the auto-carry rule unchanged** (below).
+- **Write each DROP to the ignore file as it is decided**, exactly per
+  § Grilling a report.
+
+When the walk is done, send **one reply** carrying:
+
+1. the contested questions, numbered, each with a recommendation;
+2. **Calls I applied without asking** — a short list of the close calls the
+   agent decided that were reversible, so the user can overrule any one;
+3. the spec and ticket draft (§ Land one spec for the whole sweep, step 1).
+
+That reply is the single confirmation gate of § Land one spec for the whole
+sweep, step 2, unchanged: nothing reaches the tracker until the user approves
+it, with the contested questions answered.
+
+## Check the ignore-file path, in both modes
+
+Before the first DROP is written, look for rejections kept anywhere in the
+audited repo other than `.audit-ignore.md` — a `docs/audit-ignores.md`, an
+`audit-ignore` section in another file. `driver.py`'s `audit_prompt` reads
+only `<repo>/.audit-ignore.md`, so an entry anywhere else never reaches an
+audit's prompt and the same finding returns every sweep. If you find one,
+raise it as a contested question — in the default mode, before the first
+report's grill; in the batch mode, among the numbered questions — and keep
+writing new DROPs to `.audit-ignore.md` meanwhile.
+
 ## Grilling a report
 
 Grill every report the sweep produced, one after another. Start at the top of
