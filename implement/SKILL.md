@@ -323,21 +323,6 @@ round follows steps 2–3 below keyed on the spec number:
    settled (`multi-axis-code-review/SKILL.md` § 4's *A "Settled decisions"
    block*).
 
-   **The first ablation** (#1401, ADR 0005) is on while the heading in
-   `~/.agents/skills/docs/agents/ablations.md` reads `running`. Then, on a PR
-   under the size threshold, the standards axis does not run and the other two
-   do. The threshold is `codex-usage-gate.py`'s own, asked without a usage
-   read: `python3 ~/.agents/skills/implement/codex-usage-gate.py --size
-   --base origin/<default>` exits 40 (`under size threshold`) when the PR is
-   small, 0 when it is not, 30 when it could not measure; 30 runs the
-   standards axis, since an unmeasured PR is not a small one. A skipped axis
-   is recorded, not just omitted, so the escape count has something to
-   attribute a later bug to, and so the merge check can tell it from a
-   reviewer that never ran:
-   `python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type standards --skip-reason ablation`.
-   How long it runs, how it is measured and what decides its fate are that
-   file's, stated once.
-
 2. **Fix every valid finding.** Every finding every reviewer returned gets
    exactly one disposition, one of three outcomes:
 
@@ -410,7 +395,8 @@ Part of the wave for a heavy Claude-lane PR; not part of a Codex-lane build
 Run `codex login status` first. Not logged in, no `codex@openai-codex` entry in
 `~/.claude/plugins/installed_plugins.json`, or the kill-switch file
 `~/.config/agent-skills/codex-reviews-off` present: no pass, append its ledger
-skip row (below), and name the skip in the PR body. A pass that launched and
+skip row (below; the kill switch's reason is `ablation`), and name the skip in
+the PR body. A pass that launched and
 errored has a record, so its ledger row is a `--refusal` row, never a skip row.
 
 Then run the gate from this workspace after `git fetch origin`, which checks
@@ -425,7 +411,9 @@ row, name the printed line in the PR body. An unreadable cache is exit 30,
 never headroom. Exit 20 also answers usage at or above the reserve ceiling, 70%
 (#1359), the 100% cap included, so the weekly audit of skipped PRs always has
 quota left; its ledger skip row takes `--skip-reason ceiling` exactly, whenever
-the printed line says `reserve ceiling`. An exit 30 of this PR gate, whether
+the printed line says `reserve ceiling`. A kill-switch exit 20 (the line `codex reviews off by
+Chris's ruling`) takes `--skip-reason ablation` exactly, so the Codex-pass
+ablation's table (`docs/agents/ablations.md`) counts it. An exit 30 of this PR gate, whether
 its size check or its usage read failed, leaves a PR that may be large with no
 pass: its skip row takes `--skip-reason unmeasured` exactly, which the audit
 reads like `size`. Exit 40 (under the size threshold): its non-test,
@@ -552,7 +540,8 @@ this PR no longer has, so its row holds none. A pass not launched has no
 record: append it with `--skip-reason "<the printed line>"` and no other flag,
 and it gets a row of zero cost that `report` counts as skipped and never as a
 clean pass. That is an exit 20 or 30 of the usage gate (a reserve-ceiling exit
-20's reason is `ceiling`, not the line; a PR gate's exit 30's is `unmeasured`),
+20's reason is `ceiling`, not the line; a kill-switch exit 20's is `ablation`,
+not the line; a PR gate's exit 30's is `unmeasured`),
 its exit 40 (whose reason is `size`, not the line), or a failed preflight. A
 refusal from `append` itself goes to the controller in "PR up", never skipped.
 

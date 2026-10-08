@@ -357,7 +357,9 @@ fn blockers(agents: &[Agent]) -> Vec<String> {
 struct WorktreeFiles {
     modified: Vec<String>,
     untracked: Vec<String>,
-    /// Ignored entries that are not regenerable caches — `.scratch/` evidence.
+    /// Ignored entries that are not regenerable caches — `.scratch/` evidence —
+    /// and the modified, untracked and ignored files of a nested worktree,
+    /// prefixed by its path.
     ignored: Vec<String>,
     /// Ignored entries `is_cache` accepts.
     caches: Vec<String>,
@@ -368,8 +370,6 @@ struct WorktreeFiles {
     /// Ignored entries the repo's own AGENTS.md declares discardable (#1326),
     /// listed apart from `caches` so the output says who approved the loss.
     declared: Vec<String>,
-    /// The names that declaration lists, read once per `read`.
-    declared_names: Vec<String>,
     /// Registered linked worktrees nested anywhere beneath this one, outer
     /// before inner. `git worktree remove --force` on the parent deletes their
     /// files and leaves each registered, so they are removed first, inner
@@ -385,7 +385,7 @@ struct NestedWorktree {
     common_dir: String,
 }
 
-/// One `!!` porcelain entry, decoded once at the boundary in
+/// One `!!` or `??` porcelain entry, decoded once at the boundary in
 /// `WorktreeFiles::read` (#949): the path git means, with the trailing `/`
 /// git appends to a directory taken off and recorded as `is_dir`. Nothing
 /// downstream re-derives either from the shape of a string — a quoted
@@ -569,7 +569,8 @@ impl WorktreeFiles {
         let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"]) else {
             return (!Path::new(wt).exists()).then(Self::default);
         };
-        let mut files = Self { declared_names: declared_discardable(wt), ..Self::default() };
+        let declared_names = declared_discardable(wt);
+        let mut files = Self::default();
         for line in out.lines().filter(|l| l.len() > 3) {
             let (code, rest) = (&line[..2], &line[3..]);
             if code == "??" {
@@ -579,7 +580,7 @@ impl WorktreeFiles {
                 }
             }
             if code == "!!" {
-                files.file_ignored(wt, IgnoredEntry::parse(rest));
+                files.file_ignored(wt, &declared_names, IgnoredEntry::parse(rest));
                 continue;
             }
             // Porcelain v1 writes a rename or a copy as `<orig> -> <new>`,
@@ -601,7 +602,8 @@ impl WorktreeFiles {
         Some(files)
     }
 
-    /// Files one ignored entry as cache, work or empty. A directory entry
+    /// Files one ignored entry as cache, declared-discardable (`declared_names`,
+    /// the repo's AGENTS.md list), a nested worktree, work or empty. A directory entry
     /// stands for whatever is inside it:
     /// `--ignored=matching` collapses it to one line whether it holds nothing
     /// or hundreds of files, and counting entries was wrong both ways (#946)
@@ -614,10 +616,10 @@ impl WorktreeFiles {
     /// directory the walk cannot read, stay `ignored` as themselves — an
     /// unreadable directory fails closed (#801), never read as "nothing in
     /// there".
-    fn file_ignored(&mut self, wt: &str, entry: IgnoredEntry) {
+    fn file_ignored(&mut self, wt: &str, declared_names: &[String], entry: IgnoredEntry) {
         if is_cache(wt, &entry) {
             self.caches.push(entry.shown());
-        } else if is_declared(&self.declared_names, &entry) {
+        } else if is_declared(declared_names, &entry) {
             // Discarded unasked, but a registered worktree beneath it is
             // found first, so it is removed properly and its uncommitted
             // work is not discarded by a declaration about build output.
@@ -627,8 +629,7 @@ impl WorktreeFiles {
             self.declared.push(entry.shown());
         } else if !entry.is_dir {
             self.ignored.push(entry.shown());
-        } else if self.take_nested(wt, &Path::new(wt).join(&entry.path)) {
-        } else {
+        } else if !self.take_nested(wt, &Path::new(wt).join(&entry.path)) {
             match files_under(&Path::new(wt).join(&entry.path), &mut |d| self.take_nested(wt, d)) {
                 Some(f) if f.is_empty() => self.empty_dirs.push(entry.path),
                 Some(f) => self.ignored.extend(f.into_iter().map(|rel| format!("{}/{rel}", entry.path))),
@@ -645,7 +646,9 @@ impl WorktreeFiles {
     fn take_nested(&mut self, wt: &str, dir: &Path) -> bool {
         let Some(nested) = nested_worktree(dir) else { return false };
         let prefix = dir.strip_prefix(wt).unwrap_or(dir).display().to_string();
-        match Self::read(&nested.path) {
+        let inner = Self::read(&nested.path);
+        self.nested.push(nested);
+        match inner {
             // Unreadable: not known clean, so it refuses under its own name.
             None => self.ignored.push(format!("{prefix}/")),
             Some(inner) => {
@@ -653,12 +656,9 @@ impl WorktreeFiles {
                 self.ignored.extend(held.map(|f| format!("{prefix}/{f}")));
                 self.caches.extend(inner.caches.iter().map(|f| format!("{prefix}/{f}")));
                 self.declared.extend(inner.declared.iter().map(|f| format!("{prefix}/{f}")));
-                self.nested.push(nested);
                 self.nested.extend(inner.nested);
-                return true;
             }
         }
-        self.nested.push(nested);
         true
     }
 
@@ -1056,13 +1056,11 @@ impl Cleanup {
             }
             safe_println!("--discard: {wt} — {}", files.dirty_text());
         }
-        if !files.caches.is_empty() {
-            let would = if self.dry { "would discard" } else { "discarding" };
-            safe_println!("{would} {} cache file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
-        }
-        if !files.declared.is_empty() {
-            let would = if self.dry { "would discard" } else { "discarding" };
-            safe_println!("{would} {} declared-discardable file(s) in {wt}: {}", files.declared.len(), first_names(&files.declared));
+        let would = if self.dry { "would discard" } else { "discarding" };
+        for (kind, names) in [("cache", &files.caches), ("declared-discardable", &files.declared)] {
+            if !names.is_empty() {
+                safe_println!("{would} {} {kind} file(s) in {wt}: {}", names.len(), first_names(names));
+            }
         }
         Some(files)
     }

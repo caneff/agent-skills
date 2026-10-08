@@ -24,9 +24,9 @@ a deletion".
   engine-generated stubs and configs such as a plugin's
   `.claude-plugin/types/` or `tsconfig.json`) is undoable: rerunning the tool
   is the undo, so `merge-cleanup --discard` deletes it without asking. A repo
-  lists such paths itself on a `**Discardable**:` line of its AGENTS.md
-  (backtick-quoted names, e.g. `out/`, `*.egg-info`); `merge-cleanup` then
-  discards them unasked, and `merge-cleanup --help` states the grammar.
+  lists such paths itself on a `**Discardable**:` line of its AGENTS.md;
+  `merge-cleanup` then discards them unasked, and `merge-cleanup --help`
+  states the grammar and its limits.
 - Two things are not history rewrites, because neither can reach `main` and
   both are recoverable: resolving a conflict inside a rebase already under way
   (`git checkout --ours|--theirs <paths>`, `git rebase --continue|--abort`),

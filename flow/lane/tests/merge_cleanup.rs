@@ -2774,18 +2774,28 @@ fn a_script_written_while_sibling_threads_spawn_still_executes() {
 
 // --- #1326: repo-declared discardable paths, nested registered worktrees -----
 
-/// The repo declares `out/` and `*.egg-info` discardable in its AGENTS.md, and
-/// git ignores them, the shape a repo like sudokupad-art writes in prose today.
-fn declare_discardable(r: &std::path::Path, line: &str) {
+/// The repo declares `line` in its AGENTS.md, and git ignores `out/`,
+/// `*.egg-info/`, `.scratch/` and `keep.log` (it overwrites `.git/info/exclude`),
+/// the shape a repo like sudokumaker-custom-constraints writes in prose today.
+fn declare_discardable_and_ignore(r: &std::path::Path, line: &str) {
     std::fs::write(r.join("AGENTS.md"), format!("## Notes\n\n{line}\n")).unwrap();
     std::fs::write(r.join(".git/info/exclude"), "out/\n*.egg-info/\n.scratch/\nkeep.log\n").unwrap();
+}
+
+/// A second repo at `other` with its own identity and one commit, whose
+/// worktrees a test nests inside a workspace of the first.
+fn init_other_repo(c: &Cleanup, other: &std::path::Path) {
+    c.git_ok(&["init", "-q", "-b", "main", s(other)]);
+    c.git_ok(&["-C", s(other), "config", "user.email", "t@example.com"]);
+    c.git_ok(&["-C", s(other), "config", "user.name", "t"]);
+    c.git_ok(&["-C", s(other), "commit", "-q", "--allow-empty", "-m", "base"]);
 }
 
 #[test]
 fn ignored_paths_the_repo_declares_discardable_are_removed_without_discard() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r1326a", "implement-1326a");
-    declare_discardable(&r, "**Discardable**: `out/`, `*.egg-info`");
+    declare_discardable_and_ignore(&r, "**Discardable**: `out/`, `*.egg-info`");
     std::fs::create_dir_all(wt.join("out/deep")).unwrap();
     std::fs::write(wt.join("out/deep/a.bin"), "x\n").unwrap();
     std::fs::create_dir_all(wt.join("pkg.egg-info")).unwrap();
@@ -2799,7 +2809,7 @@ fn ignored_paths_the_repo_declares_discardable_are_removed_without_discard() {
 fn an_ignored_file_outside_the_declared_list_still_refuses() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r1326b", "implement-1326b");
-    declare_discardable(&r, "**Discardable**: `out/`");
+    declare_discardable_and_ignore(&r, "**Discardable**: `out/`");
     std::fs::create_dir_all(wt.join("out")).unwrap();
     std::fs::write(wt.join("out/a.bin"), "x\n").unwrap();
     std::fs::write(wt.join("keep.log"), "evidence\n").unwrap();
@@ -2813,7 +2823,7 @@ fn an_ignored_file_outside_the_declared_list_still_refuses() {
 fn a_declaration_naming_git_or_scratch_discards_nothing_extra() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r1326c", "implement-1326c");
-    declare_discardable(&r, "**Discardable**: `.scratch/`, `*`, `.git`");
+    declare_discardable_and_ignore(&r, "**Discardable**: `.scratch/`, `*`, `.git`");
     std::fs::create_dir_all(wt.join(".scratch")).unwrap();
     std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
@@ -2849,10 +2859,7 @@ fn a_clean_worktree_of_another_repo_nested_in_a_workspace_is_removed_too() {
     // `caneff/merged-one`, so the run reads "not merged" whenever the two
     // tips differ (they differ only when a second boundary ticks over).
     let other = c.root().join("r1326e-other");
-    c.git_ok(&["init", "-q", "-b", "main", s(&other)]);
-    c.git_ok(&["-C", s(&other), "config", "user.email", "t@example.com"]);
-    c.git_ok(&["-C", s(&other), "config", "user.name", "t"]);
-    c.git_ok(&["-C", s(&other), "commit", "-q", "--allow-empty", "-m", "base"]);
+    init_other_repo(&c, &other);
     let nested = wt.join(".claude/worktrees/qqrr");
     c.worktree_add(&other, &["--detach", s(&nested), "main"]);
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
@@ -2893,7 +2900,7 @@ fn a_glob_declaration_cannot_reach_scratch() {
     for decl in [".*", ".scr*", "*h"] {
         let c = Cleanup::new();
         let (r, wt) = lane_workspace(&c, "r1326h", "implement-1326h");
-        declare_discardable(&r, &format!("**Discardable**: `{decl}`"));
+        declare_discardable_and_ignore(&r, &format!("**Discardable**: `{decl}`"));
         std::fs::create_dir_all(wt.join(".scratch")).unwrap();
         std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
         let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
@@ -2905,7 +2912,7 @@ fn a_glob_declaration_cannot_reach_scratch() {
 fn a_declared_name_does_not_discard_beneath_scratch() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r1326i", "implement-1326i");
-    declare_discardable(&r, "**Discardable**: `out/`");
+    declare_discardable_and_ignore(&r, "**Discardable**: `out/`");
     // Only `out/` is ignored, so git lists `.scratch/out/` itself.
     std::fs::write(r.join(".git/info/exclude"), "out/\n").unwrap();
     std::fs::create_dir_all(wt.join(".scratch/out")).unwrap();
@@ -2925,7 +2932,7 @@ fn a_copied_worktree_is_files_not_a_nested_worktree() {
     c.worktree_add(&r, &["--detach", s(&real), "origin/main"]);
     std::fs::create_dir_all(wt.join(".scratch")).unwrap();
     let copy = wt.join(".scratch/copy");
-    assert!(std::process::Command::new("cp").args(["-a", s(&real), s(&copy)]).status().unwrap().success());
+    assert!(support::cleanup::output(std::process::Command::new("cp").args(["-a", s(&real), s(&copy)])).unwrap().status.success());
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(!run.ok && run.stderr.contains(".scratch/copy/") && copy.is_dir(), "{}", run.text());
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
@@ -2951,12 +2958,9 @@ fn a_locked_nested_worktree_refuses_until_discard() {
 fn a_worktree_of_another_repo_under_a_declared_path_is_removed_and_unregistered() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r1326l", "implement-1326l");
-    declare_discardable(&r, "**Discardable**: `out/`");
+    declare_discardable_and_ignore(&r, "**Discardable**: `out/`");
     let other = c.root().join("r1326l-other");
-    c.git_ok(&["init", "-q", "-b", "main", s(&other)]);
-    c.git_ok(&["-C", s(&other), "config", "user.email", "t@example.com"]);
-    c.git_ok(&["-C", s(&other), "config", "user.name", "t"]);
-    c.git_ok(&["-C", s(&other), "commit", "-q", "--allow-empty", "-m", "base"]);
+    init_other_repo(&c, &other);
     let nested = wt.join("out/qqrr");
     c.worktree_add(&other, &["--detach", s(&nested), "main"]);
     std::fs::write(nested.join("notes.txt"), "unsaved\n").unwrap();
@@ -2973,10 +2977,7 @@ fn a_clean_nested_worktree_in_an_untracked_directory_is_removed_with_its_parent(
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r1326m", "implement-1326m");
     let other = c.root().join("r1326m-other");
-    c.git_ok(&["init", "-q", "-b", "main", s(&other)]);
-    c.git_ok(&["-C", s(&other), "config", "user.email", "t@example.com"]);
-    c.git_ok(&["-C", s(&other), "config", "user.name", "t"]);
-    c.git_ok(&["-C", s(&other), "commit", "-q", "--allow-empty", "-m", "base"]);
+    init_other_repo(&c, &other);
     let nested = wt.join("timing");
     c.worktree_add(&other, &["--detach", s(&nested), "main"]);
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);

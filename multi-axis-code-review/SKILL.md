@@ -164,13 +164,6 @@ findings (§ 4 below), `axis` still `"standards"` and `severity` always
 Run the usage gate first (*A rate-limited axis did not run*, below): exit 20
 spawns nothing.
 
-A caller that has switched an axis off — `implement/SKILL.md` § Review's
-first ablation skips the standards axis on a small PR — names it, and you
-spawn the other two. The skipped axis is not reported as `NO REPORT RECEIVED`
-and has no sidecar; the caller records the skip in the ledger
-(`review_ledger.py append --type <axis> --skip-reason <why>`), which is how
-`implement/fix-check.sh` tells it from a reviewer that never ran.
-
 Spawn all three with the plain `Agent` tool, `subagent_type: diff-reviewer`, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
 
 Pass `model: opus` to all three. Review is Opus-tier and the user reads every line before merge, so a miss is caught downstream — do not let them inherit the session model.

@@ -367,14 +367,14 @@ def excerpt(ctx, n):
     """A candidate's body and comments, read live and cut to `EXCERPT_CHARS`, so
     the chooser judges from text and the log shows what it judged from. A ticket
     that cannot be read says so: a blank excerpt would read as an empty ticket.
-    A candidate is unblocked, so its body holds a `## Blocked by` section and is
-    never empty."""
+    A ticket unblocked by GitHub's native dependencies alone may have no body and
+    no comments, and says so rather than rendering blank."""
     try:
         view = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "body,comments")
     except DrainError as exc:
         return f"(body not read: {one_line(exc, 80)})"
     text = " ".join([view["body"] or "", *(c["body"] or "" for c in view["comments"])])
-    return one_line(text, EXCERPT_CHARS)
+    return one_line(text, EXCERPT_CHARS) or "(empty body, no comments)"
 
 
 def chooser_prompt(anchor, others, bundle_max):
