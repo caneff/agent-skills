@@ -22,6 +22,7 @@ and not ignored — so the repo must be a git repository.
 
 The grammar, the two modes and what each answers: `references/closure.md`.
 """
+import ast
 import collections
 import json
 import os
@@ -29,6 +30,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import warnings
 
 # The fence rule is #890's, bug-for-bug: a declaration inside ``` or ~~~ is
 # quoted material, and a fence closes CommonMark's way. Both `declaration_section`
@@ -56,6 +58,10 @@ _NONE = re.compile(r"^[-*\s]*none[ \t]*([.,;:\u2014\u2013-]|$)", re.IGNORECASE)
 
 
 PATH_SLOT = "<path>"
+# The one directive that is not a template (#1478): a Python import names a
+# module, not a path, so the form is read by `python_edges` instead of matched
+# by `directive_pattern`.
+PYTHON_IMPORTS = "python imports"
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".claude"}
 MARKDOWN = {"md", "markdown"}
 # A whole file is scanned, however long. This is only the ceiling on what one
@@ -129,6 +135,48 @@ def declaration(root):
             return parse_declaration(fh.read())
     except OSError:
         return None
+
+
+def is_python_imports(directive):
+    """Whether the declared directive is the Python-imports form, whatever its
+    case or spacing."""
+    return " ".join((directive or "").lower().split()) == PYTHON_IMPORTS
+
+
+def imported_modules(rel, text):
+    """The absolute module names a Python file imports, as dotted strings,
+    plus `module.name` for each `from module import name` so a submodule
+    import resolves to its own file. Relative imports are out of scope.
+
+    Parsed rather than matched: an import inside a string or comment is not
+    one. A file that does not parse raises, because "cannot tell" read as
+    "imports nothing" is a missing edge."""
+    try:
+        with warnings.catch_warnings():
+            # A valid file's escape-sequence warning is not an import answer,
+            # and must not reach stderr or, under -W error, fail the run.
+            warnings.simplefilter("ignore")
+            tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError) as exc:
+        raise ClosureError(f"cannot read imports of {rel}: {exc}") from exc
+    names = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names.append(node.module)
+            names.extend(f"{node.module}.{a.name}" for a in node.names)
+    return names
+
+
+def python_references(rel, text):
+    """The paths an `.py` file's imports may name: for each module `a.b`,
+    `a/b.py` and `a/b/__init__.py`."""
+    out = []
+    for name in imported_modules(rel, text):
+        stem = name.replace(".", "/")
+        out += [f"{stem}.py", f"{stem}/__init__.py"]
+    return out
 
 
 def directive_pattern(directive):
@@ -284,17 +332,33 @@ def include_edges(root, decl, limit=SCAN_LIMIT):
     Every failure here is fatal by design: a closure resolved from a scan that
     partly failed is a precise-looking answer with a hole in it, and the hole
     is where two workers meet."""
-    pattern = directive_pattern(decl.directive)
+    python = is_python_imports(decl.directive)
+    pattern = None if python else directive_pattern(decl.directive)
+    files = repo_files(root)
+    tracked = set(files)
     edges = {}
-    for rel in repo_files(root):
+    for rel in files:
+        if python and not rel.endswith(".py"):
+            continue
         text = read_text(os.path.join(root, rel), limit)
         if text is None:
+            if python:
+                # A `.py` that does not read as text has imports nobody can
+                # list; "cannot tell" is not "imports nothing".
+                raise ClosureError(f"cannot read imports of {rel}: not text")
             continue
-        for line in scanned_lines(rel, text):
-            for match in pattern.finditer(line):
-                target = resolve_reference(rel, match.group(1).strip(),
-                                           decl.relative_to)
-                edges.setdefault(target, set()).add(rel)
+        if python:
+            references = python_references(rel, text)
+        else:
+            references = [m.group(1).strip()
+                          for line in scanned_lines(rel, text)
+                          for m in pattern.finditer(line)]
+        for reference in references:
+            target = resolve_reference(rel, reference, decl.relative_to)
+            # A Python name with no tracked file is stdlib or third-party.
+            if python and target not in tracked:
+                continue
+            edges.setdefault(target, set()).add(rel)
     return edges
 
 
