@@ -274,12 +274,12 @@ def note_anchor(ctx, anchor):
     return True
 
 
-def resumable(ctx, ended=()):
+def resumable(ctx, ended):
     """The lowest open in-progress ticket whose latest drain comment is its
     anchor note, or `None`. A worker `implement-dispatch` started has none, and
     a ticket drain handed to Chris ends in `HANDED_NOTE`, so neither is taken.
     The open list can still carry a ticket just closed, so each candidate's
-    state and labels are read again, and an anchor this run already ended
+    state and labels are read again, and an anchor this run already took up
     (`ended`) is never taken twice."""
     try:
         claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
@@ -289,7 +289,7 @@ def resumable(ctx, ended=()):
         if issue["number"] in ended or HUMAN in labels_of(issue) or issue.get("pull_request"):
             continue
         view = gh_json("issue", "view", str(issue["number"]), "--repo", ctx.repo, "--json", "state,labels,comments")
-        if view["state"].lower() != "open" or CLAIMED not in labels_of(view) or HUMAN in labels_of(view):
+        if view["state"].lower() != "open" or CLAIMED not in labels_of(view):
             continue
         marks = [c["body"] for c in view["comments"] if c["body"].startswith((ANCHOR_NOTE, HANDED_NOTE))]
         if marks and marks[-1].startswith(ANCHOR_NOTE):
@@ -729,7 +729,7 @@ def drain(ctx, limit):
     """`(merged, handed, stop reason or None)`; `limit` counts tickets."""
     merged, handed, stop, failures, done, want = [], [], None, 0, 0, ctx.want
     started = []  # the tickets of a bundle whose start line is out and whose end line is not
-    ended = set()  # the anchors this run has ended, merged or handed over
+    ended = set()  # the anchors this run has taken up: added before `work()`, so none is taken twice
     try:
         if want:  # refuse before any work, and not only when the loop gets there
             put_first(anchors(ctx, pick(ctx)), want)
