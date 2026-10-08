@@ -25,3 +25,4 @@ One line per friction point a controller or worker hits, instead of a prevention
 Commit each line on its own with the subject `friction: <what happened>`.
 A burn's closing report counts them by that subject; the rule is
 `burndown/SKILL.md` § The friction log.
+- 2026-10-08, twitch-rules-scroller: same as the spec-301 line: after #658 landed on spec-632, loop.py dispatch read in-flight #637's diff against origin/main and held all nine unblocked clumps over files only #658 touched. Second occurrence, filed as #1486. Workaround: --in-flight built from origin/spec-632...HEAD plus uncommitted and untracked files, run with --no-workspace-diff. Cost: one blocked tick.
