@@ -42,11 +42,11 @@ The tickets inside one family whose closures are identical, at most three (`MAX_
 _Avoid_: batch, group, cluster
 
 **Anchor**:
-The oldest unblocked `ready-for-agent` ticket (or the one `--anchor` names), which `drain` (`drain/drain.py`) builds first. A one-turn session adds the other ready tickets it would naturally fix in the same PR, and `drain` starts the bundle through `implement-dispatch`.
+The oldest unblocked `ready-for-agent` ticket or clear spec parent (or the one `--anchor` names), which `drain` (`drain/drain.py`) builds first. A one-turn session adds the other ready tickets it would naturally fix in the same PR, and `drain` starts the bundle through `implement-dispatch`.
 _Avoid_: seed, lead ticket
 
 **Bundle**:
-The anchor plus the tickets the agent chose to fix with it, at most `--bundle-max` (8): one agent, one worktree, one PR that closes every one, one review wave. A one-turn session chooses it after reading the queue; `drain` groups nothing by directory or closure. Unlike a clump, which the burn's controller computes from file closures before dispatch.
+The anchor plus the tickets the agent chose to fix with it, at most `--bundle-max` (8): one agent, one worktree, one PR that closes every one, one review wave. A one-turn session chooses it after reading the queue; `drain` groups nothing by directory or closure. A spec parent is a bundle of its own: the spec and all its slices, built by one `implement-dispatch --spec` run and closed by its one integration PR, with no `--bundle-max` cap. Unlike a clump, which the burn's controller computes from file closures before dispatch.
 _Avoid_: clump (the burn's term), batch
 
 **Tier**:
