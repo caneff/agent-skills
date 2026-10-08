@@ -135,6 +135,17 @@ Evidence: on `sudokumaker-custom-constraints` (#781) the repo had no native
 links, the edges lived in `## Blocked by` sections, and **8 of 21**
 `ready-for-agent` tickets had no such section at all.
 
+**A blocker landed on a spec branch is met** (#1466). A slice merged into its
+spec's `spec-<p>` integration branch stays open until the integration PR
+closes it, so "open" alone would block every slice after it and stall the
+spec run. The reader therefore asks of each *open* blocker, native or
+stated, whether a merged PR from its `implement-<n>` branch has a base named
+`spec-<digits>` (`gh pr list --head implement-<n> --state merged`); one that
+has is met. A native blocker list is read from
+`issues/<n>/dependencies/blocked_by`. Both lookups fail closed: a call that
+did not answer leaves the ticket `blocked`, never freed. A clump's
+non-lowest ticket has no branch of its own and reads as not landed.
+
 ## The `## Blocked by` grammar
 
 This is what `/to-tickets` emits and what the fallback reader parses. Nothing
