@@ -10,7 +10,8 @@ out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep runs to completion on its own: past the index, it grills every report
 widest-first and lands the run as one spec. Grilling itself still questions
-the user on each fresh finding, and writes each rejection to the audited
+the user on each fresh finding, unless the user takes the batch mode and is
+asked only the contested ones, and writes each rejection to the audited
 repo's ignore file as it's decided; the single confirmation gate is only
 about the tracker — nothing goes to the spec issue or its tickets before that
 one approval. It **reports and files only** — no edit is applied, no PR is
@@ -112,9 +113,10 @@ When you are invoked in-session as `/all-audits [path]`:
 
 3. **Report the index, then grill.** The script prints `index: <path>` and opens
    that page itself — do not open it again. Print its absolute path and list the
-   audits, then continue straight into the grill — no separate ask needed —
-   which walks every report widest-first per
-   [`harness/GRILLING.md`](harness/GRILLING.md).
+   audits, then continue straight into the grill — no separate ask to start
+   it — which walks every report widest-first per
+   [`harness/GRILLING.md`](harness/GRILLING.md). It opens with one question,
+   `harness/GRILLING.md` § Offer the batch mode.
 
 ## After the sweep
 
