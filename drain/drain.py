@@ -483,7 +483,7 @@ def seam_cmd(ctx):
 def run_in_scratch_tree(ctx, cmd, log, head=None):
     """`cmd` in a throwaway worktree of current main, with `head` merged in when
     given. The merge commit uses the identity the repo is already configured
-    with. Raises `DrainError` on a conflict or a non-zero exit."""
+    with. A tree with a `package-lock.json` gets `npm ci` before `cmd`. Raises `DrainError` on a conflict or a non-zero exit."""
     scratch = tempfile.mkdtemp(prefix="drain-seam-")
     try:
         run(["git", "worktree", "add", "-q", "--detach", scratch, ctx.default], cwd=ctx.root)
@@ -493,6 +493,12 @@ def run_in_scratch_tree(ctx, cmd, log, head=None):
                 raise DrainError("merging the PR into current main failed: "
                                  + one_line(merged.stderr or merged.stdout, 200))
         with open(log, "w") as out:
+            if os.path.exists(os.path.join(scratch, "package-lock.json")):
+                # A bare worktree has no node_modules: the repo's declared dependencies go in first (#1445).
+                code, _ = run_group(["npm", "ci"], scratch, WALL_CLOCK_SECONDS, out=out)
+                if code:
+                    raise DrainError(f"`npm ci` failed (output in {log})")
+            out.flush()
             code, _ = run_group(["sh", "-c", cmd], scratch, WALL_CLOCK_SECONDS, out=out)
         if code:
             raise DrainError(f"`{cmd}` failed (output in {log})")
