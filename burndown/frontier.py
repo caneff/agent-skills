@@ -19,6 +19,7 @@ section as "unblocked" dispatches a worker onto a ticket whose prerequisite
 is still open — the cost is a whole build. The grammar this parses, and what
 each answer means, are specified in `references/frontier.md`.
 """
+import functools
 import json
 import re
 import subprocess
@@ -273,26 +274,35 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     really a PR, is in no bucket at all — each is off the frontier by its own
     nature, not by a blocking relationship.
 
-    `landed_of(number) -> bool` says an open blocker's PR merged into its
-    spec's integration branch (#1466): that blocker is met, because the slice
-    stays open until the integration PR closes it. `native_blockers_of(ticket)
-    -> [number]` lists a ticket's open native blockers so each can be asked
-    the same; it raises `FrontierError` when it cannot. Both default to "no
-    blocker has landed", so a reader that supplies neither blocks as before."""
+    `landed_of(spec_branch) -> {numbers}` and `native_blockers_of(ticket) ->
+    [numbers]` carry the landed-blocker rule, stated in
+    `references/frontier.md` (#1466); either raises `FrontierError` when it
+    cannot answer, and neither supplied means no blocker has landed."""
     buckets = {name: [] for name in BUCKETS}
-    landed_of = landed_of or (lambda number: False)
 
-    def native_still_blocked(issue):
-        """Whether a natively blocked ticket still has an open blocker that
-        has not landed. A list that cannot be read stays blocked: an unknown
-        blocker is not a met one."""
-        if native_blockers_of is None:
-            return True
+    def landed_numbers(issue):
+        """`(numbers, why)`: the blockers landed on the spec branch of this
+        ticket's own parent spec. `why` names a lookup that failed, and the
+        ticket then stays blocked with that reason in its entry."""
+        if landed_of is None:
+            return set(), ""
         try:
-            open_numbers = native_blockers_of(issue)
+            parent = parent_of(issue)
+            if not parent or SPEC_LABEL not in _labels(parent):
+                return set(), ""
+            return landed_of(f"spec-{parent['number']}"), ""
+        except FrontierError as exc:
+            return set(), f" (landing lookup failed: {exc})"
+
+    def native_open(issue, landed):
+        """The open native blockers not landed, or `None` when the list could
+        not be read, or came back empty against a summary that counted an open
+        blocker: an unknown blocker is not a met one."""
+        try:
+            listed = native_blockers_of(issue)
         except FrontierError:
-            return True
-        return not open_numbers or not all(landed_of(n) for n in open_numbers)
+            return None
+        return [n for n in listed if n not in landed] if listed else None
 
     def rank(issue, entry):
         """`(bucket, stated)` from this ticket's blocking state alone.
@@ -303,9 +313,13 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
         native = _native(issue)
         if native is not None:
             entry["why"] = "native dependencies"
-            if native and not native_still_blocked(issue):
-                entry["why"] = "native dependencies, all landed on a spec branch"
-                native = False
+            if native and native_blockers_of is not None:
+                landed, failed = landed_numbers(issue)
+                if native_open(issue, landed) == []:
+                    entry["why"] += ", all landed on the spec branch"
+                    native = False
+                else:
+                    entry["why"] += failed
             return ("blocked" if native else "unblocked"), True
         section = blocked_by_section(issue.get("body"))
         if section is None:
@@ -327,11 +341,14 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
                             + ", ".join(f"#{n}" for n in unreadable)
                             + ", whose state could not be read")
             return "unresolved", True
-        open_blockers = [n for n, state in states
-                         if state == "open" and not landed_of(n)]
+        open_blockers = [n for n, state in states if state == "open"]
+        failed = ""
+        if open_blockers:
+            landed, failed = landed_numbers(issue)
+            open_blockers = [n for n in open_blockers if n not in landed]
         if open_blockers:
             entry["blockers"] = open_blockers
-            entry["why"] = "`Blocked by` names an open ticket"
+            entry["why"] = "`Blocked by` names an open ticket" + failed
             return "blocked", True
         entry["why"] = "`Blocked by` names only closed or landed tickets"
         return "unblocked", True
@@ -431,32 +448,41 @@ def fetch_state(repo, number, run=gh_json):
     return (answer or {}).get("state")
 
 
-_SPEC_BRANCH = re.compile(r"^spec-\d+$")
+_CLOSES = re.compile(r"^[ \t]*Closes[ \t]+#(\d+)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 
-def fetch_landed(repo, number, run=gh_json):
-    """Whether ticket `number`'s PR merged into a `spec-<p>` integration
-    branch (#1466, ruling (a)). The slice's branch is `implement-<n>`, so the
-    merged PRs from that head name their base. A lookup that fails is `False`:
-    an unknown landing keeps the ticket blocked, never frees it. A clump's
-    non-lowest ticket has no branch of its own and reads as not landed."""
-    try:
-        prs = run(["pr", "list", "--repo", repo, "--head", f"implement-{int(number)}",
-                   "--state", "merged", "--json", "baseRefName", "--limit", "20"])
-    except (FrontierError, OSError):
-        return False
-    return any(_SPEC_BRANCH.match(str((pr or {}).get("baseRefName") or ""))
-               for pr in prs or [])
+def fetch_landed(repo, spec_branch, run=gh_json):
+    """The ticket numbers whose PR merged into `spec_branch` (#1466, ruling
+    (a)): each merged PR's bare `Closes #<n>` body lines, which a clump's PR
+    carries once per ticket. GitHub's own closing references stay empty for a
+    PR into a non-default branch, so the body is the record. Raises
+    `FrontierError` when the list cannot be read."""
+    prs = run(["pr", "list", "--repo", repo, "--base", spec_branch,
+               "--state", "merged", "--json", "body", "--limit", "200"])
+    if not isinstance(prs, list):
+        raise FrontierError("the merged-PR list was not a list")
+    return {int(n) for pr in prs if isinstance(pr, dict)
+            for n in _CLOSES.findall(pr.get("body") or "")}
 
 
 def fetch_native_blockers(repo, ticket, run=gh_json):
-    """The numbers of `ticket`'s open native blockers. Raises `FrontierError`
-    when the list cannot be read."""
-    answer = run(["api", f"repos/{quote(repo, safe='/')}/issues/"
-                  f"{int(ticket['number'])}/dependencies/blocked_by"])
-    if not isinstance(answer, list):
-        raise FrontierError("the dependencies endpoint answered with no list")
-    return [b["number"] for b in answer if b.get("state") == "open"]
+    """The numbers of `ticket`'s open native blockers, every page of them.
+    Raises `FrontierError` when the list cannot be read or names a blocker
+    outside `repo`, whose number could collide with a local one."""
+    path = (f"repos/{quote(repo, safe='/')}/issues/{int(ticket['number'])}"
+            "/dependencies/blocked_by?per_page=100")
+    pages = run(["api", "--paginate", "--slurp", path])
+    if not isinstance(pages, list) or not all(isinstance(p, list) for p in pages):
+        raise FrontierError("the dependencies endpoint answered with no pages of issues")
+    open_numbers = []
+    for blocker in (b for page in pages for b in page):
+        if not isinstance(blocker, dict) or not isinstance(blocker.get("number"), int):
+            raise FrontierError("a native blocker came back malformed")
+        if not str(blocker.get("repository_url") or "").endswith(f"/repos/{repo}"):
+            raise FrontierError(f"native blocker #{blocker['number']} is outside {repo}")
+        if blocker.get("state") == "open":
+            open_numbers.append(blocker["number"])
+    return open_numbers
 
 
 def fetch_parent(repo, ticket, run=gh_json):
@@ -546,12 +572,7 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
             answers[tuple(args)] = run(args)
         return answers[tuple(args)]
 
-    landings = {}
-
-    def landed(number):
-        if number not in landings:
-            landings[number] = landed_of(repo, number)
-        return landings[number]
+    landed = functools.cache(lambda spec_branch: landed_of(repo, spec_branch))
 
     return classify(fetch(repo, label), cached,
                     lambda ticket: parent_of(repo, ticket, run=read_once),
