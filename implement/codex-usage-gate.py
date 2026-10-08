@@ -38,7 +38,7 @@ cache read or live fetch, so a disabled gate costs no RPC. Removing the file
 re-enables Codex reviews.
 
 `--size --base <ref>` answers only the size question (#1401),
-for the first ablation (`SKILL.md` § Review): 40 `under size threshold
+for a caller that needs only the size verdict: 40 `under size threshold
 (<churn> < <threshold>)`, 0 `at or above size threshold (...)`, 30 when it
 could not measure. It reads no usage, ignores the kill switch and the forcing
 label, and writes nothing: a small PR is small whether or not Codex may run.
