@@ -61,7 +61,7 @@ elif args[0] == "api":
         parent = state["issues"][m.group(1)].get("parent")
         if parent is None:
             sys.stderr.write("gh: Not Found (HTTP 404)\n"); sys.exit(1)
-        out(dict(number=parent, state=state["issues"][str(parent)]["state"], labels=names(state["issues"][str(parent)])))
+        out(dict(number=parent, repository_url="https://api.github.com/repos/" + re.search(r"repos/([^/]+/[^/]+)/issues", url).group(1), state=state["issues"][str(parent)]["state"], labels=names(state["issues"][str(parent)])))
     elif m:
         out({"state": state["issues"][m.group(1)]["state"]})
 elif args[:2] == ["issue", "edit"]:
@@ -1075,6 +1075,12 @@ class SpecTest(Sandbox):
         self.assertIn("stranded: #2", r.stdout)
         self.assertIn("closed", r.stdout)
         self.assertEqual(self.dispatch_runs(), [])
+
+    def test_a_stranded_slice_is_named_even_when_another_ticket_is_started(self):
+        self.write_state({1: {**self.SPEC, "state": "closed"}, 2: {"parent": 1}, 3: {}})
+        r = self.drain("--once")
+        self.assertIn("stranded: #2", r.stdout)
+        self.assertEqual(r.stdout.count("stranded: #2"), 1)
 
     def test_a_blocked_spec_is_not_dispatched(self):
         self.write_state({1: {**self.SPEC, "body": "## Blocked by\n\n- #9\n"}, 2: {"parent": 1}, 9: {"labels": []}})

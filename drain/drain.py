@@ -236,7 +236,7 @@ def origin_slug(root):
 
 
 def read_frontier(ctx):
-    """`(queue, waiting)`. `queue` is `[(number, title, kind)]`: the unblocked
+    """`(queue, waiting, stranded)`. `queue` is `[(number, title, kind)]`: the unblocked
     ready tickets and the clear spec parents, oldest first; the anchor is the
     first. A slice is neither: it is built inside its spec's run. `waiting` is
     the numbers of specs that have a ready slice and are not in the queue
@@ -872,6 +872,7 @@ def drain(ctx, limit):
     """`(merged, handed, stop reason or None)`; `limit` counts tickets."""
     merged, handed, stop, failures, done, want = [], [], None, 0, 0, ctx.want
     started = []  # the tickets of a bundle whose start line is out and whose end line is not
+    told = set()  # stranded slices already named this run (#1485)
     ended = set()  # the anchors this run has taken up: added before `work()`, so none is taken twice
     try:
         if want:  # refuse before any work, and not only when the loop gets there
@@ -883,10 +884,12 @@ def drain(ctx, limit):
                 anchor, kind = taken
             else:
                 queue, waiting, stranded = read_frontier(ctx)
+                for n, why in stranded:
+                    if n not in told:  # every exit names them, once
+                        told.add(n)
+                        say(f"stranded: #{n}, {why}")
                 candidates = anchors(ctx, queue)
                 if not candidates:
-                    for n, why in stranded:
-                        say(f"stranded: #{n}, {why}")
                     for spec in waiting:
                         say(f"waiting: ready slices of spec #{spec}, which drain cannot start (it is not "
                             "ready-for-agent, is claimed, or is blocked)")

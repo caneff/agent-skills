@@ -254,20 +254,23 @@ def _handoff(number):
 
 
 def _stranded_reason(parent, repo):
-    """Why a slice's parent spec cannot run it, `""` when it can: the spec is
-    in another repo (named with it, since a bare number is a different issue
-    here) or is closed. A parent that is no spec strands nothing."""
-    if not parent or SPEC_LABEL not in _labels(parent):
-        return ""
+    """Why a spec parent cannot run its slices, `""` when it can: it is in
+    another repo (named with it, since a bare number is a different issue
+    here), its repo or state could not be read, or it is closed. Given no
+    `repo`, only the state is checked."""
     where = str(parent.get("repository_url") or "")
-    home = f"/repos/{repo}".lower() if repo else None
-    if home and where and not where.lower().endswith(home):
+    if repo and not where:
+        return (f"a slice of spec #{parent['number']}, whose repo could not be "
+                "read: no dispatch verb is safe to copy")
+    if repo and not where.lower().endswith(f"/repos/{repo}".lower()):
         other = where.split("/repos/", 1)[-1]
         return (f"a slice of spec {other}#{parent['number']}, which is in another "
-                "repo: no dispatch verb here can run it; hand it off there")
-    if parent.get("state") == "closed":
-        return (f"a slice of spec #{parent['number']}, which is closed: reopen the "
-                "spec or remove the slice's `## Parent` line and sub-issue link")
+                "repo: remove the slice's `## Parent` line and sub-issue link, "
+                "or run the spec there")
+    if parent.get("state") != "open":
+        return (f"a slice of spec #{parent['number']}, which is closed or its "
+                "state unread: reopen the spec or remove the slice's "
+                "`## Parent` line and sub-issue link")
     return ""
 
 
@@ -284,8 +287,8 @@ BUCKETS = ("unblocked", "blocked", "unresolved", "spec", "slice", "stranded")
 
 def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=None,
              repo=None):
-    """`{unblocked, blocked, unresolved, spec, slice, stranded}` over GitHub issue
-    objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
+    """`{unblocked, blocked, unresolved, spec, slice, stranded}` over
+    GitHub issue objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
     state; `None` means it could not be read, which is unresolved rather than
     a guess. `parent_of(ticket) -> issue | None` reads the ticket's parent
     issue, `None` being a ticket with no parent; it raises `FrontierError`
@@ -412,20 +415,15 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
                 entry["why"] = f"{own}its parent could not be read ({exc})"
                 name = "unresolved"
             else:
-                stranded = _stranded_reason(parent, repo)
-                if stranded:
+                if parent and SPEC_LABEL in _labels(parent):
                     entry["blockers"] = []
                     entry["spec"] = parent["number"]
-                    entry["why"] = stranded
-                    name = "stranded"
-                elif parent and SPEC_LABEL in _labels(parent):
-                    entry["blockers"] = []
-                    entry["spec"] = parent["number"]
-                    entry["why"] = (
+                    stranded = _stranded_reason(parent, repo)
+                    entry["why"] = stranded or (
                         f"a slice of spec #{parent['number']}: hand off with "
                         + _handoff(parent["number"])
                         + ", never as its own ticket")
-                    name = "slice"
+                    name = "stranded" if stranded else "slice"
         buckets[name].append(entry)
     return buckets
 

@@ -796,7 +796,9 @@ def spec_parent(number=483, labels=("spec",)):
     """The parent issue as `/issues/<n>/parent` answers: a full issue object.
     Its labels omit the queried one by default, the shape burn-2026-09-27 hit:
     the parent carried `spec` and no `ready-for-agent`."""
-    return issue(number, labels=labels)
+    out = issue(number, labels=labels)
+    out["repository_url"] = "https://api.github.com/repos/owner/repo"
+    return out
 
 
 def test_a_slice_of_a_spec_lacking_the_queried_label_is_not_unblocked():
@@ -1320,10 +1322,23 @@ def test_a_slice_of_a_closed_spec_is_stranded():
 
 
 def test_a_slice_of_an_open_spec_in_this_repo_is_still_a_slice():
-    same = spec_parent(483)
-    same["repository_url"] = "https://api.github.com/repos/owner/repo"
-    got = read([issue(491, body=NO_BLOCKERS)], parents={491: same})
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: spec_parent(483)})
     assert numbers(got["slice"]) == [491], got
+
+
+def test_a_parent_whose_repo_was_not_read_is_not_handed_off():
+    unread = spec_parent(259)
+    del unread["repository_url"]
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: unread})
+    assert numbers(got["stranded"]) == [491], got
+    assert "implement-dispatch --spec" not in got["stranded"][0]["why"]
+
+
+def test_a_parent_whose_state_was_not_read_is_not_handed_off():
+    unread = spec_parent(259)
+    del unread["state"]
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: unread})
+    assert numbers(got["stranded"]) == [491], got
 
 
 def test_a_blocked_slice_of_a_closed_spec_stays_blocked():
