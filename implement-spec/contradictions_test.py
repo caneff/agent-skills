@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Tests for the exploration pass's contradiction check (#897).
+"""Tests for the exploration pass's contradiction check (#897); runs under pytest.
 
 One seam, named on the ticket: `check(decisions, tickets)` over a fixture
 spec holding a decision a ticket of that spec builds, a decision the code
@@ -7,8 +6,12 @@ implements differently, and a decision the code does not mention. What each
 of the three does — escalate to Chris, or land as a summary line — is what
 these assert.
 """
+import json
 import os
+import subprocess
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -128,39 +131,26 @@ def test_the_summary_counts_the_errors_beside_the_contradictions():
     assert "1 contradiction for Chris" in out, out
 
 
-def test_the_cli_reads_an_exploration_file_and_prints_the_summary():
-    import json
-    import subprocess
-    import tempfile
-    payload = {"tickets": TICKETS,
-               "decisions": [BUILT_BY_A_SLICE, IMPLEMENTED_DIFFERENTLY,
-                             NOT_IN_THE_CODE]}
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
-        json.dump(payload, fh)
-        path = fh.name
-    try:
-        out = subprocess.run([sys.executable, CHECKER, path],
-                             capture_output=True, text=True)
-    finally:
-        os.unlink(path)
+def run_checker(tmp_path, payload):
+    path = tmp_path / "exploration.json"
+    path.write_text(json.dumps(payload))
+    return subprocess.run([sys.executable, CHECKER, str(path)],
+                          capture_output=True, text=True)
+
+
+def test_the_cli_reads_an_exploration_file_and_prints_the_summary(tmp_path):
+    out = run_checker(tmp_path, {"tickets": TICKETS,
+                                 "decisions": [BUILT_BY_A_SLICE,
+                                               IMPLEMENTED_DIFFERENTLY,
+                                               NOT_IN_THE_CODE]})
     assert out.returncode == 0, out.stderr
     assert "1 contradiction for Chris" in out.stdout, out.stdout
 
 
-def test_the_cli_fails_loud_on_a_malformed_exploration_file():
-    import json
-    import subprocess
-    import tempfile
-    payload = {"tickets": TICKETS,
-               "decisions": [{"id": "D9"}, IMPLEMENTED_DIFFERENTLY]}
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
-        json.dump(payload, fh)
-        path = fh.name
-    try:
-        out = subprocess.run([sys.executable, CHECKER, path],
-                             capture_output=True, text=True)
-    finally:
-        os.unlink(path)
+def test_the_cli_fails_loud_on_a_malformed_exploration_file(tmp_path):
+    out = run_checker(tmp_path, {"tickets": TICKETS,
+                                 "decisions": [{"id": "D9"},
+                                               IMPLEMENTED_DIFFERENTLY]})
     assert out.returncode == 1, out.stdout
     assert "is missing" in out.stderr and "D9" in out.stderr, out.stderr
 
@@ -169,22 +159,6 @@ def test_a_ticket_list_entry_that_is_not_a_number_is_refused():
     # The list is what the whole defence is checked against; a malformed
     # entry silently dropped would turn a "not yet built" into a
     # contradiction on Chris's desk.
-    try:
+    with pytest.raises(C.SpecError) as exc:
         C.check([BUILT_BY_A_SLICE], [366, "three-six-seven", 368])
-    except C.SpecError as exc:
-        assert "not a ticket number" in str(exc), exc
-    else:
-        raise AssertionError("a malformed ticket list was accepted")
-
-
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
-
-
-if __name__ == "__main__":
-    main()
+    assert "not a ticket number" in str(exc.value), exc.value
