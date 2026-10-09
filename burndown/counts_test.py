@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for `burndown/counts.py`, the closing report's fixed and moved counts.
 Two seams: `counts` over a fixture run file and sidecar directory, and the CLI.
 """

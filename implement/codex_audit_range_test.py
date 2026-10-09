@@ -1,6 +1,7 @@
-"""Tests for `codex-audit-range.py` (#1361): which merged PRs skipped the Codex gate for size or
-the reserve ceiling since the last audit mark, and the one range a Codex audit reviews. Every test
-runs the command line against a fabricated repo and ledger; nothing reaches the real ~/.cache. Runs under pytest."""
+"""Tests for `codex-audit-range.py` (#1361): which merged PRs skipped the Codex
+gate for size or the reserve ceiling since the last audit mark, and the one
+range a Codex audit reviews. Every test runs the command line against a
+fabricated repo and ledger; nothing reaches the real ~/.cache."""
 import json
 import os
 import subprocess

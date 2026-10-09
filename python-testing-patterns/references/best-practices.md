@@ -51,10 +51,10 @@ def test_divide():
 ### 3. AAA Pattern (Arrange-Act-Assert)
 **Structure tests consistently:**
 ```python
-def test_user_registration_sends_welcome_email():
+def test_user_registration_sends_welcome_email(mocker):
     # Arrange
     user_data = {"email": "test@example.com", "name": "Test"}
-    mock_email = Mock()
+    mock_email = mocker.Mock()
 
     # Act
     user = register_user(user_data, email_service=mock_email)
@@ -223,17 +223,17 @@ def db():
 **Mock external systems, test internal logic:**
 ```python
 # Good: Mock external API
-def test_fetch_user_data():
-    with patch("requests.get") as mock_get:
-        mock_get.return_value.json.return_value = {"id": 1}
-        result = fetch_user_data(1)
-        assert result["id"] == 1
+def test_fetch_user_data(mocker):
+    mock_get = mocker.patch("requests.get")
+    mock_get.return_value.json.return_value = {"id": 1}
+    result = fetch_user_data(1)
+    assert result["id"] == 1
 
 # Bad: Over-mocking
-def test_process_user():
-    with patch("module.User") as MockUser:  # Don't mock own code
-        with patch("module.validate") as mock_validate:
-            # Too much mocking
+def test_process_user(mocker):
+    MockUser = mocker.patch("module.User")  # Don't mock own code
+    mock_validate = mocker.patch("module.validate")
+    # Too much mocking
 ```
 
 ### 12. Don't Over-Mock
@@ -245,8 +245,8 @@ def test_calculate_total():
     assert calculate_total(items) == 30
 
 # Bad: Mock everything
-def test_calculate_total_with_mocks():
-    mock_items = Mock()
+def test_calculate_total_with_mocks(mocker):
+    mock_items = mocker.Mock()
     mock_items.return_value = 30  # Why test a mock?
 ```
 
@@ -255,8 +255,8 @@ def test_calculate_total_with_mocks():
 system boundary — and assert the returned result beside it. A test that checks
 only mock calls breaks on refactors that keep behavior:**
 ```python
-def test_user_creation_sends_welcome_email():
-    mock_email = Mock()
+def test_user_creation_sends_welcome_email(mocker):
+    mock_email = mocker.Mock()
 
     user = create_user("test@example.com", email_service=mock_email)
 
@@ -268,21 +268,20 @@ def test_user_creation_sends_welcome_email():
 **Ensure clean state between tests:**
 ```python
 @pytest.fixture
-def mock_service():
-    mock = Mock()
-    yield mock
-    mock.reset_mock()  # Clean up
+def mock_service(mocker):
+    # Built per test from `mocker`, so no call history carries over
+    return mocker.Mock()
 ```
 
 ### 15. Define Return Values
 **Always specify expected returns:**
 ```python
 # Good: Clear return value
-mock_api = Mock()
+mock_api = mocker.Mock()
 mock_api.get_user.return_value = {"id": 1, "name": "Test"}
 
 # Bad: Undefined return
-mock_api = Mock()
+mock_api = mocker.Mock()
 result = mock_api.get_user()  # Returns Mock, not dict
 ```
 

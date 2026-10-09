@@ -1,6 +1,6 @@
 """Tests for the stale-reference check (#1252; implement/SKILL.md § Before the
-PR runs it), run under pytest. Seam: the command line — a repo and a base in,
-one line per stale reference and an exit status out.
+PR runs it). Seam: the command line — a repo and a base in, one line per
+stale reference and an exit status out.
 
 Each case builds a fixture repo whose `main` holds the base state and whose
 checked-out branch makes one change, then asserts on what the check prints.

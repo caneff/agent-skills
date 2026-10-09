@@ -64,10 +64,11 @@ uv add --dev ruff ty pytest pytest-cov hypothesis pre-commit
 uv tool install rust-just                # the `just` binary, in-ecosystem (needed for the justfile)
 ```
 
-Every Python test in the repo is a pytest test (`docs/adr/0007-pytest-everywhere.md`):
-pytest is a declared dev dependency, and tests use pytest's idiom, never
-`unittest.TestCase`, `unittest.mock` or an assert-at-import script. Where a
-test needs a mock, also `uv add --dev pytest-mock` and use its `mocker` fixture.
+Every Python test in the repo is a pytest test
+(`~/.agents/skills/docs/adr/0007-pytest-everywhere.md`): pytest is a declared
+dev dependency, and tests use pytest's idiom, never `unittest.TestCase`,
+`unittest.mock` or an assert-at-import script. Where a test needs a mock, also
+`uv add --dev pytest-mock` and use its `mocker` fixture.
 
 `uv add --dev` pins exact versions in `uv.lock` — that IS the pin (ty is beta;
 the lock is what stops it floating).

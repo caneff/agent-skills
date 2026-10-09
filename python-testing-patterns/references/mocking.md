@@ -1,6 +1,9 @@
 # Mocking with pytest-mock
 
-Every mock in a test comes from the `mocker` fixture (pytest-mock, a dev dependency). `mocker` undoes each patch at test end, so there are no context managers or decorators. Never import `unittest.mock` (`docs/adr/0007-pytest-everywhere.md`).
+Every mock in a test comes from the `mocker` fixture (pytest-mock, a dev
+dependency). `mocker` undoes each patch at test end, so there are no context
+managers or decorators. Never import `unittest.mock`
+(`~/.agents/skills/docs/adr/0007-pytest-everywhere.md`).
 
 ## Basic Mocking
 

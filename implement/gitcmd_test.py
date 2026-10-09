@@ -1,4 +1,5 @@
-"""Tests for `gitcmd.py` (#1405 S6): the one git helper of the Codex audit's scripts. Runs under pytest."""
+"""Tests for `gitcmd.py` (#1405 S6): the one git helper of the Codex audit's
+scripts."""
 import subprocess
 
 import pytest

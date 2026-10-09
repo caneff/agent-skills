@@ -1,7 +1,8 @@
-"""Tests for `codex-audit.py` (#1362): the weekly Codex audit's run, from the usage gate through
-the ledger row, and the audit mark it reads and moves. Every test drives the command line against a
-fabricated repo, ledger, usage cache, trial doc and `gh`, with `--dry-run` in place of the Codex
-launch, so nothing reaches the real ~/.cache, the real kill switch, GitHub or the Codex quota. Runs under pytest."""
+"""Tests for `codex-audit.py` (#1362): the weekly Codex audit's run, from the
+usage gate through the ledger row, and the audit mark it reads and moves. Every
+test drives the command line against a fabricated repo, ledger, usage cache,
+trial doc and `gh`, with `--dry-run` in place of the Codex launch, so nothing
+reaches the real ~/.cache, the real kill switch, GitHub or the Codex quota."""
 import hashlib
 import os
 import subprocess

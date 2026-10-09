@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """The always-on budget gate (#1413): every session loads the global
 CLAUDE.md plus its `@`-imports, and tests/check-always-on.py fails when that
 text passes its word budget or a pointer line names a path that does not

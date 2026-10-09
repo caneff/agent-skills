@@ -4,7 +4,6 @@ dispositions sidecar lives (#1258). `fix_check.py` (behind
 `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`; a rename in either
 would otherwise turn the merge check into "no sidecar" for a worker whose
 sidecar is where the skill says, or the closing counts into a refusal.
-Runs under pytest.
 
 Seam: the sidecar is written where `counts.default_reviews_dir` and
 `runfile.dispositions_path` say, then the script is run from a linked

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for pointer_reads.py (#1413): the pointer-doc read count from
 docs/research/2026-10-04-claude-md-pointer-reads.md, and the one-shot cron
 re-count 14 days after #1413 closes. Every test runs the script's command

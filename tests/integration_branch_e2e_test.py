@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """End-to-end test for spec #1457: an integration branch per spec, with one
 review for the whole spec.
 

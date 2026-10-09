@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Structure test for the create-lmd-page closing step (#1288): the archive
 step exists, passes --slug on every call, asks for the LMD id, allows a skip
 naming the backfill fallback, and reports a failed archive.

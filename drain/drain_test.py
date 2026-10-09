@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for `drain` (#1403, #1415). Seam: the command line, `drain.py [--once]
 [--max n] [--bundle-max k] [--anchor n] [--repo path]`, run as a subprocess
 against a real git repo with a bare origin, a fake `gh` (a JSON state file), a

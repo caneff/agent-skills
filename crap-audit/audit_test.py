@@ -1,7 +1,6 @@
 """Tests for crap-audit's scoring core: normalize, score, and the thin CLI main.
 
-Plain pytest asserts. One function per acceptance criterion of ticket #505;
-run with `uv run --locked pytest crap-audit/audit_test.py`.
+Plain pytest asserts. One function per acceptance criterion of ticket #505.
 """
 import json
 import os

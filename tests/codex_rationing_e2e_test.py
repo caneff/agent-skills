@@ -29,9 +29,10 @@ from the fixture, never read back from the module:
      skipped (#102's launched pass is not run here, so it writes none); three `codex-audit` rows, two
      skipped, three audited PRs.
 
-Seam: `bash tests/all.sh`, which runs this file under pytest. HOME, CODEX_HOME, the ledger, the review cache and
-the trial doc are temporary, `gh` and `codex` are fakes on PATH, and the Codex launch is the audit's
-own `--dry-run`, so nothing reaches the real kill switch, `~/.cache`, GitHub or the Codex quota.
+Seam: `bash tests/all.sh`. HOME, CODEX_HOME, the ledger, the review cache and
+the trial doc are temporary, `gh` and `codex` are fakes on PATH, and the Codex
+launch is the audit's own `--dry-run`, so nothing reaches the real kill switch,
+`~/.cache`, GitHub or the Codex quota.
 
 Blind to: anything a human reads rather than a test asserts: whether a model follows a skill's
 prose, whether a present `SKILL.md` instruction is also unambiguous, and the harness behaviours

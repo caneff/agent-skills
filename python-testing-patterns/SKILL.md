@@ -9,7 +9,11 @@ Comprehensive guide to implementing robust testing strategies in Python using py
 
 ## The ruling: pytest everywhere
 
-Every Python test in a repo Chris owns is a pytest test, and pytest is a declared dev dependency of that repo. Write plain `assert`, fixtures and `parametrize`; mock with the `mocker` fixture from pytest-mock. Never write a `unittest.TestCase` class, a `unittest.mock` import or a script that asserts at import. Ruled in `docs/adr/0007-pytest-everywhere.md`.
+Every Python test in a repo Chris owns is a pytest test, and pytest is a
+declared dev dependency of that repo. Write plain `assert`, fixtures and
+`parametrize`; mock with the `mocker` fixture from pytest-mock. Never write a
+`unittest.TestCase` class, a `unittest.mock` import or a script that asserts
+at import. Ruled in `~/.agents/skills/docs/adr/0007-pytest-everywhere.md`.
 
 ## Test Quality Gate
 

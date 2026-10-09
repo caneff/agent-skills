@@ -1,7 +1,6 @@
 """Tests for the landed page generator (#612) — builds a tmp git repo with a
 couple of commits and checks the rendered page, not by running the CLI
-against the real ~/src workspace. Run with `uv run --locked pytest
-landed/generate_test.py`.
+against the real ~/src workspace.
 """
 import os
 import subprocess

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for `drain/SKILL.md` (#1427). Two things a machine reads off it: the
 frontmatter that makes it user-typed only (install and skill discovery read
 those keys), and the flags it names, each checked against `drain.py --help`

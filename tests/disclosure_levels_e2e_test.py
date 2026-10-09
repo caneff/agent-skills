@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """End-to-end test for spec #1409, deterministic disclosure levels: every rule
 sits at one level, and each level has a loader that does not depend on the
 model choosing to read.

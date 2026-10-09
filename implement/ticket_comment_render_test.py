@@ -4,7 +4,7 @@ This file
 extracts the jq program those snippets carry and executes it, so the rendering
 is a tested seam rather than prose: a comment-less ticket still renders as the
 bare body, comments render after it attributed and marked as data, and a
-comment cannot forge a block of its own. Runs under pytest.
+comment cannot forge a block of its own.
 """
 import importlib.util
 import json

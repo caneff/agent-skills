@@ -1,4 +1,4 @@
-"""Tests for the exploration pass's contradiction check (#897); runs under pytest.
+"""Tests for the exploration pass's contradiction check (#897).
 
 One seam, named on the ticket: `check(decisions, tickets)` over a fixture
 spec holding a decision a ticket of that spec builds, a decision the code

@@ -23,9 +23,11 @@ editing if anything is destructive.
 - Poetry → uv: translate `[tool.poetry.dependencies]` to `[project.dependencies]`
   + `[dependency-groups]`, then `uv sync`. Remove `poetry.lock`.
 - requirements.txt → `uv add` each, then delete the txt.
-- Add the dev tools: `uv add --dev ruff ty pytest pytest-cov hypothesis pre-commit` (plus `pytest-mock` where a test mocks).
-  Existing `unittest` tests run under pytest unchanged; rewrite them into
-  pytest's idiom (`docs/adr/0007-pytest-everywhere.md`).
+- Add the dev tools:
+  `uv add --dev ruff ty pytest pytest-cov hypothesis pre-commit` (plus
+  `pytest-mock` where a test mocks). Existing `unittest` tests run under
+  pytest unchanged; rewrite them into pytest's idiom
+  (`~/.agents/skills/docs/adr/0007-pytest-everywhere.md`).
 
 ## 3. Layout + test naming
 
