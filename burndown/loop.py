@@ -1029,22 +1029,28 @@ def slice_base(run):
     """`origin/spec-<p>` when the checkout's branch is a slice, one whose
     dispatch recorded `branch.<name>.base` as `spec-<p>` (#1486); else None.
     The branch already holds every slice landed on `spec-<p>`, so those files
-    are not its own. A recorded base naming no `spec-<n>` is refused, and a
-    detached HEAD has no branch to record one on."""
-    try:
-        branch = run(["symbolic-ref", "--short", "HEAD"]).strip()
-    except LoopError:
+    are not its own. A recorded base that is not a `spec-<n>` branch is no
+    slice, as `implement/fix_check.py` reads it. A detached HEAD has no
+    branch to record one on. A slice whose `origin/spec-<p>` is gone is
+    refused: the over-held diff it would fall back to is what this removes."""
+    branch = run(["branch", "--show-current"]).strip()
+    if not branch:
         return None
     # `--default ""` makes an unset key an empty answer, so a git failure
     # stays an error instead of reading as "no recorded base".
     recorded = run(["config", "--default", "", "--get",
                     f"branch.{branch}.base"]).strip()
-    if not recorded:
-        return None
     if not SPEC_BRANCH.fullmatch(recorded):
-        raise LoopError(f"branch.{branch}.base is {recorded!r}, not a "
-                        "`spec-<n>` branch, so its diff base is unknown")
-    return f"origin/{recorded}"
+        return None
+    base = f"origin/{recorded}"
+    try:
+        run(["rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"])
+    except LoopError:
+        raise LoopError(
+            f"branch.{branch}.base records {recorded}, but {base} is gone: "
+            "its spec has ended or the ref was never fetched, so this "
+            "slice's diff has no base") from None
+    return base
 
 
 def workspace_diff(workspace):

@@ -65,7 +65,10 @@ closure is only what the ticket's named files reach, so dispatch also unions
 each unsettled in-flight workspace's `git diff --name-only
 origin/<default>...HEAD`, uncommitted edits and untracked files into it
 (#1212): on burn-trs-2026-09-27 two workers ran concurrently in files no
-candidate list named. An unreadable diff refuses the tick rather than reading
+candidate list named. A slice workspace (its branch's recorded
+`branch.<name>.base` reads `spec-<p>`) is diffed against `origin/spec-<p>`
+instead (#1486), since its branch already holds every slice landed there;
+if that ref is gone the tick refuses. An unreadable diff refuses the tick rather than reading
 as no change; `--no-workspace-diff` exists for fixtures without real
 checkouts and a controller never passes it. That is cheap and it is enough
 for the one question a dispatch asks: does *this* clump collide with anyone

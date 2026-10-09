@@ -2548,6 +2548,44 @@ def test_workspace_diff_of_a_branch_with_no_recorded_base_is_against_default():
         assert sorted(loop.workspace_diff(work)) == ["landed.txt", "own.txt"]
 
 
+def test_workspace_diff_of_a_slice_that_merged_an_advanced_spec_branch_1486():
+    # The ticket's first criterion: spec-9 moved on after the slice was cut and
+    # the slice merged it in; the other slice's file is still not its own.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_slice_workspace(tmp, own=["own.txt"], landed=[])
+        run_in(work, "git", "checkout", "-q", "spec-9")
+        with open(os.path.join(work, "later.txt"), "w") as fh:
+            fh.write("s")
+        run_in(work, "git", "add", "later.txt")
+        run_in(work, "git", "commit", "-qm", "later slice")
+        run_in(work, "git", "push", "-q", "origin", "spec-9")
+        run_in(work, "git", "checkout", "-q", "implement-1")
+        run_in(work, "git", "merge", "-q", "--no-edit", "origin/spec-9")
+        assert loop.workspace_diff(work) == ["own.txt"]
+
+
+def test_workspace_diff_reads_a_base_that_is_not_a_spec_branch_as_no_slice():
+    # As `implement/fix_check.py` reads it: only `spec-<n>` marks a slice.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_slice_workspace(tmp, own=["own.txt"],
+                                    landed=["landed.txt"])
+        run_in(work, "git", "config", "branch.implement-1.base", "main")
+        assert sorted(loop.workspace_diff(work)) == ["landed.txt", "own.txt"]
+
+
+def test_workspace_diff_of_a_slice_whose_spec_branch_is_gone_names_the_key():
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_slice_workspace(tmp, own=["own.txt"], landed=[])
+        run_in(work, "git", "config", "branch.implement-1.base", "spec-77")
+        try:
+            loop.workspace_diff(work)
+        except loop.LoopError as exc:
+            assert "branch.implement-1.base" in str(exc), exc
+            assert "origin/spec-77" in str(exc), exc
+        else:
+            raise AssertionError("a slice with no base was diffed anyway")
+
+
 def test_workspace_diff_includes_uncommitted_and_untracked_edits_1254():
     # #1212 P2: a worker that has not committed yet has still reached its
     # files; the committed history alone reads it as touching nothing.
