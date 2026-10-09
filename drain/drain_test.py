@@ -15,7 +15,6 @@ import os
 import select
 import subprocess
 import sys
-import tempfile
 import time
 
 import pytest
@@ -241,9 +240,9 @@ SPEC = {"labels": ["ready-for-agent", "spec"], "body": "the spec\n## Blocked by\
 class Sandbox:
     """A repo, a bare origin, stubs on PATH and an isolated HOME."""
 
-    def __init__(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        t = self.tmp.name
+    def __init__(self, tmp_path):
+        self.tmp = tmp_path
+        t = str(tmp_path)
         self.rewrite = None
         self.home = os.path.join(t, "home")
         os.mkdir(self.home)
@@ -278,9 +277,6 @@ class Sandbox:
         self.chooser_log = os.path.join(t, "chooser.log")
         self.write_state({})
 
-    def close(self):
-        self.tmp.cleanup()
-
     def git(self, cwd, *args):
         return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
                               env=self.env).stdout.strip()
@@ -310,7 +306,7 @@ class Sandbox:
                 "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
                 "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
                 "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
-                "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
+                "DRAIN_LOG_DIR": os.path.join(self.tmp, "logs"), **(env or {})}
 
     def drain(self, *argv, env=None):
         return subprocess.run([sys.executable, DRAIN, "--repo", self.repo, *argv],
@@ -369,10 +365,8 @@ class Sandbox:
 
 
 @pytest.fixture
-def sb():
-    sandbox = Sandbox()
-    yield sandbox
-    sandbox.close()
+def sb(tmp_path):
+    return Sandbox(tmp_path)
 
 
 def test_once_builds_checks_merges_and_cleans_up(sb):
@@ -422,7 +416,7 @@ def test_the_chooser_prompt_carries_each_candidates_body_and_comments_capped(sb)
 def test_the_choose_log_holds_the_prompt_the_chooser_judged_from_even_when_it_fails(sb):
     sb.write_state({1: {}, 2: {"body": "distinctive-excerpt\n## Blocked by\n\n- None\n"}})
     sb.drain("--once", env={"CHOOSER_FAIL": "1"})
-    log = read(os.path.join(sb.tmp.name, "logs", "me__repo-implement-1-choose.log"))
+    log = read(os.path.join(sb.tmp, "logs", "me__repo-implement-1-choose.log"))
     assert "- #2 ticket 2: distinctive-excerpt" in log
 
 
@@ -659,7 +653,7 @@ def test_a_dispatch_refusal_stops_the_run_and_leaves_the_ticket_ready(sb):
 
 def test_the_bundle_is_announced_while_its_worker_is_still_building(sb):
     sb.write_state({1: {"title": "first"}, 2: {"title": "second"}})
-    hold = os.path.join(sb.tmp.name, "hold")
+    hold = os.path.join(sb.tmp, "hold")
     write(hold, "")
     proc = sb.drain_live("--once", env={"TAKE": "2", "HERDR_HOLD_FILE": hold})
     try:
@@ -859,7 +853,7 @@ def test_a_ticket_another_worker_holds_is_not_touched_by_a_merge(sb):
     assert sb.state()["issues"]["3"]["assignees"] == ["me"]
 
 
-def test_the_lock_and_agent_names_match_implement_dispatch(sb):
+def test_the_lock_and_agent_names_match_implement_dispatch(sb, tmp_path, monkeypatch):
     # drain cannot import the Rust it mirrors; this pins what it copies.
     source = read(os.path.join(HERE, "..", "flow", "lane", "src", "bin", "implement_dispatch.rs"))
     sys.path.insert(0, HERE)
@@ -870,13 +864,11 @@ def test_the_lock_and_agent_names_match_implement_dispatch(sb):
     assert "{}/.implement-dispatch-claim-{}.lock" in source
     assert "slug.replace('/', \"__\")" in source
     import types
-    home = tempfile.mkdtemp()
-    old_home, os.environ["HOME"] = os.environ.get("HOME"), home
-    try:
-        with drain.claim_lock(types.SimpleNamespace(repo="owner/name")):
-            pass
-    finally:
-        os.environ["HOME"] = old_home
+    home = tmp_path / "lock-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    with drain.claim_lock(types.SimpleNamespace(repo="owner/name")):
+        pass
     assert os.path.exists(os.path.join(home, ".implement-dispatch-claim-owner__name.lock"))
     # The worker's herdr agent name drain looks for is the one the Rust formats.
     assert "(32usize).saturating_sub(suffix.len())" in source
@@ -977,7 +969,7 @@ def test_a_green_full_run_records_main_and_a_later_red_one_names_the_merges_sinc
     sb.write_state({1: {}, 2: {}})
     sb.git(sb.repo, "config", "land.testcmd", 'test -z "$SEAM_RED"')
     assert sb.drain("--once").returncode == 0
-    green = read(os.path.join(sb.tmp.name, "logs", "last-green-me__repo")).strip()
+    green = read(os.path.join(sb.tmp, "logs", "last-green-me__repo")).strip()
     assert green == sb.git(sb.repo, "rev-parse", "origin/main")
     # Two merges land on main since that green run (the fake `gh` never moves main itself).
     for subject in ("first other merge", "second other merge"):
@@ -1098,7 +1090,7 @@ def test_a_dispatch_that_fails_after_the_claim_is_this_bundles_failed_build(sb):
 
 def test_a_drain_run_from_a_linked_worktree_names_the_primary_checkout(sb):
     sb.write_state({1: {}})
-    linked = os.path.join(sb.tmp.name, "linked")
+    linked = os.path.join(sb.tmp, "linked")
     sb.git(sb.repo, "worktree", "add", "-q", "--detach", linked, "origin/main")
     r = sb.drain("--once", "--repo", linked)
     assert r.returncode == 0, r.stdout + r.stderr
