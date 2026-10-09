@@ -23,7 +23,6 @@ drain/skill_test.py
 flow/ccstatusline-table/claude_usage_cache_test.py
 flow/claude/pointer_reads_test.py
 tests/always_on_budget_test.py
-tests/codex_rationing_e2e_test.py
 tests/disclosure_levels_e2e_test.py
 tests/integration_branch_e2e_test.py
 tests/review_ledger_e2e_test.py
