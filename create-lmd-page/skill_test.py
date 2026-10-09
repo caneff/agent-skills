@@ -20,7 +20,7 @@ def closing_step():
 
 
 def archive_commands(text):
-    return [l for l in text.splitlines() if "lmd_archive" in l and " archive " in l]
+    return [line for line in text.splitlines() if "lmd_archive" in line and " archive " in line]
 
 
 class ClosingStepTest(unittest.TestCase):
@@ -44,17 +44,25 @@ class ClosingStepTest(unittest.TestCase):
             self.assertIn("--archive ~/src/lmd-archive", c)
 
     def test_link_is_the_page_link_verbatim(self):
-        self.assertRegex(closing_step(), r"verbatim|exactly as the page uses")
+        self.assertIn("exactly as the page uses", closing_step())
+
+    def test_asks_for_the_lmd_id(self):
+        self.assertIn("Ask the user for the puzzle's LMD id", closing_step())
+
+    def test_output_steps_hand_off_to_archive(self):
+        out = SKILL[SKILL.index("## Output"):SKILL.index("## Archive")]
+        self.assertRegex(out, r"(?m)^4\. Archive the puzzle: run § Archive")
 
     def test_skip_names_backfill_fallback(self):
         t = closing_step()
         self.assertIn("backfill", t)
-        self.assertRegex(t, r"skip")
-        self.assertIn("SudokuPad link", t)
+        self.assertIn("may skip the id", t)
+        self.assertIn("match the puzzle by its SudokuPad link", t)
 
     def test_failure_is_reported_not_swallowed(self):
-        self.assertRegex(closing_step(), r"(?i)non-zero|exit")
-        self.assertRegex(closing_step(), r"(?i)report")
+        t = closing_step()
+        self.assertIn("A non-zero exit, or any `FAILED` line on stderr, is reported to the user", t)
+        self.assertIn("never say the puzzle is archived after one", t)
 
 
 if __name__ == "__main__":
