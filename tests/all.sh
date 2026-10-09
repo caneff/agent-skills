@@ -67,7 +67,7 @@ suites() { # prints "<label>\t<command>" per discovered suite
 # repo-wide checks. Prints the kept labels' directories as a space-separated
 # word list on stdout, or `*` for the full suite; the reason goes to stderr.
 scope_changed() { # <base>
-  local base=$1 files file dir all_dirs dirs=""
+  local base=$1 files file dir all_dirs dirs="" widened
   files=$(git diff --name-only --no-renames "$base...HEAD") || {
     echo "tests/all.sh: cannot diff $base...HEAD" >&2; exit 2; }
   all_dirs=$(suites | cut -f1 | awk -F/ 'NF > 1 {print $1}' | sort -u)
@@ -84,6 +84,19 @@ scope_changed() { # <base>
     case " $dirs " in *" $dir "*) ;; *) dirs="$dirs $dir" ;; esac
   done <<<"$files"
   dirs=${dirs# }
+  if [ -n "$dirs" ]; then
+    # A suite that loads or reads another directory's files is impacted by a
+    # change there too (#1495). The scan failing is not "no edges": the full
+    # suite runs instead.
+    if ! widened=$(python3 "$(dirname "${BASH_SOURCE[0]}")/suite-edges.py" $dirs 2>&1) || [ "$(wc -l <<<"$widened")" != 1 ]; then
+      echo "full suite: the cross-directory edge scan failed ($(head -c 200 <<<"$widened" | tr '\n' ' '))" >&2
+      echo '*'; return
+    fi
+    if [ "$widened" != "$dirs" ]; then
+      echo "cross-directory edges widen $dirs to: $widened" >&2
+      dirs=$widened
+    fi
+  fi
   echo "changed suites: ${dirs:-none} + tests" >&2
   echo "$dirs"
 }
@@ -422,4 +435,11 @@ while IFS=$'\t' read -r label cmd; do
 done <"$tmp/ordered"
 wait "$dispatcher"
 
-echo "$count suites passed"
+# A narrowed run says so (defect class 1): `N suites passed` alone reads the
+# same as a full green.
+narrowed=$(grep -m1 '^changed suites: ' "$tmp/scope" || true)
+if [ -n "$narrowed" ]; then
+  echo "$count of $(suites | wc -l | tr -d ' ') suites passed (narrowed: ${narrowed#changed suites: })"
+else
+  echo "$count suites passed"
+fi
