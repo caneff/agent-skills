@@ -361,6 +361,45 @@ class AppendRowTest(AppendCase):
         self.assertEqual({r["ticket"] for r in self.rows().values()}, {400})
 
 
+class AppendUnknownCostTest(AppendCase):
+    """#1374: a review axis whose cost cannot be attributed is recorded with the cost unknown."""
+
+    def cost(self, ticket, rtype="standards"):
+        self.ok(ticket, rtype)
+        return next(r for r in self.rows().values() if r["type"] == rtype)["cost"]
+
+    def test_an_axis_run_with_no_transcript_is_recorded_with_unknown_tokens(self):
+        tokens = self.cost(401)["tokens"]
+        self.assertEqual(tokens["status"], "unknown")
+        self.assertIn("no transcript", tokens["reason"])
+
+    def test_a_transcript_with_no_usage_is_recorded_with_unknown_tokens(self):
+        tokens = self.cost(402)["tokens"]
+        self.assertEqual(tokens["status"], "unknown")
+        self.assertIn("usage", tokens["reason"])
+
+    def test_known_tokens_with_unreadable_wall_clock_keeps_the_tokens_and_marks_the_clock(self):
+        cost = self.cost(418)
+        self.assertEqual(cost["tokens"]["status"], "known")
+        self.assertEqual(cost["wall_clock"]["status"], "unknown")
+        self.assertIn("timestamp", cost["wall_clock"]["reason"])
+
+    def test_spec_and_correctness_rows_with_no_transcript_are_recorded_too(self):
+        for axis, letter in (("spec", "P"), ("correctness", "C")):
+            write_jsonl(self.cache / "skills" / f"findings-{axis}-408.jsonl",
+                        [finding(f"{letter}1", "hard", "a.py", "Thing 408", axis=axis)])
+            self.assertEqual(self.cost(408, axis)["tokens"]["status"], "unknown")
+
+    def test_report_counts_the_row_as_a_run_review_with_unknown_cost_not_zero(self):
+        self.ok(401, "standards")
+        r = run("report", "--ledger", self.ledger, "--format", "json", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        std = next(t for t in json.loads(r.stdout)["types"] if t["type"] == "standards")
+        self.assertEqual((std["rows"], std["unknown_cost_rows"], std["skipped_rows"]), (1, 1, None))
+        self.assertIsNone(std["tokens"])
+        self.assertIsNone(std["wall_clock_seconds"])
+
+
 class AppendRefusalTest(AppendCase):
     def assert_refused(self, r, *needles):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
@@ -368,17 +407,12 @@ class AppendRefusalTest(AppendCase):
             self.assertIn(n, r.stderr)
         self.assertEqual(self.rows(), {})
 
-    def test_a_transcript_with_no_usage_is_refused_not_written_as_zero_cost(self):
-        self.assert_refused(self.append(402, "standards"), "tokens", "usage")
-
-    def test_an_axis_run_with_no_transcript_is_refused_not_written_as_zero_cost(self):
-        self.assert_refused(self.append(401, "standards"), "tokens", "no transcript")
-
     def test_a_round_the_ticket_has_no_sidecar_for_is_refused(self):
         self.assert_refused(self.append(404, "standards", 1), "findings sidecar", "round 1")
 
-    def test_known_tokens_with_unreadable_wall_clock_is_still_refused(self):
-        self.assert_refused(self.append(418, "standards"), "wall_clock", "timestamp")
+    def test_a_verification_run_with_an_unattributed_cost_is_still_refused(self):
+        write_jsonl(self.cache / "skills" / "findings-verification-407.jsonl", [])
+        self.assert_refused(self.append(407, "verification"), "tokens", "no transcript")
 
     def test_a_missing_transcripts_tree_is_refused(self):
         self.assert_refused(self.append(400, "standards", tr=self.tmp / "absent"), "transcripts tree not found")
