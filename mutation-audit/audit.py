@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Pass one of mutation-audit: parse `mutmut results` text into candidate rows,
-and suggest target modules when none is given.
+"""Pass one of mutation-audit: parse `mutmut results` text (Python) or a
+StrykerJS JSON report (`.mjs`/`.js`) into candidate rows, and suggest target
+modules when none is given.
 
 mutmut 3.x has no clean structured export (see spec #365's recon) — `mutmut
 results --all true` text is the stable contract: one line per mutant,
@@ -16,9 +17,13 @@ resolving the real line means reading the target module. That's the judgment
 pass in SKILL.md, same as dead-code's judgment pass reads code to re-bucket a
 vulture hit — here it also fills `line`/`before`/`after`/`failure`.
 
-`suggest_candidates` is the second seam: given a list of repo-relative `.py`
-paths, return the subset worth mutation-testing — a module with a sibling
-test file, skipping vendored/build/fixture/test files themselves. Pure, no
+`parse_stryker_report` is the same seam for a JS target: Stryker's `Survived`
+-> `rewrite`, `NoCoverage` -> `no-coverage`, `Killed`/`Timeout` counted and
+dropped, and it carries the real source line.
+
+`suggest_candidates` is the second seam: given a list of repo-relative `.py`,
+`.mjs` and `.js` paths, return the subset worth mutation-testing — a module
+with a sibling test file, skipping vendored/build/fixture/test files themselves. Pure, no
 filesystem walk inside it; the caller collects `paths` (via `os.walk` or
 similar) and hands them in. Never returns "everything" — an empty list is a
 valid answer when nothing in scope looks testable.
@@ -35,9 +40,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
@@ -116,7 +123,6 @@ class Inconclusive(Exception):
 
 INCONCLUSIVE_EXIT = 3
 
-JS_SUFFIXES = (".mjs", ".js")
 STRYKER_VERSION = "10.0.0"
 
 # Stryker statuses that carry no verdict of their own: its own score leaves
@@ -133,6 +139,28 @@ def parse_or_inconclusive(text):
     return parse_mutmut_results(text)
 
 
+def _run_bounded(args, target):
+    """Run `args` to completion in its own process group and return the
+    `CompletedProcess`. Past `MUTATION_AUDIT_TIMEOUT` seconds (default 3600)
+    the whole group is killed and `Inconclusive` raised: killing only the
+    direct child (`npx`, `uvx`) would leave the tool it started running and
+    writing into the audited checkout."""
+    limit = float(os.environ.get("MUTATION_AUDIT_TIMEOUT", "3600"))
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            stdin=subprocess.DEVNULL, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=limit)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise Inconclusive(f"`{' '.join(args)}` timed out after {limit:g}s (target {target})") from None
+    return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+
+def _output_tail(run):
+    return "\n".join((run.stdout + run.stderr).strip().splitlines()[-5:])
+
+
 def run_mutmut(target):
     """Run mutmut through `uvx` in the cwd and return its `results --all true`
     text. Raises `Inconclusive`, saying why, when uvx is missing, a mutmut
@@ -141,20 +169,10 @@ def run_mutmut(target):
     mutmut mutates is the `source_paths` config SKILL.md step 3 writes."""
     if shutil.which("uvx") is None:
         raise Inconclusive(f"mutmut unavailable: `uvx` is not on PATH, so nothing was mutated (target {target})")
-    limit = float(os.environ.get("MUTATION_AUDIT_TIMEOUT", "3600"))
-
-    def call(args):
-        try:
-            return subprocess.run(["uvx", *args], capture_output=True, text=True,
-                                  stdin=subprocess.DEVNULL, timeout=limit)
-        except subprocess.TimeoutExpired:
-            raise Inconclusive(f"`uvx {' '.join(args)}` timed out after {limit:g}s (target {target})") from None
-
-    run = call(["--with", "pytest", "mutmut", "run"])
+    run = _run_bounded(["uvx", "--with", "pytest", "mutmut", "run"], target)
     if run.returncode != 0:
-        tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-5:])
-        raise Inconclusive(f"mutmut run failed (exit {run.returncode}) (target {target}):\n{tail}")
-    res = call(["mutmut", "results", "--all", "true"])
+        raise Inconclusive(f"mutmut run failed (exit {run.returncode}) (target {target}):\n{_output_tail(run)}")
+    res = _run_bounded(["uvx", "mutmut", "results", "--all", "true"], target)
     if res.returncode != 0:
         raise Inconclusive(f"mutmut results failed (exit {res.returncode}): {res.stderr.strip()}")
     return res.stdout
@@ -168,7 +186,9 @@ def parse_stryker_report(text):
     counted into `killed_count` and dropped. `CompileError` and `Ignored`
     never ran, and Stryker's own score leaves them out too. Anything else
     (`RuntimeError`, `Pending`, an unknown status) raises `Inconclusive`: the
-    mutant was not judged, and dropping it would read as a clean run. Unlike
+    mutant was not judged, and dropping it would read as a clean run. So does
+    a report in which no mutant was judged at all (none, or all `Ignored`/
+    `CompileError`): `[]` is for a run whose every mutant was killed. Unlike
     mutmut, the report carries the real source `line`.
     """
     try:
@@ -199,6 +219,8 @@ def parse_stryker_report(text):
             rows.append(auditlib.finding(
                 bucket, path, line, "surviving-mutant",
                 f"mutant survives at {path}:{line} ({m['mutatorName']}, {mutant})", **extra))
+    if killed_count + survived_count + no_coverage_count == 0:
+        raise Inconclusive("Stryker's report holds no judged mutant; it did not mutate the target")
     rows.sort(key=lambda r: (r["file"], r["line"], int(r["extra"]["mutant"].rsplit("#", 1)[1])))
     for row in rows:
         row["extra"]["killed_count"] = killed_count
@@ -207,22 +229,10 @@ def parse_stryker_report(text):
     return rows
 
 
-def parse_stryker_or_inconclusive(text):
-    """`parse_stryker_report`, but a report holding no mutant at all raises
-    `Inconclusive` instead of returning `[]`, which reads as a clean run."""
-    rows = parse_stryker_report(text)
-    if not any(entry["mutants"] for entry in json.loads(text)["files"].values()):
-        raise Inconclusive("Stryker's report holds no mutant; it did not mutate the target")
-    return rows
-
-
 def js_test_file(target):
-    """The sibling test file of a `.mjs`/`.js` target, or `None` when absent."""
-    stem = target[: target.rindex(".")]
-    for candidate in (f"{stem}.test.mjs", f"{stem}.test.js"):
-        if os.path.isfile(candidate):
-            return candidate
-    return None
+    """The sibling test file of a `.mjs`/`.js` target (`_sibling_tests`' rule),
+    or `None` when the target is not a worthy module or none exists."""
+    return next((t for t in sorted(_sibling_tests(target) or ()) if os.path.isfile(t)), None)
 
 
 def run_stryker(target):
@@ -236,7 +246,7 @@ def run_stryker(target):
     that lists the repo root reads as false kills. The JSON reporter is
     pointed at a temp dir through a config file passed by path, so no
     `reports/` lands in the audited checkout (Stryker removes `.stryker-tmp/`
-    itself). The audited repo's `package.json` is untouched: the packages come
+    itself on a normal exit; a timeout kills its whole process group). The audited repo's `package.json` is untouched: the packages come
     from `npx -p`.
     """
     if shutil.which("npx") is None:
@@ -244,7 +254,6 @@ def run_stryker(target):
     test_file = js_test_file(target)
     if test_file is None:
         raise Inconclusive(f"no sibling test file for {target} (looked for <stem>.test.mjs and <stem>.test.js); nothing to mutate against")
-    limit = float(os.environ.get("MUTATION_AUDIT_TIMEOUT", "3600"))
     with tempfile.TemporaryDirectory() as out:
         report = os.path.join(out, "report.json")
         conf = os.path.join(out, "stryker.conf.json")
@@ -254,13 +263,9 @@ def run_stryker(target):
                 "-p", f"@stryker-mutator/tap-runner@{STRYKER_VERSION}", "stryker", "run", conf,
                 "--testRunner", "tap", "--coverageAnalysis", "perTest",
                 "--mutate", target, "--testFiles", test_file, "--reporters", "clear-text,json"]
-        try:
-            run = subprocess.run(args, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=limit)
-        except subprocess.TimeoutExpired:
-            raise Inconclusive(f"`stryker run` timed out after {limit:g}s (target {target})") from None
+        run = _run_bounded(args, target)
         if run.returncode != 0:
-            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-5:])
-            raise Inconclusive(f"stryker run failed (exit {run.returncode}) (target {target}):\n{tail}")
+            raise Inconclusive(f"stryker run failed (exit {run.returncode}) (target {target}):\n{_output_tail(run)}")
         try:
             with open(report, encoding="utf-8") as f:
                 return f.read()
@@ -276,32 +281,31 @@ def _sibling_tests(p):
     `suggest_candidates` (keep when a sibling exists) and `no_test_modules`
     (keep when none does) share, so the two can never drift apart.
     """
-    parts = p.split("/")
-    dirs, name = parts[:-1], parts[-1]
-    if name.endswith(JS_SUFFIXES):
-        # `.mjs`/`.js` module: tested by `<stem>.test.mjs` (or `.test.js`)
-        # beside it. `is_test_or_fixture` is Python-only, so its directory
-        # skips are repeated here.
-        if auditlib.EXCLUDED_DIRS & set(dirs) or "fixtures" in dirs or ".test." in name:
-            return None
-        stem = name[: name.rindex(".")]
-        return {"/".join([*dirs, f"{stem}.test.mjs"]), "/".join([*dirs, f"{stem}.test.js"])}
     if auditlib.is_test_or_fixture(p):
         return None
-    stem = name[: -len(".py")]
+    parts = p.split("/")
+    dirs, name = parts[:-1], parts[-1]
+    stem = name[: name.rindex(".")]
+    if name.endswith(auditlib.JS_SUFFIXES):
+        return {"/".join([*dirs, f"{stem}.test.mjs"]), "/".join([*dirs, f"{stem}.test.js"])}
     return {
         "/".join([*dirs, f"test_{name}"]),
         "/".join([*dirs, f"{stem}_test.py"]),
     }
 
 
+def _source_paths(root):
+    """Every `.py`, `.mjs` and `.js` path under `root`, in one walk."""
+    return auditlib.walk_source(root, (".py", *auditlib.JS_SUFFIXES))
+
+
 def suggest_candidates(paths):
     """Suggest candidate modules to mutation-test from repo state.
 
-    Pure: a list of repo-relative `.py` paths in, candidate module paths out
+    Pure: a list of repo-relative `.py`/`.mjs`/`.js` paths in, candidate module paths out
     (sorted). A path is a candidate when it's a worthy source module (see
-    `_sibling_tests`) AND a sibling test file exists for it in `paths` (mutmut
-    needs a test suite to mutate against; a module with no tests is not a
+    `_sibling_tests`) AND a sibling test file exists for it in `paths` (the
+    mutation tool needs a test suite to mutate against; a module with no tests is not a
     useful target — `no_test_modules` reports those instead). Never errors,
     never falls back to "everything" — an empty input or a repo with no
     testable module returns `[]`.
@@ -318,7 +322,7 @@ def suggest_candidates(paths):
 def no_test_modules(paths):
     """The worthy source modules in `paths` that have NO sibling test — the
     strict inverse of `suggest_candidates`' sibling filter over the same
-    worthy universe. A worthy module with zero tests can't be mutated (mutmut
+    worthy universe. A worthy module with zero tests can't be mutated (the tool
     has nothing to run), so it is the worst case — 0% coverage — not something
     to drop silently. Pure, sorted, uncapped; `[]` when every worthy module
     has a test.
@@ -595,9 +599,10 @@ def _check_stryker_timeout_counts_killed_and_unjudged_statuses_stop():
             assert status in str(e), e
         else:
             raise AssertionError(f"{status} mutant was accepted")
-    for bad in ("", "not json", "{}", _stryker_report()):
+    # Nothing judged is not a clean run: no mutant, or only unjudged ones.
+    for bad in ("", "not json", "{}", _stryker_report(), _stryker_report("Ignored", "CompileError")):
         try:
-            parse_stryker_or_inconclusive(bad)
+            parse_stryker_report(bad)
         except Inconclusive:
             pass
         else:
@@ -618,19 +623,31 @@ def _check_js_candidate_selection():
         with contextlib.redirect_stdout(buf):
             main(["audit.py", "--suggest", root])
         assert [json.loads(l)["candidate"] for l in buf.getvalue().splitlines()] == ["x.mjs"], buf.getvalue()
+        # The no-test stat counts JS modules in the same universe.
+        for name in ("lone.mjs", "x.test.mjs"):
+            open(os.path.join(root, name), "w").close()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["audit.py", "--no-tests", root])
+        assert json.loads(buf.getvalue()) == {"no_tests": ["lone.mjs"], "total": 2}, buf.getvalue()
 
 
-def _stub_npx(dirpath, report_text, exit_code=0):
+def _stub_npx(dirpath, report_text, exit_code=0, hang=False):
     """A stand-in `npx` (a Python script run by this interpreter) that records
     its argv and cwd, then writes `report_text` where the config file it was
-    handed says the JSON reporter should."""
+    handed says the JSON reporter should (writes no file when it is `None`).
+    `hang` leaves a grandchild running and waits, the shape of a
+    Stryker that outlives `npx`; its pid goes to `child.pid`."""
     stub = os.path.join(dirpath, "npx")
     with open(stub, "w", encoding="utf-8") as f:
         f.write(f"#!{sys.executable}\n"
                 "import json, os, sys\n"
                 f"open({os.path.join(dirpath, 'argv.json')!r}, 'w').write(json.dumps([os.getcwd()] + sys.argv[1:]))\n"
                 "conf = [a for a in sys.argv if a.endswith('.json')]\n"
-                "if conf:\n"
+                + (f"import subprocess, time\n"
+                   f"open({os.path.join(dirpath, 'child.pid')!r}, 'w').write(str(subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']).pid))\n"
+                   "time.sleep(60)\n" if hang else "") +
+                "if conf and " + ("False" if report_text is None else "True") + ":\n"
                 "    out = json.load(open(conf[0]))['jsonReporter']['fileName']\n"
                 f"    open(out, 'w').write({report_text!r})\n"
                 f"sys.exit({exit_code})\n")
@@ -671,9 +688,36 @@ def _check_run_js_target_through_stryker():
         _stub_npx(d, report, exit_code=1)
         code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
         assert code == 3 and out == "" and "stryker run failed" in err, (code, out, err)
-        _stub_npx(d, "", exit_code=0)
+        _stub_npx(d, None)
         code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
-        assert code == 3 and out == "" and "INCONCLUSIVE" in err, (code, out, err)
+        assert code == 3 and out == "" and "wrote no JSON report" in err, (code, out, err)
+        _stub_npx(d, "")
+        code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
+        assert code == 3 and out == "" and "not a Stryker JSON report" in err, (code, out, err)
+        # A parseable report with nothing judged is not a clean run either.
+        _stub_npx(d, _stryker_report("Ignored", "CompileError"))
+        code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
+        assert code == 3 and out == "" and "no judged mutant" in err, (code, out, err)
+        # An all-killed run is a real clean run.
+        _stub_npx(d, _stryker_report("Killed", "Timeout"))
+        code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
+        assert (code, out) == (0, ""), (code, out, err)
+
+        # A hung Stryker is bounded, and its whole process group dies with it.
+        _stub_npx(d, report, hang=True)
+        code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd,
+                                  extra_env={"MUTATION_AUDIT_TIMEOUT": "2"})
+        assert code == 3 and out == "" and "timed out" in err, (code, out, err)
+        child = int(open(os.path.join(d, "child.pid")).read())
+        for _ in range(50):
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(child, signal.SIGKILL)
+            raise AssertionError("the timed-out run left its child process running")
 
     with tempfile.TemporaryDirectory() as empty, tempfile.TemporaryDirectory() as cwd:
         open(os.path.join(cwd, "sample.mjs"), "w").close()
@@ -711,17 +755,14 @@ def _selfcheck():
 def main(argv):
     if argv[1:2] == ["--suggest"]:
         root = argv[2] if len(argv) > 2 else "."
-        paths = auditlib.walk_source(root)
-        for suffix in JS_SUFFIXES:
-            paths += auditlib.walk_source(root, suffix)
-        for candidate in suggest_candidates(paths):
+        for candidate in suggest_candidates(_source_paths(root)):
             print(json.dumps({"candidate": candidate}))
         return
     if argv[1:2] == ["--no-tests"]:
         # The worthy source modules with no sibling test, plus the worthy-module
         # total, for the repo-wide "N of M source modules have no tests" stat.
         root = argv[2] if len(argv) > 2 else "."
-        paths = auditlib.walk_source(root)
+        paths = _source_paths(root)
         worthy = sum(1 for p in paths if _sibling_tests(p) is not None)
         print(json.dumps({"no_tests": no_test_modules(paths), "total": worthy}))
         return
@@ -730,8 +771,8 @@ def main(argv):
             if len(argv) < 3:
                 print("usage: audit.py --run <target-module.py|.mjs|.js>", file=sys.stderr)
                 sys.exit(1)
-            if argv[2].endswith(JS_SUFFIXES):
-                rows = parse_stryker_or_inconclusive(run_stryker(argv[2]))
+            if argv[2].endswith(auditlib.JS_SUFFIXES):
+                rows = parse_stryker_report(run_stryker(argv[2]))
             else:
                 rows = parse_or_inconclusive(run_mutmut(argv[2]))
             for row in rows:

@@ -79,8 +79,9 @@ covered without re-running mutmut.
 
 2. **Confirm the target is mutation-testable.** It must be a real `.py`
    (or `.mjs`/`.js`) file with a sibling test file (same rule as the
-   suggester). A `.mjs`/`.js` target skips steps 3 and 4: § JavaScript targets. If it has
-   no tests, mutmut has nothing to run against — say so and stop.
+   suggester). A `.mjs`/`.js` target skips steps 3 and 4:
+   § JavaScript targets. If it has no tests, the tool has nothing to run
+   against — say so and stop.
 
 3. **Scope mutmut to just the target.** mutmut 3.x reads `[tool.mutmut]`
    (pyproject.toml) or `[mutmut]` (setup.cfg) for `source_paths` — there is
@@ -191,6 +192,13 @@ in that setup.
    not by assuming the removal worked — a failed cleanup leaves
    mutation-testing state for the next run to trip over.
 
+   For a JavaScript target the artifacts are `.stryker-tmp/` and `reports/`.
+   A normal Stryker exit removes `.stryker-tmp/` itself and the report goes
+   to a temp dir, so `test -e .stryker-tmp` is expected to fail; after an
+   INCONCLUSIVE run it may not, and a `.stryker-tmp/` this run left (untracked,
+   `git status --porcelain` shows it) is removed with `rm -r .stryker-tmp`.
+   Never remove one that was already there before the run.
+
 ## JavaScript targets
 
 A `.mjs`/`.js` target runs StrykerJS's tap runner (`node --test` has no native
@@ -202,9 +210,10 @@ python3 ~/.agents/skills/mutation-audit/audit.py --run <target.mjs>
 ```
 
 Run it from the repo root. `run_stryker` runs `npx -y -p
-@stryker-mutator/core@10.0.0 -p @stryker-mutator/tap-runner@10.0.0 stryker run
+@stryker-mutator/core@<v> -p @stryker-mutator/tap-runner@<v> stryker run
 <config> --testRunner tap --coverageAnalysis perTest --mutate <target>
---testFiles <target's sibling test> --reporters clear-text,json`. It needs no
+--testFiles <target's sibling test> --reporters clear-text,json`, `<v>` being
+`STRYKER_VERSION` in `audit.py`, the one place the pin lives. It needs no
 step 3 config. Three things it does for you, which a hand-run must repeat:
 
 - **Only the target's own test file goes to `--testFiles`.** The tap runner's
@@ -215,8 +224,10 @@ step 3 config. Three things it does for you, which a hand-run must repeat:
   `reports/` lands in the checkout. Stryker removes `.stryker-tmp/` itself.
 - **It exits 3 with `INCONCLUSIVE: <why>`**, no rows, when `npx` is missing,
   the sibling test file is missing, Stryker fails or exceeds
-  `MUTATION_AUDIT_TIMEOUT`, the report holds no mutant, or a mutant is
-  `RuntimeError`/`Pending` (not judged).
+  `MUTATION_AUDIT_TIMEOUT` (its whole process group is killed), the report
+  holds no judged mutant, or a mutant is `RuntimeError`/`Pending`. After an
+  INCONCLUSIVE run, do step 7's cleanup: a killed or failed Stryker can
+  leave `.stryker-tmp/` behind.
 
 `parse_stryker_report(text) -> list[dict]` is the tested seam, backed by
 `~/.agents/skills/mutation-audit/fixtures/js/` (a real run of `sample.mjs`,
@@ -227,8 +238,7 @@ are left out, as Stryker's own score leaves them. Unlike mutmut, the report
 carries the real `line`, and `extra.mutant` is
 `<file>:<line>:<mutator>#<id>`. Pass two (step 5) still reads the covering
 test and fills `before`/`after`; use the report's `replacement` for the
-concrete mutation. Steps 6 and 7 apply unchanged, minus the mutmut artifacts:
-check `git status --porcelain` for a stray `.stryker-tmp/` or `reports/`.
+concrete mutation. Steps 6 and 7 apply unchanged, minus the mutmut artifacts.
 
 ## Single-diff witness mode
 
