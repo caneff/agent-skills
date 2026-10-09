@@ -106,6 +106,15 @@ out=$(cd "$shadow/repo" && TMPDIR=$shadow/tmpdir PATH=/usr/bin:/bin bash tests/a
 check "a missing uv fails the gate, naming uv and how to get it" "$([ "$rc" != 0 ] && has "uv is not on PATH" && has "install uv"; echo $?)"
 check "...and leaves no temp directory behind" "$([ -z "$(ls -A "$shadow/tmpdir")" ]; echo $?)"
 
+# The suites run on the system python3, the interpreter the code they test
+# runs on, never a newer one uv manages: a green suite on 3.14 can pass a
+# SyntaxError on 3.12.
+fresh a/idiom_test.py=pytest_idiom
+want=$(/usr/bin/python3 -c 'import sys; print(sys.version_info[:2])')
+got=$(cd "$shadow/repo" && uv run --locked python3 -c 'import sys; print(sys.version_info[:2])' 2>/dev/null)
+check "suites run on the system python3 ($want), not a uv-managed one (got: ${got:-nothing})" \
+  "$([ -n "$got" ] && [ "$got" = "$want" ]; echo $?)"
+
 # This repo's own tree: no tracked suite imports unittest, and both testing
 # skills state the ruling and cite ADR 0007 by a path that resolves anywhere.
 out=$(cd "$root" && python3 tests/unittest_imports.py 2>&1); rc=$?
