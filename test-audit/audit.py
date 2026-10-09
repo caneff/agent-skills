@@ -165,17 +165,26 @@ def is_mock_the_world(func):
     return mock_calls >= MOCK_CEILING and mock_calls > real_calls
 
 
-def _is_interaction_check(node):
+def _interaction_check(node):
+    """`(is_check, receiver)` for an assertion that a mock was called: `assert
+    m.called` or `m.assert_called*(...)`. The receiver is the source text of
+    `m`, None when the check is not on an attribute."""
     if isinstance(node, ast.Expr):
         node = node.value
     if isinstance(node, ast.Assert):
         test = node.test
         if isinstance(test, ast.Attribute) and test.attr == "called":
-            return True
-        name = _bare_name(test)
-        return bool(name and name.startswith("assert_called"))
+            return True, ast.unparse(test.value)
+        node = test
     name = _bare_name(node)
-    return bool(name and name.startswith("assert_called"))
+    if name and name.startswith("assert_called"):
+        func = node.func
+        return True, ast.unparse(func.value) if isinstance(func, ast.Attribute) else None
+    return False, None
+
+
+def _is_interaction_check(node):
+    return _interaction_check(node)[0]
 
 
 def is_interaction_only(func):
@@ -189,6 +198,115 @@ def is_interaction_only(func):
     if not checks:
         return False
     return all(checks)
+
+
+STUB_SMELL = "stub asserted called"
+STUB_KEYWORDS = frozenset({"return_value", "side_effect"})
+
+
+def _stubbed_receivers(func):
+    """Source text of every mock the test gives an input to: `m.return_value =`
+    or `m.side_effect =` assigns it to `m`; `m = Mock(return_value=...)` gives
+    it to `m`."""
+    stubbed = set()
+    for n in ast.walk(func):
+        if not isinstance(n, ast.Assign):
+            continue
+        for target in n.targets:
+            if isinstance(target, ast.Attribute) and target.attr in STUB_KEYWORDS:
+                stubbed.add(ast.unparse(target.value))
+            elif isinstance(n.value, ast.Call) and any(kw.arg in STUB_KEYWORDS for kw in n.value.keywords):
+                stubbed.add(ast.unparse(target))
+    return stubbed
+
+
+def has_called_stub(func):
+    """10. stub asserted called -- the same mock gets a `return_value` or
+    `side_effect` and is also checked with `assert_called*` or `.called`.
+    `is_interaction_only` needs every check to be a call check, so this mixed
+    form, with a real outcome assertion beside it, gets through there. The
+    stub feeds the code its input; asserting it was called pins how the code
+    got that input, so a refactor that fetches it another way goes red."""
+    stubbed = _stubbed_receivers(func)
+    return bool(stubbed) and any(_interaction_check(n)[1] in stubbed for n in ast.walk(func))
+
+
+PRIVATE_SMELL = "private-API access"
+VACUOUS_SMELL = "vacuous loop assertion"
+
+
+def _is_private_name(name):
+    """`_x` or `__x`, not a dunder such as `__class__`."""
+    return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+
+
+def has_private_access(func):
+    """11. private-API access -- `x._name` on a receiver other than `self` or
+    `cls`. It reaches into what a caller cannot see, so an internal rename
+    turns the test red though no behavior changed. Candidate only: a stdlib
+    `sys._getframe` reads the same, and the judgment pass tells them apart."""
+    return any(
+        isinstance(n, ast.Attribute)
+        and _is_private_name(n.attr)
+        and not (isinstance(n.value, ast.Name) and n.value.id in ("self", "cls"))
+        for n in ast.walk(func)
+    )
+
+
+def private_imports(tree):
+    """Lines of `from mod import _name`: the import form of private-API access,
+    which sits at module scope, outside every test function."""
+    return [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and any(_is_private_name(a.name) for a in n.names)
+    ]
+
+
+# Wrappers that pass their argument's contents through, so the iterable of
+# `for i, x in enumerate(result)` is `result`. `range` and `len` are absent on
+# purpose: they build numbers from nothing the code under test returned.
+_PASS_THROUGH = frozenset({"enumerate", "zip", "sorted", "reversed", "list", "tuple", "set", "iter"})
+_VIEW_METHODS = frozenset({"items", "values", "keys"})
+
+
+def _is_output_iterable(node, from_call):
+    """Does iterating `node` walk something the code under test returned: a
+    call's result, or a local name assigned from one (`from_call`)? A literal
+    collection or a name the test never assigns (a module constant, a fixture)
+    is a fixed input and is never empty by accident."""
+    if isinstance(node, ast.Name):
+        return node.id in from_call
+    if isinstance(node, ast.Attribute):
+        return _is_output_iterable(node.value, from_call)
+    if not isinstance(node, ast.Call):
+        return False
+    name = _call_name(node)
+    if name in _PASS_THROUGH and isinstance(node.func, ast.Name):
+        return any(_is_output_iterable(a, from_call) for a in node.args)
+    if name in _VIEW_METHODS and isinstance(node.func, ast.Attribute):
+        return _is_output_iterable(node.func.value, from_call)
+    return name not in ("range", "len")
+
+
+def has_vacuous_loop_assertion(func):
+    """12. vacuous loop assertion -- every assertion sits in the body of a
+    `for` over what the code under test returned, so an empty result runs none
+    of them and the test passes. Any assertion outside such a loop, a length or
+    non-empty check included, clears it."""
+    from_call = {
+        t.id
+        for n in ast.walk(func)
+        if isinstance(n, ast.Assign) and any(isinstance(c, ast.Call) for c in ast.walk(n.value))
+        for t in n.targets
+        if isinstance(t, ast.Name)
+    }
+    inside = set()
+    for loop in ast.walk(func):
+        if isinstance(loop, (ast.For, ast.AsyncFor)) and _is_output_iterable(loop.iter, from_call):
+            inside.update(id(n) for stmt in loop.body for n in ast.walk(stmt))
+    mechs = [m for m in _assertion_mechanisms(func) if not (isinstance(m, ast.Assert) and _is_trivial_assert(m))]
+    return bool(mechs) and all(id(m) in inside for m in mechs)
 
 
 def is_empty_or_skipped(func):
@@ -535,6 +653,9 @@ DETECTORS = [
     ("empty/skipped test", is_empty_or_skipped),
     ("dead assertion in an expect-exception block", has_dead_assertion_in_raises),
     ("broad exception expectation", has_broad_raises),
+    (STUB_SMELL, has_called_stub),
+    (PRIVATE_SMELL, has_private_access),
+    (VACUOUS_SMELL, has_vacuous_loop_assertion),
 ]
 
 
@@ -578,6 +699,7 @@ def scan_file(path):
         if is_nonstrict_xfail(cls, xfail_strict):
             findings.append((path, cls.lineno, "non-strict xfail"))
     findings.extend((path, lineno, smell) for lineno, smell in lost_tests(tree))
+    findings.extend((path, lineno, PRIVATE_SMELL) for lineno in private_imports(tree))
     return findings
 
 
@@ -1109,6 +1231,27 @@ def _selfcheck():
         finally:
             os.chmod(path, 0o644)
             shutil.rmtree(locked)
+
+    # 10. stub asserted called: the stubbed receiver must be the one checked
+    assert has_called_stub(_func_from("def test_x():\n    m.get.return_value = 1\n    assert f(m) == 1\n    m.get.assert_called_once()\n"))
+    assert has_called_stub(_func_from("def test_x():\n    m = Mock(side_effect=[1])\n    assert f(m) == 1\n    assert m.called\n"))
+    assert not has_called_stub(_func_from("def test_x():\n    m.get.return_value = 1\n    assert f(m) == 1\n    m.put.assert_called_once()\n"))
+    assert not has_called_stub(_func_from("def test_x():\n    m.get.return_value = 1\n    assert f(m) == 1\n"))
+    assert not has_called_stub(_func_from("def test_x():\n    m = Mock()\n    assert f(m) == 1\n    m.assert_called_once()\n"))
+
+    # 11. private-API access
+    assert has_private_access(_func_from("def test_x():\n    assert c._store == 1\n"))
+    assert has_private_access(_func_from("def test_x():\n    assert self.obj._store == 1\n"))
+    assert not has_private_access(_func_from("def test_x():\n    assert self._store == c.__class__\n"))
+    assert private_imports(ast.parse("from m import _a\nfrom m import b\nimport _c\nfrom m import __v__\n")) == [1]
+
+    # 12. vacuous loop assertion
+    assert has_vacuous_loop_assertion(_func_from("def test_x():\n    r = f()\n    for i in r:\n        assert i > 0\n"))
+    assert has_vacuous_loop_assertion(_func_from("def test_x():\n    for i in enumerate(f().items()):\n        assert i\n"))
+    assert not has_vacuous_loop_assertion(_func_from("def test_x():\n    r = f()\n    assert r\n    for i in r:\n        assert i > 0\n"))
+    assert not has_vacuous_loop_assertion(_func_from("def test_x():\n    for i in range(3):\n        assert f(i) > 0\n"))
+    assert not has_vacuous_loop_assertion(_func_from("def test_x():\n    for i in CASES:\n        assert f(i) > 0\n"))
+    assert not has_vacuous_loop_assertion(_func_from("def test_x():\n    r = f()\n    for i in r:\n        pass\n"))
 
     print("ok")
 

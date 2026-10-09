@@ -376,6 +376,7 @@ function assertionsIn(func, bindings) {
     const e = asExpectAssertion(n);
     if (e) {
       out.push({
+        node: n,
         kind: "expect",
         matcher: e.matcher,
         isEq: EQ_MATCHERS.has(e.matcher),
@@ -387,6 +388,7 @@ function assertionsIn(func, bindings) {
     const a = assertCallInfo(n, bindings);
     if (a) {
       out.push({
+        node: n,
         kind: "assert",
         matcher: a.matcher,
         isEq: ASSERT_EQ_MATCHERS.has(a.matcher),
@@ -516,6 +518,191 @@ function isInteractionOnly(call, source, bindings) {
   return assertions.every((a) => isSpyCheck(a, source));
 }
 
+const STUB_SMELL = "stub asserted called";
+const STUB_MATCHERS = new Set([
+  "mockReturnValue",
+  "mockReturnValueOnce",
+  "mockResolvedValue",
+  "mockResolvedValueOnce",
+  "mockRejectedValue",
+  "mockRejectedValueOnce",
+]);
+
+/** What a chain like `vi.fn().mockReturnValue(1)`, `get.mockResolvedValue(1)`
+ * or `vi.spyOn(obj, "get").mockReturnValue(1)` stubs, as the source texts
+ * `expect(...)` would name it by: `[]` for an anonymous `vi.fn()`, `["obj.get"]`
+ * for a spy, `["get"]` for a mock already named. `null` when the chain
+ * supplies no input. */
+function stubNames(chain, source) {
+  let stubs = false;
+  let n = chain;
+  while (n.type === "CallExpression" && n.callee.type === "MemberExpression") {
+    const path = memberPath(n.callee);
+    if (path && path.length === 2 && path[0] === "vi" && path[1] === "spyOn" && n.arguments.length === 2) {
+      const [target, name] = n.arguments;
+      return stubs && name.type === "StringLiteral" ? [`${source.slice(target.start, target.end)}.${name.value}`] : null;
+    }
+    if (STUB_MATCHERS.has(identifierName(n.callee.property))) stubs = true;
+    n = n.callee.object;
+  }
+  if (!stubs) return null;
+  return n.type === "CallExpression" ? [] : [source.slice(n.start, n.end)];
+}
+
+/** A vitest mock that supplies input (`mockReturnValue` and its `Once`,
+ * `Resolved` and `Rejected` forms) and is also checked with a
+ * `toHaveBeenCalled*` matcher. `isInteractionOnly` needs every assertion to be
+ * a call check, so this mixed form, with an outcome assertion beside it, gets
+ * through there. Asserting the stub was called pins how the code got its input,
+ * so a refactor that fetches it another way goes red. */
+function hasCalledStub(call, source, bindings) {
+  const cb = testCallback(call);
+  if (!cb) return false;
+  const stubbed = new Set();
+  walk(cb.body, (n) => {
+    // `const get = vi.fn().mockReturnValue(1)`: the declared name is the stub too.
+    const decl = n.type === "VariableDeclarator" && n.id.type === "Identifier" && n.init;
+    const names = decl ? stubNames(n.init, source) : n.type === "ExpressionStatement" ? stubNames(n.expression, source) : null;
+    if (!names) return;
+    for (const name of names) stubbed.add(name);
+    if (decl) stubbed.add(n.id.name);
+  });
+  return assertionsIn(cb, bindings).some(
+    (a) =>
+      a.kind === "expect" &&
+      INTERACTION_MATCHERS.has(a.matcher) &&
+      a.actual &&
+      stubbed.has(source.slice(a.actual.start, a.actual.end)),
+  );
+}
+
+const VACUOUS_SMELL = "vacuous loop assertion";
+
+// Calls that hand back their argument's contents, so iterating
+// `Object.keys(result)` walks `result`. Any other call is itself an output.
+const PASS_THROUGH_ROOTS = new Set(["Object", "Array"]);
+const VIEW_METHODS = new Set(["entries", "values", "keys"]);
+
+/** Does iterating `node` walk something the code under test returned: a call's
+ * result, or a local name declared from one (`fromCall`)? A literal collection
+ * or a name the test never declares (a module constant) is a fixed input and
+ * is never empty by accident. */
+function isOutputIterable(node, fromCall) {
+  switch (node.type) {
+    case "Identifier":
+      return fromCall.has(node.name);
+    case "MemberExpression":
+    case "OptionalMemberExpression":
+      return isOutputIterable(node.object, fromCall);
+    case "AwaitExpression":
+      return true;
+    case "ChainExpression":
+    case "TSNonNullExpression":
+      return isOutputIterable(node.expression, fromCall);
+    case "CallExpression":
+    case "OptionalCallExpression": {
+      const c = node.callee;
+      if (c.type === "MemberExpression" && PASS_THROUGH_ROOTS.has(identifierName(c.object))) {
+        return node.arguments.some((a) => isOutputIterable(a, fromCall));
+      }
+      if (c.type === "MemberExpression" && VIEW_METHODS.has(identifierName(c.property))) {
+        return isOutputIterable(c.object, fromCall);
+      }
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+/** Every assertion sits in a `for...of`, `for...in` or `.forEach` over what
+ * the code under test returned, so an empty result runs none of them and the
+ * test passes. An assertion outside such a loop, a length or non-empty check
+ * included, clears it. */
+function isVacuousLoop(call, source, bindings) {
+  const cb = testCallback(call);
+  if (!cb) return false;
+  const assertions = assertionsIn(cb, bindings);
+  if (assertions.length === 0) return false;
+  const fromCall = new Set();
+  walk(cb.body, (n) => {
+    if (n.type !== "VariableDeclarator" || n.id.type !== "Identifier" || !n.init) return;
+    let hasCall = false;
+    walk(n.init, (m) => {
+      if (m.type === "CallExpression" || m.type === "AwaitExpression") hasCall = true;
+    });
+    if (hasCall) fromCall.add(n.id.name);
+  });
+  const loops = [];
+  walk(cb.body, (n) => {
+    if ((n.type === "ForOfStatement" || n.type === "ForInStatement") && isOutputIterable(n.right, fromCall)) {
+      loops.push(n.body);
+    } else if (
+      n.type === "CallExpression" &&
+      n.callee.type === "MemberExpression" &&
+      identifierName(n.callee.property) === "forEach" &&
+      n.arguments.length > 0 &&
+      isOutputIterable(n.callee.object, fromCall)
+    ) {
+      loops.push(n.arguments[0]);
+    }
+  });
+  return assertions.every((a) => loops.some((l) => a.node.start >= l.start && a.node.end <= l.end));
+}
+
+const PRIVATE_SMELL = "private-API access";
+const TS_SUPPRESSION = /@ts-(ignore|expect-error)\b/;
+
+const isMember = (n) => n.type === "MemberExpression" || n.type === "OptionalMemberExpression";
+
+/** Is `member` the matcher half of an `expect(...).toX` chain? A
+ * `@ts-expect-error` above `expect(() => f(1)).toThrow()` silences a type
+ * error in the argument, not a member access. */
+function isExpectChain(member) {
+  let obj = member.object;
+  while (obj && isMember(obj)) obj = obj.object;
+  return !!obj && obj.type === "CallExpression" && calleeName(obj) === "expect";
+}
+
+/** `[line, smell]` for each test that reaches past the public surface of what
+ * it tests: `(x as any).name`, `x["_name"]`, or a member access on the line
+ * under a `@ts-ignore` / `@ts-expect-error`. It reaches into what a caller
+ * cannot see, so an internal rename turns the test red though no behavior
+ * changed. Candidate only: the judgment pass tells a deliberate type test from
+ * a private read. */
+function privateAccess(tree) {
+  const found = [];
+  for (const call of testCalls(tree)) {
+    const cb = testCallback(call);
+    if (!cb) continue;
+    const suppressed = (tree.comments || [])
+      .filter((c) => TS_SUPPRESSION.test(c.value) && c.start >= cb.start && c.end <= cb.end)
+      .map((c) => c.loc.end.line + 1);
+    let hit = false;
+    walk(cb.body, (n) => {
+      if (!isMember(n)) return;
+      const obj = n.object;
+      if (
+        (obj.type === "TSAsExpression" || obj.type === "TSTypeAssertion") &&
+        obj.typeAnnotation.type === "TSAnyKeyword"
+      ) {
+        hit = true;
+      } else if (
+        n.computed &&
+        n.property.type === "StringLiteral" &&
+        /^_(?!_.*__$)/.test(n.property.value) &&
+        obj.type !== "ThisExpression"
+      ) {
+        hit = true;
+      } else if (suppressed.includes(n.loc.start.line) && !isExpectChain(n)) {
+        hit = true;
+      }
+    });
+    if (hit) found.push([lineOf(call), PRIVATE_SMELL]);
+  }
+  return found;
+}
+
 const BROAD_THROW_MATCHERS = new Set(["toThrow", "toThrowError"]);
 
 /** Is `matcherCall` negated, as in `expect(f).not.toThrow()`? */
@@ -551,6 +738,8 @@ const DETECTORS = [
   ["mock-the-world", isMockTheWorld],
   ["interaction-only assertion", isInteractionOnly],
   ["broad exception expectation", isBroadThrow],
+  [STUB_SMELL, hasCalledStub],
+  [VACUOUS_SMELL, isVacuousLoop],
 ];
 
 const LOST_DUPLICATE = "lost test (duplicate name)";
@@ -633,6 +822,7 @@ function smellsIn(tree, source) {
     }
   }
   if (isVitestFile(tree)) found.push(...duplicateTitles(tree));
+  found.push(...privateAccess(tree));
   return found;
 }
 
@@ -1226,6 +1416,39 @@ function selfcheck() {
       rmSync(denied, { recursive: true, force: true });
     }
   }
+
+  // 10-12. candidate smells: stub asserted called, vacuous loop, private-API access
+  const has = (src, smell) => smellsOf(src).includes(smell);
+  assert(
+    has("it('t', () => { const g = vi.fn().mockReturnValue(1); expect(f(g)).toBe(1); expect(g).toHaveBeenCalled(); });", STUB_SMELL),
+    "a named vi.fn() stub that is asserted called",
+  );
+  assert(
+    !has("it('t', () => { const g = vi.fn().mockReturnValue(1); const h = vi.fn(); expect(f(g, h)).toBe(1); expect(h).toHaveBeenCalled(); });", STUB_SMELL),
+    "the asserted mock is not the stub",
+  );
+  assert(
+    has("it('t', () => { const r = f(); r.forEach((i) => { expect(i).toBe(1); }); });", VACUOUS_SMELL),
+    "forEach over the output holds every assertion",
+  );
+  assert(
+    !has("it('t', () => { const r = f(); expect(r.length).toBe(2); r.forEach((i) => { expect(i).toBe(1); }); });", VACUOUS_SMELL),
+    "a length check outside the loop clears it",
+  );
+  assert(
+    !has("it('t', () => { for (const k of Object.keys(CASES)) { expect(f(k)).toBe(1); } });", VACUOUS_SMELL),
+    "a loop over a module constant is a fixed input",
+  );
+  assert(has("it('t', () => { expect(c['_store']).toBe(1); });", PRIVATE_SMELL), "a bracketed private name");
+  assert(!has("it('t', () => { expect(c['__proto__']).toBe(1); });", PRIVATE_SMELL), "a dunder name is not private");
+  assert(
+    has("it('t', () => {\n  // @ts-expect-error private\n  expect(c.store).toBe(1);\n});", PRIVATE_SMELL),
+    "a member access under @ts-expect-error",
+  );
+  assert(
+    !has("it('t', () => {\n  // @ts-expect-error wrong type\n  expect(() => f(1)).toThrow('x');\n});", PRIVATE_SMELL),
+    "an expect matcher chain under @ts-expect-error is no member access",
+  );
 
   process.stdout.write("ok\n");
 }
