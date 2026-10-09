@@ -5,7 +5,7 @@ Scans pytest-style test files and emits `file:line: <smell>` candidates for the
 judgment pass (SKILL.md) to sort into Cut/Rewrite/Keep. This script never
 classifies — it only surfaces candidates.
 
-Six detectors, five small AST checks and one shell-source check:
+Ten detectors, nine small AST checks and one shell-source check:
   1. assertion-free   — no assert / pytest.raises / self.assert*, or only a
                          trivial `assert True` / `assert x is not None`.
   2. tautology         — `assert x == x` (same expression both sides).
@@ -17,6 +17,15 @@ Six detectors, five small AST checks and one shell-source check:
                          Python tests are judged per function, `*.test.sh`
                          per file. A test that runs any code is never flagged
                          here: what it reads is the judgment pass's business.
+  7. dead assertion   — a statement after the first call inside a
+                         `with pytest.raises(...)` block: it never runs.
+  8. lost test         — a second `def test_x` at one module or class scope
+                         replaces the first; a `Test*` class that defines
+                         `__init__` is never collected.
+  9. broad exception   — `pytest.raises(Exception)` / `BaseException` with no
+                         `match=`: it passes on the wrong error.
+ 10. non-strict xfail  — `@pytest.mark.xfail` without `strict=True`, when the
+                         nearest pytest config does not set `xfail_strict`.
 
 Wherever a detector keys off the `assert` name prefix, leading underscores are
 stripped first: `_assert_*` is the private-helper spelling of a delegated
@@ -29,9 +38,11 @@ general classifier. jest, go test, and other non-Python runners are
 out-of-scope follow-ups per the parent spec (#275).
 """
 import ast
+import configparser
 import os
 import re
 import sys
+import tomllib
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
 import auditlib  # noqa: E402
@@ -202,6 +213,180 @@ def is_empty_or_skipped(func):
             return True
     return False
 
+# --- 7-10. exact-match smells -----------------------------------------------
+
+LOST_DUPLICATE = "lost test (duplicate name)"
+LOST_UNCOLLECTED = "lost test (uncollected class)"
+BROAD_EXCEPTIONS = frozenset({"Exception", "BaseException"})
+
+
+def has_dead_assertion_in_raises(func):
+    """7. dead assertion — in a `with pytest.raises(...)` block, the first call
+    is the one expected to raise, so every statement after the statement that
+    holds it never runs and can never fail.
+
+    ponytail: any statement after it counts, not only an `assert`, so the
+    `with raises(E): setup(); target()` shape is a candidate too. The judgment
+    pass tells a setup call that should sit outside the block from a target."""
+    for node in ast.walk(func):
+        if not isinstance(node, (ast.With, ast.AsyncWith)):
+            continue
+        if not any(_call_name(item.context_expr) == "raises" for item in node.items):
+            continue
+        for i, stmt in enumerate(node.body):
+            if any(isinstance(n, ast.Call) for n in ast.walk(stmt)):
+                if node.body[i + 1 :]:
+                    return True
+                break
+    return False
+
+
+def _expected_exception(call):
+    """The exception argument of a `raises(...)` call, positional or by keyword."""
+    if call.args:
+        return call.args[0]
+    return next((kw.value for kw in call.keywords if kw.arg == "expected_exception"), None)
+
+
+def has_broad_raises(func):
+    """9. broad exception expectation — `raises(Exception)` with no `match=`."""
+    for node in ast.walk(func):
+        if (
+            _call_name(node) == "raises"
+            and _name_of(_expected_exception(node)) in BROAD_EXCEPTIONS
+            and not any(kw.arg == "match" for kw in node.keywords)
+        ):
+            return True
+    return False
+
+
+def is_nonstrict_xfail(func, xfail_strict):
+    """10. non-strict xfail — `@pytest.mark.xfail` on a test function or a class
+    that is not strict. Without
+    a `strict=` keyword the ini decides (`xfail_strict`); a literal `strict=`
+    wins over it. A non-literal `strict=` is unknown, so it is not flagged."""
+    for dec in func.decorator_list:
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        if _name_of(target) != "xfail" or _name_of(getattr(target, "value", None)) != "mark":
+            continue
+        kws = dec.keywords if isinstance(dec, ast.Call) else []
+        strict_kw = next((kw for kw in kws if kw.arg == "strict"), None)
+        if strict_kw is None:
+            strict = xfail_strict
+        elif isinstance(strict_kw.value, ast.Constant):
+            strict = bool(strict_kw.value.value)
+        else:
+            continue
+        if not strict:
+            return True
+    return False
+
+
+def lost_tests(tree):
+    """8. lost test — yield `(lineno, smell)`. A name defined twice among one
+    scope's direct statements loses all but its last definition; the shadowed
+    ones are reported, in a unittest.TestCase class too. A `Test*` class with
+    `__init__` and a test method is never collected; a TestCase is collected by
+    unittest's rules, so it is exempt from that one."""
+    all_classes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+    classes = [c for c in all_classes if not _is_unittest_testcase(c)]
+    for body in [tree.body] + [c.body for c in all_classes]:
+        by_name = {}
+        for stmt in body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name.startswith("test_"):
+                by_name.setdefault(stmt.name, []).append(stmt.lineno)
+        for linenos in by_name.values():
+            for lineno in linenos[:-1]:
+                yield lineno, LOST_DUPLICATE
+    for cls in classes:
+        funcs = [n for n in cls.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        if (
+            cls.name.startswith("Test")
+            and any(f.name == "__init__" for f in funcs)
+            and any(f.name.startswith("test_") for f in funcs)
+        ):
+            yield cls.lineno, LOST_UNCOLLECTED
+
+
+# pytest 9 renamed `xfail_strict` to `strict_xfail` and keeps the old name as an
+# alias; the umbrella `strict` option turns the strict family on together.
+XFAIL_STRICT_KEYS = ("strict_xfail", "xfail_strict")
+_TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
+
+
+def _truthy(value):
+    return value is True or (isinstance(value, str) and value.strip().lower() in _TRUE_WORDS)
+
+
+def _strictness(options):
+    for key in XFAIL_STRICT_KEYS:
+        if key in options:
+            return _truthy(options[key])
+    return _truthy(options.get("strict", False))
+
+
+def _read_ini(path, section):
+    parser = configparser.RawConfigParser()
+    # read_file, not read: `read` skips a file it cannot open without a word,
+    # which would let a parent directory's config decide in its place.
+    with open(path, encoding="utf-8") as f:
+        parser.read_file(f)
+    return dict(parser[section]) if parser.has_section(section) else None
+
+
+def _pytest_options(directory):
+    """The pytest options of the config file that configures pytest in
+    `directory`, in pytest's own precedence order, or None when no file there
+    does. A file that matches but cannot be read yields `{}`: unreadable is not
+    strict, so its xfail markers are flagged rather than waved through."""
+    for name in ("pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"):
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            if name.endswith(".toml"):
+                with open(path, "rb") as f:
+                    data = tomllib.load(f)
+                if name == "pyproject.toml":
+                    table = data.get("tool", {}).get("pytest")
+                    if table is None:
+                        continue
+                    options = {**table, **table.get("ini_options", {})}
+                else:
+                    options = data.get("pytest", {})
+            elif name in ("pytest.ini", ".pytest.ini"):
+                options = _read_ini(path, "pytest") or {}
+            else:
+                options = _read_ini(path, "pytest" if name == "tox.ini" else "tool:pytest")
+                if options is None:
+                    continue
+        except (OSError, ValueError, TypeError, AttributeError, configparser.Error):
+            # ValueError covers a TOML syntax error and a bad encoding; the
+            # others a config that parses to the wrong shape.
+            return {}
+        return options
+    return None
+
+
+def xfail_strict_for(path):
+    """Does the pytest config nearest `path` make xfail strict? Walks up from
+    the file to the first config that configures pytest, stopping at a repo
+    boundary (a directory holding `.git`), as pytest's rootdir search would
+    settle on the project's own file. No config is not strict."""
+    directory = os.path.dirname(os.path.abspath(path))
+    strict = False
+    while True:
+        options = _pytest_options(directory)
+        if options is not None:
+            strict = _strictness(options)
+            break
+        parent = os.path.dirname(directory)
+        if os.path.exists(os.path.join(directory, ".git")) or parent == directory:
+            break
+        directory = parent
+    return strict
+
+
 # --- 6. prose-assertion ------------------------------------------------------
 
 PROSE_FILE = re.compile(r"\.md\b")
@@ -348,6 +533,8 @@ DETECTORS = [
     ("mock-the-world", is_mock_the_world),
     ("interaction-only assertion", is_interaction_only),
     ("empty/skipped test", is_empty_or_skipped),
+    ("dead assertion in an expect-exception block", has_dead_assertion_in_raises),
+    ("broad exception expectation", has_broad_raises),
 ]
 
 
@@ -378,12 +565,19 @@ def scan_file(path):
         return []
     findings = []
     prose_names = _prose_names(tree)
+    xfail_strict = xfail_strict_for(path)
     for func in _test_functions(tree):
         for smell, detector in DETECTORS:
             if detector(func):
                 findings.append((path, func.lineno, smell))
         if is_prose_assertion(func, prose_names):
             findings.append((path, func.lineno, PROSE_SMELL))
+        if is_nonstrict_xfail(func, xfail_strict):
+            findings.append((path, func.lineno, "non-strict xfail"))
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and not _is_unittest_testcase(n)):
+        if is_nonstrict_xfail(cls, xfail_strict):
+            findings.append((path, cls.lineno, "non-strict xfail"))
+    findings.extend((path, lineno, smell) for lineno, smell in lost_tests(tree))
     return findings
 
 
@@ -410,12 +604,9 @@ def scan_path(root):
 
 # --- gate mode -------------------------------------------------------------
 
-# The one smell a build gates on. The other four are report-only: a
-# mock-the-world or interaction-only test still runs and still fails when the
-# behavior breaks, so blocking a merge on one costs more than it buys. An
-# assertion-free test cannot fail at all, which is the one finding a machine
-# can call a defect without reading anything.
-GATE_SMELL = "assertion-free test"
+# The smells a build gates on, each with the label its fixtures-suppression
+# count is reported under. SKILL.md § Gate mode says why these two and no other.
+GATE_SMELLS = {"assertion-free test": "assertion-free", LOST_DUPLICATE: "duplicate-name"}
 
 # Exit status contract: 0 clean, 1 hollow tests found, 2 unable to check. Only
 # gate mode ever returns 1 -- a report never fails a build -- but 0 and 2 mean
@@ -435,16 +626,20 @@ def _under_fixtures(path):
 
 
 def gate(root):
-    """`(findings, suppressed)` -- the `GATE_SMELL` findings that fail a build,
-    and how many the fixtures exemption dropped.
+    """`(findings, suppressed)` -- the `GATE_SMELLS` findings that fail a build,
+    and how many the fixtures exemption dropped, per `GATE_SMELLS` label.
 
     The count is returned, and reported by `main`, because `_under_fixtures`
     matches a `fixtures` segment at any depth: without it a repo could park
     hollow tests under any directory it named `fixtures` and never see that
     the gate had stopped looking at them (#685)."""
-    gated = [f for f in scan_path(root) if f[2] == GATE_SMELL]
+    gated = [f for f in scan_path(root) if f[2] in GATE_SMELLS]
     findings = [f for f in gated if not _under_fixtures(f[0])]
-    return findings, len(gated) - len(findings)
+    suppressed = {}
+    for path, _, smell in gated:
+        if _under_fixtures(path):
+            suppressed[GATE_SMELLS[smell]] = suppressed.get(GATE_SMELLS[smell], 0) + 1
+    return findings, suppressed
 
 
 def _main_stderr(argv):
@@ -633,7 +828,204 @@ def _selfcheck():
     finally:
         shutil.rmtree(tmp)
 
-    # gate mode: assertion-free only, and never a fixture.
+    # 7. dead assertion in an expect-exception block: every statement after the
+    # first call in the block never runs.
+    assert has_dead_assertion_in_raises(
+        _func_from(
+            "def test_x():\n    with pytest.raises(ValueError):\n        parse('')\n        assert parse.calls == 1\n"
+        )
+    )
+    assert has_dead_assertion_in_raises(
+        _func_from("def test_x():\n    with raises(ValueError) as e:\n        parse('')\n        x = 1\n")
+    )
+    assert not has_dead_assertion_in_raises(
+        _func_from("def test_x():\n    with pytest.raises(ValueError):\n        assert ready\n        parse('')\n")
+    )
+    assert not has_dead_assertion_in_raises(
+        _func_from("def test_x():\n    with pytest.raises(ValueError):\n        parse('')\n    assert after\n")
+    )
+    assert not has_dead_assertion_in_raises(
+        _func_from("def test_x():\n    with open(f):\n        parse('')\n        assert after\n")
+    )
+
+    # 8. lost test: a second def at one scope replaces the first; a Test* class
+    # with __init__ is never collected.
+    def _lost(src):
+        return list(lost_tests(ast.parse(src)))
+
+    assert _lost("def test_a():\n    assert 1\n\ndef test_a():\n    assert 2\n") == [(1, LOST_DUPLICATE)]
+    assert _lost(
+        "class TestA:\n    def test_a(self):\n        assert 1\n    def test_a(self):\n        assert 2\n"
+    ) == [(2, LOST_DUPLICATE)]
+    assert _lost("def test_a():\n    assert 1\ndef test_a():\n    assert 2\ndef test_a():\n    assert 3\n") == [
+        (1, LOST_DUPLICATE),
+        (3, LOST_DUPLICATE),
+    ]
+    # the same name in two scopes, or behind a branch, replaces nothing
+    assert not _lost("def test_a():\n    assert 1\nclass TestA:\n    def test_a(self):\n        assert 2\n")
+    assert not _lost(
+        "if X:\n    def test_a():\n        assert 1\nelse:\n    def test_a():\n        assert 2\n"
+    )
+    assert not _lost("def helper():\n    pass\ndef helper():\n    pass\n")
+    assert _lost("class TestA:\n    def __init__(self):\n        pass\n    def test_a(self):\n        assert 1\n") == [
+        (1, LOST_UNCOLLECTED)
+    ]
+    assert not _lost("class TestA:\n    def test_a(self):\n        assert 1\n")
+    assert not _lost("class Helper:\n    def __init__(self):\n        pass\n    def test_a(self):\n        assert 1\n")
+    assert not _lost("class TestA:\n    def __init__(self):\n        pass\n    def helper(self):\n        pass\n")
+    # a TestCase still loses a shadowed method, though it is exempt from the __init__ rule
+    assert _lost(
+        "class TestA(unittest.TestCase):\n    def test_a(self):\n        pass\n    def test_a(self):\n        pass\n"
+    ) == [(2, LOST_DUPLICATE)]
+    assert not _lost(
+        "class TestA(unittest.TestCase):\n    def __init__(self):\n        pass\n    def test_a(self):\n        assert 1\n"
+    )
+
+    # 9. broad exception expectation
+    assert has_broad_raises(_func_from("def test_x():\n    with pytest.raises(Exception):\n        parse('')\n"))
+    assert has_broad_raises(_func_from("def test_x():\n    with raises(BaseException) as e:\n        parse('')\n"))
+    assert not has_broad_raises(
+        _func_from("def test_x():\n    with pytest.raises(Exception, match='empty'):\n        parse('')\n")
+    )
+    assert not has_broad_raises(_func_from("def test_x():\n    with pytest.raises(ValueError):\n        parse('')\n"))
+    assert has_broad_raises(
+        _func_from("def test_x():\n    with pytest.raises(expected_exception=Exception):\n        parse('')\n")
+    )
+
+    # 10. non-strict xfail: the ini decides when the marker is silent
+    def _xfail(src, strict=False):
+        return is_nonstrict_xfail(_func_from(src + "def test_x():\n    assert 1\n"), strict)
+
+    assert _xfail("@pytest.mark.xfail\n")
+    assert _xfail("@pytest.mark.xfail(reason='bug')\n")
+    assert _xfail("@pytest.mark.xfail(strict=False)\n")
+    assert _xfail("@mark.xfail\n")
+    assert not _xfail("@pytest.mark.xfail(strict=True)\n")
+    assert not _xfail("@pytest.mark.xfail\n", strict=True)
+    assert _xfail("@pytest.mark.xfail(strict=False)\n", strict=True)
+    assert not _xfail("@pytest.mark.xfail(strict=STRICT)\n")
+    assert not _xfail("@pytest.mark.skip\n")
+    assert not _xfail("@pytest.mark.parametrize('a', [1])\n")
+    # a class mark covers every method in it
+    assert is_nonstrict_xfail(ast.parse("@pytest.mark.xfail\nclass TestA:\n    pass\n").body[0], False)
+    assert not is_nonstrict_xfail(ast.parse("@pytest.mark.xfail(strict=True)\nclass TestA:\n    pass\n").body[0], False)
+
+    tmp = tempfile.mkdtemp()
+    try:
+        def _ini_case(name, files):
+            case = os.path.join(tmp, name)
+            os.makedirs(os.path.join(case, ".git"))
+            os.makedirs(os.path.join(case, "pkg"))
+            for fname, text in files.items():
+                with open(os.path.join(case, fname), "w", encoding="utf-8") as f:
+                    f.write(text)
+            return xfail_strict_for(os.path.join(case, "pkg", "test_x.py"))
+
+        assert _ini_case("none", {}) is False
+        assert _ini_case("ini", {"pytest.ini": "[pytest]\nxfail_strict = true\n"}) is True
+        assert _ini_case("ini-false", {"pytest.ini": "[pytest]\nxfail_strict = false\n"}) is False
+        assert _ini_case("ini-new-name", {"pytest.ini": "[pytest]\nstrict_xfail = 1\n"}) is True
+        assert _ini_case("umbrella", {"pytest.ini": "[pytest]\nstrict = true\n"}) is True
+        assert _ini_case("umbrella-off", {"pytest.ini": "[pytest]\nstrict = true\nxfail_strict = false\n"}) is False
+        assert _ini_case("pyproject", {"pyproject.toml": "[tool.pytest.ini_options]\nxfail_strict = true\n"}) is True
+        assert _ini_case("pyproject-native", {"pyproject.toml": "[tool.pytest]\nstrict_xfail = true\n"}) is True
+        assert _ini_case("pytest-toml", {"pytest.toml": "[pytest]\nstrict_xfail = true\n"}) is True
+        assert _ini_case("tox", {"tox.ini": "[pytest]\nxfail_strict = true\n"}) is True
+        assert _ini_case("setup-cfg", {"setup.cfg": "[tool:pytest]\nxfail_strict = yes\n"}) is True
+        # a pyproject with no pytest table does not configure pytest, so the
+        # next file up the precedence list decides
+        assert _ini_case(
+            "pyproject-no-table",
+            {"pyproject.toml": "[project]\nname = 'x'\n", "tox.ini": "[pytest]\nxfail_strict = true\n"},
+        ) is True
+        # an unreadable config is not a strict one: the marker is flagged
+        assert _ini_case("broken", {"pytest.ini": "[pytest\nxfail_strict = true\n"}) is False
+        assert _ini_case("broken-toml", {"pyproject.toml": "[tool.pytest.ini_options\n"}) is False
+        # a config that parses but has the wrong shape is unreadable too, not a crash
+        assert _ini_case("wrong-shape", {"pyproject.toml": "[tool]\npytest = 'x'\n"}) is False
+        # an unreadable config stops the walk: the strict file above it must not decide
+        case = os.path.join(tmp, "broken-sub")
+        os.makedirs(os.path.join(case, ".git"))
+        os.makedirs(os.path.join(case, "sub"))
+        with open(os.path.join(case, "tox.ini"), "w", encoding="utf-8") as f:
+            f.write("[pytest]\nxfail_strict = true\n")
+        with open(os.path.join(case, "sub", "setup.cfg"), "w", encoding="utf-8") as f:
+            f.write("[tool:pytest]\n")
+        assert xfail_strict_for(os.path.join(case, "sub", "test_x.py")) is False
+        if os.geteuid() != 0:
+            os.chmod(os.path.join(case, "sub", "setup.cfg"), 0o000)
+            try:
+                assert xfail_strict_for(os.path.join(case, "sub", "test_x.py")) is False
+            finally:
+                os.chmod(os.path.join(case, "sub", "setup.cfg"), 0o644)
+        # the walk stops at the repo root: a strict config above it is not this project's
+        outer = os.path.join(tmp, "outer")
+        os.makedirs(os.path.join(outer, "repo", ".git"))
+        with open(os.path.join(outer, "pytest.ini"), "w", encoding="utf-8") as f:
+            f.write("[pytest]\nxfail_strict = true\n")
+        assert xfail_strict_for(os.path.join(outer, "repo", "test_x.py")) is False
+    finally:
+        shutil.rmtree(tmp)
+
+    # the four are wired into scanning, the xfail one reading the ini beside it
+    tmp = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmp, ".git"))
+        with open(os.path.join(tmp, "test_exact.py"), "w", encoding="utf-8") as f:
+            f.write(
+                "import pytest\n"
+                "@pytest.mark.xfail\n"
+                "def test_a():\n    with pytest.raises(Exception):\n        run()\n        assert 1\n"
+                "def test_b():\n    assert 1\n"
+                "def test_b():\n    assert 2\n"
+                "class TestC:\n    def __init__(self):\n        pass\n    def test_c(self):\n        assert 1\n"
+            )
+        found = sorted((line, smell) for _, line, smell in scan_path(tmp))
+        assert found == [
+            (3, "broad exception expectation"),
+            (3, "dead assertion in an expect-exception block"),
+            (3, "non-strict xfail"),
+            (7, LOST_DUPLICATE),
+            (11, LOST_UNCOLLECTED),
+        ], found
+        with open(os.path.join(tmp, "pytest.ini"), "w", encoding="utf-8") as f:
+            f.write("[pytest]\nxfail_strict = true\n")
+        assert "non-strict xfail" not in [smell for _, _, smell in scan_path(tmp)]
+    finally:
+        shutil.rmtree(tmp)
+
+    # gate mode: the duplicate-name case joins assertion-free; the rest of the
+    # new four stay report-only. Its own fixtures exemption and count.
+    tmp = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmp, "fixtures"))
+        dup = "def test_x():\n    assert 1\ndef test_x():\n    assert 2\n"
+        with open(os.path.join(tmp, "fixtures", "test_specimen.py"), "w", encoding="utf-8") as f:
+            f.write(dup)
+        with open(os.path.join(tmp, "test_report_only.py"), "w", encoding="utf-8") as f:
+            f.write(
+                "import pytest\n"
+                "@pytest.mark.xfail\n"
+                "def test_a():\n    with pytest.raises(Exception):\n        run()\n        assert 1\n"
+                "class TestC:\n    def __init__(self):\n        pass\n    def test_c(self):\n        assert 1\n"
+            )
+        findings, suppressed = gate(tmp)
+        assert findings == [], findings
+        assert suppressed == {"duplicate-name": 1}, suppressed
+        code, err = _main_stderr(["audit.py", "--gate", tmp])
+        assert code == 0, (code, err)
+        assert "1 duplicate-name finding(s) suppressed under fixtures/" in err, err
+        with open(os.path.join(tmp, "test_dup.py"), "w", encoding="utf-8") as f:
+            f.write(dup)
+        findings, _ = gate(tmp)
+        assert [(os.path.basename(p), line, smell) for p, line, smell in findings] == [
+            ("test_dup.py", 1, LOST_DUPLICATE)
+        ], findings
+        assert _quiet_main(["audit.py", "--gate", tmp]) == 1
+    finally:
+        shutil.rmtree(tmp)
+
+    # gate mode: assertion-free only (the duplicate-name case is below), and never a fixture.
     tmp = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(tmp, "fixtures"))
@@ -648,7 +1040,7 @@ def _selfcheck():
         # ...but the exemption is counted and reported. `fixtures` matches any
         # directory of that name at any depth, so without this line a repo
         # could park hollow tests under one and never see it (#685).
-        assert gate(tmp)[1] == 1, gate(tmp)
+        assert gate(tmp)[1] == {"assertion-free": 1}, gate(tmp)
         code, err = _main_stderr(["audit.py", "--gate", tmp])
         assert code == 0, (code, err)
         assert "1 assertion-free finding(s) suppressed under fixtures/" in err, err
@@ -658,7 +1050,7 @@ def _selfcheck():
         gated, suppressed = gate(tmp)
         assert len(gated) == 1, gated
         assert gated[0][0].endswith("test_hollow.py"), gated
-        assert suppressed == 1, suppressed
+        assert suppressed == {"assertion-free": 1}, suppressed
         assert _quiet_main(["audit.py", "--gate", tmp]) == 1
         os.remove(os.path.join(tmp, "test_hollow.py"))
         assert _quiet_main(["audit.py", "--gate", tmp]) == 0
@@ -749,14 +1141,11 @@ def main(argv):
         findings, suppressed = gate(root)
         for path, lineno, smell in findings:
             print(f"{path}:{lineno}: {smell}")
-        if suppressed:
-            print(
-                f"test-audit: {suppressed} assertion-free finding(s) suppressed under fixtures/.",
-                file=sys.stderr,
-            )
+        for label, count in suppressed.items():
+            print(f"test-audit: {count} {label} finding(s) suppressed under fixtures/.", file=sys.stderr)
         if findings:
             print(
-                f"test-audit: {len(findings)} assertion-free test(s) -- a test that cannot fail proves nothing.",
+                f"test-audit: {len(findings)} test(s) that cannot fail -- a test that cannot fail proves nothing.",
                 file=sys.stderr,
             )
             return 1

@@ -6,12 +6,18 @@
  * `file:line: <smell>` candidates audit.py does for pytest. This script never
  * classifies — it only surfaces candidates for the judgment pass (SKILL.md).
  *
- * Five smells, on vitest and node:test alike —
+ * Seven smells; the first five run on vitest and node:test alike —
  *   1. assertion-free   — the test body has no `expect(...)`/`assert.*` call.
  *   2. tautology        — `expect(x).toBe(x)` / `assert.equal(x, x)`.
  *   3. empty/skipped    — empty body, or `.skip`/`.todo`, or a bodyless `it`.
  *   4. mock-the-world   — mock constructs exceed a ceiling, little real logic.
  *   5. interaction-only — every assertion only checks that a spy was called.
+ *   6. broad exception  — `toThrow()` / `toThrowError()` with no argument
+ *                         passes on the wrong error. Vitest `expect` only.
+ *   7. duplicate title  — two tests in one describe with the same literal
+ *                         title (the "lost test (duplicate name)" smell of
+ *                         docs/research/2026-10-08-test-smell-gaps.md). Vitest
+ *                         files only.
  *
  * audit.py keeps the pytest path untouched.
  */
@@ -510,13 +516,87 @@ function isInteractionOnly(call, source, bindings) {
   return assertions.every((a) => isSpyCheck(a, source));
 }
 
+const BROAD_THROW_MATCHERS = new Set(["toThrow", "toThrowError"]);
+
+/** Is `matcherCall` negated, as in `expect(f).not.toThrow()`? */
+function isNegated(matcherCall) {
+  let obj = matcherCall.callee.object;
+  while (obj && obj.type === "MemberExpression") {
+    if (identifierName(obj.property) === "not") return true;
+    obj = obj.object;
+  }
+  return false;
+}
+
+/** A `toThrow()` / `toThrowError()` with no argument: it passes on any error,
+ * the wrong one included. `.not.toThrow()` asserts the opposite and is not
+ * this smell. */
+function isBroadThrow(call) {
+  const cb = testCallback(call);
+  if (!cb) return false;
+  let found = false;
+  walk(cb.body, (n) => {
+    const e = asExpectAssertion(n);
+    if (e && BROAD_THROW_MATCHERS.has(e.matcher) && e.matcherCall.arguments.length === 0 && !isNegated(e.matcherCall)) {
+      found = true;
+    }
+  });
+  return found;
+}
+
 const DETECTORS = [
   ["assertion-free test", isAssertionFree],
   ["tautology", isTautology],
   ["empty/skipped test", isEmptyOrSkipped],
   ["mock-the-world", isMockTheWorld],
   ["interaction-only assertion", isInteractionOnly],
+  ["broad exception expectation", isBroadThrow],
 ];
+
+const LOST_DUPLICATE = "lost test (duplicate name)";
+
+/** A `describe`/`suite` call, including a modifier (`describe.only`) and the
+ * Playwright alias `test.describe`; not `describe.each(...)(...)`, whose callee
+ * is itself a call. */
+function isDescribeCall(node) {
+  if (node.type !== "CallExpression") return false;
+  const bare = calleeName(node);
+  if (bare) return SUITE_ALIAS_METHODS.has(bare);
+  const mem = memberCallee(node);
+  return !!mem && (SUITE_ALIAS_METHODS.has(mem.root) || (TEST_ROOTS.has(mem.root) && SUITE_ALIAS_METHODS.has(mem.method)));
+}
+
+/** The title when it is a literal: a string, or a template with no
+ * substitution. Else null -- a computed title is not a repeat of anything. */
+function literalTitle(call) {
+  const arg = call.arguments[0];
+  if (!arg) return null;
+  if (arg.type === "StringLiteral") return arg.value;
+  if (arg.type === "TemplateLiteral" && arg.expressions.length === 0) return arg.quasis[0].value.cooked;
+  return null;
+}
+
+/** `[line, smell]` for every test that repeats an earlier test's literal title
+ * among the same describe's direct statements. Reported at the repeat. */
+function duplicateTitles(tree) {
+  const found = [];
+  walk(tree, (n) => {
+    if (!isDescribeCall(n)) return;
+    const cb = testCallback(n);
+    if (!cb || cb.body.type !== "BlockStatement") return;
+    const seen = new Set();
+    for (const stmt of cb.body.body) {
+      if (stmt.type !== "ExpressionStatement" || !isTestCall(stmt.expression)) continue;
+      // `it.todo('a')` has no body for a later definition to replace.
+      if (!testCallback(stmt.expression)) continue;
+      const title = literalTitle(stmt.expression);
+      if (title === null) continue;
+      if (seen.has(title)) found.push([lineOf(stmt.expression), LOST_DUPLICATE]);
+      seen.add(title);
+    }
+  });
+  return found;
+}
 
 // --- scan ------------------------------------------------------------------
 
@@ -552,6 +632,7 @@ function smellsIn(tree, source) {
       if (detect(call, source, bindings)) found.push([lineOf(call), smell]);
     }
   }
+  if (isVitestFile(tree)) found.push(...duplicateTitles(tree));
   return found;
 }
 
@@ -897,7 +978,82 @@ function selfcheck() {
     assert(!isInteractionOnly(testCallFrom(src), src), "interaction-only negative (vitest, mixed assertions)");
   }
 
-  // gate mode: assertion-free only, and never a fixture.
+  // 6. broad exception expectation: `toThrow()` / `toThrowError()` with no
+  // argument pass on any error, the wrong one included.
+  const broad = (src) => isBroadThrow(testCallFrom(src));
+  assert(broad("it('x', () => { expect(() => f()).toThrow(); })"), "toThrow() positive");
+  assert(broad("it('x', () => { expect(() => f()).toThrowError(); })"), "toThrowError() positive");
+  assert(broad("it('x', async () => { await expect(p).rejects.toThrow(); })"), "rejects.toThrow() positive");
+  assert(!broad("it('x', () => { expect(() => f()).toThrow('boom'); })"), "toThrow(string) negative");
+  assert(!broad("it('x', () => { expect(() => f()).toThrow(/boom/); })"), "toThrow(regex) negative");
+  assert(!broad("it('x', () => { expect(() => f()).toThrow(TypeError); })"), "toThrow(class) negative");
+  assert(!broad("it('x', () => { expect(() => f()).toThrowError('boom'); })"), "toThrowError(string) negative");
+  assert(!broad("it('x', () => { expect(() => f()).not.toThrow(); })"), ".not.toThrow() asserts no throw: negative");
+  assert(!broad("it('x', () => { expect(f()).toBe(1); })"), "no throw matcher negative");
+
+  // 7. duplicate title: two tests in one describe with the same literal title.
+  const dupLines = (src) =>
+    smellsIn(parseSource(src, "snippet.test.js"), src)
+      .filter(([, smell]) => smell === LOST_DUPLICATE)
+      .map(([line]) => line);
+  const body = (t) => `it(${t}, () => { expect(a).toBe(1); });\n`;
+  assert.deepEqual(
+    dupLines(`describe('g', () => {\n${body("'a'")}${body("'a'")}});`),
+    [3],
+    "the repeated title is reported at the later test",
+  );
+  assert.deepEqual(dupLines(`describe('g', () => {\n${body("'a'")}${body("'b'")}});`), [], "distinct titles");
+  assert.deepEqual(
+    dupLines(`describe('g', () => {\n${body("'a'")}});\ndescribe('h', () => {\n${body("'a'")}});`),
+    [],
+    "the same title in two describes",
+  );
+  assert.deepEqual(
+    dupLines(`describe('g', () => {\n${body("'a'")}describe('h', () => {\n${body("'a'")}});\n});`),
+    [],
+    "the same title in an outer and a nested describe",
+  );
+  assert.deepEqual(
+    dupLines(`describe('g', () => {\n${body("`a`")}${body("'a'")}});`),
+    [3],
+    "a template title with no substitution is a literal",
+  );
+  assert.deepEqual(dupLines(`describe('g', () => {\n${body("`a${n}`")}${body("`a${n}`")}});`), [], "computed title");
+  assert.deepEqual(
+    dupLines(`describe('g', () => {\n${body("'a'")}it.skip('a', () => { expect(a).toBe(1); });\n});`),
+    [3],
+    "a skipped repeat counts",
+  );
+  assert.deepEqual(
+    dupLines(`describe('g', () => {\n${body("'a'")}${body("'a'")}${body("'a'")}});`),
+    [3, 4],
+    "every repeat is reported",
+  );
+  assert.deepEqual(
+    dupLines(`describe.only('g', () => {\n${body("'a'")}${body("'a'")}});`),
+    [3],
+    "describe.only is a describe",
+  );
+  assert.deepEqual(dupLines(`${body("'a'")}${body("'a'")}`), [], "outside any describe: not this smell");
+  assert.deepEqual(
+    dupLines("import { describe, it } from 'vitest';\ndescribe('g', () => {\nit.todo('a');\nit.todo('a');\n});"),
+    [],
+    "a todo has no body to replace",
+  );
+  assert.deepEqual(
+    dupLines(
+      "import { describe, test } from 'node:test';\ndescribe('g', () => {\ntest('a', () => {});\ntest('a', () => {});\n});",
+    ),
+    [],
+    "node:test files are out: the ticket names vitest",
+  );
+  assert.deepEqual(
+    dupLines(`describe('g', () => {\nit.each([1, 2])('a', (n) => { expect(n).toBe(n + 0); });\nit.each([1, 2])('a', (n) => { expect(n).toBe(n + 0); });\n});`),
+    [],
+    "it.each is not a test call here",
+  );
+
+  // gate mode: assertion-free only (the duplicate-name case is below), and never a fixture.
   const tmp = mkdtempSync(join(tmpdir(), "test-audit-gate-"));
   try {
     // These two files carry a real `expect`, so the assertion signal alone
@@ -914,7 +1070,7 @@ function selfcheck() {
     // ...but the exemption is counted and reported. `fixtures` matches any
     // directory of that name at any depth, so without this line a repo could
     // park hollow tests under one and never see it (#685).
-    assert.equal(gate(tmp)[1], 1, "gate counts what the fixtures exemption dropped");
+    assert.deepEqual(gate(tmp)[1], { "assertion-free": 1 }, "gate counts what the fixtures exemption dropped");
     {
       const [code, err] = mainStderr(["node", "audit.mjs", "--gate", tmp]);
       assert.equal(code, 0, "a fixtures-only finding still passes the gate");
@@ -928,10 +1084,37 @@ function selfcheck() {
     const [gated, suppressed] = gate(tmp);
     assert.equal(gated.length, 1, "gate catches the hollow test");
     assert(gated[0][0].endsWith("hollow.test.js"), "gate names the hollow test");
-    assert.equal(suppressed, 1, "the fixtures specimen is still counted as suppressed");
+    assert.deepEqual(suppressed, { "assertion-free": 1 }, "the fixtures specimen is still counted as suppressed");
 
     unlinkSync(join(tmp, "hollow.test.js"));
     assert.deepEqual(gate(tmp)[0], [], "gate is clean once the hollow test is gone");
+
+    // The duplicate-name smell joins the gate, with its own fixtures exemption
+    // and its own suppression count. A broad `toThrow()` stays report-only.
+    const dup =
+      "describe('g', () => {\nit('a', () => { expect(a).toBe(1); });\nit('a', () => { expect(a).toBe(2); });\n});\n";
+    writeFileSync(join(tmp, "fixtures", "dup-specimen.test.js"), dup);
+    writeFileSync(join(tmp, "broad.test.js"), "it('x', () => { expect(() => f()).toThrow(); });\n");
+    assert.deepEqual(gate(tmp)[0], [], "a broad toThrow and a fixtures duplicate do not fail the gate");
+    assert.deepEqual(gate(tmp)[1], { "assertion-free": 1, "duplicate-name": 1 }, "both exemptions are counted");
+    {
+      const [code, err] = mainStderr(["node", "audit.mjs", "--gate", tmp]);
+      assert.equal(code, 0, "fixtures-only duplicates still pass the gate");
+      assert(err.includes("1 duplicate-name finding(s) suppressed under fixtures/"), `gate reports it: ${err}`);
+    }
+    writeFileSync(join(tmp, "dup.test.js"), dup);
+    {
+      const [gatedDup] = gate(tmp);
+      assert.deepEqual(
+        gatedDup.map(([path, line, smell]) => [basename(path), line, smell]),
+        [["dup.test.js", 3, LOST_DUPLICATE]],
+        "a duplicate title outside fixtures fails the gate",
+      );
+    }
+    assert.equal(quietMain(["node", "audit.mjs", "--gate", tmp]), 1, "and the exit status says so");
+    unlinkSync(join(tmp, "dup.test.js"));
+    unlinkSync(join(tmp, "broad.test.js"));
+    unlinkSync(join(tmp, "fixtures", "dup-specimen.test.js"));
 
     // Two ordinary node:test assertion spellings. The runner import admits
     // these files, so a vocabulary that did not recognize their assertions
@@ -1049,10 +1232,13 @@ function selfcheck() {
 
 // --- gate mode -------------------------------------------------------------
 
-// The one smell a build gates on -- the Python side's GATE_SMELL, same
-// reasoning: the other four still run and still fail when the behavior
-// breaks, while an assertion-free test cannot fail at all.
-const GATE_SMELL = "assertion-free test";
+// The smells a build gates on -- the Python side's GATE_SMELLS, each with the
+// label its fixtures-suppression count is reported under. SKILL.md § Gate mode
+// says why these two and no other.
+const GATE_SMELLS = new Map([
+  ["assertion-free test", "assertion-free"],
+  [LOST_DUPLICATE, "duplicate-name"],
+]);
 
 // Exit status contract: 0 clean, 1 hollow tests found, 2 unable to check --
 // the status the bootstrap failure above already uses. Only gate mode ever
@@ -1068,17 +1254,21 @@ function underFixtures(path) {
   return path.split(/[\\/]/).includes("fixtures");
 }
 
-/** `[findings, suppressed]` -- the `GATE_SMELL` findings that fail a build,
- * and how many the fixtures exemption dropped.
+/** `[findings, suppressed]` -- the `GATE_SMELLS` findings that fail a build,
+ * and how many the fixtures exemption dropped, per `GATE_SMELLS` label.
  *
  * The count is returned, and reported by `main`, because `underFixtures`
  * matches a `fixtures` segment at any depth: without it a repo could park
  * hollow tests under any directory it named `fixtures` and never see that the
  * gate had stopped looking at them (#685). Mirrors audit.py. */
 function gate(root) {
-  const gated = scanPath(root).filter(([, , smell]) => smell === GATE_SMELL);
+  const gated = scanPath(root).filter(([, , smell]) => GATE_SMELLS.has(smell));
   const findings = gated.filter(([path]) => !underFixtures(path));
-  return [findings, gated.length - findings.length];
+  const suppressed = {};
+  for (const [path, , smell] of gated) {
+    if (underFixtures(path)) suppressed[GATE_SMELLS.get(smell)] = (suppressed[GATE_SMELLS.get(smell)] ?? 0) + 1;
+  }
+  return [findings, suppressed];
 }
 
 // --- main ------------------------------------------------------------------
@@ -1117,12 +1307,12 @@ function main(argv) {
   if (gateMode) {
     const [findings, suppressed] = gate(root);
     for (const [path, line, smell] of findings) process.stdout.write(`${path}:${line}: ${smell}\n`);
-    if (suppressed > 0) {
-      process.stderr.write(`test-audit: ${suppressed} assertion-free finding(s) suppressed under fixtures/.\n`);
+    for (const [label, count] of Object.entries(suppressed)) {
+      process.stderr.write(`test-audit: ${count} ${label} finding(s) suppressed under fixtures/.\n`);
     }
     if (findings.length > 0) {
       process.stderr.write(
-        `test-audit: ${findings.length} assertion-free test(s) -- a test that cannot fail proves nothing.\n`,
+        `test-audit: ${findings.length} test(s) that cannot fail -- a test that cannot fail proves nothing.\n`,
       );
       return 1;
     }
