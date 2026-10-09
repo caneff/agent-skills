@@ -78,6 +78,27 @@ Layout — pick by the `layout` field (see the two variants under Template):
 
 `flex-wrap` stacks the columns vertically on narrow screens. **Flexbox on LMD is unverified — check a real preview; if it doesn't hold, the wrap makes it degrade to stacked blocks anyway.**
 
+## Archive
+
+Closing step, once the page file is written and on the clipboard (§ Output): back the puzzle up at once, then ask for its LMD id (Chris's ruling, sudokupad-art `docs/research/2026-09-30-lmd-archive-facts.md`, rulings 13 and 18). `<slug>` is the page file's name without `.html`; `<sudokupad-link>` is the link exactly as the page uses it, any `?setting-...` query included.
+
+1. Archive it:
+
+   ```
+   uv run --project ~/src/sudokupad-art ~/src/sudokupad-art/lmd_archive.py archive "<sudokupad-link>" --archive ~/src/lmd-archive --slug <slug>
+   ```
+
+2. Ask Chris for the puzzle's LMD id once he has posted it, in its own message. When he gives it, re-run with the id added, still passing `--slug`:
+
+   ```
+   uv run --project ~/src/sudokupad-art ~/src/sudokupad-art/lmd_archive.py archive "<sudokupad-link>" --archive ~/src/lmd-archive --slug <slug> --lmd <id>
+   ```
+
+   That fills the LMD fields and renames the folder to the id.
+3. Chris may skip the id. Say that the next `backfill` will match the puzzle by its SudokuPad link, and stop.
+
+A non-zero exit, or any `FAILED` line on stderr, is reported to Chris with the command's output, for either call. Never skip a failure, and never say the puzzle is archived after one. The page and clipboard are already done, so a failed archive does not undo them.
+
 ## Template
 
 One shared skeleton with four values that differ by `layout` — see
