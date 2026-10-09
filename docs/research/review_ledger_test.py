@@ -10,6 +10,10 @@ from review_ledger_support import (PRICES, build_cache, build_cost_fixture, cost
                                    section, write_jsonl)
 
 
+def finding_of(env, row_id, fid):
+    return next(f for f in env.rows()[row_id]["findings"] if f["id"] == fid)
+
+
 class TestHarvest:
     @pytest.fixture
     def env(self, env):
