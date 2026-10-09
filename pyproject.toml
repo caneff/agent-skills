@@ -1,5 +1,5 @@
 # Not a package: this file only pins the Python test tools that tests/all.sh
-# runs `*_test.py` suites with (`uv run pytest <file>`), locked by uv.lock.
+# runs every `*_test.py` suite with, locked by uv.lock.
 # Ruled in #1494 (rulings 1a, 2a).
 [project]
 name = "agent-skills"

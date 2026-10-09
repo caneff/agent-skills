@@ -3,8 +3,8 @@
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
 # runs as `uv run --locked pytest <file>` (the tools pinned by pyproject.toml
 # and uv.lock), each `audit.py` that implements `--selfcheck` runs with that
-# flag, each `Cargo.toml` runs `cargo test`, and
-# each mod folder under `flow/mods/` runs `claude plugin test <folder>`. One
+# flag, each `Cargo.toml` runs `cargo test`, and each mod folder under
+# `flow/mods/` runs `claude plugin test <folder>`. One
 # line per suite; exits non-zero on the first failure (and prints that
 # suite's output). A suite is failed on its exit status *or* on a failure
 # signature at the start of a line in its output, because exit status alone
@@ -112,9 +112,11 @@ selected() { # prints the "<label>\t<command>" lines this run covers
 if [ "$list_only" = 1 ]; then selected 2>/dev/null | cut -f1; exit "${PIPESTATUS[0]}"; fi
 
 tmp=$(mktemp -d) || exit 1
+# Every exit from here to the run's own trap (below) leaves no temp directory.
+trap 'rm -rf "$tmp"' EXIT
 # The selection is read once: its scope line goes to the report and a diff that
 # cannot be read (exit 2) stops the run rather than selecting nothing.
-selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; rm -rf "$tmp"; exit 2; }
+selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; exit 2; }
 [ -s "$tmp/scope" ] && cat "$tmp/scope"
 # A missing cargo must fail the gate, not silently skip every Cargo suite.
 if printf '%s\n' "$selection" | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
@@ -125,33 +127,30 @@ fi
 # Likewise a missing uv must fail the gate, not fail every pytest suite with a
 # bare "command not found".
 if printf '%s\n' "$selection" | cut -f2 | grep -q '^uv run ' && ! command -v uv >/dev/null 2>&1; then
-  echo "tests/all.sh: uv is not on PATH, and a *_test.py suite runs under it (uv sync, then rerun)" >&2
+  echo "tests/all.sh: uv is not on PATH, and a *_test.py suite runs under it (install uv or put it on PATH, then rerun)" >&2
   exit 1
 fi
 
 # Every `*_test.py` is a pytest suite (#1494, ruling 4a): one that imports
 # `unittest`, `unittest.mock` included, fails the run, naming the file and the
 # line. pytest would collect and pass a unittest suite, so nothing else here
-# keeps the old idiom from coming back. Checked over every tracked file rather
-# than the `--changed` selection, since a grep costs nothing. `git grep` exits
-# 1 on no match and above 1 on an error, which stops the run: a check that
-# could not read the files has not found them clean. A file from which pytest
-# collects no tests needs no check of its own: pytest exits 5, and any non-zero
-# exit is a failed suite below.
-unittest_imports=$(git grep -nE -e \
-  '^[[:space:]]*(import[[:space:]]+unittest([[:space:].,]|$)|from[[:space:]]+unittest(\.[A-Za-z_]+)*[[:space:]]+import[[:space:]])' \
-  -- '*_test.py')
+# keeps the old idiom from coming back. tests/unittest_imports.py parses every
+# tracked suite, not the `--changed` selection, so no spelling of the import
+# gets past it; it exits 2 when it could not read a file, which stops the run:
+# a check that could not read the files has not found them clean. A file from
+# which pytest collects no tests needs no check of its own: pytest exits 5,
+# and any non-zero exit is a failed suite below.
+unittest_imports=$(python3 tests/unittest_imports.py 2>"$tmp/unittest")
 case $? in
   0|1) ;;
-  *) echo "tests/all.sh: the unittest import check could not run (git grep failed)" >&2; rm -rf "$tmp"; exit 2 ;;
+  *) echo "tests/all.sh: the unittest import check could not run: $(cat "$tmp/unittest")" >&2; exit 2 ;;
 esac
 if [ -n "$unittest_imports" ]; then
   while IFS= read -r hit; do
-    f=${hit%%:*}
+    f=${hit%:*}
     echo "FAIL $f"
-    echo "tests/all.sh: $f imports unittest (line ${hit#*:}); write it as a pytest suite"
+    echo "tests/all.sh: $f imports unittest (line ${hit##*:}); write it as a pytest suite"
   done <<<"$unittest_imports"
-  rm -rf "$tmp"
   exit 1
 fi
 
