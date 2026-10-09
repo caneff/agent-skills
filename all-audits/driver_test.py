@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """Tests for the audit sweep driver (#558) — ports run-audits.test.sh's
 hermetic index test to Python (parses the index rather than grepping it, per
-the family's plain-assert convention — see crap-audit/audit_test.py), plus a
+the family's plain-assert pytest convention — see crap-audit/audit_test.py), plus a
 new cache-decision test against a real temporary git repo, including the
 bad-last-run-SHA case, which must mean RUN.
 """
@@ -749,15 +748,3 @@ def test_mutation_worktree_is_removed_even_when_the_failure_report_raises():
 def test_domain_drift_is_gated_on_the_glossary_file():
     assert "GLOSSARY.md" in driver.GATED["domain-drift"], driver.GATED["domain-drift"]
     assert "CONTEXT.md" not in driver.GATED["domain-drift"], driver.GATED["domain-drift"]
-
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
-
-
-if __name__ == "__main__":
-    main()
