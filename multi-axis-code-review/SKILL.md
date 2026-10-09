@@ -248,8 +248,10 @@ findings' outcomes are `unknown` then, since no dispositions exist yet;
 `review_ledger.py harvest` joins them from the dispositions sidecar, and the
 controller runs it in the closing report (`burndown/SKILL.md` § The closing
 report). It exits non-zero,
-naming what is missing, when that transcript has no usage or the findings
-sidecar is absent, and then writes nothing. A refusal is reported, never
+naming what is missing, when the findings sidecar is absent, and then writes
+nothing. An axis whose subagent transcript cannot be attributed or has no usage
+is still appended, its cost marked `unknown` with the reason (#1374); `report`
+counts it beside the known costs, never as zero. A refusal is reported, never
 skipped: the reviewer puts the command's stderr on the first line of its
 summary, and the caller repeats it in its own report. An `append` that never
 ran leaves a row only if a burn's closing report runs `harvest` while the

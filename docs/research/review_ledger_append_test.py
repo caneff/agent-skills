@@ -384,6 +384,12 @@ class AppendUnknownCostTest(AppendCase):
         self.assertEqual(cost["wall_clock"]["status"], "unknown")
         self.assertIn("timestamp", cost["wall_clock"]["reason"])
 
+    def test_spec_and_correctness_rows_with_no_transcript_are_recorded_too(self):
+        for axis, letter in (("spec", "P"), ("correctness", "C")):
+            write_jsonl(self.cache / "skills" / f"findings-{axis}-408.jsonl",
+                        [finding(f"{letter}1", "hard", "a.py", "Thing 408", axis=axis)])
+            self.assertEqual(self.cost(408, axis)["tokens"]["status"], "unknown")
+
     def test_report_counts_the_row_as_a_run_review_with_unknown_cost_not_zero(self):
         self.ok(401, "standards")
         r = run("report", "--ledger", self.ledger, "--format", "json", home=self.home)

@@ -1120,6 +1120,8 @@ APPEND_TYPES = ("standards", "spec", "correctness", "verification")
 # The reviews a caller may switch off and record as skipped (#1401's ablation): the axes, not the
 # verification pass, which no worker runs any more.
 SKIPPABLE_AXES = ("standards", "spec", "correctness")
+# The reviews whose row is kept when its cost cannot be attributed (#1374).
+AXIS_TYPES = ("standards", "spec", "correctness")
 REVIEWER_TYPES = APPEND_TYPES + ("over-engineering",)
 MUTATION_OUTCOMES = ("red", "green", "unknown")
 _MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -1127,10 +1129,11 @@ _MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 def _unknown_cost_why(row: dict) -> str | None:
     """Why a row cannot be appended: the cost source it was read from is missing or unreadable.
-    A review axis (and the over-engineering row inside standards) is appended anyway with that
-    cost `unknown` and its reason (#1374): the review ran, and `report` counts it beside the
-    known costs, never as zero; dropping the row would hide the review."""
-    if row["type"] in SKIPPABLE_AXES + ("over-engineering",):
+    A review axis is appended anyway with that cost `unknown` and its reason (#1374): the
+    review ran, and `report` counts it beside the known costs, never as zero; dropping the
+    row would hide the review. (An over-engineering row's cost is always inside its
+    standards row's, so it is never unknown.)"""
+    if row["type"] in AXIS_TYPES:
         return None
     for field in ("tokens", "wall_clock"):
         c = row["cost"][field]
@@ -1351,10 +1354,9 @@ def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
     findings sidecar being absent is a refusal. An unattributable cost is a refusal for
-    a verification row, and for an axis row an `unknown` cost with its reason (#1374), never
-    zero. An axis review
-    ends before its dispositions exist, so its findings' outcomes are `unknown` until
-    `harvest` joins them from the dispositions sidecar. (Before #1401 a verification pass's
+    a verification row; for an axis row it is an `unknown` cost with its reason (#1374),
+    never zero. An axis review ends before its dispositions exist, so its findings'
+    outcomes are `unknown` until `harvest` joins them from the dispositions sidecar. (Before #1401 a verification pass's
     own `append --type verification` refilled them; the type is still accepted, for that
     history.)"""
     if args.type in RETIRED_CODEX_TYPES:
