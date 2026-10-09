@@ -57,6 +57,25 @@ Pass one's smells, by the label each prints:
   root; one that cannot be read counts as not strict. A non-literal `strict=`
   is not flagged. Decorators on a test function or a class are read; a
   module-level `pytestmark = pytest.mark.xfail` is not.
+- **private-API access** — a test reaches past the public surface. Python
+  (`audit.py`): `x._name` on a receiver other than `self` or `cls`, reported at
+  the test, and `from mod import _name`, reported at the import; dunders such as
+  `__class__` do not count. TS/JS (`audit.mjs`): `(x as any).name`, `x["_name"]`,
+  or a member access on the line under `@ts-ignore` / `@ts-expect-error`; an
+  `expect(...).toX` chain under one is not a member access. A candidate only:
+  `sys._getframe` reads the same, and the judgment pass tells them apart.
+- **stub asserted called** — the same mock gets a `return_value` or
+  `side_effect` and is also checked with `assert_called*` or `.called`
+  (`audit.py`); a `mockReturnValue` / `mockResolvedValue` / `mockRejectedValue`
+  mock, or a `vi.spyOn(obj, "m")` spy given one, is also under
+  `toHaveBeenCalled*` (`audit.mjs`, vitest). `interaction-only assertion` needs
+  every check to be a call check, so this mixed form, with a real outcome
+  assertion beside it, gets through there.
+- **vacuous loop assertion** — every assertion sits in a `for` (Python) or a
+  `for...of` / `for...in` / `.forEach` (JS) over what the code under test
+  returned, so an empty result runs none of them. An assertion outside such a
+  loop, a length or non-empty check included, clears it, and so does a loop over
+  a literal or a name the test never assigns.
 
 **JS/TS reach.** `audit.mjs` recognizes vitest and node:test — nothing else.
 A file identifies as **vitest** by importing `vitest`, or by naming tests
@@ -213,10 +232,30 @@ nothing broke," not "this is a mystery guest."
   default works (a dataclass default argument, an ORM's auto-increment id,
   a framework's built-in validation). Nothing this codebase wrote can break
   it.
-- **Conditional test logic.** An `if`/`else` or `try`/`except` inside the
-  test body that changes what gets asserted depending on a runtime
-  condition. Whichever branch runs, the test finds a way to pass — it can't
-  fail no matter which branch the real behavior takes.
+- **Conditional test logic.** An `if`/`else`, `try`/`except` or loop
+  (`for`, `while`, `forEach`) inside the test body that changes what gets
+  asserted, or whether anything is, depending on a runtime condition. Whichever
+  branch runs, the test finds a way to pass — it can't fail no matter which
+  branch the real behavior takes. A loop over a collection the code returned is
+  the same hole: an empty collection runs the body zero times, and pass one's
+  `vacuous loop assertion` is its mechanical form (Meszaros, "Conditional Test
+  Logic"; tsDetect).
+- **Leaking domain knowledge.** The test computes its expected value with the
+  code under test's own formula (`assert total == price + price * rate`), so it
+  holds the same bug the code does. It cannot fail when the algorithm is wrong,
+  and it fails on a legitimate fix because it checks "implemented as before".
+  Rewrite against a worked literal from the spec. `is_tautology` catches only
+  the literal self-comparison; this form is for reading. Khorikov, "Leaking
+  domain knowledge to tests".
+- **Private-API access.** The test reads a private member, imports a
+  `_name`, or casts through `as any` / `@ts-expect-error` to reach one. It
+  fails when an internal refactor renames the member though no caller sees a
+  change: the refactoring-resistance half that `interaction-only` does not
+  cover. Pass one lists the candidates; the judgment pass confirms the target
+  is private to the code under test, and keeps a deliberate type test or a
+  stdlib name. Rewrite to assert through the public interface; when that
+  interface cannot show the behavior, the finding is about the code under
+  test, not the test.
 - **Prose assertion.** The test's only assertions are that a prose file
   (Markdown, a `SKILL.md`, a doc) contains or lacks a string. It cannot fail
   when an agent stops following the rule, and fails on every rewording of the
@@ -306,12 +345,15 @@ just no longer this test's problem.
 
 ## Verify against the fixture
 
-`~/.agents/skills/test-audit/fixtures/` carries nine files.
+`~/.agents/skills/test-audit/fixtures/` carries eleven files.
 `test_pricing.py`, `test_checkout_e2e.py`, `test_user_service.py`,
-`test_prose_assertions.py` and `prose_assertion.test.sh` span the
+`test_prose_assertions.py`, `prose_assertion.test.sh`,
+`test_candidate_smells.py` and `vitest_candidate_smells.test.ts` span the
 Cut/Rewrite/Keep buckets; `~/.agents/skills/test-audit/fixtures/answer-key.md`
 has the pass-two bucket for each of their tests, and a run over them should
-reproduce that table. `test_pytest_smells.py`, `vitest_smells.test.js`,
+reproduce that table. `candidate-smells-fixtures.test.sh` pins what pass one
+reports on those two, each smell beside its nearest negatives.
+`test_pytest_smells.py`, `vitest_smells.test.js`,
 `test_exact_match_smells.py` and `vitest_exact_match_smells.test.js` exist for
 pass one's scanners to flag; the answer key does not cover them.
 `exact-match-fixtures.test.sh` pins what both scanners report on the last two,
@@ -368,8 +410,9 @@ vocabulary, and metabar:
   `mystery-guest`, `eager`, `sensitive-equality`, `name-mismatch`,
   `library-default`, `conditional-logic`, `flaky-by-construction`, `tautology`,
   `interaction-only`, `documented-intent`, `prose-assertion`,
-  `dead-assertion`, `lost-test`, `broad-exception`, `non-strict-xfail`. A
-  rewrite carries `before`/`after`;
+  `dead-assertion`, `lost-test`, `broad-exception`, `non-strict-xfail`,
+  `leaking-domain-knowledge`, `private-api-access`, `stub-asserted-called`,
+  `vacuous-loop`. A rewrite carries `before`/`after`;
   a duplicate-coverage cut carries `owner` (the stronger test's `file:line`);
   a `documented-intent` row carries the comment it defers to in
   `extra.author_intent`.
