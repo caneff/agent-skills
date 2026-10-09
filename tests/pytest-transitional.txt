@@ -3,18 +3,3 @@
 # its own group once its suites are rewritten for pytest; an entry naming no
 # tracked *_test.py fails the gate. Blank and `#` lines are ignored. One blank
 # line between groups, so parallel slices never touch adjacent lines.
-
-# #1504
-burndown/loop_test.py
-
-# #1506
-docs/research/review_ledger_append_test.py
-docs/research/review_ledger_codex_append_test.py
-docs/research/review_ledger_codex_test.py
-docs/research/review_ledger_escapes_test.py
-docs/research/review_ledger_mutation_test.py
-docs/research/review_ledger_test.py
-docs/research/tally_review_axes_test.py
-
-# #1508
-tests/review_ledger_e2e_test.py
