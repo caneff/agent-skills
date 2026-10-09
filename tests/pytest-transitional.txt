@@ -4,6 +4,7 @@
 # tracked *_test.py fails the gate. Blank and `#` lines are ignored. One blank
 # line between groups, so parallel slices never touch adjacent lines.
 
+
 # #1506
 docs/research/review_ledger_append_test.py
 docs/research/review_ledger_codex_append_test.py
