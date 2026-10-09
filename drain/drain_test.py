@@ -924,6 +924,19 @@ def test_a_nested_lockfile_gets_its_dependencies_installed_in_its_own_directory(
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
 
 
+def test_every_tracked_lockfile_gets_its_own_install(sb):
+    sb.write_state({1: {}})
+    sb.lockfile_repo(where="test-audit")
+    write(os.path.join(sb.repo, "package-lock.json"), "{}\n")
+    sb.git(sb.repo, "add", ".")
+    sb.git(sb.repo, "commit", "-qm", "root lockfile")
+    sb.git(sb.repo, "push", "-q", "origin", "main")
+    sb.git(sb.repo, "config", "land.testcmd",
+           'test -d node_modules && test -d test-audit/node_modules && echo seam >> "$SEAM_LOG"')
+    r = sb.drain("--once", env={"RESET_TO_OLD": "1"})
+    assert sb.seam_runs() == ["npm ci", "npm ci", "seam", "npm ci", "npm ci", "seam"], r.stdout
+
+
 def test_a_repo_without_a_lockfile_installs_nothing(sb):
     sb.write_state({1: {}})
     sb.lockfile_repo(lock=False)

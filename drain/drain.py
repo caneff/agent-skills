@@ -613,7 +613,8 @@ def seam_cmd(ctx):
 def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
     """`cmd` in a throwaway worktree of current main (or of `rev`), with `head`
     merged in when given. The merge commit uses the identity the repo is already configured
-    with. Each directory holding a tracked `package-lock.json` gets `npm ci` before `cmd`.
+    with. Each directory holding a tracked `package-lock.json` gets `npm ci`
+    before `cmd`.
     Raises `DrainError` on a conflict or a non-zero exit."""
     scratch = tempfile.mkdtemp(prefix="drain-seam-")
     try:
