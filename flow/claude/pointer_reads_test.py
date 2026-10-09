@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for pointer_reads.py (#1413): the pointer-doc read count from
 docs/research/2026-10-04-claude-md-pointer-reads.md, and the one-shot cron
 re-count 14 days after #1413 closes. Every test runs the script's command
@@ -9,11 +8,11 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
-import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+
+import pytest
 
 SCRIPT = Path(__file__).with_name("pointer_reads.py")
 NOTE = "docs/research/2026-10-04-claude-md-pointer-reads.md"
@@ -42,49 +41,53 @@ def epoch(iso):
     return datetime.fromisoformat(iso).timestamp()
 
 
-class Count(unittest.TestCase):
+@pytest.fixture
+def projects(tmp_path):
     """End 2026-10-04T12:00Z, so the window is (2026-09-20T12:00Z, end]."""
-
-    def setUp(self):
-        self.projects = Path(tempfile.mkdtemp())
-        p = self.projects / "-home-u-repo"
-        p.mkdir()
-        inwin, late, old = "2026-10-01T00:00:00Z", "2026-10-05T00:00:00Z", "2026-09-01T00:00:00Z"
-        # a: merge, read OPERATIONS, no skill -> triggered, uncovered, read.
-        (p / "a.jsonl").write_text(line(inwin, **bash("gh pr merge 5 --repo o/r"))
-                                   + line(inwin, **read("/h/.agents/skills/flow/claude/OPERATIONS.md")))
-        # b: merge under the implement skill, no read -> triggered, covered.
-        (p / "b.jsonl").write_text(line(inwin, **SKILL) + line(inwin, **bash("merge-cleanup x")))
-        # c: a kill, but only after the end -> not triggered.
-        (p / "c.jsonl").write_text(line(inwin, **bash("ls")) + line(late, **bash("pkill foo")))
-        # d: a subagent transcript -> never a session.
-        (p / "a" / "subagents").mkdir(parents=True)
-        (p / "a" / "subagents" / "d.jsonl").write_text(line(inwin, **bash("gh pr merge 1")))
-        # e: every line older than the window -> not a session.
-        (p / "e.jsonl").write_text(line(old, **bash("gh issue create -t x")))
-        os.utime(p / "e.jsonl", (epoch("2026-09-01T00:00:00+00:00"),) * 2)
-        # f: no timestamped line, but modified in the window -> a session.
-        (p / "f.jsonl").write_text(line(None, **bash("gh issue edit 3")))
-        os.utime(p / "f.jsonl", (epoch("2026-10-02T00:00:00+00:00"),) * 2)
-        for n in "abc":
-            os.utime(p / f"{n}.jsonl", (epoch("2026-10-05T00:00:00+00:00"),) * 2)
-
-    def test_tables(self):
-        out = subprocess.run([sys.executable, str(SCRIPT), "count", "--end", "2026-10-04T12:00:00Z",
-                              "--projects", str(self.projects)], capture_output=True, text=True)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        text = out.stdout
-        self.assertIn("Sessions in the window: 4", text)
-        self.assertIn("| OPERATIONS | `gh pr merge\\|implement-dispatch\\|merge-cleanup` | 2 | 1 |", text)
-        self.assertIn("| WORKFLOW | `gh issue create\\|gh issue edit` | 1 | 0 |", text)
-        self.assertIn("| SHELL-SAFETY | `pkill\\|kill -\\|kill [0-9]` | 0 | 0 |", text)
-        self.assertIn("| OPERATIONS | 2 | 1 | 1 |", text)
-        self.assertIn("| WORKFLOW | 1 | 1 | 0 |", text)
+    root = tmp_path / "count-projects"
+    root.mkdir()
+    p = root / "-home-u-repo"
+    p.mkdir()
+    inwin, late, old = "2026-10-01T00:00:00Z", "2026-10-05T00:00:00Z", "2026-09-01T00:00:00Z"
+    # a: merge, read OPERATIONS, no skill -> triggered, uncovered, read.
+    (p / "a.jsonl").write_text(line(inwin, **bash("gh pr merge 5 --repo o/r"))
+                               + line(inwin, **read("/h/.agents/skills/flow/claude/OPERATIONS.md")))
+    # b: merge under the implement skill, no read -> triggered, covered.
+    (p / "b.jsonl").write_text(line(inwin, **SKILL) + line(inwin, **bash("merge-cleanup x")))
+    # c: a kill, but only after the end -> not triggered.
+    (p / "c.jsonl").write_text(line(inwin, **bash("ls")) + line(late, **bash("pkill foo")))
+    # d: a subagent transcript -> never a session.
+    (p / "a" / "subagents").mkdir(parents=True)
+    (p / "a" / "subagents" / "d.jsonl").write_text(line(inwin, **bash("gh pr merge 1")))
+    # e: every line older than the window -> not a session.
+    (p / "e.jsonl").write_text(line(old, **bash("gh issue create -t x")))
+    os.utime(p / "e.jsonl", (epoch("2026-09-01T00:00:00+00:00"),) * 2)
+    # f: no timestamped line, but modified in the window -> a session.
+    (p / "f.jsonl").write_text(line(None, **bash("gh issue edit 3")))
+    os.utime(p / "f.jsonl", (epoch("2026-10-02T00:00:00+00:00"),) * 2)
+    for n in "abc":
+        os.utime(p / f"{n}.jsonl", (epoch("2026-10-05T00:00:00+00:00"),) * 2)
+    return root
 
 
-class Recount(unittest.TestCase):
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+def test_count_tables(projects):
+    out = subprocess.run([sys.executable, str(SCRIPT), "count", "--end", "2026-10-04T12:00:00Z",
+                          "--projects", str(projects)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    text = out.stdout
+    assert "Sessions in the window: 4" in text
+    assert "| OPERATIONS | `gh pr merge\\|implement-dispatch\\|merge-cleanup` | 2 | 1 |" in text
+    assert "| WORKFLOW | `gh issue create\\|gh issue edit` | 1 | 0 |" in text
+    assert "| SHELL-SAFETY | `pkill\\|kill -\\|kill [0-9]` | 0 | 0 |" in text
+    assert "| OPERATIONS | 2 | 1 | 1 |" in text
+    assert "| WORKFLOW | 1 | 1 | 0 |" in text
+
+
+class Recount:
+    """A scratch clone with a bare origin, fake `gh` and `crontab` on PATH, and one synthetic transcript."""
+
+    def __init__(self, tmp):
+        self.tmp = tmp
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         self.env = env
         origin = self.tmp / "origin.git"
@@ -143,131 +146,143 @@ class Recount(unittest.TestCase):
         return subprocess.run(["git", "--git-dir", str(self.origin), "show", f"main:{NOTE}"],
                               capture_output=True, text=True, env=self.env).stdout
 
-    def test_open_ticket_exits_silently(self):
-        self.gh({"state": "OPEN", "closedAt": None})
-        out = self.recount("2026-12-01T00:00:00Z")
-        self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "", ""))
-        self.assertIn(TAG, self.crontab_file.read_text())
-        self.assertEqual(self.origin_note(), "# note\n")
 
-    def test_before_the_date_exits_silently(self):
-        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
-        out = self.recount("2026-10-19T11:59:59Z")
-        self.assertEqual((out.returncode, out.stdout, out.stderr), (0, "", ""))
-        self.assertIn(TAG, self.crontab_file.read_text())
-        self.assertEqual(self.origin_note(), "# note\n")
+@pytest.fixture
+def rc(tmp_path):
+    return Recount(tmp_path)
 
-    def test_on_the_date_appends_commits_pushes_and_removes_its_line(self):
-        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
-        out = self.recount("2026-10-19T12:00:00Z")
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        note = self.origin_note()
-        self.assertIn("## Re-count 2026-10-19", note)
-        self.assertIn("2026-10-05T12:00:00Z", note)
-        self.assertIn("| SHELL-SAFETY | `pkill\\|kill -\\|kill [0-9]` | 1 | 0 |", note)
-        cron = self.crontab_file.read_text()
-        self.assertNotIn(TAG, cron)
-        self.assertIn("other-job  # other", cron)
-        # The primary checkout is not touched: the commit is made elsewhere.
-        self.assertEqual((self.root / NOTE).read_text(), "# note\n")
-        self.assertEqual(self.git(self.root, "worktree", "list").count("\n"), 1)
 
-    def test_a_second_run_after_a_lost_crontab_removal_does_not_append_twice(self):
-        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
-        self.recount("2026-10-19T12:00:00Z")
-        self.crontab_file.write_text(f"17 9 * * * recount {TAG}\n")
-        out = self.recount("2026-10-20T12:00:00Z")
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertEqual(self.origin_note().count("## Re-count"), 1)
-        self.assertNotIn(TAG, self.crontab_file.read_text())
+def test_open_ticket_exits_silently(rc):
+    rc.gh({"state": "OPEN", "closedAt": None})
+    out = rc.recount("2026-12-01T00:00:00Z")
+    assert (out.returncode, out.stdout, out.stderr) == (0, "", "")
+    assert TAG in rc.crontab_file.read_text()
+    assert rc.origin_note() == "# note\n"
 
-    def test_unreadable_closed_at_fails_without_appending(self):
-        for payload in (None, {"state": "CLOSED", "closedAt": None}, "not json"):
-            with self.subTest(payload=payload):
-                if payload is None:
-                    self.gh_out.unlink(missing_ok=True)
-                elif payload == "not json":
-                    self.gh_out.write_text("not json")
-                else:
-                    self.gh(payload)
-                out = self.recount("2026-12-01T00:00:00Z")
-                self.assertNotEqual(out.returncode, 0)
-                self.assertIn("closedAt", out.stderr)
-                self.assertEqual(self.origin_note(), "# note\n")
-                self.assertIn(TAG, self.crontab_file.read_text())
 
-    def test_unreadable_crontab_is_never_rewritten(self):
-        # Only "no crontab for <user>" is an empty crontab; any other failure
-        # of `crontab -l` must not install a crontab built from nothing.
-        before = self.crontab_file.read_text()
-        (self.tmp / "crontab-mode").write_text("broken")
+def test_before_the_date_exits_silently(rc):
+    rc.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+    out = rc.recount("2026-10-19T11:59:59Z")
+    assert (out.returncode, out.stdout, out.stderr) == (0, "", "")
+    assert TAG in rc.crontab_file.read_text()
+    assert rc.origin_note() == "# note\n"
+
+
+def test_on_the_date_appends_commits_pushes_and_removes_its_line(rc):
+    rc.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+    out = rc.recount("2026-10-19T12:00:00Z")
+    assert out.returncode == 0, out.stdout + out.stderr
+    note = rc.origin_note()
+    assert "## Re-count 2026-10-19" in note
+    assert "2026-10-05T12:00:00Z" in note
+    assert "| SHELL-SAFETY | `pkill\\|kill -\\|kill [0-9]` | 1 | 0 |" in note
+    cron = rc.crontab_file.read_text()
+    assert TAG not in cron
+    assert "other-job  # other" in cron
+    # The primary checkout is not touched: the commit is made elsewhere.
+    assert (rc.root / NOTE).read_text() == "# note\n"
+    assert rc.git(rc.root, "worktree", "list").count("\n") == 1
+
+
+def test_a_second_run_after_a_lost_crontab_removal_does_not_append_twice(rc):
+    rc.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+    rc.recount("2026-10-19T12:00:00Z")
+    rc.crontab_file.write_text(f"17 9 * * * recount {TAG}\n")
+    out = rc.recount("2026-10-20T12:00:00Z")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert rc.origin_note().count("## Re-count") == 1
+    assert TAG not in rc.crontab_file.read_text()
+
+
+@pytest.mark.parametrize("payload", [None, {"state": "CLOSED", "closedAt": None}, "not json"])
+def test_unreadable_closed_at_fails_without_appending(rc, payload):
+    if payload is None:
+        rc.gh_out.unlink(missing_ok=True)
+    elif payload == "not json":
+        rc.gh_out.write_text("not json")
+    else:
+        rc.gh(payload)
+    out = rc.recount("2026-12-01T00:00:00Z")
+    assert out.returncode != 0
+    assert "closedAt" in out.stderr
+    assert rc.origin_note() == "# note\n"
+    assert TAG in rc.crontab_file.read_text()
+
+
+def test_unreadable_crontab_is_never_rewritten(rc):
+    # Only "no crontab for <user>" is an empty crontab; any other failure
+    # of `crontab -l` must not install a crontab built from nothing.
+    before = rc.crontab_file.read_text()
+    (rc.tmp / "crontab-mode").write_text("broken")
+    out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
+                         capture_output=True, text=True, env=rc.env)
+    assert out.returncode != 0
+    assert "cannot open spool" in out.stderr
+    rc.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+    out = rc.recount("2026-10-19T12:00:00Z")
+    assert out.returncode != 0
+    assert "cannot open spool" in out.stderr
+    assert rc.crontab_file.read_text() == before
+
+
+def test_install_cron_with_no_crontab_yet(rc):
+    (rc.tmp / "crontab-mode").write_text("none")
+    out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
+                         capture_output=True, text=True, env=rc.env)
+    assert out.returncode == 0, out.stderr
+    assert rc.crontab_file.read_text().count(TAG) == 1
+
+
+def test_empty_window_is_an_error_not_a_result(rc):
+    # Fourteen days with no transcript means the count could not see
+    # them, not that nothing ran: nothing is appended, the line stays.
+    rc.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+    (rc.projects / "x" / "s.jsonl").unlink()
+    out = rc.recount("2026-10-19T12:00:00Z")
+    assert out.returncode != 0
+    assert "no transcripts" in out.stderr
+    assert rc.origin_note() == "# note\n"
+    assert TAG in rc.crontab_file.read_text()
+
+
+def test_a_failed_push_names_git_s_reason(rc):
+    rc.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+    hook = rc.origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'rejected by test hook' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    out = rc.recount("2026-10-19T12:00:00Z")
+    assert out.returncode != 0
+    assert "rejected by test hook" in out.stderr
+    assert TAG in rc.crontab_file.read_text()
+
+
+def test_install_cron_adds_the_line_once(rc):
+    rc.crontab_file.write_text("0 8 * * 1 other-job  # other\n")
+    for _ in range(2):
         out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
-                             capture_output=True, text=True, env=self.env)
-        self.assertNotEqual(out.returncode, 0)
-        self.assertIn("cannot open spool", out.stderr)
-        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
-        out = self.recount("2026-10-19T12:00:00Z")
-        self.assertNotEqual(out.returncode, 0)
-        self.assertIn("cannot open spool", out.stderr)
-        self.assertEqual(self.crontab_file.read_text(), before)
-
-    def test_install_cron_with_no_crontab_yet(self):
-        (self.tmp / "crontab-mode").write_text("none")
-        out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
-                             capture_output=True, text=True, env=self.env)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(self.crontab_file.read_text().count(TAG), 1)
-
-    def test_empty_window_is_an_error_not_a_result(self):
-        # Fourteen days with no transcript means the count could not see
-        # them, not that nothing ran: nothing is appended, the line stays.
-        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
-        (self.projects / "x" / "s.jsonl").unlink()
-        out = self.recount("2026-10-19T12:00:00Z")
-        self.assertNotEqual(out.returncode, 0)
-        self.assertIn("no transcripts", out.stderr)
-        self.assertEqual(self.origin_note(), "# note\n")
-        self.assertIn(TAG, self.crontab_file.read_text())
-
-    def test_a_failed_push_names_git_s_reason(self):
-        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
-        hook = self.origin / "hooks" / "pre-receive"
-        hook.write_text("#!/bin/sh\necho 'rejected by test hook' >&2\nexit 1\n")
-        hook.chmod(0o755)
-        out = self.recount("2026-10-19T12:00:00Z")
-        self.assertNotEqual(out.returncode, 0)
-        self.assertIn("rejected by test hook", out.stderr)
-        self.assertIn(TAG, self.crontab_file.read_text())
-
-    def test_install_cron_adds_the_line_once(self):
-        self.crontab_file.write_text("0 8 * * 1 other-job  # other\n")
-        for _ in range(2):
-            out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
-                                 capture_output=True, text=True, env=self.env)
-            self.assertEqual(out.returncode, 0, out.stderr)
-        cron = self.crontab_file.read_text()
-        self.assertEqual(cron.count(TAG), 1)
-        self.assertIn("other-job  # other", cron)
-        self.assertIn("pointer_reads.py recount", cron)
-
-    def test_install_cron_from_a_worktree_names_the_primary_checkout(self):
-        # merge-cleanup deletes the worktree the install ran from, so the line
-        # must name the primary checkout: here self.root, run from a linked
-        # worktree of it that holds the script.
-        (self.root / "flow" / "claude").mkdir(parents=True)
-        (self.root / "flow" / "claude" / "pointer_reads.py").write_text(SCRIPT.read_text())
-        self.git(self.root, "add", "-A")
-        self.git(self.root, "commit", "-q", "-m", "script")
-        wt = self.tmp / "wt"
-        self.git(self.root, "worktree", "add", "-q", str(wt))
-        self.crontab_file.write_text("")
-        out = subprocess.run([sys.executable, str(wt / "flow" / "claude" / "pointer_reads.py"), "install-cron"],
-                             capture_output=True, text=True, env=self.env)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        cron = self.crontab_file.read_text()
-        self.assertIn(f" {self.root.resolve()}/flow/claude/pointer_reads.py recount ", cron)
-        self.assertNotIn(str(wt), cron)
+                             capture_output=True, text=True, env=rc.env)
+        assert out.returncode == 0, out.stderr
+    cron = rc.crontab_file.read_text()
+    assert cron.count(TAG) == 1
+    assert "other-job  # other" in cron
+    assert "pointer_reads.py recount" in cron
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_install_cron_from_a_worktree_names_the_primary_checkout(rc):
+    # merge-cleanup deletes the worktree the install ran from, so the line
+    # must name the primary checkout: here rc.root, run from a linked
+    # worktree of it that holds the script.
+    (rc.root / "flow" / "claude").mkdir(parents=True)
+    (rc.root / "flow" / "claude" / "pointer_reads.py").write_text(SCRIPT.read_text())
+    rc.git(rc.root, "add", "-A")
+    rc.git(rc.root, "commit", "-q", "-m", "script")
+    wt = rc.tmp / "wt"
+    rc.git(rc.root, "worktree", "add", "-q", str(wt))
+    rc.crontab_file.write_text("")
+    out = subprocess.run([sys.executable, str(wt / "flow" / "claude" / "pointer_reads.py"), "install-cron"],
+                         capture_output=True, text=True, env=rc.env)
+    assert out.returncode == 0, out.stderr
+    cron = rc.crontab_file.read_text()
+    assert f" {rc.root.resolve()}/flow/claude/pointer_reads.py recount " in cron
+    assert str(wt) not in cron
+

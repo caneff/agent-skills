@@ -7,6 +7,14 @@ description: Python testing patterns and test-quality review using pytest. Use w
 
 Comprehensive guide to implementing robust testing strategies in Python using pytest, fixtures, mocking, parameterization, and property-based testing.
 
+## The ruling: pytest everywhere
+
+Every Python test in a repo Chris owns is a pytest test, and pytest is a
+declared dev dependency of that repo. Write plain `assert`, fixtures and
+`parametrize`; mock with the `mocker` fixture from pytest-mock. Never write a
+`unittest.TestCase` class, a `unittest.mock` import or a script that asserts
+at import. Ruled in `~/.agents/skills/docs/adr/0007-pytest-everywhere.md`.
+
 ## Test Quality Gate
 
 Before adding or keeping a test, ask:
@@ -45,7 +53,7 @@ Load detailed references for specific topics:
 |------|----------------|
 | Fixtures, scopes, setup/teardown, conftest.py | `~/.agents/skills/python-testing-patterns/references/fixtures.md` |
 | Parametrization, multiple test cases | `~/.agents/skills/python-testing-patterns/references/parametrized-tests.md` |
-| Mocking, patching, unittest.mock, pytest-mock | `~/.agents/skills/python-testing-patterns/references/mocking.md` |
+| Mocking, patching, pytest-mock | `~/.agents/skills/python-testing-patterns/references/mocking.md` |
 | Async tests, pytest-asyncio | `~/.agents/skills/python-testing-patterns/references/async-testing.md` |
 | Property-based testing, Hypothesis, strategies | `~/.agents/skills/python-testing-patterns/references/property-based-testing.md` |
 | Monkeypatch, environment variables, attributes | `~/.agents/skills/python-testing-patterns/references/monkeypatch.md` |

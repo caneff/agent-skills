@@ -1,0 +1,21 @@
+# Not a package: this file only pins the Python test tools that tests/all.sh
+# runs every `*_test.py` suite with, locked by uv.lock.
+# Ruled in #1494 (rulings 1a, 2a).
+[project]
+name = "agent-skills"
+version = "0"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = ["pytest", "pytest-mock"]
+
+[tool.uv]
+package = false
+# The suites run on the interpreter the code they test runs on, the system
+# python3, never a newer one uv downloads: a test green on 3.14 can pass code
+# that is a SyntaxError on the box's 3.12.
+python-preference = "only-system"
+
+[tool.pytest.ini_options]
+# Suites run in parallel, one pytest per file; none reads a cache back.
+addopts = "-p no:cacheprovider"

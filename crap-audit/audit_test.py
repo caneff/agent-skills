@@ -1,9 +1,6 @@
-#!/usr/bin/env python3
 """Tests for crap-audit's scoring core: normalize, score, and the thin CLI main.
 
-Assert-based, no framework — matches the audit family's convention (see
-dead-code/audit.py's `_selfcheck`). One function per acceptance criterion of
-ticket #505; run directly with `python3 crap-audit/audit_test.py`.
+Plain pytest asserts. One function per acceptance criterion of ticket #505.
 """
 import json
 import os
@@ -512,15 +509,3 @@ def test_cli_main_ts_mode_prints_whole_score_result():
     assert set(result) == {"findings", "under_floor", "gates", "ranking"}
     assert len(result["findings"]) == 2
     assert {row["file"] for row in result["findings"]} == {"src/sample.ts"}
-
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
-
-
-if __name__ == "__main__":
-    main()

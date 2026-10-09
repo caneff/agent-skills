@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """End-to-end test for spec #1409, deterministic disclosure levels: every rule
 sits at one level, and each level has a loader that does not depend on the
 model choosing to read.
@@ -32,9 +31,9 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 CLAUDE = ROOT / "flow" / "claude"
@@ -52,96 +51,92 @@ def teach_commands():
     return out
 
 
-class TeachingHooks(unittest.TestCase):
-    # hook -> (precursor command, a sentence from the section it must show)
-    CASES = {
-        "teach-process-kill.sh": ("ps -eo pid,args", "A kill gets its own Bash call and nothing else."),
-        "teach-visual.sh": ("zed docs/x.md:3", "never print a path and ask me to open it"),
-        "teach-merge.sh": ("gh pr view 5 --repo caneff/agent-skills", "names its repo"),
-        "teach-filing.sh": ('gh issue create --repo caneff/agent-skills --title "teach-lib: x" --body y',
-                            "instead of a new issue"),
-    }
-
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
-        stub = self.tmp / "bin"
-        stub.mkdir()
-        # teach-filing searches open issues; answer "none" without the network.
-        (stub / "gh").write_text("#!/usr/bin/env bash\necho '[]'\n")
-        (stub / "gh").chmod(0o755)
-        self.env = dict(os.environ, XDG_CACHE_HOME=str(self.tmp / "cache"),
-                        PATH=f"{stub}:{os.environ['PATH']}")
-
-    def fire(self, command_line, session, cmd):
-        payload = json.dumps({"session_id": session, "cwd": str(ROOT), "hook_event_name": "PreToolUse",
-                              "tool_name": "Bash", "tool_input": {"command": cmd}})
-        p = subprocess.run(command_line, shell=True, input=payload, capture_output=True, text=True,
-                           env=self.env)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        if not p.stdout.strip():
-            return ""
-        return json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"]
-
-    def test_every_teaching_hook_is_wired_and_teaches_once(self):
-        wired = teach_commands()
-        self.assertEqual(set(wired), set(self.CASES), "settings.json teaching hooks changed")
-        for hook, (cmd, sentence) in self.CASES.items():
-            with self.subTest(hook=hook):
-                first = self.fire(wired[hook], f"e2e-{hook}", cmd)
-                self.assertIn(sentence, first)
-                second = self.fire(wired[hook], f"e2e-{hook}", cmd)
-                if hook == "teach-filing.sh":
-                    # The search answers every filing; the section only once.
-                    self.assertNotIn(sentence, second)
-                else:
-                    self.assertEqual(second, "")
+# hook -> (precursor command, a sentence from the section it must show)
+TEACH_CASES = {
+    "teach-process-kill.sh": ("ps -eo pid,args", "A kill gets its own Bash call and nothing else."),
+    "teach-visual.sh": ("zed docs/x.md:3", "never print a path and ask me to open it"),
+    "teach-merge.sh": ("gh pr view 5 --repo caneff/agent-skills", "names its repo"),
+    "teach-filing.sh": ('gh issue create --repo caneff/agent-skills --title "teach-lib: x" --body y',
+                        "instead of a new issue"),
+}
 
 
-class AlwaysOn(unittest.TestCase):
-    def test_budget_gate_passes_on_the_real_tree(self):
-        p = subprocess.run([sys.executable, str(ROOT / "tests" / "check-always-on.py")],
-                           capture_output=True, text=True)
-        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertIn("within budget 1100", p.stdout)
-
-    def test_hook_carried_lines_left_claude_md(self):
-        text = (CLAUDE / "CLAUDE.md").read_text()
-        for gone in ("not-draft", "SHELL-SAFETY", "zed <path>", "shot-scraper",
-                     "search open issues", "# Communication"):
-            with self.subTest(gone=gone):
-                self.assertNotIn(gone, text)
-
-    def test_communication_lives_in_quill(self):
-        quill = (CLAUDE / "output-styles" / "quill.md").read_text()
-        self.assertIn("\n# Communication\n", quill)
-        self.assertIn("Relay a subagent's or worker's **delta**", quill)
+@pytest.fixture
+def hook_env(tmp_path):
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    # teach-filing searches open issues; answer "none" without the network.
+    (stub / "gh").write_text("#!/usr/bin/env bash\necho '[]'\n")
+    (stub / "gh").chmod(0o755)
+    return dict(os.environ, XDG_CACHE_HOME=str(tmp_path / "cache"), PATH=f"{stub}:{os.environ['PATH']}")
 
 
-class PathRules(unittest.TestCase):
-    WANT = {
-        "instruction-files.md": {"**/CLAUDE.md", "**/AGENTS.md", "**/RULES.md", "**/CODING_STANDARDS.md"},
-        "skill-files.md": {"**/SKILL.md"},
-        "research-notes.md": {"**/docs/research/**"},
-    }
-
-    def test_each_rule_is_scoped_to_its_files(self):
-        found = {}
-        for f in sorted((CLAUDE / "rules").glob("*.md")):
-            head = f.read_text().split("---")[1]
-            found[f.name] = set(re.findall(r'^\s*-\s*"([^"]+)"', head, re.M))
-        self.assertEqual(found, self.WANT)
+def fire(env, command_line, session, cmd):
+    payload = json.dumps({"session_id": session, "cwd": str(ROOT), "hook_event_name": "PreToolUse",
+                          "tool_name": "Bash", "tool_input": {"command": cmd}})
+    p = subprocess.run(command_line, shell=True, input=payload, capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stderr
+    if not p.stdout.strip():
+        return ""
+    return json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"]
 
 
-class Recount(unittest.TestCase):
-    def test_count_prints_both_tables(self):
-        empty = tempfile.mkdtemp()
-        p = subprocess.run([sys.executable, str(CLAUDE / "pointer_reads.py"), "count",
-                            "--end", "2026-10-04T00:00:00Z", "--projects", empty],
-                           capture_output=True, text=True)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("Sessions in the window: 0.", p.stdout)
-        self.assertEqual(p.stdout.count("| SHELL-SAFETY |"), 2)
+def test_every_teaching_hook_is_wired():
+    assert set(teach_commands()) == set(TEACH_CASES), "settings.json teaching hooks changed"
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.parametrize("hook", sorted(TEACH_CASES))
+def test_a_teaching_hook_teaches_once(hook, hook_env):
+    cmd, sentence = TEACH_CASES[hook]
+    command_line = teach_commands()[hook]
+    first = fire(hook_env, command_line, f"e2e-{hook}", cmd)
+    assert sentence in first
+    second = fire(hook_env, command_line, f"e2e-{hook}", cmd)
+    if hook == "teach-filing.sh":
+        # The search answers every filing; the section only once.
+        assert sentence not in second
+    else:
+        assert second == ""
+
+
+def test_budget_gate_passes_on_the_real_tree():
+    p = subprocess.run([sys.executable, str(ROOT / "tests" / "check-always-on.py")],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "within budget 1100" in p.stdout
+
+
+@pytest.mark.parametrize("gone", ["not-draft", "SHELL-SAFETY", "zed <path>", "shot-scraper",
+                                  "search open issues", "# Communication"])
+def test_hook_carried_lines_left_claude_md(gone):
+    assert gone not in (CLAUDE / "CLAUDE.md").read_text()
+
+
+def test_communication_lives_in_quill():
+    quill = (CLAUDE / "output-styles" / "quill.md").read_text()
+    assert "\n# Communication\n" in quill
+    assert "Relay a subagent's or worker's **delta**" in quill
+
+
+WANT_RULE_PATHS = {
+    "instruction-files.md": {"**/CLAUDE.md", "**/AGENTS.md", "**/RULES.md", "**/CODING_STANDARDS.md"},
+    "skill-files.md": {"**/SKILL.md"},
+    "research-notes.md": {"**/docs/research/**"},
+}
+
+
+def test_each_rule_is_scoped_to_its_files():
+    found = {}
+    for f in sorted((CLAUDE / "rules").glob("*.md")):
+        head = f.read_text().split("---")[1]
+        found[f.name] = set(re.findall(r'^\s*-\s*"([^"]+)"', head, re.M))
+    assert found == WANT_RULE_PATHS
+
+
+def test_recount_count_prints_both_tables(tmp_path):
+    p = subprocess.run([sys.executable, str(CLAUDE / "pointer_reads.py"), "count",
+                        "--end", "2026-10-04T00:00:00Z", "--projects", str(tmp_path)],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert "Sessions in the window: 0." in p.stdout
+    assert p.stdout.count("| SHELL-SAFETY |") == 2

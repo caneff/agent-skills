@@ -6,6 +6,18 @@ import subprocess
 import runfile
 
 
+def reopen_permissions(root):
+    """Give every entry under `root` (and `root` itself) owner access again, so
+    pytest can remove a tree a test took permissions away from."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        os.chmod(dirpath, 0o700)
+        for name in dirnames + filenames:
+            try:
+                os.chmod(os.path.join(dirpath, name), 0o700)
+            except OSError:
+                pass
+
+
 def drop_repo_field(run_id, root):
     """Rewrite a run file as one written before the `repo` field existed."""
     target = runfile.path(run_id, root)

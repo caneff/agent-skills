@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Runs every test suite in the repo. Discovery rules over git-tracked
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
-# runs directly under python3, each `audit.py` that implements
-# `--selfcheck` runs with that flag, each `Cargo.toml` runs `cargo test`, and
-# each mod folder under `flow/mods/` runs `claude plugin test <folder>`. One
+# runs as `uv run --locked pytest <file>` (the tools pinned by pyproject.toml
+# and uv.lock), each `audit.py` that implements `--selfcheck` runs with that
+# flag, each `Cargo.toml` runs `cargo test`, and each mod folder under
+# `flow/mods/` runs `claude plugin test <folder>`. One
 # line per suite; exits non-zero on the first failure (and prints that
 # suite's output). A suite is failed on its exit status *or* on a failure
 # signature at the start of a line in its output, because exit status alone
@@ -39,7 +40,7 @@ suites() { # prints "<label>\t<command>" per discovered suite
   git ls-files -- '*.test.sh' |
     while IFS= read -r f; do printf '%s\tbash %s\n' "$f" "$f"; done
   git ls-files -- '*_test.py' |
-    while IFS= read -r f; do printf '%s\tpython3 %s\n' "$f" "$f"; done
+    while IFS= read -r f; do printf '%s\tuv run --locked pytest %s\n' "$f" "$f"; done
   git ls-files | grep -E '(^|/)audit\.py$' |
     while IFS= read -r f; do
       grep -q -- '--selfcheck' "$f" &&
@@ -111,13 +112,90 @@ selected() { # prints the "<label>\t<command>" lines this run covers
 if [ "$list_only" = 1 ]; then selected 2>/dev/null | cut -f1; exit "${PIPESTATUS[0]}"; fi
 
 tmp=$(mktemp -d) || exit 1
+# Every exit from here to the run's own trap (below) leaves no temp directory.
+trap 'rm -rf "$tmp"' EXIT
 # The selection is read once: its scope line goes to the report and a diff that
 # cannot be read (exit 2) stops the run rather than selecting nothing.
-selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; rm -rf "$tmp"; exit 2; }
+selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; exit 2; }
 [ -s "$tmp/scope" ] && cat "$tmp/scope"
 # A missing cargo must fail the gate, not silently skip every Cargo suite.
 if printf '%s\n' "$selection" | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
   echo "tests/all.sh: cargo is not on PATH, and a tracked Cargo.toml needs it" >&2
+  exit 1
+fi
+
+# Likewise a missing uv must fail the gate, not fail every pytest suite with a
+# bare "command not found".
+if printf '%s\n' "$selection" | cut -f2 | grep -q '^uv run ' && ! command -v uv >/dev/null 2>&1; then
+  echo "tests/all.sh: uv is not on PATH, and a *_test.py suite runs under it (install uv or put it on PATH, then rerun)" >&2
+  exit 1
+fi
+
+# Every `*_test.py` is a pytest suite (#1494, ruling 4a): one that imports
+# `unittest`, `unittest.mock` included, fails the run, naming the file and the
+# line. pytest would collect and pass a unittest suite, so nothing else here
+# keeps the old idiom from coming back. The check below parses every tracked
+# suite, not the `--changed` selection, so no spelling of the import gets
+# past it; it exits 2 when it could not read a file, which stops the run:
+# a check that could not read the files has not found them clean. A file from
+# which pytest collects no tests needs no check of its own: pytest exits 5,
+# and any non-zero exit is a failed suite below.
+unittest_imports=$(python3 - 2>"$tmp/unittest" <<'PY'
+# Prints `<path>:<line>` per import of unittest or a submodule in a tracked
+# `*_test.py`, read as Python so `import os, unittest`, an import inside a
+# block, and `importlib.import_module("unittest")` or `__import__` with a
+# literal name are caught. Exits 1 when it found any, 2 when `git ls-files`
+# failed or a file could not be read or parsed.
+import ast, subprocess, sys
+
+def is_unittest(name):
+    return name == "unittest" or name.startswith("unittest.")
+
+def lines(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(is_unittest(a.name) for a in node.names):
+                yield node.lineno
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module and is_unittest(node.module):
+                yield node.lineno
+        elif isinstance(node, ast.Call) and node.args:
+            f, arg = node.func, node.args[0]
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+            if (name in ("import_module", "__import__") and isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str) and is_unittest(arg.value)):
+                yield node.lineno
+
+try:
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*_test.py"],
+                            capture_output=True, check=True).stdout.decode()
+except (OSError, subprocess.CalledProcessError) as exc:
+    print(f"git ls-files failed: {exc}", file=sys.stderr)
+    sys.exit(2)
+found = False
+for path in filter(None, listed.split("\0")):
+    try:
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=path)
+    except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+        print(f"could not read {path}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    for line in sorted(set(lines(tree))):
+        print(f"{path}:{line}")
+        found = True
+sys.exit(1 if found else 0)
+PY
+)
+case $? in
+  0|1) ;;
+  *) echo "tests/all.sh: the unittest import check could not run: $(cat "$tmp/unittest")" >&2; exit 2 ;;
+esac
+if [ -n "$unittest_imports" ]; then
+  while IFS= read -r hit; do
+    f=${hit%:*}
+    echo "FAIL $f"
+    echo "tests/all.sh: $f imports unittest (line ${hit##*:}); write it as a pytest suite"
+  done <<<"$unittest_imports"
   exit 1
 fi
 
@@ -237,7 +315,7 @@ cpu_budget() { # <label>: prints the suite's budget in seconds
   case $1 in
     flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir) and runs 140+ process-spawning tests
     flow/install.test.sh) echo 160 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME (measured 109s)
-    drain/drain_test.py) echo 60 ;; # one real git repo, bare origin and stub processes per case, 90 cases (measured 44.6s CPU)
+    drain/drain_test.py) echo 80 ;; # one real git repo, bare origin and stub processes per case, 99 cases (measured 58.4s CPU alone, 64.4s in an 8-job run, 2026-10-09)
     *) echo "$default_cpu_budget" ;;
   esac
 }

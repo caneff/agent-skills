@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """End-to-end test for spec #1357 (ration the Codex pass by PR size, with a weekly audit of the
 PRs that skipped it), closing ticket #1386.
 
@@ -30,9 +29,10 @@ from the fixture, never read back from the module:
      skipped (#102's launched pass is not run here, so it writes none); three `codex-audit` rows, two
      skipped, three audited PRs.
 
-Seam: `bash tests/all.sh`, which runs this file. HOME, CODEX_HOME, the ledger, the review cache and
-the trial doc are temporary, `gh` and `codex` are fakes on PATH, and the Codex launch is the audit's
-own `--dry-run`, so nothing reaches the real kill switch, `~/.cache`, GitHub or the Codex quota.
+Seam: `bash tests/all.sh`. HOME, CODEX_HOME, the ledger, the review cache and
+the trial doc are temporary, `gh` and `codex` are fakes on PATH, and the Codex
+launch is the audit's own `--dry-run`, so nothing reaches the real kill switch,
+`~/.cache`, GitHub or the Codex quota.
 
 Blind to: anything a human reads rather than a test asserts: whether a model follows a skill's
 prose, whether a present `SKILL.md` instruction is also unambiguous, and the harness behaviours
@@ -50,12 +50,14 @@ import json
 import os
 import subprocess
 import sys
-import unittest
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "implement"))
-from codex_audit_test import FINDINGS_OUT, Case  # noqa: E402
+from codex_audit_fixtures import AuditEnv  # noqa: E402
+from codex_audit_test import FINDINGS_OUT  # noqa: E402
 
 GATE = ROOT / "implement" / "codex-usage-gate.py"
 AUDIT = ROOT / "implement" / "codex-audit.py"
@@ -67,7 +69,9 @@ def lines(n, tag):
     return "".join(f"{tag} line {i}\n" for i in range(n))
 
 
-class RationingEndToEnd(Case):
+class Week(AuditEnv):
+    """The audit environment plus this week's drivers: open, gate and merge a PR; run a CLI."""
+
     def pr(self, pr, ticket, files, labels=(), day=1):
         """Open PR `pr` for `ticket` on its own branch with `files` ({path: line count}), run the merge
         gate on it from there as § The merge step 3 does, then squash-merge it onto main.
@@ -97,95 +101,98 @@ class RationingEndToEnd(Case):
 
     def skip(self, ticket, reason):
         r = self.append("--ticket", ticket, "--type", "codex-gate", "--skip-reason", reason)
-        self.assertEqual(r.returncode, 0, r.stderr)
-
-    def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(self):
-        # 1. The merge gate, one PR at a time.
-        status, line, m101 = self.pr(101, 11, {"lib/a.py": 120, "lib/a_test.py": 200, "tests/t.sh": 200,
-                                               "docs/a.md": 200})
-        self.assertEqual((status, line), (40, "under size threshold (120 < 300)"))
-        self.skip(11, "size")
-
-        status, line, _ = self.pr(102, 12, {"lib/b.py": 50}, labels=["needs-codex"], day=2)
-        self.assertEqual(status, 0, line)
-        self.assertIn("codex usage 40% — ok", line)
-
-        self.set_usage(75)
-        status, line, m103 = self.pr(103, 13, {"lib/c.py": 300}, day=3)
-        self.assertEqual(status, 20, line)
-        self.assertTrue(line.startswith("usage 75% at or above reserve ceiling 70%, resets "), line)
-        self.skip(13, "ceiling")
-
-        status, line, m104 = self.pr(104, 14, {"lib/d.py": 50}, labels=["needs-codex"], day=4)
-        self.assertEqual(status, 20, line)
-        self.assertIn("reserve ceiling 70%", line)
-        self.skip(14, "ceiling")
-
-        # The kill switch answers before the size check: even a small PR reads 20, never 40.
-        self.git("checkout", "-q", "-b", "pr-105", "main")
-        (self.repo / "lib" / "e.py").write_text(lines(10, "e"))
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", "small")
-        self.issues["15"] = {"body": "", "comments": [], "labels": []}
-        self.kill_switch()
-        r = self.run_cli(GATE, "--base", "main", "--tickets", "15")
-        self.assertEqual(r.returncode, 20, r.stdout)
-        self.assertIn("codex reviews off", r.stdout)
-        (self.tmp / ".config" / "agent-skills" / "codex-reviews-off").unlink()
-        self.git("checkout", "-q", "main")
-        self.git("branch", "-q", "-D", "pr-105")
-
-        # 2. The second pass is final: no third-pass row can be written, a second-pass one can.
-        r = self.append("--ticket", 12, "--type", "codex-third", "--skip-reason", "x")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("retired", r.stderr)
-        r = self.append("--ticket", 12, "--type", "codex-second", "--skip-reason", "ceiling")
-        self.assertEqual(r.returncode, 0, r.stderr)
-
-        # 3. The weekly audit, still at 75%: the ceiling is lifted for it, and it reviews exactly the
-        # three PRs that skipped their gate.
-        out = self.tmp / "findings.out"
-        out.write_text(FINDINGS_OUT.replace("(a:3-9)", "(lib/c.py:3-9)"))
-        r = self.run_cli(AUDIT, "run", "--base", "main", "--ledger", self.ledger, "--cache", self.cache,
-                         "--trial", self.trial, "--dry-run", "--simulate-out", out)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(f"audit range {self.root}..{m104}: PR #101, PR #103, PR #104\n", r.stdout)
-        self.assertNotIn("PR #102", r.stdout)
-        self.assertIn("finding 1 [high] The gate reads an absent answer as a pass (lib/c.py) — "
-                      "PR #103 ticket #13", r.stdout)
-        self.assertIn(f"next: confirm and file each finding (implement/codex-audit.md), then "
-                      f"`codex-audit.py mark --sha {m104}`", r.stdout)
-        [audit] = self.rows("codex-audit")
-        self.assertEqual(audit["prs"], [101, 103, 104])
-        self.assertEqual(audit["range"], f"{self.root}..{m104}")
-        brief = next(self.cache.glob("codex-audit-*-brief.md")).read_text()
-        for pr, ticket, reason in ((101, 11, "size"), (103, 13, "ceiling"), (104, 14, "ceiling")):
-            self.assertIn(f"- PR #{pr} (ticket #{ticket}, skipped for {reason})", brief)
-
-        # 4. The mark moves to the newest audited merge; the next run has nothing to audit.
-        r = self.run_cli(AUDIT, "mark", "--sha", m104, "--date", "2026-09-25", "--trial", self.trial)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(f"- skills: 2026-09-25 {m104}", self.trial.read_text())
-        r = self.run_cli(AUDIT, "run", "--base", "main", "--ledger", self.ledger, "--cache", self.cache,
-                         "--trial", self.trial, "--dry-run")
-        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
-        self.assertIn("nothing to audit", r.stdout)
-        self.assertEqual([a["skip_reason"] for a in self.rows("codex-audit")[1:]], ["empty"])
-        self.set_usage(100)
-        r = self.run_cli(AUDIT, "run", "--base", "main", "--ledger", self.ledger, "--cache", self.cache,
-                         "--trial", self.trial, "--dry-run")
-        self.assertEqual(r.returncode, 20, r.stdout + r.stderr)
-        self.assertIn("codex usage 100% — capped", r.stdout)
-        self.assertIn("codex usage 100% — capped", self.rows("codex-audit")[2]["skip_reason"])
-
-        # 5. The report counts the week.
-        r = self.run_cli(LEDGER_CLI, "report", "--ledger", self.ledger, "--format", "json")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        by_type = {t["type"]: t for t in json.loads(r.stdout)["types"]}
-        self.assertEqual((by_type["codex-gate"]["rows"], by_type["codex-gate"]["skipped_rows"]), (3, 3))
-        self.assertEqual((by_type["codex-audit"]["rows"], by_type["codex-audit"]["skipped_rows"],
-                          by_type["codex-audit"]["audited_prs"]), (3, 2, 3))
+        assert r.returncode == 0, r.stderr
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.fixture
+def week(tmp_path):
+    return Week(tmp_path)
+
+
+def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(week):
+    w = week
+    # 1. The merge gate, one PR at a time.
+    status, line, m101 = w.pr(101, 11, {"lib/a.py": 120, "lib/a_test.py": 200, "tests/t.sh": 200,
+                                           "docs/a.md": 200})
+    assert (status, line) == (40, "under size threshold (120 < 300)")
+    w.skip(11, "size")
+
+    status, line, _ = w.pr(102, 12, {"lib/b.py": 50}, labels=["needs-codex"], day=2)
+    assert status == 0, line
+    assert "codex usage 40% — ok" in line
+
+    w.set_usage(75)
+    status, line, m103 = w.pr(103, 13, {"lib/c.py": 300}, day=3)
+    assert status == 20, line
+    assert line.startswith("usage 75% at or above reserve ceiling 70%, resets "), line
+    w.skip(13, "ceiling")
+
+    status, line, m104 = w.pr(104, 14, {"lib/d.py": 50}, labels=["needs-codex"], day=4)
+    assert status == 20, line
+    assert "reserve ceiling 70%" in line
+    w.skip(14, "ceiling")
+
+    # The kill switch answers before the size check: even a small PR reads 20, never 40.
+    w.git("checkout", "-q", "-b", "pr-105", "main")
+    (w.repo / "lib" / "e.py").write_text(lines(10, "e"))
+    w.git("add", "-A")
+    w.git("commit", "-q", "-m", "small")
+    w.issues["15"] = {"body": "", "comments": [], "labels": []}
+    w.kill_switch()
+    r = w.run_cli(GATE, "--base", "main", "--tickets", "15")
+    assert r.returncode == 20, r.stdout
+    assert "codex reviews off" in r.stdout
+    (w.tmp / ".config" / "agent-skills" / "codex-reviews-off").unlink()
+    w.git("checkout", "-q", "main")
+    w.git("branch", "-q", "-D", "pr-105")
+
+    # 2. The second pass is final: no third-pass row can be written, a second-pass one can.
+    r = w.append("--ticket", 12, "--type", "codex-third", "--skip-reason", "x")
+    assert r.returncode != 0
+    assert "retired" in r.stderr
+    r = w.append("--ticket", 12, "--type", "codex-second", "--skip-reason", "ceiling")
+    assert r.returncode == 0, r.stderr
+
+    # 3. The weekly audit, still at 75%: the ceiling is lifted for it, and it reviews exactly the
+    # three PRs that skipped their gate.
+    out = w.tmp / "findings.out"
+    out.write_text(FINDINGS_OUT.replace("(a:3-9)", "(lib/c.py:3-9)"))
+    r = w.run_cli(AUDIT, "run", "--base", "main", "--ledger", w.ledger, "--cache", w.cache,
+                     "--trial", w.trial, "--dry-run", "--simulate-out", out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"audit range {w.root}..{m104}: PR #101, PR #103, PR #104\n" in r.stdout
+    assert "PR #102" not in r.stdout
+    assert ("finding 1 [high] The gate reads an absent answer as a pass (lib/c.py) — "
+            "PR #103 ticket #13") in r.stdout
+    assert (f"next: confirm and file each finding (implement/codex-audit.md), then "
+            f"`codex-audit.py mark --sha {m104}`") in r.stdout
+    [audit] = w.rows("codex-audit")
+    assert audit["prs"] == [101, 103, 104]
+    assert audit["range"] == f"{w.root}..{m104}"
+    brief = next(w.cache.glob("codex-audit-*-brief.md")).read_text()
+    for pr, ticket, reason in ((101, 11, "size"), (103, 13, "ceiling"), (104, 14, "ceiling")):
+        assert f"- PR #{pr} (ticket #{ticket}, skipped for {reason})" in brief
+
+    # 4. The mark moves to the newest audited merge; the next run has nothing to audit.
+    r = w.run_cli(AUDIT, "mark", "--sha", m104, "--date", "2026-09-25", "--trial", w.trial)
+    assert r.returncode == 0, r.stderr
+    assert f"- skills: 2026-09-25 {m104}" in w.trial.read_text()
+    r = w.run_cli(AUDIT, "run", "--base", "main", "--ledger", w.ledger, "--cache", w.cache,
+                     "--trial", w.trial, "--dry-run")
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "nothing to audit" in r.stdout
+    assert [a["skip_reason"] for a in w.rows("codex-audit")[1:]] == ["empty"]
+    w.set_usage(100)
+    r = w.run_cli(AUDIT, "run", "--base", "main", "--ledger", w.ledger, "--cache", w.cache,
+                     "--trial", w.trial, "--dry-run")
+    assert r.returncode == 20, r.stdout + r.stderr
+    assert "codex usage 100% — capped" in r.stdout
+    assert "codex usage 100% — capped" in w.rows("codex-audit")[2]["skip_reason"]
+
+    # 5. The report counts the week.
+    r = w.run_cli(LEDGER_CLI, "report", "--ledger", w.ledger, "--format", "json")
+    assert r.returncode == 0, r.stderr
+    by_type = {t["type"]: t for t in json.loads(r.stdout)["types"]}
+    assert (by_type["codex-gate"]["rows"], by_type["codex-gate"]["skipped_rows"]) == (3, 3)
+    assert (by_type["codex-audit"]["rows"], by_type["codex-audit"]["skipped_rows"],
+            by_type["codex-audit"]["audited_prs"]) == (3, 2, 3)
