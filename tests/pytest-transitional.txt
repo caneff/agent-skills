@@ -7,13 +7,6 @@
 # #1504
 burndown/loop_test.py
 
-# #1505
-burndown/closure_test.py
-burndown/counts_test.py
-burndown/frontier_test.py
-burndown/runfile_test.py
-burndown/tier_test.py
-
 # #1506
 docs/research/review_ledger_append_test.py
 docs/research/review_ledger_codex_append_test.py
@@ -38,12 +31,3 @@ implement/ticket_comment_render_test.py
 # #1508
 tests/codex_rationing_e2e_test.py
 tests/review_ledger_e2e_test.py
-
-# #1509
-all-audits/driver_test.py
-all-audits/harness/pagelib_test.py
-crap-audit/audit_test.py
-file-ticket/blocked_by_test.py
-landed/generate_test.py
-multi-axis-code-review/claude_usage_gate_test.py
-multi-axis-code-review/render_brief_test.py
