@@ -26,3 +26,4 @@ One line per friction point a controller or worker hits, instead of a prevention
 Commit each line on its own with the subject `friction: <what happened>`.
 A burn's closing report counts them by that subject; the rule is
 `burndown/SKILL.md` § The friction log.
+- 2026-10-09, sudokumaker-custom-constraints: third occurrence of #1486: spec-758's run held #767 behind in-flight #761 over three catalogue files only the landed slice #760 touched, because loop.py dispatch diffed #761's workspace against origin/main, not spec-758. Workaround: --in-flight with #761's real closure and --no-workspace-diff, after which #767 dispatched. Cost: one held tick and a hand check of the workspace diff.
