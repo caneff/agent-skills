@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """render-brief.py (#1216, #1329, #1400): the one source of an axis reviewer's
 brief. Seam: the CLI, run against a throwaway worktree directory. Each case
 asserts the line it is about, so a render that fails for another reason (a
@@ -8,24 +7,14 @@ missing input, a bad path) does not pass for the one under test
 import os
 import re
 import subprocess
-import sys
-import tempfile
+
+import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDER = os.path.join(HERE, "render-brief.py")
 SHAPES = ("an absent or malformed answer read as a benign one",
           "a stated fallback with no mechanism behind it",
           "a test that passes for a reason other than the one it claims")
-FAILS = []
-
-
-def check(name, ok, detail=""):
-    if ok:
-        print(f"PASS: {name}")
-    else:
-        FAILS.append(f"FAIL: {name} {detail}")
-
-
 def render(worktree, diff, *extra, axis="standards", explicit_spec=False):
     args = ["python3", RENDER, "--axis", axis, "--repo", "skills", "--worktree", worktree,
             "--ticket", "1395", "--base", "origin/main", "--diff", diff,
@@ -43,120 +32,205 @@ def section(out, heading):
     return m.group(1) if m else None
 
 
-def main():
-    with tempfile.TemporaryDirectory() as tmp:
-        wt = os.path.join(tmp, "wt")
-        os.makedirs(os.path.join(wt, "docs", "agents"))
-        open(os.path.join(wt, "CODING_STANDARDS.md"), "w").write("x\n")
-        diff = os.path.join(tmp, "diff.patch")
-        open(diff, "w").write("diff --git a/f b/f\n" * 7)
-
-        code, out, err = render(wt, diff)
-        check("a minimal render succeeds", code == 0, err)
-        check("the diff's line count is read from the file, not asserted",
-              "(7 lines)" in out, out)
-        check("the report filename is pinned once, for this axis and ticket",
-              out.count("review-standards-1395.md") == 1 and "review-spec" not in out, out)
-        check("the sidecar and marker names are pinned",
-              "findings-standards-1395.jsonl" in out and "findings-standards-1395.done" in out, out)
-
-        # #1329: standards sources are listed from the worktree with ls, not asserted.
-        src = section(out, "Standards sources") or ""
-        check("a standards file present in the worktree is listed", "CODING_STANDARDS.md" in src, src)
-        check("a standards file absent from the worktree is not listed", "CONTRIBUTING.md" not in src, src)
-        open(os.path.join(wt, "GLOSSARY.md"), "w").write("x\n")
-        _, out_g, _ = render(wt, diff)
-        src_g = section(out_g, "Standards sources") or ""
-        check("the domain glossary present in the worktree is listed as GLOSSARY.md",
-              "GLOSSARY.md" in src_g, src_g)
-        os.remove(os.path.join(wt, "GLOSSARY.md"))
-        dc = section(out, "Defect classes") or ""
-        check("defect-classes.md absent: the three shapes are inline and the file is not named as a source",
-              all(s in dc for s in SHAPES) and "defect-classes.md" not in src, dc)
-        open(os.path.join(wt, "docs", "agents", "defect-classes.md"), "w").write("x\n")
-        code, out2, _ = render(wt, diff)
-        src2, dc2 = section(out2, "Standards sources") or "", section(out2, "Defect classes") or ""
-        check("defect-classes.md present: listed as a source and read by name, shapes not retyped",
-              "docs/agents/defect-classes.md" in src2 and "docs/agents/defect-classes.md" in dc2
-              and not any(s in dc2 for s in SHAPES), (src2, dc2))
-
-        # #1216/#1400: rulings, the worker's choices and claims stay in their own sections.
-        code, out, err = render(wt, diff, "--ruling", "RULED-X by Chris", "--choice", "CHOSE-Y by worker",
-                                "--claim", "S1: CLAIM-Z the worker says it fixed this")
-        settled, own = section(out, "Settled decisions") or "", section(out, "Worker's own choices") or ""
-        claims = section(out, "Claims to check") or ""
-        check("a ruling is printed under Settled decisions only",
-              "RULED-X" in settled and out.count("RULED-X") == 1, out)
-        check("a worker's choice is never settled: own section, flagged, absent from Settled",
-              "CHOSE-Y" in own and "flag" in own.lower() and "CHOSE-Y" not in settled, out)
-        check("a claim is printed under the claims heading only, as a claim to check",
-              "CLAIM-Z" in claims and out.count("CLAIM-Z") == 1 and "claim" in claims.lower()
-              and "CLAIM-Z" not in settled, out)
-        code, out, _ = render(wt, diff)
-        check("no claims: no claims heading", section(out, "Claims to check") is None, out)
-        check("no rulings: the list says none rather than vanishing",
-              "settled decisions: none" in (section(out, "Settled decisions") or "").lower(), out)
-        check("the renderer never emits an outcome of its own",
-              not re.search(r'"outcome"|\b(fixed|moved|disputed)\b', out), out)
-        code, out_c, _ = render(wt, diff, "--claim", "S1: it says fixed", axis="correctness")
-        check("a claim's own words are the only place an outcome word appears",
-              len(re.findall(r'\b(fixed|moved|disputed)\b', out_c)) == 1, out_c)
-
-        # #1400: nested agents, worker count and ceiling.
-        check("the brief forbids a nested subagent", "no nested subagent" in out.lower(), out)
-        check("default worker count and wall-clock ceiling are stated",
-              "at most 1 worker" in out and "600 seconds" in out, out)
-        code, out, _ = render(wt, diff, "--workers", "3", "--ceiling", "90")
-        check("worker count and ceiling are taken from the inputs",
-              "at most 3 worker" in out and "90 seconds" in out, out)
-
-        # #1230: the rating field belongs to the correctness sidecar.
-        _, out_c, _ = render(wt, diff, axis="correctness")
-        _, out_s, _ = render(wt, diff, axis="spec")
-        check("the correctness sidecar schema carries rating CONFIRMED/PLAUSIBLE",
-              '"rating": "CONFIRMED" or "PLAUSIBLE"' in out_c, out_c)
-        check("the spec sidecar schema carries no rating", '"rating"' not in out_s, out_s)
-
-        # Refusals name their cause and never render a half brief.
-        code, out, err = render(wt, os.path.join(tmp, "nope.patch"))
-        check("a missing diff capture is refused by name", code == 2 and "nope.patch" in err and not out, err)
-        open(os.path.join(tmp, "empty.patch"), "w").close()
-        code, out, err = render(wt, os.path.join(tmp, "empty.patch"))
-        check("an empty diff capture is refused", code == 2 and "empty" in err and not out, err)
-        code, out, err = render(os.path.join(tmp, "no-such-dir"), diff)
-        check("a worktree that is not a directory is refused", code == 2 and "no-such-dir" in err, err)
-        code, out, err = render(wt, diff, axis="docs")
-        check("an unknown axis is refused", code == 2, err)
-        code, out, err = render(wt, diff, axis="spec", explicit_spec=True)
-        check("a spec axis with neither --spec nor --no-spec is refused, not read as 'no spec'",
-              code == 2 and "--spec" in err and not out, err)
-        code, out, err = render(wt, diff, "--spec", "x.md", "--no-spec", axis="correctness")
-        check("--spec together with --no-spec is refused", code == 2 and "both" in err and not out, err)
-        code, out, err = render(wt, diff, "--no-spec", axis="correctness")
-        check("--no-spec renders 'no spec available'", code == 0 and "no spec available" in out, err)
-        code, out, err = render(wt, diff, "--claim", "no colon here")
-        check("a claim with no finding id is refused", code == 2 and "no colon here" in err, err)
-
-        # #1218: the capture's stat line reaches the prompt.
-        code, out, _ = render(wt, diff, "--capture-stat", "captured: 3 files; excluded 1 generated file(s): g/x.json")
-        check("the capture's stat line is printed under Inputs",
-              "captured: 3 files; excluded 1 generated file(s): g/x.json" in (section(out, "Inputs") or ""), out)
-        # #1325/#1324: the worker cap binds the witness check, which has its own concurrency.
-        _, out_c, _ = render(wt, diff, "--workers", "2", axis="correctness")
-        _, out_s, _ = render(wt, diff, "--workers", "2")
-        check("the correctness prompt tells the witness check its slot cap", "--slots 2" in out_c, out_c)
-        check("a prompt with no witness check carries no --slots", "--slots" not in out_s, out_s)
-
-        # Each axis renders its own brief, from the one file per axis.
-        for axis, needle in (("standards", "Over-engineering"), ("spec", "scope creep"),
-                             ("correctness", "witness-check.sh")):
-            _, o, _ = render(wt, diff, axis=axis)
-            check(f"the {axis} brief is included", needle in (section(o, "Brief") or ""), o)
-    if FAILS:
-        print("\n".join(FAILS))
-        sys.exit(1)
-    print("ALL PASS")
+@pytest.fixture
+def wt(tmp_path):
+    path = tmp_path / "wt"
+    (path / "docs" / "agents").mkdir(parents=True)
+    (path / "CODING_STANDARDS.md").write_text("x\n")
+    return str(path)
 
 
-if __name__ == "__main__":
-    main()
+@pytest.fixture
+def diff(tmp_path):
+    path = tmp_path / "diff.patch"
+    path.write_text("diff --git a/f b/f\n" * 7)
+    return str(path)
+
+
+def test_a_minimal_render_succeeds(wt, diff):
+    code, _, err = render(wt, diff)
+    assert code == 0, err
+
+
+def test_the_diffs_line_count_is_read_from_the_file_not_asserted(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert "(7 lines)" in out, out
+
+
+def test_the_report_filename_is_pinned_once_for_this_axis_and_ticket(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert out.count("review-standards-1395.md") == 1 and "review-spec" not in out, out
+
+
+def test_the_sidecar_and_marker_names_are_pinned(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert "findings-standards-1395.jsonl" in out and "findings-standards-1395.done" in out, out
+
+
+# #1329: standards sources are listed from the worktree with ls, not asserted.
+def test_a_standards_file_present_in_the_worktree_is_listed(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert "CODING_STANDARDS.md" in (section(out, "Standards sources") or ""), out
+
+
+def test_a_standards_file_absent_from_the_worktree_is_not_listed(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert "CONTRIBUTING.md" not in (section(out, "Standards sources") or ""), out
+
+
+def test_the_domain_glossary_present_in_the_worktree_is_listed_as_glossary(wt, diff):
+    open(os.path.join(wt, "GLOSSARY.md"), "w").write("x\n")
+    _, out, _ = render(wt, diff)
+    assert "GLOSSARY.md" in (section(out, "Standards sources") or ""), out
+
+
+def test_defect_classes_absent_the_three_shapes_are_inline_and_the_file_is_not_named(wt, diff):
+    _, out, _ = render(wt, diff)
+    src, dc = section(out, "Standards sources") or "", section(out, "Defect classes") or ""
+    assert all(s in dc for s in SHAPES) and "defect-classes.md" not in src, dc
+
+
+def test_defect_classes_present_is_listed_as_a_source_and_read_by_name(wt, diff):
+    open(os.path.join(wt, "docs", "agents", "defect-classes.md"), "w").write("x\n")
+    _, out, _ = render(wt, diff)
+    src, dc = section(out, "Standards sources") or "", section(out, "Defect classes") or ""
+    assert "docs/agents/defect-classes.md" in src and "docs/agents/defect-classes.md" in dc, (src, dc)
+    assert not any(s in dc for s in SHAPES), dc
+
+
+# #1216/#1400: rulings, the worker's choices and claims stay in their own sections.
+@pytest.fixture
+def judged(wt, diff):
+    _, out, _ = render(wt, diff, "--ruling", "RULED-X by Chris", "--choice", "CHOSE-Y by worker",
+                       "--claim", "S1: CLAIM-Z the worker says it fixed this")
+    return out
+
+
+def test_a_ruling_is_printed_under_settled_decisions_only(judged):
+    assert "RULED-X" in (section(judged, "Settled decisions") or "") and judged.count("RULED-X") == 1, judged
+
+
+def test_a_workers_choice_is_never_settled_own_section_flagged(judged):
+    settled, own = section(judged, "Settled decisions") or "", section(judged, "Worker's own choices") or ""
+    assert "CHOSE-Y" in own and "flag" in own.lower() and "CHOSE-Y" not in settled, judged
+
+
+def test_a_claim_is_printed_under_the_claims_heading_only_as_a_claim_to_check(judged):
+    settled, claims = section(judged, "Settled decisions") or "", section(judged, "Claims to check") or ""
+    assert "CLAIM-Z" in claims and judged.count("CLAIM-Z") == 1 and "claim" in claims.lower()
+    assert "CLAIM-Z" not in settled, judged
+
+
+def test_no_claims_no_claims_heading(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert section(out, "Claims to check") is None, out
+
+
+def test_no_rulings_the_list_says_none_rather_than_vanishing(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert "settled decisions: none" in (section(out, "Settled decisions") or "").lower(), out
+
+
+def test_the_renderer_never_emits_an_outcome_of_its_own(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert not re.search(r'"outcome"|\b(fixed|moved|disputed)\b', out), out
+
+
+def test_a_claims_own_words_are_the_only_place_an_outcome_word_appears(wt, diff):
+    _, out, _ = render(wt, diff, "--claim", "S1: it says fixed", axis="correctness")
+    assert len(re.findall(r'\b(fixed|moved|disputed)\b', out)) == 1, out
+
+
+# #1400: nested agents, worker count and ceiling.
+def test_the_brief_forbids_a_nested_subagent(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert "no nested subagent" in out.lower(), out
+
+
+def test_default_worker_count_and_wall_clock_ceiling_are_stated(wt, diff):
+    _, out, _ = render(wt, diff)
+    assert "at most 1 worker" in out and "600 seconds" in out, out
+
+
+def test_worker_count_and_ceiling_are_taken_from_the_inputs(wt, diff):
+    _, out, _ = render(wt, diff, "--workers", "3", "--ceiling", "90")
+    assert "at most 3 worker" in out and "90 seconds" in out, out
+
+
+# #1230: the rating field belongs to the correctness sidecar.
+def test_the_correctness_sidecar_schema_carries_rating_confirmed_plausible(wt, diff):
+    _, out, _ = render(wt, diff, axis="correctness")
+    assert '"rating": "CONFIRMED" or "PLAUSIBLE"' in out, out
+
+
+def test_the_spec_sidecar_schema_carries_no_rating(wt, diff):
+    _, out, _ = render(wt, diff, axis="spec")
+    assert '"rating"' not in out, out
+
+
+# Refusals name their cause and never render a half brief.
+def test_a_missing_diff_capture_is_refused_by_name(wt, tmp_path):
+    code, out, err = render(wt, str(tmp_path / "nope.patch"))
+    assert code == 2 and "nope.patch" in err and not out, err
+
+
+def test_an_empty_diff_capture_is_refused(wt, tmp_path):
+    (tmp_path / "empty.patch").write_text("")
+    code, out, err = render(wt, str(tmp_path / "empty.patch"))
+    assert code == 2 and "empty" in err and not out, err
+
+
+def test_a_worktree_that_is_not_a_directory_is_refused(tmp_path, diff):
+    code, _, err = render(str(tmp_path / "no-such-dir"), diff)
+    assert code == 2 and "no-such-dir" in err, err
+
+
+def test_an_unknown_axis_is_refused(wt, diff):
+    code, _, err = render(wt, diff, axis="docs")
+    assert code == 2, err
+
+
+def test_a_spec_axis_with_neither_spec_nor_no_spec_is_refused(wt, diff):
+    code, out, err = render(wt, diff, axis="spec", explicit_spec=True)
+    assert code == 2 and "--spec" in err and not out, err
+
+
+def test_spec_together_with_no_spec_is_refused(wt, diff):
+    code, out, err = render(wt, diff, "--spec", "x.md", "--no-spec", axis="correctness")
+    assert code == 2 and "both" in err and not out, err
+
+
+def test_no_spec_renders_no_spec_available(wt, diff):
+    code, out, err = render(wt, diff, "--no-spec", axis="correctness")
+    assert code == 0 and "no spec available" in out, err
+
+
+def test_a_claim_with_no_finding_id_is_refused(wt, diff):
+    code, _, err = render(wt, diff, "--claim", "no colon here")
+    assert code == 2 and "no colon here" in err, err
+
+
+# #1218: the capture's stat line reaches the prompt.
+def test_the_captures_stat_line_is_printed_under_inputs(wt, diff):
+    stat = "captured: 3 files; excluded 1 generated file(s): g/x.json"
+    _, out, _ = render(wt, diff, "--capture-stat", stat)
+    assert stat in (section(out, "Inputs") or ""), out
+
+
+# #1325/#1324: the worker cap binds the witness check, which has its own concurrency.
+def test_the_correctness_prompt_tells_the_witness_check_its_slot_cap(wt, diff):
+    _, out, _ = render(wt, diff, "--workers", "2", axis="correctness")
+    assert "--slots 2" in out, out
+
+
+def test_a_prompt_with_no_witness_check_carries_no_slots(wt, diff):
+    _, out, _ = render(wt, diff, "--workers", "2")
+    assert "--slots" not in out, out
+
+
+# Each axis renders its own brief, from the one file per axis.
+@pytest.mark.parametrize("axis,needle", [("standards", "Over-engineering"), ("spec", "scope creep"),
+                                         ("correctness", "witness-check.sh")])
+def test_each_axis_brief_is_included(wt, diff, axis, needle):
+    _, out, _ = render(wt, diff, axis=axis)
+    assert needle in (section(out, "Brief") or ""), out
