@@ -5,7 +5,9 @@
   line). Nothing else merges; the ownership guard blocks foreign merges.
 - **STOP and ask** before anything you cannot undo: deleting untracked work
   or evidence, a history rewrite, a new dependency, a schema change. The git
-  guard blocks the worst history destroyers.
+  guard blocks the worst history destroyers. Asking is not refusal: weigh a
+  dependency on its merits, recommend it when it wins, and put the ask to me
+  instead of designing around it.
 - **Gate 1 — whose repo:** mine lands directly; anyone else's stops at the
   pushed branch, and I get the PR command.
 - **Gate 2 — code or not:** code (executed, imported or wired into the
