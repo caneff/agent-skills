@@ -99,9 +99,12 @@ check "--list labels each suite by its path alone" \
 
 # A gate with no uv must fail, not skip every pytest suite. PATH keeps only
 # the system directories, which hold git, bash and python3 but not uv.
+# Its own TMPDIR shows the early exit leaves no temp directory behind.
 fresh a/idiom_test.py=pytest_idiom
-out=$(cd "$shadow/repo" && PATH=/usr/bin:/bin bash tests/all.sh 2>&1); rc=$?
+mkdir -p "$shadow/tmpdir"
+out=$(cd "$shadow/repo" && TMPDIR=$shadow/tmpdir PATH=/usr/bin:/bin bash tests/all.sh 2>&1); rc=$?
 check "a missing uv fails the gate, naming uv and how to get it" "$([ "$rc" != 0 ] && has "uv is not on PATH" && has "install uv"; echo $?)"
+check "...and leaves no temp directory behind" "$([ -z "$(ls -A "$shadow/tmpdir")" ]; echo $?)"
 
 # This repo's own tree: no tracked suite imports unittest, and both testing
 # skills state the ruling and cite ADR 0007 by a path that resolves anywhere.
