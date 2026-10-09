@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """The merge check (#1401): `fix-check.sh <n>` verifies mechanically
 that every review finding of ticket <n> has exactly one disposition, that a
 `fixed` sha is a commit on the PR branch, that a `moved` ticket is open, and
@@ -9,14 +8,17 @@ Seam: the real script, run from a linked worktree of a throwaway repo whose
 a fake HOME. Every refusal case also asserts the message names its cause, so
 a refusal for another reason (a missing file, a failed setup) does not pass
 for the one under test (`AGENTS.md` § Recurring defect classes, class 3).
+
+Runs under pytest (`uv run --locked pytest implement/fix_check_test.py`); each
+case builds its own throwaway world under `tmp_path`.
 """
 import json
 import os
 import shutil
 import subprocess
-import sys
-import tempfile
 import time
+
+import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.join(HERE, "fix-check.sh")
@@ -36,9 +38,9 @@ class World:
     """One repo, one branch (`implement-5` unless named) with commits past main, and the
     review cache keyed on `ticket`."""
 
-    def __init__(self, author_date=None, ticket=5, branch="implement-5"):
+    def __init__(self, tmp, author_date=None, ticket=5, branch="implement-5"):
         self.n = ticket
-        self.tmp = tempfile.mkdtemp(prefix="fix-check-")
+        self.tmp = str(tmp)
         self.home = os.path.join(self.tmp, "home")
         self.bin = os.path.join(self.tmp, "bin")
         os.makedirs(self.bin)
@@ -129,333 +131,439 @@ class World:
                               capture_output=True, text=True)
         return done.returncode, done.stdout + done.stderr
 
-    def close(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
+
+def fixed(fid, sha):
+    return {"id": fid, "outcome": "fixed", "sha": sha}
 
 
 def fixed(fid, sha):
     return {"id": fid, "outcome": "fixed", "sha": sha}
 
 
-FAILS = []
+def disputed(fid, reason="r"):
+    return {"id": fid, "outcome": "disputed", "reason": reason}
 
 
-def case(name, world, want_code, needle):
-    code, out = world.run()
-    if code != want_code or needle not in out:
-        FAILS.append(f"FAIL: {name} — want exit {want_code} + {needle!r}, got {code}: {out}")
-    else:
-        print(f"PASS: {name}")
+def expect(world, want_code, needle, cwd=None, *args):
+    """Run the check and assert its exit code and that its output names the cause."""
+    code, out = world.run(cwd, *args)
+    assert code == want_code and needle in out, f"want exit {want_code} + {needle!r}, got {code}: {out}"
 
 
-def rebased_after_review():
+def age(world, names, seconds_ago):
+    old = time.time() - seconds_ago
+    for name in names:
+        os.utime(os.path.join(world.reviews, name), (old, old))
+
+
+@pytest.fixture
+def make_world(tmp_path):
+    count = []
+
+    def make(**kwargs):
+        count.append(1)
+        return World(tmp_path / f"world{len(count)}", **kwargs)
+    return make
+
+
+@pytest.fixture
+def world(make_world):
+    return make_world()
+
+
+@pytest.fixture
+def reviewed(world):
+    """Standards S1 and spec P1 found; the cache otherwise empty of dispositions."""
+    world.findings(standards=["S1"], spec=["P1"])
+    return world
+
+
+@pytest.fixture
+def clean(world):
+    """Three empty sidecars with their markers, and an empty dispositions sidecar."""
+    world.findings()
+    world.dispositions()
+    return world
+
+
+@pytest.fixture
+def rebased(make_world):
     """#1419: a rebase after the review wave moves every committer date past the sidecars, and
     the sidecars must still read as this dispatch's: the branch is dated by author time."""
-    w = World(author_date=time.time() - 3600)
-    try:
-        w.findings(standards=["S1"])
-        written = time.time() - 1800  # after the commits were authored, before the rebase
-        for name in os.listdir(w.reviews):
-            os.utime(os.path.join(w.reviews, name), (written, written))
-        w.commit(w.primary, "moved-on")
-        w.git(w.primary, "push", "-q", "origin", "main")
-        w.git(w.work, "fetch", "-q", "origin")
-        w.git(w.work, "rebase", "-q", "origin/main")
-        committed = int(w.git(w.work, "log", "origin/main..HEAD", "--format=%ct", "-1"))
-        if committed <= written:
-            FAILS.append("FAIL: setup — the rebase did not move the committer date past the sidecars")
-            return
-        new_fix = w.git(w.work, "log", "origin/main..HEAD", "--format=%H", "--grep=^fix$")
-        w.dispositions(fixed("S1", new_fix))
-        os.utime(os.path.join(w.reviews, "dispositions-5.jsonl"), (written + 60, written + 60))
-        case("a rebase after the review wave leaves the sidecars fresh", w, 0, "1 findings")
-        old = time.time() - 10 * 86400
-        for name in ("findings-standards-5.jsonl", "findings-standards-5.done"):
-            os.utime(os.path.join(w.reviews, name), (old, old))
-        case("sidecars older than the branch's authored commits are still an earlier dispatch's", w, 1,
-             "findings-standards-5.jsonl is older than the first commit")
-    finally:
-        w.close()
+    w = make_world(author_date=time.time() - 3600)
+    w.findings(standards=["S1"])
+    written = time.time() - 1800  # after the commits were authored, before the rebase
+    for name in os.listdir(w.reviews):
+        os.utime(os.path.join(w.reviews, name), (written, written))
+    w.commit(w.primary, "moved-on")
+    w.git(w.primary, "push", "-q", "origin", "main")
+    w.git(w.work, "fetch", "-q", "origin")
+    w.git(w.work, "rebase", "-q", "origin/main")
+    committed = int(w.git(w.work, "log", "origin/main..HEAD", "--format=%ct", "-1"))
+    assert committed > written, "setup: the rebase did not move the committer date past the sidecars"
+    new_fix = w.git(w.work, "log", "origin/main..HEAD", "--format=%H", "--grep=^fix$")
+    w.dispositions(fixed("S1", new_fix))
+    os.utime(os.path.join(w.reviews, "dispositions-5.jsonl"), (written + 60, written + 60))
+    return w
 
 
-def slice_branch():
-    """#1459: a slice of a spec run is reviewed once on its integration branch, so its own
-    branch runs no wave. The skip is read from the base dispatch recorded, never from the
-    missing dispositions file (defect class 1)."""
-    w = World()
-    try:
-        w.git(w.primary, "config", "branch.implement-6.base", "spec-3")
-        case("a base recorded for another ticket excuses nothing", w, 1, "dispositions-5.jsonl is missing")
-        w.git(w.primary, "config", "branch.implement-5.base", "main")
-        case("a recorded base that is no spec-<p> keeps the review check", w, 1, "dispositions-5.jsonl is missing")
-        w.git(w.primary, "config", "branch.implement-5.base", "spec-3")
-        case("a recorded spec-3 with no origin/spec-3 is no live slice: a stale or hand-set key", w, 1,
-             "origin/spec-3 does not exist")
-        w.git(w.primary, "push", "-q", "origin", "main:spec-3")
-        w.git(w.primary, "fetch", "-q", "origin")
-        case("a slice of spec-3 needs no review sidecars and no dispositions", w, 0,
-             "slice of spec-3, no review wave")
-        case("before its PR exists, the slice says its base is checked at the merge", w, 0,
-             "no open PR from implement-5 yet")
-        # #1460's S4: fix-check passes a slice with no review, so a slice PR opened against main
-        # would land there unreviewed; the base GitHub holds is read, not the one dispatch meant.
-        w.prs = [(40, "spec-3")]
-        w.write_gh()
-        case("a slice PR into its spec-3 passes", w, 0, "PR #40 into spec-3")
-        w.prs = [(40, "main")]
-        w.write_gh()
-        case("a slice PR opened against main is refused before the merge", w, 1,
-             "PR #40 from implement-5 targets main, not spec-3")
-        w.prs = None
-        w.write_gh()
-        case("a gh that cannot list the slice's PR is the environment's, exit 2", w, 2, "gh: no network")
-        w.prs = []
-        w.write_gh()
-        real_git = shutil.which("git", path=os.environ["PATH"])
-        with open(os.path.join(w.bin, "git"), "w") as fh:
-            fh.write('#!/usr/bin/env bash\n'
-                     'if [ "$1 $2" = "config --get" ]; then echo "bad config line 9" >&2; exit 3; fi\n'
-                     f'exec {real_git} "$@"\n')
-        os.chmod(os.path.join(w.bin, "git"), 0o755)
-        case("a recorded base git cannot read is the environment's, exit 2, never an ordinary ticket", w, 2,
-             "bad config line 9")
-        os.remove(os.path.join(w.bin, "git"))
-        code, out = w.run(w.primary, "origin/implement-5")
-        if code != 2 or "origin/implement-5" not in out:
-            FAILS.append(f"FAIL: a slice head that was never pushed is still no PR head — want exit 2, got {code}: {out}")
-        else:
-            print("PASS: a slice head that was never pushed is still no PR head")
-        w.git(w.work, "push", "-q", "origin", "implement-5")
-        code, out = w.run(w.primary, "origin/implement-5")
-        if code != 0 or "slice of spec-3" not in out:
-            FAILS.append(f"FAIL: the controller's origin/implement-5 reads the same recorded base — got {code}: {out}")
-        else:
-            print("PASS: the controller's origin/implement-5 reads the same recorded base")
-    finally:
-        w.close()
+def test_a_rebase_after_the_review_wave_leaves_the_sidecars_fresh(rebased):
+    expect(rebased, 0, "1 findings")
 
 
-def spec_review():
-    """#1461: the spec is reviewed once on its integration branch `spec-<p>`, and the merge check
-    is keyed on the spec number: one disposition per finding of that review, every `fixed` sha
-    on `spec-<p>` past main. The branch holds a landed slice that closes #4, as a slice's squash
-    merge into `spec-3` does."""
-    w = World(ticket=3, branch="spec-3")
-    try:
-        w.commit(w.work, "slice-4", "slice 4 (#40)\n\nCloses #4")
-        w.git(w.work, "push", "-q", "origin", "spec-3")
-        w.git(w.primary, "fetch", "-q", "origin")
-        w.findings(standards=["S1"], spec=["P1"])
-        w.dispositions(fixed("S1", w.fix_sha))
-        code, out = w.run(w.primary, "origin/spec-3")
-        if code != 1 or "no disposition for P1" not in out:
-            FAILS.append(f"FAIL: a spec review with an undisposed finding — want exit 1 naming P1, got {code}: {out}")
-        else:
-            print("PASS: a spec review with an undisposed finding is refused, keyed on the spec number")
-        w.git(w.primary, "checkout", "-q", "-b", "elsewhere")
-        stray = w.commit(w.primary, "stray")
-        w.git(w.primary, "checkout", "-q", "main")
-        w.dispositions(fixed("S1", stray), {"id": "P1", "outcome": "disputed", "reason": "r"})
-        code, out = w.run(w.primary, "origin/spec-3")
-        if code != 1 or f"S1: fixed sha {stray} is not a hex commit on origin/spec-3" not in out:
-            FAILS.append(f"FAIL: a fixed sha off spec-3 — want exit 1 naming S1 and origin/spec-3, got {code}: {out}")
-        else:
-            print("PASS: a fixed sha that is no commit on spec-3 is refused")
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 4})
-        code, out = w.run(w.primary, "origin/spec-3")
-        if code != 1 or "P1: moved ticket #4 is one this PR closes" not in out:
-            FAILS.append(f"FAIL: a finding moved onto a landed slice — want exit 1, got {code}: {out}")
-        else:
-            print("PASS: a finding moved onto a slice the integration PR closes is refused")
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "r"})
-        code, out = w.run(w.primary, "origin/spec-3")
-        if code != 0 or "2 findings, each disposed once" not in out:
-            FAILS.append(f"FAIL: a fully disposed spec review — want exit 0, got {code}: {out}")
-        else:
-            print("PASS: a spec review with every finding disposed passes on origin/spec-3")
-    finally:
-        w.close()
+def test_sidecars_older_than_the_branchs_authored_commits_are_still_an_earlier_dispatchs(rebased):
+    age(rebased, ("findings-standards-5.jsonl", "findings-standards-5.done"), 10 * 86400)
+    expect(rebased, 1, "findings-standards-5.jsonl is older than the first commit")
 
 
-def main():
-    rebased_after_review()
-    slice_branch()
-    spec_review()
-    w = World()
-    try:
-        case("nothing in the cache: the reviewers never ran", w, 1, "findings-standards-5.jsonl is missing")
+# #1459: a slice of a spec run is reviewed once on its integration branch, so its own
+# branch runs no wave. The skip is read from the base dispatch recorded, never from the
+# missing dispositions file (defect class 1).
 
-        w.findings()
-        case("no findings and no dispositions sidecar: a missing file is not a clean review", w, 1,
-             "dispositions-5.jsonl is missing")
-
-        w.findings(standards=["S1"], spec=["P1"])
-        case("findings and no dispositions sidecar", w, 1, "dispositions-5.jsonl is missing")
-
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "the ticket asks for it"})
-        case("every finding disposed once passes", w, 0, "2 findings")
-
-        w.dispositions(fixed("S1", w.fix_sha))
-        case("one finding with no disposition", w, 1, "no disposition for P1")
-
-        w.dispositions(fixed("S1", w.fix_sha), fixed("S1", w.fix_sha),
-                       {"id": "P1", "outcome": "disputed", "reason": "r"})
-        case("one finding disposed twice", w, 1, "repeats finding id 'S1'")
-
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "r"}, fixed("X9", w.fix_sha))
-        case("a disposition for no finding", w, 1, "X9 is no finding")
-
-        w.dispositions(fixed("S1", w.base_sha), {"id": "P1", "outcome": "disputed", "reason": "r"})
-        case("a fixed sha already on main is not a fix on the branch", w, 1, "S1: fixed sha")
-
-        w.dispositions(fixed("S1", "0" * 40), {"id": "P1", "outcome": "disputed", "reason": "r"})
-        case("a fixed sha that is no commit here", w, 1, "S1: fixed sha")
-
-        w.dispositions(fixed("S1", "HEAD"), {"id": "P1", "outcome": "disputed", "reason": "r"})
-        case("a symbolic fixed sha is refused: it means another commit from another checkout", w, 1,
-             "S1: fixed sha HEAD")
-
-        w.dispositions(fixed("S1", w.fix_sha[:9]), {"id": "P1", "outcome": "disputed", "reason": "r"})
-        case("an abbreviated fixed sha resolves", w, 0, "2 findings")
-
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 77})
-        w.tickets = {77: "OPEN"}
-        w.write_gh()
-        case("a moved ticket that is open passes", w, 0, "2 findings")
-        w.tickets = {77: "CLOSED"}
-        w.write_gh()
-        case("a moved ticket that is closed", w, 1, "P1: moved ticket #77 is CLOSED")
-        w.tickets = {}
-        w.write_gh()
-        case("a gh that cannot answer is the environment's, exit 2, not a refusal the worker fixes", w, 2,
-             "`gh issue view 77` failed")
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 5})
-        case("a finding moved onto the ticket this PR closes would be lost at the merge", w, 1,
-             "P1: moved ticket #5 is one this PR closes")
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 6})
-        case("a finding moved onto a ticket a later commit of the branch closes", w, 1,
-             "P1: moved ticket #6 is one this PR closes")
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": "77"})
-        case("a moved line without an integer ticket", w, 1, "P1: moved without a ticket number")
-
-        for outcome in ("leftover", "filed", "handed-back"):
-            w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": outcome})
-            case(f"the removed outcome {outcome}", w, 1, f"its outcome is '{outcome}'")
-        # #1230: a correctness finding carries its CONFIRMED/PLAUSIBLE rating in the sidecar.
-        w.findings(correctness=["C1"])
-        w.dispositions({"id": "C1", "outcome": "disputed", "reason": "r"})
-        case("a correctness finding with a rating passes", w, 0, "1 findings")
-        w.put("findings-correctness-5.jsonl", json.dumps({"id": "C1", "axis": "correctness", "severity": "hard",
-                                                         "file": "f", "title": "t"}) + "\n")
-        case("a correctness finding with no rating is refused", w, 1, "findings-correctness-5.jsonl:1 has no rating")
-        w.put("findings-correctness-5.jsonl", json.dumps({"id": "C1", "axis": "correctness", "severity": "hard",
-                                                         "rating": "LIKELY", "file": "f", "title": "t"}) + "\n")
-        case("a correctness rating outside CONFIRMED/PLAUSIBLE is refused by naming the wrong value", w, 1,
-             "rating 'LIKELY' is not CONFIRMED or PLAUSIBLE")
-        w.findings(standards=["S1"], spec=["P1"])
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "r"})
-        case("standards and spec findings need no rating", w, 0, "2 findings")
-        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "  "})
-        case("disputed with no reason", w, 1, "P1: disputed without a reason")
-
-        w.findings()
-        w.dispositions()
-        case("three empty sidecars with their markers need no dispositions", w, 0, "0 findings")
-        os.remove(os.path.join(w.reviews, "findings-spec-5.done"))
-        case("an empty sidecar without its marker is a reviewer that may have crashed", w, 1,
-             "findings-spec-5.jsonl has no completion marker")
-        w.findings(spec=["P1"])
-        os.remove(os.path.join(w.reviews, "findings-spec-5.done"))
-        w.dispositions({"id": "P1", "outcome": "disputed", "reason": "r"})
-        case("a non-empty sidecar without its marker may be truncated: refused too", w, 1,
-             "findings-spec-5.jsonl has no completion marker")
-        w.findings(spec=["P1"])
-        old = time.time() - 10 * 86400
-        for name in ("findings-spec-5.jsonl", "findings-spec-5.done"):
-            os.utime(os.path.join(w.reviews, name), (old, old))
-        case("a sidecar older than the branch is a leftover of an earlier dispatch", w, 1,
-             "findings-spec-5.jsonl is older than the first commit")
-        w.findings()
-        w.dispositions()
-        old = time.time() - 10 * 86400
-        os.utime(os.path.join(w.reviews, "dispositions-5.jsonl"), (old, old))
-        case("a stale dispositions sidecar is refused the same way", w, 1,
-             "dispositions-5.jsonl is older than the first commit")
-        w.dispositions()
-        w.put("findings-spec-5.jsonl", '{"id": "P1"')
-        case("a malformed sidecar line is not skipped", w, 1, "findings-spec-5.jsonl:1")
-        w.findings()
-
-        # The ablation: a review the ledger records as skipped needs no sidecar.
-        for name in ("findings-standards-5.jsonl", "findings-standards-5.done"):
-            os.remove(os.path.join(w.reviews, name))
-        case("a standards axis the ledger does not record as skipped needs its sidecar", w, 1,
-             "records no skip for it")
-        w.ledger_skip("standards", ticket=6)
-        case("a skip recorded for another ticket excuses nothing", w, 1, "records no skip for it")
-        w.ledger_skip("standards")
-        case("a standards axis the ledger records as skipped (the ablation) passes with no sidecar", w, 0,
-             "0 findings")
-        w.findings()
-
-        # Codex: its findings are `codex-gate-<k>`, the id `review_ledger.py` harvests under.
-        w.codex()
-        w.dispositions(fixed("codex-gate-1", w.fix_sha))
-        case("a codex finding with no disposition", w, 1, "no disposition for codex-gate-2")
-        w.dispositions(fixed("codex-gate-1", w.fix_sha), {"id": "codex-gate-2", "outcome": "disputed", "reason": "r"})
-        case("both codex findings disposed", w, 0, "2 findings")
-        w.codex(status=1)
-        w.dispositions()
-        case("a codex run that errored is a skipped pass, named", w, 0, "codex pass refused")
-        w.codex(launch="a" * 40)
-        case("a codex run the branch moved under is refused the same way", w, 0, "codex pass refused")
-        w.codex(out="garbage\n")
-        case("a codex output the parser cannot read is not a clean pass", w, 1, "codex-adversarial-5-gate.out")
-        w.put("codex-adversarial-5-gate.json", "{not json")
-        case("an unreadable codex record is refused, not read as no pass", w, 1,
-             "codex-adversarial-5-gate.json is unreadable")
-        w.codex(out="No material findings\n")
-        case("a codex run with no findings needs no dispositions", w, 0, "0 findings")
-        os.remove(os.path.join(w.reviews, "codex-adversarial-5-gate.json"))
-        ledger = os.path.join(w.home, ".cache", "agent-reviews", "ledger.jsonl")
-        os.rename(ledger, ledger + ".off")
-        case("no codex record and no ledger row saying why: the pass neither ran nor was skipped on record", w, 1,
-             "no codex-gate row")
-        os.rename(ledger + ".off", ledger)
-
-        # From the primary checkout, as the controller runs it: the branch is named, never HEAD.
-        w.findings(standards=["S1"])
-        w.dispositions(fixed("S1", w.fix_sha))
-        code, out = w.run(w.primary)
-        if code != 0:
-            FAILS.append(f"FAIL: the primary checkout resolves the branch, not its own HEAD — got {code}: {out}")
-        else:
-            print("PASS: the primary checkout resolves the branch, not its own HEAD")
-        code, out = w.run(w.primary, "origin/implement-5")
-        if code != 2 or "origin/implement-5" not in out:
-            FAILS.append(f"FAIL: a branch that was never pushed is no PR head — want exit 2 naming it, got {code}: {out}")
-        else:
-            print("PASS: a branch that was never pushed is no PR head: the environment cannot answer")
-        w.git(w.work, "push", "-q", "origin", "implement-5")
-        w.dispositions(fixed("S1", w.fix_sha))
-        code, out = w.run(w.primary, "origin/implement-5")
-        if code != 0:
-            FAILS.append(f"FAIL: the pushed head, named as the controller names it, passes — got {code}: {out}")
-        else:
-            print("PASS: the pushed head, named as the controller names it, passes")
-
-        done = subprocess.run(["bash", CHECK], cwd=w.work, env=w.env, capture_output=True, text=True)
-        if done.returncode != 2 or "usage" not in done.stderr:
-            FAILS.append(f"FAIL: no ticket number is a usage error — got {done.returncode}: {done.stderr}")
-        else:
-            print("PASS: no ticket number is a usage error")
-    finally:
-        w.close()
-    if FAILS:
-        print("\n".join(FAILS))
-        sys.exit(1)
-    print("ALL PASS")
+def test_a_base_recorded_for_another_ticket_excuses_nothing(world):
+    world.git(world.primary, "config", "branch.implement-6.base", "spec-3")
+    expect(world, 1, "dispositions-5.jsonl is missing")
 
 
-if __name__ == "__main__":
-    main()
+def test_a_recorded_base_that_is_no_spec_p_keeps_the_review_check(world):
+    world.git(world.primary, "config", "branch.implement-6.base", "spec-3")
+    world.git(world.primary, "config", "branch.implement-5.base", "main")
+    expect(world, 1, "dispositions-5.jsonl is missing")
+
+
+def test_a_recorded_spec_3_with_no_origin_spec_3_is_no_live_slice_a_stale_or_hand_set_key(world):
+    world.git(world.primary, "config", "branch.implement-5.base", "spec-3")
+    expect(world, 1, "origin/spec-3 does not exist")
+
+
+@pytest.fixture
+def slice_world(world):
+    world.git(world.primary, "config", "branch.implement-5.base", "spec-3")
+    world.git(world.primary, "push", "-q", "origin", "main:spec-3")
+    world.git(world.primary, "fetch", "-q", "origin")
+    return world
+
+
+def test_a_slice_of_spec_3_needs_no_review_sidecars_and_no_dispositions(slice_world):
+    expect(slice_world, 0, "slice of spec-3, no review wave")
+
+
+def test_before_its_pr_exists_the_slice_says_its_base_is_checked_at_the_merge(slice_world):
+    expect(slice_world, 0, "no open PR from implement-5 yet")
+
+
+# #1460's S4: fix-check passes a slice with no review, so a slice PR opened against main
+# would land there unreviewed; the base GitHub holds is read, not the one dispatch meant.
+def test_a_slice_pr_into_its_spec_3_passes(slice_world):
+    slice_world.prs = [(40, "spec-3")]
+    slice_world.write_gh()
+    expect(slice_world, 0, "PR #40 into spec-3")
+
+
+def test_a_slice_pr_opened_against_main_is_refused_before_the_merge(slice_world):
+    slice_world.prs = [(40, "main")]
+    slice_world.write_gh()
+    expect(slice_world, 1, "PR #40 from implement-5 targets main, not spec-3")
+
+
+def test_a_gh_that_cannot_list_the_slices_pr_is_the_environments_exit_2(slice_world):
+    slice_world.prs = None
+    slice_world.write_gh()
+    expect(slice_world, 2, "gh: no network")
+
+
+def test_a_recorded_base_git_cannot_read_is_the_environments_exit_2_never_an_ordinary_ticket(slice_world):
+    real_git = shutil.which("git", path=os.environ["PATH"])
+    with open(os.path.join(slice_world.bin, "git"), "w") as fh:
+        fh.write('#!/usr/bin/env bash\n'
+                 'if [ "$1 $2" = "config --get" ]; then echo "bad config line 9" >&2; exit 3; fi\n'
+                 f'exec {real_git} "$@"\n')
+    os.chmod(os.path.join(slice_world.bin, "git"), 0o755)
+    expect(slice_world, 2, "bad config line 9")
+
+
+def test_a_slice_head_that_was_never_pushed_is_still_no_pr_head(slice_world):
+    expect(slice_world, 2, "origin/implement-5", slice_world.primary, "origin/implement-5")
+
+
+def test_the_controllers_origin_implement_5_reads_the_same_recorded_base(slice_world):
+    slice_world.git(slice_world.work, "push", "-q", "origin", "implement-5")
+    expect(slice_world, 0, "slice of spec-3", slice_world.primary, "origin/implement-5")
+
+
+# #1461: the spec is reviewed once on its integration branch `spec-<p>`, and the merge check
+# is keyed on the spec number: one disposition per finding of that review, every `fixed` sha
+# on `spec-<p>` past main. The branch holds a landed slice that closes #4, as a slice's squash
+# merge into `spec-3` does.
+@pytest.fixture
+def spec_world(make_world):
+    w = make_world(ticket=3, branch="spec-3")
+    w.commit(w.work, "slice-4", "slice 4 (#40)\n\nCloses #4")
+    w.git(w.work, "push", "-q", "origin", "spec-3")
+    w.git(w.primary, "fetch", "-q", "origin")
+    w.findings(standards=["S1"], spec=["P1"])
+    return w
+
+
+def test_a_spec_review_with_an_undisposed_finding_is_refused_keyed_on_the_spec_number(spec_world):
+    spec_world.dispositions(fixed("S1", spec_world.fix_sha))
+    expect(spec_world, 1, "no disposition for P1", spec_world.primary, "origin/spec-3")
+
+
+def test_a_fixed_sha_that_is_no_commit_on_spec_3_is_refused(spec_world):
+    w = spec_world
+    w.git(w.primary, "checkout", "-q", "-b", "elsewhere")
+    stray = w.commit(w.primary, "stray")
+    w.git(w.primary, "checkout", "-q", "main")
+    w.dispositions(fixed("S1", stray), disputed("P1"))
+    expect(w, 1, f"S1: fixed sha {stray} is not a hex commit on origin/spec-3", w.primary, "origin/spec-3")
+
+
+def test_a_finding_moved_onto_a_slice_the_integration_pr_closes_is_refused(spec_world):
+    w = spec_world
+    w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 4})
+    expect(w, 1, "P1: moved ticket #4 is one this PR closes", w.primary, "origin/spec-3")
+
+
+def test_a_spec_review_with_every_finding_disposed_passes_on_origin_spec_3(spec_world):
+    w = spec_world
+    w.dispositions(fixed("S1", w.fix_sha), disputed("P1"))
+    expect(w, 0, "2 findings, each disposed once", w.primary, "origin/spec-3")
+
+
+def test_nothing_in_the_cache_the_reviewers_never_ran(world):
+    expect(world, 1, "findings-standards-5.jsonl is missing")
+
+
+def test_no_findings_and_no_dispositions_sidecar_a_missing_file_is_not_a_clean_review(world):
+    world.findings()
+    expect(world, 1, "dispositions-5.jsonl is missing")
+
+
+def test_findings_and_no_dispositions_sidecar(reviewed):
+    expect(reviewed, 1, "dispositions-5.jsonl is missing")
+
+
+def test_every_finding_disposed_once_passes(reviewed):
+    reviewed.dispositions(fixed("S1", reviewed.fix_sha),
+                          disputed("P1", "the ticket asks for it"))
+    expect(reviewed, 0, "2 findings")
+
+
+@pytest.mark.parametrize("name, lines, code, needle", [
+    ("one finding with no disposition",
+     lambda w: [fixed("S1", w.fix_sha)], 1, "no disposition for P1"),
+    ("one finding disposed twice",
+     lambda w: [fixed("S1", w.fix_sha), fixed("S1", w.fix_sha), disputed("P1")],
+     1, "repeats finding id 'S1'"),
+    ("a disposition for no finding",
+     lambda w: [fixed("S1", w.fix_sha), disputed("P1"), fixed("X9", w.fix_sha)],
+     1, "X9 is no finding"),
+    ("a fixed sha already on main is not a fix on the branch",
+     lambda w: [fixed("S1", w.base_sha), disputed("P1")], 1, "S1: fixed sha"),
+    ("a fixed sha that is no commit here",
+     lambda w: [fixed("S1", "0" * 40), disputed("P1")], 1, "S1: fixed sha"),
+    ("a symbolic fixed sha is refused: it means another commit from another checkout",
+     lambda w: [fixed("S1", "HEAD"), disputed("P1")], 1, "S1: fixed sha HEAD"),
+    ("an abbreviated fixed sha resolves",
+     lambda w: [fixed("S1", w.fix_sha[:9]), disputed("P1")], 0, "2 findings"),
+    ("a finding moved onto the ticket this PR closes would be lost at the merge",
+     lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 5}],
+     1, "P1: moved ticket #5 is one this PR closes"),
+    ("a finding moved onto a ticket a later commit of the branch closes",
+     lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 6}],
+     1, "P1: moved ticket #6 is one this PR closes"),
+    ("a moved line without an integer ticket",
+     lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": "77"}],
+     1, "P1: moved without a ticket number"),
+    ("the removed outcome leftover",
+     lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "leftover"}],
+     1, "its outcome is 'leftover'"),
+    ("the removed outcome filed",
+     lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "filed"}],
+     1, "its outcome is 'filed'"),
+    ("the removed outcome handed-back",
+     lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "handed-back"}],
+     1, "its outcome is 'handed-back'"),
+    ("standards and spec findings need no rating",
+     lambda w: [fixed("S1", w.fix_sha), disputed("P1")], 0, "2 findings"),
+    ("disputed with no reason",
+     lambda w: [fixed("S1", w.fix_sha), disputed("P1", "  ")], 1, "P1: disputed without a reason"),
+], ids=lambda v: v if isinstance(v, str) and " " in v else None)
+def test_dispositions_of_standards_and_spec_findings(reviewed, name, lines, code, needle):
+    reviewed.dispositions(*lines(reviewed))
+    expect(reviewed, code, needle)
+
+
+def test_a_moved_ticket_that_is_open_passes(reviewed):
+    reviewed.dispositions(fixed("S1", reviewed.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 77})
+    reviewed.tickets = {77: "OPEN"}
+    reviewed.write_gh()
+    expect(reviewed, 0, "2 findings")
+
+
+def test_a_moved_ticket_that_is_closed(reviewed):
+    reviewed.dispositions(fixed("S1", reviewed.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 77})
+    reviewed.tickets = {77: "CLOSED"}
+    reviewed.write_gh()
+    expect(reviewed, 1, "P1: moved ticket #77 is CLOSED")
+
+
+def test_a_gh_that_cannot_answer_is_the_environments_exit_2_not_a_refusal_the_worker_fixes(reviewed):
+    reviewed.dispositions(fixed("S1", reviewed.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 77})
+    reviewed.tickets = {}
+    reviewed.write_gh()
+    expect(reviewed, 2, "`gh issue view 77` failed")
+
+
+# #1230: a correctness finding carries its CONFIRMED/PLAUSIBLE rating in the sidecar.
+@pytest.fixture
+def correctness(world):
+    world.findings(correctness=["C1"])
+    world.dispositions(disputed("C1"))
+    return world
+
+
+def test_a_correctness_finding_with_a_rating_passes(correctness):
+    expect(correctness, 0, "1 findings")
+
+
+def test_a_correctness_finding_with_no_rating_is_refused(correctness):
+    correctness.put("findings-correctness-5.jsonl", json.dumps(
+        {"id": "C1", "axis": "correctness", "severity": "hard", "file": "f", "title": "t"}) + "\n")
+    expect(correctness, 1, "findings-correctness-5.jsonl:1 has no rating")
+
+
+def test_a_correctness_rating_outside_confirmed_plausible_is_refused_by_naming_the_wrong_value(correctness):
+    correctness.put("findings-correctness-5.jsonl", json.dumps(
+        {"id": "C1", "axis": "correctness", "severity": "hard", "rating": "LIKELY",
+         "file": "f", "title": "t"}) + "\n")
+    expect(correctness, 1, "rating 'LIKELY' is not CONFIRMED or PLAUSIBLE")
+
+
+def test_three_empty_sidecars_with_their_markers_need_no_dispositions(clean):
+    expect(clean, 0, "0 findings")
+
+
+def test_an_empty_sidecar_without_its_marker_is_a_reviewer_that_may_have_crashed(clean):
+    os.remove(os.path.join(clean.reviews, "findings-spec-5.done"))
+    expect(clean, 1, "findings-spec-5.jsonl has no completion marker")
+
+
+def test_a_non_empty_sidecar_without_its_marker_may_be_truncated_refused_too(world):
+    world.findings(spec=["P1"])
+    os.remove(os.path.join(world.reviews, "findings-spec-5.done"))
+    world.dispositions(disputed("P1"))
+    expect(world, 1, "findings-spec-5.jsonl has no completion marker")
+
+
+def test_a_sidecar_older_than_the_branch_is_a_leftover_of_an_earlier_dispatch(world):
+    world.findings(spec=["P1"])
+    world.dispositions(disputed("P1"))
+    age(world, ("findings-spec-5.jsonl", "findings-spec-5.done"), 10 * 86400)
+    expect(world, 1, "findings-spec-5.jsonl is older than the first commit")
+
+
+def test_a_stale_dispositions_sidecar_is_refused_the_same_way(clean):
+    age(clean, ("dispositions-5.jsonl",), 10 * 86400)
+    expect(clean, 1, "dispositions-5.jsonl is older than the first commit")
+
+
+def test_a_malformed_sidecar_line_is_not_skipped(clean):
+    clean.put("findings-spec-5.jsonl", '{"id": "P1"')
+    expect(clean, 1, "findings-spec-5.jsonl:1")
+
+
+# The ablation: a review the ledger records as skipped needs no sidecar.
+@pytest.fixture
+def no_standards(clean):
+    for name in ("findings-standards-5.jsonl", "findings-standards-5.done"):
+        os.remove(os.path.join(clean.reviews, name))
+    return clean
+
+
+def test_a_standards_axis_the_ledger_does_not_record_as_skipped_needs_its_sidecar(no_standards):
+    expect(no_standards, 1, "records no skip for it")
+
+
+def test_a_skip_recorded_for_another_ticket_excuses_nothing(no_standards):
+    no_standards.ledger_skip("standards", ticket=6)
+    expect(no_standards, 1, "records no skip for it")
+
+
+def test_a_standards_axis_the_ledger_records_as_skipped_the_ablation_passes_with_no_sidecar(no_standards):
+    no_standards.ledger_skip("standards")
+    expect(no_standards, 0, "0 findings")
+
+
+# Codex: its findings are `codex-gate-<k>`, the id `review_ledger.py` harvests under.
+def test_a_codex_finding_with_no_disposition(clean):
+    clean.codex()
+    clean.dispositions(fixed("codex-gate-1", clean.fix_sha))
+    expect(clean, 1, "no disposition for codex-gate-2")
+
+
+def test_both_codex_findings_disposed(clean):
+    clean.codex()
+    clean.dispositions(fixed("codex-gate-1", clean.fix_sha), disputed("codex-gate-2"))
+    expect(clean, 0, "2 findings")
+
+
+def test_a_codex_run_that_errored_is_a_skipped_pass_named(clean):
+    clean.codex(status=1)
+    expect(clean, 0, "codex pass refused")
+
+
+def test_a_codex_run_the_branch_moved_under_is_refused_the_same_way(clean):
+    clean.codex(launch="a" * 40)
+    expect(clean, 0, "codex pass refused")
+
+
+def test_a_codex_output_the_parser_cannot_read_is_not_a_clean_pass(clean):
+    clean.codex(out="garbage\n")
+    expect(clean, 1, "codex-adversarial-5-gate.out")
+
+
+def test_an_unreadable_codex_record_is_refused_not_read_as_no_pass(clean):
+    clean.codex(out="garbage\n")
+    clean.put("codex-adversarial-5-gate.json", "{not json")
+    expect(clean, 1, "codex-adversarial-5-gate.json is unreadable")
+
+
+def test_a_codex_run_with_no_findings_needs_no_dispositions(clean):
+    clean.codex(out="No material findings\n")
+    expect(clean, 0, "0 findings")
+
+
+def test_no_codex_record_and_no_ledger_row_saying_why_the_pass_neither_ran_nor_was_skipped_on_record(clean):
+    ledger = os.path.join(clean.home, ".cache", "agent-reviews", "ledger.jsonl")
+    os.rename(ledger, ledger + ".off")
+    expect(clean, 1, "no codex-gate row")
+
+
+# From the primary checkout, as the controller runs it: the branch is named, never HEAD.
+@pytest.fixture
+def s1_world(world):
+    world.findings(standards=["S1"])
+    world.dispositions(fixed("S1", world.fix_sha))
+    return world
+
+
+def test_the_primary_checkout_resolves_the_branch_not_its_own_head(s1_world):
+    code, out = s1_world.run(s1_world.primary)
+    assert code == 0, f"got {code}: {out}"
+
+
+def test_a_branch_that_was_never_pushed_is_no_pr_head_the_environment_cannot_answer(s1_world):
+    expect(s1_world, 2, "origin/implement-5", s1_world.primary, "origin/implement-5")
+
+
+def test_the_pushed_head_named_as_the_controller_names_it_passes(s1_world):
+    s1_world.git(s1_world.work, "push", "-q", "origin", "implement-5")
+    code, out = s1_world.run(s1_world.primary, "origin/implement-5")
+    assert code == 0, f"got {code}: {out}"
+
+
+def test_no_ticket_number_is_a_usage_error(world):
+    done = subprocess.run(["bash", CHECK], cwd=world.work, env=world.env, capture_output=True, text=True)
+    assert done.returncode == 2 and "usage" in done.stderr, f"got {done.returncode}: {done.stderr}"
