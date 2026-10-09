@@ -9,7 +9,6 @@ default branch had not moved.
 Seam: the Markdown text of step 3 and of the slice paragraph above it.
 """
 import os
-import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -32,8 +31,8 @@ def step3():
 
 
 def test_step3_runs_the_full_seam():
-    assert re.search(r"run whole from the merged worktree", step3())
-    assert re.search(r"`bash tests/all\.sh` here", step3())
+    assert "run whole from the merged worktree" in step3()
+    assert "`bash tests/all.sh` here" in step3()
 
 
 def test_step3_does_not_narrow_the_rerun():

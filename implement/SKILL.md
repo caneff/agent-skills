@@ -866,7 +866,7 @@ closed.
 
    `<the repo's seam>` is the command declared in `AGENTS.md` § End-to-end seam,
    which is `bash tests/all.sh` here, run whole from the merged worktree, not
-   narrowed (about 100 s on 32 cores); a
+   narrowed; a
    repo declaring none: tell Chris and merge nothing on this step's say-so.
    State the run's worker and core count in your status line before you launch
    it. The controller merges only on green. A merge conflict or a red seam blocks the merge: send the worker

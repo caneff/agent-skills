@@ -992,39 +992,57 @@ def test_the_full_run_log_is_named_for_its_repo(sb):
     assert not os.path.exists(os.path.join(logs, "full-suite.log")), "the shared name would be overwritten by the next repo"
 
 
-def gate_repo(sb, listed):
-    """A main whose `tests/all.sh` is a stub: with `--list` it prints `listed`
-    (what `--changed` selects), otherwise it fails the suite `SEAM_RED` names."""
+def gate_repo(sb, listed, message="gate"):
+    """Commit a `tests/all.sh` stub to main: with `--list --changed <base>` it
+    prints `listed` (what `--changed` selects at this commit) and logs its
+    arguments to `$SEAM_LOG`; otherwise it fails the suite `SEAM_RED` names."""
     os.makedirs(os.path.join(sb.repo, "tests"), exist_ok=True)
     write(os.path.join(sb.repo, "tests", "all.sh"),
-          '#!/bin/sh\ncase "$1" in --list) printf "%s\\n" ' + " ".join(listed) + '; exit 0;; esac\n'
+          '#!/bin/sh\ncase "$1" in --list) echo "$*" >> "$SEAM_LOG"; printf "%s\\n" ' + " ".join(listed) + '; exit 0;; esac\n'
           'test -z "$SEAM_RED" && exit 0\necho "FAIL $SEAM_RED"; exit 1\n', 0o755)
     sb.git(sb.repo, "add", ".")
-    sb.git(sb.repo, "commit", "-qm", "gate")
+    sb.git(sb.repo, "commit", "-q", "--allow-empty", "-m", message)
     sb.git(sb.repo, "push", "-q", "origin", "main")
-    sb.git(sb.repo, "config", "--unset", "land.testcmd")
+    if subprocess.run(["git", "config", "land.testcmd"], cwd=sb.repo, capture_output=True).returncode == 0:
+        sb.git(sb.repo, "config", "--unset", "land.testcmd")  # the default seam is `bash tests/all.sh`
+    return sb.git(sb.repo, "rev-parse", "HEAD")
 
 
-def red_after_a_green(sb, listed):
+def red_after_a_green(sb, *listings):
+    """A green full run, then one merge per listing (each rewrites the stub, so
+    the listing is what `--changed` selects at that merge), then a red full run."""
     sb.write_state({1: {}, 2: {}})
-    gate_repo(sb, listed)
+    gate_repo(sb, ["alpha/a.test.sh"])
     assert sb.drain("--once").returncode == 0  # records last-green
-    sb.git(sb.repo, "commit", "-q", "--allow-empty", "-m", "later merge")
-    sb.git(sb.repo, "push", "-q", "origin", "main")
-    return sb.drain("--once", env={"SEAM_RED": "zeta/z.test.sh"})
+    merges = [gate_repo(sb, listed, f"merge {i}") for i, listed in enumerate(listings)]
+    r = sb.drain("--once", env={"SEAM_RED": "zeta/z.test.sh"})
+    return r, merges
 
 
-def test_a_red_full_run_whose_suite_the_changed_selection_would_have_skipped_is_a_selector_miss(sb):
-    r = red_after_a_green(sb, ["alpha/a.test.sh", "tests/t.test.sh"])
+def test_a_red_full_run_no_merges_gate_selects_is_a_selector_miss(sb):
+    r, _ = red_after_a_green(sb, ["alpha/a.test.sh"], ["tests/t.test.sh"])
     assert "stopped: the full suite is red on main" in r.stdout
-    assert "selector miss: `--changed` since the last green full run would not have selected zeta/z.test.sh" in r.stdout
+    assert "selector miss: `--changed` would not have selected zeta/z.test.sh for any of the 2 merges" in r.stdout
 
 
-def test_a_red_full_run_whose_suite_the_changed_selection_includes_is_not_a_selector_miss(sb):
-    r = red_after_a_green(sb, ["alpha/a.test.sh", "zeta/z.test.sh"])
+def test_the_selector_is_asked_per_merge_with_that_merges_parent_as_the_base(sb):
+    _, merges = red_after_a_green(sb, ["alpha/a.test.sh"], ["alpha/a.test.sh"])
+    asked = [x for x in sb.seam_runs() if x.startswith("--list")]
+    assert asked == [f"--list --changed {m}^1" for m in merges]
+
+
+def test_a_suite_selected_for_only_some_merges_is_not_called_clean_or_a_miss(sb):
+    r, merges = red_after_a_green(sb, ["zeta/z.test.sh"], ["alpha/a.test.sh"])
+    assert "selector miss:" not in r.stdout
+    assert f"for 1 of 2 merges ({merges[0][:8]})" in r.stdout
+    assert "(bisect to settle)" in r.stdout
+
+
+def test_a_suite_every_merge_selects_is_reported_selected(sb):
+    r, _ = red_after_a_green(sb, ["zeta/z.test.sh"], ["zeta/z.test.sh"])
     assert "stopped: the full suite is red on main" in r.stdout
-    assert "selector miss" not in r.stdout
-    assert "`--changed` would have selected zeta/z.test.sh" in r.stdout
+    assert "selector miss:" not in r.stdout
+    assert "would have selected zeta/z.test.sh for every merge" in r.stdout
 
 
 def test_a_red_full_run_with_no_green_on_record_says_the_selector_was_not_checked(sb):
@@ -1033,7 +1051,17 @@ def test_a_red_full_run_with_no_green_on_record_says_the_selector_was_not_checke
     r = sb.drain("--once", env={"SEAM_RED": "zeta/z.test.sh"})
     assert "stopped: the full suite is red on main" in r.stdout
     assert "selector not checked: no green full run on record" in r.stdout
-    assert "selector miss" not in r.stdout
+    assert "selector miss:" not in r.stdout
+
+
+def test_a_full_run_log_that_cannot_be_read_is_not_reported_as_one_without_a_failure_line(sb, monkeypatch):
+    sys.path.insert(0, HERE)
+    import drain as drain_module
+    ctx = drain_module.Ctx(sb.repo, "me/repo", "main", os.path.join(sb.tmp, "logs"), 1, None)
+    monkeypatch.setattr(drain_module, "seam_cmd", lambda c: drain_module.FULL_SEAM)
+    verdict = drain_module.selector_verdict(ctx, "0" * 40, "1" * 40)  # no log was ever written
+    assert "could not be read" in verdict
+    assert "no `FAIL" not in verdict
 
 
 def test_no_merge_means_no_full_run(sb):

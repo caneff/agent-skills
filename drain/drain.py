@@ -610,14 +610,14 @@ def seam_cmd(ctx):
     return run(["git", "config", "land.testcmd"], cwd=ctx.root, check=False) or FULL_SEAM
 
 
-def run_in_scratch_tree(ctx, cmd, log, head=None):
-    """`cmd` in a throwaway worktree of current main, with `head` merged in when
-    given. The merge commit uses the identity the repo is already configured
+def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
+    """`cmd` in a throwaway worktree of current main (or of `rev`), with `head`
+    merged in when given. The merge commit uses the identity the repo is already configured
     with. A tree with a `package-lock.json` gets `npm ci` before `cmd`.
     Raises `DrainError` on a conflict or a non-zero exit."""
     scratch = tempfile.mkdtemp(prefix="drain-seam-")
     try:
-        run(["git", "worktree", "add", "-q", "--detach", scratch, ctx.default], cwd=ctx.root)
+        run(["git", "worktree", "add", "-q", "--detach", scratch, rev or ctx.default], cwd=ctx.root)
         if head:
             merged = subprocess.run(["git", "merge", "--no-edit", head], cwd=scratch, capture_output=True, text=True)
             if merged.returncode:
@@ -674,11 +674,18 @@ def full_log_path(ctx):
     return os.path.join(ctx.log_dir, f"full-suite-{repo_slug(ctx)}.log")
 
 
-def selector_verdict(ctx, last):
-    """After a red full run: would `--changed` over the range since the last
-    green full run (`last`, a sha or `None`) have selected the suite that
-    failed? A selector miss is a defect-class instance, so every answer that is
-    not a clean "selected" says what could not be checked (#1495)."""
+MAX_SELECTOR_COMMITS = 30
+
+
+def selector_verdict(ctx, last, tip):
+    """After a red full run: would `--changed` have selected the suite that
+    failed? Each merge since the last green full run (`last`, a sha or `None`)
+    was gated on its own diff, so the question is asked per merge, at that
+    merge, and the answer names which merges' gates would have run the suite.
+    Without a bisect the breaking merge is unknown, so only "no merge's gate
+    selects it" is a selector miss. A selector miss is a defect-class instance,
+    so every answer that is not a clean one says what could not be checked
+    (#1495)."""
     if seam_cmd(ctx) != FULL_SEAM:
         return "selector not checked: the repo's seam is not `bash tests/all.sh`"
     if not last:
@@ -686,21 +693,35 @@ def selector_verdict(ctx, last):
     try:
         with open(full_log_path(ctx)) as f:
             failed = next((m.group(1) for m in (re.match(r"FAIL (\S+)", x) for x in f) if m), None)
-    except OSError:
-        failed = None
+    except OSError as exc:
+        return f"selector not checked: the full run's log could not be read ({one_line(exc, 100)})"
     if not failed:
-        return "selector not checked: the full run's log names no failing suite"
-    listing = os.path.join(ctx.log_dir, f"full-suite-{repo_slug(ctx)}-selection.log")
+        return "selector not checked: the full run's log has no `FAIL <suite>` line"
     try:
-        run_in_scratch_tree(ctx, f"{FULL_SEAM} --list --changed {shlex.quote(last)}", listing)
-        with open(listing) as f:
-            selected = f.read().split()
-    except (DrainError, OSError) as exc:
+        merges = run(["git", "log", "--first-parent", "--format=%H", f"{last}..{tip}"], cwd=ctx.root).split()[::-1]
+    except DrainError as exc:
         return f"selector not checked: {one_line(exc, 150)}"
-    if failed in selected:
-        return f"`--changed` would have selected {failed}"
-    return (f"selector miss: `--changed` since the last green full run would not have selected {failed} "
-            f"({len(selected)} suites selected)")
+    if not merges:
+        return "selector not checked: no merge since the last green full run"
+    if len(merges) > MAX_SELECTOR_COMMITS:
+        return f"selector not checked: {len(merges)} merges since the last green full run (limit {MAX_SELECTOR_COMMITS})"
+    picked = []
+    for sha in merges:
+        listing = os.path.splitext(full_log_path(ctx))[0] + "-selection.log"
+        try:
+            run_in_scratch_tree(ctx, f"{FULL_SEAM} --list --changed {sha}^1", listing, rev=sha)
+            with open(listing) as f:
+                if failed in f.read().split():
+                    picked.append(sha[:8])
+        except (DrainError, OSError) as exc:
+            return f"selector not checked: {one_line(exc, 150)}"
+    if not picked:
+        return (f"selector miss: `--changed` would not have selected {failed} for any of the {len(merges)} "
+                "merges since the last green full run")
+    if len(picked) == len(merges):
+        return f"`--changed` would have selected {failed} for every merge since the last green full run"
+    return (f"`--changed` would have selected {failed} for {len(picked)} of {len(merges)} merges ({', '.join(picked)}); "
+            "if the breaking merge is one of the others, its gate skipped the suite, which is a selector miss (bisect to settle)")
 
 
 def full_run(ctx, merged):
@@ -723,7 +744,7 @@ def full_run(ctx, merged):
         except (OSError, DrainError):
             pass
         return (f"the full suite is red on main after this run ({one_line(exc, 150)}). Merges since the last "
-                "green full run: " + "; ".join(since) + ". " + selector_verdict(ctx, last))
+                "green full run: " + "; ".join(since) + ". " + selector_verdict(ctx, last, tip))
     with open(last_green_path(ctx), "w") as f:
         f.write(tip + "\n")
     return None

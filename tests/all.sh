@@ -13,8 +13,13 @@
 # `--list` prints the labels the rules select, without running anything.
 # `--changed <base>` narrows the run to the suites under every top-level
 # directory the diff `<base>...HEAD` touches plus everything under `tests/`
-# (the repo-wide checks); see `scope_changed` for when it widens to the full
-# suite. Suites run concurrently, `TESTS_JOBS` at a time (default `nproc`),
+# (the repo-wide checks), widened by the cross-directory edges
+# `tests/suite-edges.py` finds (a suite that loads or reads another directory's
+# files runs when that directory changes); see `scope_changed` for when it
+# widens to the full suite. A suite with a line `# all.sh: repo-wide (<why>)`
+# in its first twenty lines reads the whole tree and is always kept. A
+# narrowed run's last line says so:
+# `N of M suites passed (narrowed: ...)`. Suites run concurrently, `TESTS_JOBS` at a time (default `nproc`),
 # and are reported in discovery order. A suite with a comment line
 # `# all.sh: serial (<why>)` in its first twenty lines cannot share the box (a
 # fixed port, a shared global path): it runs alone after the concurrent ones.
@@ -63,8 +68,8 @@ suites() { # prints "<label>\t<command>" per discovered suite
 # Which suites a `--changed <base>` run keeps. The full suite is the answer
 # whenever the diff cannot be pinned to a directory that owns suites: a change
 # to this script, a file at the repo root, or a directory with no suite of its
-# own (nothing then says which suites cover it). An empty diff keeps only the
-# repo-wide checks. Prints the kept labels' directories as a space-separated
+# own (nothing then says which suites cover it), or an edge scan that fails
+# (#1495). An empty diff keeps only the repo-wide checks. Prints the kept labels' directories as a space-separated
 # word list on stdout, or `*` for the full suite; the reason goes to stderr.
 scope_changed() { # <base>
   local base=$1 files file dir all_dirs dirs="" widened
@@ -101,8 +106,19 @@ scope_changed() { # <base>
   echo "$dirs"
 }
 
-filter_dirs() { # <dirs word list>: keeps suites under those dirs, under tests/, or at the root
-  awk -F'\t' -v dirs=" $1 tests " '{ n = split($1, p, "/"); if (n == 1 || index(dirs, " " p[1] " ")) print }'
+filter_dirs() { # <dirs word list> <repo-wide labels>: keeps suites under those dirs, under tests/, at the root, or marked repo-wide
+  awk -F'\t' -v dirs=" $1 tests " -v wide=" $2 " '{ n = split($1, p, "/"); if (n == 1 || index(dirs, " " p[1] " ") || index(wide, " " $1 " ")) print }'
+}
+
+# A suite that reads the whole tree rather than one directory cannot be pinned
+# by an edge, so it says so with a line `# all.sh: repo-wide (<why>)` in its
+# first twenty lines and every `--changed` run keeps it (#1495).
+repo_wide_labels() {
+  local label
+  while IFS=$'\t' read -r label _; do
+    [ -f "$label" ] && head -n 20 "$label" | grep -q '^# all\.sh: repo-wide' && printf '%s ' "$label"
+  done < <(suites)
+  return 0
 }
 
 list_only=0 changed_base=""
@@ -119,7 +135,7 @@ selected() { # prints the "<label>\t<command>" lines this run covers
   if [ -z "$changed_base" ]; then suites; return; fi
   local dirs
   dirs=$(scope_changed "$changed_base") || exit $?
-  if [ "$dirs" = '*' ]; then suites; else suites | filter_dirs "$dirs"; fi
+  if [ "$dirs" = '*' ]; then suites; else suites | filter_dirs "$dirs" "$(repo_wide_labels)"; fi
 }
 
 if [ "$list_only" = 1 ]; then selected 2>/dev/null | cut -f1; exit "${PIPESTATUS[0]}"; fi
