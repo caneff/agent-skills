@@ -4,7 +4,7 @@
 // pins the scanner's output on this file line by line, so edit the three
 // together.
 import { describe, it, expect, vi } from "vitest";
-import { Cache, loadUser, listItems, total, double, parse, nextId } from "../src/app";
+import { Cache, loadUser, listItems, total, double, nextId, client } from "../src/app";
 
 describe("leaking domain knowledge (judgment pass only)", () => {
   it("recomputes the formula", () => {
@@ -41,7 +41,7 @@ describe("private-API access", () => {
 
   it("silences a type error that is no member access", () => {
     // @ts-expect-error the argument is the wrong type
-    expect(() => parse(1)).toThrow("not a string");
+    expect(() => client.send(1)).toThrow("not a string");
   });
 });
 

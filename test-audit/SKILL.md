@@ -66,16 +66,21 @@ Pass one's smells, by the label each prints:
   `sys._getframe` reads the same, and the judgment pass tells them apart.
 - **stub asserted called** — the same mock gets a `return_value` or
   `side_effect` and is also checked with `assert_called*` or `.called`
-  (`audit.py`); a `mockReturnValue` / `mockResolvedValue` / `mockRejectedValue`
-  mock, or a `vi.spyOn(obj, "m")` spy given one, is also under
-  `toHaveBeenCalled*` (`audit.mjs`, vitest). `interaction-only assertion` needs
+  (`audit.py`; the stub set by assignment, `Mock(return_value=...)`, `with
+  patch(..., return_value=...) as m` or `@patch(..., return_value=...)`); a
+  `mockReturnValue` / `mockResolvedValue` / `mockRejectedValue` /
+  `mockImplementation` mock, a `vi.fn(impl)`, `vi.mocked(fn)` or a
+  `vi.spyOn(obj, "m")` spy given one, is also under `toHaveBeenCalled*`
+  (`audit.mjs`, vitest). A stub built outside the test body, in a fixture or
+  `beforeEach`, is not seen. `interaction-only assertion` needs
   every check to be a call check, so this mixed form, with a real outcome
   assertion beside it, gets through there.
 - **vacuous loop assertion** — every assertion sits in a `for` (Python) or a
   `for...of` / `for...in` / `.forEach` (JS) over what the code under test
   returned, so an empty result runs none of them. An assertion outside such a
-  loop, a length or non-empty check included, clears it, and so does a loop over
-  a literal or a name the test never assigns.
+  loop, a length or non-empty check included, clears it, and so does
+  `expect.hasAssertions()` / `expect.assertions(n)` and a loop over a literal, a
+  call on literals only, or a name the test never assigns.
 
 **JS/TS reach.** `audit.mjs` recognizes vitest and node:test — nothing else.
 A file identifies as **vitest** by importing `vitest`, or by naming tests

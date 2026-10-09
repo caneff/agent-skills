@@ -526,46 +526,56 @@ const STUB_MATCHERS = new Set([
   "mockResolvedValueOnce",
   "mockRejectedValue",
   "mockRejectedValueOnce",
+  "mockImplementation",
+  "mockImplementationOnce",
 ]);
 
-/** What a chain like `vi.fn().mockReturnValue(1)`, `get.mockResolvedValue(1)`
- * or `vi.spyOn(obj, "get").mockReturnValue(1)` stubs, as the source texts
- * `expect(...)` would name it by: `[]` for an anonymous `vi.fn()`, `["obj.get"]`
- * for a spy, `["get"]` for a mock already named. `null` when the chain
- * supplies no input. */
+/** What a chain like `vi.fn().mockReturnValue(1)`, `vi.fn(impl)`,
+ * `vi.mocked(get).mockResolvedValue(1)`, `get.mockResolvedValue(1)` or
+ * `vi.spyOn(obj, "get").mockReturnValue(1)` stubs, as the source texts
+ * `expect(...)` would name it by: `[]` for an anonymous `vi.fn()`, `["get"]`
+ * for `vi.mocked(get)` or a mock already named, `["obj.get"]` for a spy.
+ * `null` when the chain supplies no input. */
 function stubNames(chain, source) {
+  const text = (x) => source.slice(x.start, x.end);
   let stubs = false;
   let n = chain;
   while (n.type === "CallExpression" && n.callee.type === "MemberExpression") {
-    const path = memberPath(n.callee);
-    if (path && path.length === 2 && path[0] === "vi" && path[1] === "spyOn" && n.arguments.length === 2) {
-      const [target, name] = n.arguments;
-      return stubs && name.type === "StringLiteral" ? [`${source.slice(target.start, target.end)}.${name.value}`] : null;
-    }
     if (STUB_MATCHERS.has(identifierName(n.callee.property))) stubs = true;
+    const path = memberPath(n.callee);
+    const vi = path && path.length === 2 && path[0] === "vi" ? path[1] : null;
+    if (vi === "spyOn" && n.arguments.length === 2) {
+      const [target, name] = n.arguments;
+      return stubs && name.type === "StringLiteral" ? [`${text(target)}.${name.value}`] : null;
+    }
+    if (vi === "mocked" && n.arguments.length === 1) return stubs ? [text(n.arguments[0])] : null;
+    if (vi === "fn") return stubs || n.arguments.length > 0 ? [] : null;
     n = n.callee.object;
   }
-  if (!stubs) return null;
-  return n.type === "CallExpression" ? [] : [source.slice(n.start, n.end)];
+  return stubs ? [text(n)] : null;
 }
 
-/** A vitest mock that supplies input (`mockReturnValue` and its `Once`,
- * `Resolved` and `Rejected` forms) and is also checked with a
- * `toHaveBeenCalled*` matcher. `isInteractionOnly` needs every assertion to be
- * a call check, so this mixed form, with an outcome assertion beside it, gets
- * through there. Asserting the stub was called pins how the code got its input,
- * so a refactor that fetches it another way goes red. */
+/** A vitest mock that supplies input (the `mockReturnValue` / `mockResolvedValue`
+ * / `mockRejectedValue` / `mockImplementation` families, `vi.fn(impl)`) and is
+ * also checked with a `toHaveBeenCalled*` matcher. `isInteractionOnly` misses
+ * this mixed form (SKILL.md: stub asserted called). */
 function hasCalledStub(call, source, bindings) {
   const cb = testCallback(call);
   if (!cb) return false;
   const stubbed = new Set();
   walk(cb.body, (n) => {
     // `const get = vi.fn().mockReturnValue(1)`: the declared name is the stub too.
-    const decl = n.type === "VariableDeclarator" && n.id.type === "Identifier" && n.init;
-    const names = decl ? stubNames(n.init, source) : n.type === "ExpressionStatement" ? stubNames(n.expression, source) : null;
+    // `let g; g = vi.fn(...)` names the stub as well.
+    const bound =
+      n.type === "VariableDeclarator" && n.id.type === "Identifier" && n.init
+        ? [n.id.name, n.init]
+        : n.type === "AssignmentExpression" && n.left.type === "Identifier"
+          ? [n.left.name, n.right]
+          : null;
+    const names = bound ? stubNames(bound[1], source) : n.type === "ExpressionStatement" ? stubNames(n.expression, source) : null;
     if (!names) return;
     for (const name of names) stubbed.add(name);
-    if (decl) stubbed.add(n.id.name);
+    if (bound) stubbed.add(bound[0]);
   });
   return assertionsIn(cb, bindings).some(
     (a) =>
@@ -587,6 +597,16 @@ const VIEW_METHODS = new Set(["entries", "values", "keys"]);
  * result, or a local name declared from one (`fromCall`)? A literal collection
  * or a name the test never declares (a module constant) is a fixed input and
  * is never empty by accident. */
+const LITERAL_TYPES = new Set(["ArrayExpression", "ObjectExpression", "StringLiteral", "NumericLiteral", "BooleanLiteral", "NullLiteral"]);
+
+/** A call whose result is the code under test's: not a method on a literal
+ * (`[1, 2].map(f)`) and not a call whose every argument is a literal
+ * (`Object.keys({ a: 1 })`). */
+function isOutputCall(call) {
+  if (call.callee.type === "MemberExpression" && LITERAL_TYPES.has(call.callee.object.type)) return false;
+  return !(call.arguments.length > 0 && call.arguments.every((a) => LITERAL_TYPES.has(a.type)));
+}
+
 function isOutputIterable(node, fromCall) {
   switch (node.type) {
     case "Identifier":
@@ -608,7 +628,7 @@ function isOutputIterable(node, fromCall) {
       if (c.type === "MemberExpression" && VIEW_METHODS.has(identifierName(c.property))) {
         return isOutputIterable(c.object, fromCall);
       }
-      return true;
+      return isOutputCall(node);
     }
     default:
       return false;
@@ -624,12 +644,19 @@ function isVacuousLoop(call, source, bindings) {
   if (!cb) return false;
   const assertions = assertionsIn(cb, bindings);
   if (assertions.length === 0) return false;
+  // `expect.hasAssertions()` / `expect.assertions(n)` fail an empty loop.
+  let counted = false;
+  walk(cb.body, (n) => {
+    const path = n.type === "CallExpression" ? memberPath(n.callee) : null;
+    if (path && path.length === 2 && path[0] === "expect" && (path[1] === "hasAssertions" || path[1] === "assertions")) counted = true;
+  });
+  if (counted) return false;
   const fromCall = new Set();
   walk(cb.body, (n) => {
     if (n.type !== "VariableDeclarator" || n.id.type !== "Identifier" || !n.init) return;
     let hasCall = false;
     walk(n.init, (m) => {
-      if (m.type === "CallExpression" || m.type === "AwaitExpression") hasCall = true;
+      if ((m.type === "CallExpression" && isOutputCall(m)) || m.type === "AwaitExpression") hasCall = true;
     });
     if (hasCall) fromCall.add(n.id.name);
   });
@@ -678,6 +705,13 @@ function privateAccess(tree) {
     const suppressed = (tree.comments || [])
       .filter((c) => TS_SUPPRESSION.test(c.value) && c.start >= cb.start && c.end <= cb.end)
       .map((c) => c.loc.end.line + 1);
+    // A function passed to `expect` is the call whose throw is tested; a
+    // `@ts-expect-error` above it silences a wrong argument, not a member read.
+    const tested = [];
+    walk(cb.body, (n) => {
+      const arg = n.type === "CallExpression" && calleeName(n) === "expect" ? n.arguments[0] : null;
+      if (arg && (arg.type === "ArrowFunctionExpression" || arg.type === "FunctionExpression")) tested.push(arg);
+    });
     let hit = false;
     walk(cb.body, (n) => {
       if (!isMember(n)) return;
@@ -694,7 +728,7 @@ function privateAccess(tree) {
         obj.type !== "ThisExpression"
       ) {
         hit = true;
-      } else if (suppressed.includes(n.loc.start.line) && !isExpectChain(n)) {
+      } else if (suppressed.includes(n.loc.start.line) && !isExpectChain(n) && !tested.some((f) => n.start >= f.start && n.end <= f.end)) {
         hit = true;
       }
     });
@@ -810,7 +844,9 @@ function scanFile(path) {
   return smellsIn(tree, source).map(([line, smell]) => [path, line, smell]);
 }
 
-/** `[line, smell]` for every DETECTORS hit in `tree` -- the one pipeline
+/** `[line, smell]` for every DETECTORS hit in `tree`, plus the checks that read
+ * the whole file (duplicate titles; private-API access, which needs the
+ * comments) -- the one pipeline
  * scanFile and the selfcheck's own witness checks both run, so a witness
  * can't drift from what production actually does. */
 function smellsIn(tree, source) {
@@ -1417,7 +1453,7 @@ function selfcheck() {
     }
   }
 
-  // 10-12. candidate smells: stub asserted called, vacuous loop, private-API access
+  // 8. candidate smells: stub asserted called, vacuous loop, private-API access
   const has = (src, smell) => smellsOf(src).includes(smell);
   assert(
     has("it('t', () => { const g = vi.fn().mockReturnValue(1); expect(f(g)).toBe(1); expect(g).toHaveBeenCalled(); });", STUB_SMELL),
@@ -1450,6 +1486,31 @@ function selfcheck() {
     "an expect matcher chain under @ts-expect-error is no member access",
   );
 
+  assert(
+    has("it('t', () => { const g = vi.fn(() => 1); expect(f(g)).toBe(1); expect(g).toHaveBeenCalled(); });", STUB_SMELL),
+    "vi.fn(impl) supplies input",
+  );
+  assert(
+    has("it('t', () => { vi.mocked(get).mockResolvedValue(1); expect(f()).toBe(1); expect(get).toHaveBeenCalled(); });", STUB_SMELL),
+    "vi.mocked(get) names the stub",
+  );
+  assert(
+    has("it('t', () => { let g; g = vi.fn().mockReturnValue(1); expect(f(g)).toBe(1); expect(g).toHaveBeenCalled(); });", STUB_SMELL),
+    "a stub bound by assignment",
+  );
+  assert(
+    !has("it('t', () => { const r = f(); expect.hasAssertions(); r.forEach((i) => { expect(i).toBe(1); }); });", VACUOUS_SMELL),
+    "expect.hasAssertions fails an empty loop",
+  );
+  assert(
+    !has("it('t', () => { [1, 2].map(double).forEach((i) => { expect(i).toBe(1); }); });", VACUOUS_SMELL),
+    "a method on a literal is a fixed input",
+  );
+  assert(!has("it('t', () => { expect(this['_x']).toBe(1); });", PRIVATE_SMELL), "this[...] is the test's own state");
+  assert(
+    !has("it('t', () => {\n  // @ts-expect-error wrong type\n  expect(() => client.send(42)).toThrow('x');\n});", PRIVATE_SMELL),
+    "a call under test inside expect(() => ...) is no member read",
+  );
   process.stdout.write("ok\n");
 }
 
