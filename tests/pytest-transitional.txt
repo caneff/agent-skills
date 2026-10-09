@@ -16,5 +16,4 @@ flow/claude/pointer_reads_test.py
 tests/always_on_budget_test.py
 tests/disclosure_levels_e2e_test.py
 tests/integration_branch_e2e_test.py
-tests/review_ledger_e2e_test.py
 tests/section_reference_trimmers_test.py
