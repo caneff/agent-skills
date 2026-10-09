@@ -48,6 +48,7 @@ Fill the template below, then:
 1. Write it to `~/lmd-pages/<puzzle-slug>.html` (create the dir if needed; slug from the puzzle/rule name, e.g. `scell-squish.html`).
 2. Load it onto the clipboard: `clip.exe < FILE` (WSL) / `pbcopy < FILE` (macOS) / `xclip -selection clipboard < FILE` (Linux).
 3. Tell the user it's on the clipboard AND state the file path, so they can re-copy it later without regenerating.
+4. Archive the puzzle: run § Archive, below. The run is not finished until that step has run.
 
 **Never have the user copy the HTML out of the terminal.** Drag-selecting long soft-wrapped lines in the TUI silently drops chunks mid-line (screen-cell copy during redraws) — this corrupted rule text and tags repeatedly before the clipboard workflow was adopted. **Never print the HTML to the terminal at all** — not even in a code block for review. The clipboard and the saved file are the whole deliverable; point the user at the file path if they want to read it.
 
@@ -77,6 +78,27 @@ Layout — pick by the `layout` field (see the two variants under Template):
 - **One-column** (`"one"`, long rulesets): epigraph, then a large centered image, then a wide full-width Rules card below — so a verbose ruleset runs across the page instead of towering as a tall side column.
 
 `flex-wrap` stacks the columns vertically on narrow screens. **Flexbox on LMD is unverified — check a real preview; if it doesn't hold, the wrap makes it degrade to stacked blocks anyway.**
+
+## Archive
+
+Closing step, once the page file is written and on the clipboard (§ Output): back the puzzle up at once, then ask for its LMD id (the user's ruling, sudokupad-art `docs/research/2026-09-30-lmd-archive-facts.md`, rulings 13 and 18). `<slug>` is the page file's name without `.html`; `<sudokupad-link>` is the link exactly as the page uses it, any `?setting-...` query included.
+
+1. Archive it:
+
+   ```
+   uv run --project ~/src/sudokupad-art ~/src/sudokupad-art/lmd_archive.py archive "<sudokupad-link>" --archive ~/src/lmd-archive --slug <slug>
+   ```
+
+2. Ask the user for the puzzle's LMD id once he has posted it, in its own message. When he gives it, re-run with the id added, still passing `--slug`:
+
+   ```
+   uv run --project ~/src/sudokupad-art ~/src/sudokupad-art/lmd_archive.py archive "<sudokupad-link>" --archive ~/src/lmd-archive --slug <slug> --lmd <id>
+   ```
+
+   That fills the LMD fields and renames the folder to the id.
+3. The user may skip the id. Say that the next `backfill` will match the puzzle by its SudokuPad link, and stop.
+
+A non-zero exit, or any `FAILED` line on stderr, is reported to the user with the command's output, for either call. Never skip a failure, and never say the puzzle is archived after one. The page and clipboard are already done, so a failed archive does not undo them.
 
 ## Template
 
