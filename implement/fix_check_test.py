@@ -144,7 +144,7 @@ def disputed(fid, reason="r"):
     return {"id": fid, "outcome": "disputed", "reason": reason}
 
 
-def expect(world, want_code, needle, cwd=None, *args):
+def assert_fix_check(world, want_code, needle, cwd=None, *args):
     """Run the check and assert its exit code and that its output names the cause."""
     code, out = world.run(cwd, *args)
     assert code == want_code and needle in out, f"want exit {want_code} + {needle!r}, got {code}: {out}"
@@ -208,12 +208,12 @@ def rebased(make_world):
 
 
 def test_a_rebase_after_the_review_wave_leaves_the_sidecars_fresh(rebased):
-    expect(rebased, 0, "1 findings")
+    assert_fix_check(rebased, 0, "1 findings")
 
 
 def test_sidecars_older_than_the_branchs_authored_commits_are_still_an_earlier_dispatchs(rebased):
     age(rebased, ("findings-standards-5.jsonl", "findings-standards-5.done"), 10 * 86400)
-    expect(rebased, 1, "findings-standards-5.jsonl is older than the first commit")
+    assert_fix_check(rebased, 1, "findings-standards-5.jsonl is older than the first commit")
 
 
 # #1459: a slice of a spec run is reviewed once on its integration branch, so its own
@@ -222,18 +222,18 @@ def test_sidecars_older_than_the_branchs_authored_commits_are_still_an_earlier_d
 
 def test_a_base_recorded_for_another_ticket_excuses_nothing(world):
     world.git(world.primary, "config", "branch.implement-6.base", "spec-3")
-    expect(world, 1, "dispositions-5.jsonl is missing")
+    assert_fix_check(world, 1, "dispositions-5.jsonl is missing")
 
 
 def test_a_recorded_base_that_is_no_spec_p_keeps_the_review_check(world):
     world.git(world.primary, "config", "branch.implement-6.base", "spec-3")
     world.git(world.primary, "config", "branch.implement-5.base", "main")
-    expect(world, 1, "dispositions-5.jsonl is missing")
+    assert_fix_check(world, 1, "dispositions-5.jsonl is missing")
 
 
 def test_a_recorded_spec_3_with_no_origin_spec_3_is_no_live_slice_a_stale_or_hand_set_key(world):
     world.git(world.primary, "config", "branch.implement-5.base", "spec-3")
-    expect(world, 1, "origin/spec-3 does not exist")
+    assert_fix_check(world, 1, "origin/spec-3 does not exist")
 
 
 @pytest.fixture
@@ -245,11 +245,11 @@ def slice_world(world):
 
 
 def test_a_slice_of_spec_3_needs_no_review_sidecars_and_no_dispositions(slice_world):
-    expect(slice_world, 0, "slice of spec-3, no review wave")
+    assert_fix_check(slice_world, 0, "slice of spec-3, no review wave")
 
 
 def test_before_its_pr_exists_the_slice_says_its_base_is_checked_at_the_merge(slice_world):
-    expect(slice_world, 0, "no open PR from implement-5 yet")
+    assert_fix_check(slice_world, 0, "no open PR from implement-5 yet")
 
 
 # #1460's S4: fix-check passes a slice with no review, so a slice PR opened against main
@@ -257,19 +257,19 @@ def test_before_its_pr_exists_the_slice_says_its_base_is_checked_at_the_merge(sl
 def test_a_slice_pr_into_its_spec_3_passes(slice_world):
     slice_world.prs = [(40, "spec-3")]
     slice_world.write_gh()
-    expect(slice_world, 0, "PR #40 into spec-3")
+    assert_fix_check(slice_world, 0, "PR #40 into spec-3")
 
 
 def test_a_slice_pr_opened_against_main_is_refused_before_the_merge(slice_world):
     slice_world.prs = [(40, "main")]
     slice_world.write_gh()
-    expect(slice_world, 1, "PR #40 from implement-5 targets main, not spec-3")
+    assert_fix_check(slice_world, 1, "PR #40 from implement-5 targets main, not spec-3")
 
 
 def test_a_gh_that_cannot_list_the_slices_pr_is_the_environments_exit_2(slice_world):
     slice_world.prs = None
     slice_world.write_gh()
-    expect(slice_world, 2, "gh: no network")
+    assert_fix_check(slice_world, 2, "gh: no network")
 
 
 def test_a_recorded_base_git_cannot_read_is_the_environments_exit_2_never_an_ordinary_ticket(slice_world):
@@ -279,16 +279,16 @@ def test_a_recorded_base_git_cannot_read_is_the_environments_exit_2_never_an_ord
                  'if [ "$1 $2" = "config --get" ]; then echo "bad config line 9" >&2; exit 3; fi\n'
                  f'exec {real_git} "$@"\n')
     os.chmod(os.path.join(slice_world.bin, "git"), 0o755)
-    expect(slice_world, 2, "bad config line 9")
+    assert_fix_check(slice_world, 2, "bad config line 9")
 
 
 def test_a_slice_head_that_was_never_pushed_is_still_no_pr_head(slice_world):
-    expect(slice_world, 2, "origin/implement-5", slice_world.primary, "origin/implement-5")
+    assert_fix_check(slice_world, 2, "origin/implement-5", slice_world.primary, "origin/implement-5")
 
 
 def test_the_controllers_origin_implement_5_reads_the_same_recorded_base(slice_world):
     slice_world.git(slice_world.work, "push", "-q", "origin", "implement-5")
-    expect(slice_world, 0, "slice of spec-3", slice_world.primary, "origin/implement-5")
+    assert_fix_check(slice_world, 0, "slice of spec-3", slice_world.primary, "origin/implement-5")
 
 
 # #1461: the spec is reviewed once on its integration branch `spec-<p>`, and the merge check
@@ -307,7 +307,7 @@ def spec_world(make_world):
 
 def test_a_spec_review_with_an_undisposed_finding_is_refused_keyed_on_the_spec_number(spec_world):
     spec_world.dispositions(fixed("S1", spec_world.fix_sha))
-    expect(spec_world, 1, "no disposition for P1", spec_world.primary, "origin/spec-3")
+    assert_fix_check(spec_world, 1, "no disposition for P1", spec_world.primary, "origin/spec-3")
 
 
 def test_a_fixed_sha_that_is_no_commit_on_spec_3_is_refused(spec_world):
@@ -316,38 +316,38 @@ def test_a_fixed_sha_that_is_no_commit_on_spec_3_is_refused(spec_world):
     stray = w.commit(w.primary, "stray")
     w.git(w.primary, "checkout", "-q", "main")
     w.dispositions(fixed("S1", stray), disputed("P1"))
-    expect(w, 1, f"S1: fixed sha {stray} is not a hex commit on origin/spec-3", w.primary, "origin/spec-3")
+    assert_fix_check(w, 1, f"S1: fixed sha {stray} is not a hex commit on origin/spec-3", w.primary, "origin/spec-3")
 
 
 def test_a_finding_moved_onto_a_slice_the_integration_pr_closes_is_refused(spec_world):
     w = spec_world
     w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 4})
-    expect(w, 1, "P1: moved ticket #4 is one this PR closes", w.primary, "origin/spec-3")
+    assert_fix_check(w, 1, "P1: moved ticket #4 is one this PR closes", w.primary, "origin/spec-3")
 
 
 def test_a_spec_review_with_every_finding_disposed_passes_on_origin_spec_3(spec_world):
     w = spec_world
     w.dispositions(fixed("S1", w.fix_sha), disputed("P1"))
-    expect(w, 0, "2 findings, each disposed once", w.primary, "origin/spec-3")
+    assert_fix_check(w, 0, "2 findings, each disposed once", w.primary, "origin/spec-3")
 
 
 def test_nothing_in_the_cache_the_reviewers_never_ran(world):
-    expect(world, 1, "findings-standards-5.jsonl is missing")
+    assert_fix_check(world, 1, "findings-standards-5.jsonl is missing")
 
 
 def test_no_findings_and_no_dispositions_sidecar_a_missing_file_is_not_a_clean_review(world):
     world.findings()
-    expect(world, 1, "dispositions-5.jsonl is missing")
+    assert_fix_check(world, 1, "dispositions-5.jsonl is missing")
 
 
 def test_findings_and_no_dispositions_sidecar(reviewed):
-    expect(reviewed, 1, "dispositions-5.jsonl is missing")
+    assert_fix_check(reviewed, 1, "dispositions-5.jsonl is missing")
 
 
 def test_every_finding_disposed_once_passes(reviewed):
     reviewed.dispositions(fixed("S1", reviewed.fix_sha),
                           disputed("P1", "the ticket asks for it"))
-    expect(reviewed, 0, "2 findings")
+    assert_fix_check(reviewed, 0, "2 findings")
 
 
 @pytest.mark.parametrize("name, lines, code, needle", [
@@ -392,28 +392,28 @@ def test_every_finding_disposed_once_passes(reviewed):
 ], ids=lambda v: v if isinstance(v, str) and " " in v else None)
 def test_dispositions_of_standards_and_spec_findings(reviewed, name, lines, code, needle):
     reviewed.dispositions(*lines(reviewed))
-    expect(reviewed, code, needle)
+    assert_fix_check(reviewed, code, needle)
 
 
 def test_a_moved_ticket_that_is_open_passes(reviewed):
     reviewed.dispositions(fixed("S1", reviewed.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 77})
     reviewed.tickets = {77: "OPEN"}
     reviewed.write_gh()
-    expect(reviewed, 0, "2 findings")
+    assert_fix_check(reviewed, 0, "2 findings")
 
 
 def test_a_moved_ticket_that_is_closed(reviewed):
     reviewed.dispositions(fixed("S1", reviewed.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 77})
     reviewed.tickets = {77: "CLOSED"}
     reviewed.write_gh()
-    expect(reviewed, 1, "P1: moved ticket #77 is CLOSED")
+    assert_fix_check(reviewed, 1, "P1: moved ticket #77 is CLOSED")
 
 
 def test_a_gh_that_cannot_answer_is_the_environments_exit_2_not_a_refusal_the_worker_fixes(reviewed):
     reviewed.dispositions(fixed("S1", reviewed.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 77})
     reviewed.tickets = {}
     reviewed.write_gh()
-    expect(reviewed, 2, "`gh issue view 77` failed")
+    assert_fix_check(reviewed, 2, "`gh issue view 77` failed")
 
 
 # #1230: a correctness finding carries its CONFIRMED/PLAUSIBLE rating in the sidecar.
@@ -425,53 +425,53 @@ def correctness(world):
 
 
 def test_a_correctness_finding_with_a_rating_passes(correctness):
-    expect(correctness, 0, "1 findings")
+    assert_fix_check(correctness, 0, "1 findings")
 
 
 def test_a_correctness_finding_with_no_rating_is_refused(correctness):
     correctness.put("findings-correctness-5.jsonl", json.dumps(
         {"id": "C1", "axis": "correctness", "severity": "hard", "file": "f", "title": "t"}) + "\n")
-    expect(correctness, 1, "findings-correctness-5.jsonl:1 has no rating")
+    assert_fix_check(correctness, 1, "findings-correctness-5.jsonl:1 has no rating")
 
 
 def test_a_correctness_rating_outside_confirmed_plausible_is_refused_by_naming_the_wrong_value(correctness):
     correctness.put("findings-correctness-5.jsonl", json.dumps(
         {"id": "C1", "axis": "correctness", "severity": "hard", "rating": "LIKELY",
          "file": "f", "title": "t"}) + "\n")
-    expect(correctness, 1, "rating 'LIKELY' is not CONFIRMED or PLAUSIBLE")
+    assert_fix_check(correctness, 1, "rating 'LIKELY' is not CONFIRMED or PLAUSIBLE")
 
 
 def test_three_empty_sidecars_with_their_markers_need_no_dispositions(clean):
-    expect(clean, 0, "0 findings")
+    assert_fix_check(clean, 0, "0 findings")
 
 
 def test_an_empty_sidecar_without_its_marker_is_a_reviewer_that_may_have_crashed(clean):
     os.remove(os.path.join(clean.reviews, "findings-spec-5.done"))
-    expect(clean, 1, "findings-spec-5.jsonl has no completion marker")
+    assert_fix_check(clean, 1, "findings-spec-5.jsonl has no completion marker")
 
 
 def test_a_non_empty_sidecar_without_its_marker_may_be_truncated_refused_too(world):
     world.findings(spec=["P1"])
     os.remove(os.path.join(world.reviews, "findings-spec-5.done"))
     world.dispositions(disputed("P1"))
-    expect(world, 1, "findings-spec-5.jsonl has no completion marker")
+    assert_fix_check(world, 1, "findings-spec-5.jsonl has no completion marker")
 
 
 def test_a_sidecar_older_than_the_branch_is_a_leftover_of_an_earlier_dispatch(world):
     world.findings(spec=["P1"])
     world.dispositions(disputed("P1"))
     age(world, ("findings-spec-5.jsonl", "findings-spec-5.done"), 10 * 86400)
-    expect(world, 1, "findings-spec-5.jsonl is older than the first commit")
+    assert_fix_check(world, 1, "findings-spec-5.jsonl is older than the first commit")
 
 
 def test_a_stale_dispositions_sidecar_is_refused_the_same_way(clean):
     age(clean, ("dispositions-5.jsonl",), 10 * 86400)
-    expect(clean, 1, "dispositions-5.jsonl is older than the first commit")
+    assert_fix_check(clean, 1, "dispositions-5.jsonl is older than the first commit")
 
 
 def test_a_malformed_sidecar_line_is_not_skipped(clean):
     clean.put("findings-spec-5.jsonl", '{"id": "P1"')
-    expect(clean, 1, "findings-spec-5.jsonl:1")
+    assert_fix_check(clean, 1, "findings-spec-5.jsonl:1")
 
 
 # The ablation: a review the ledger records as skipped needs no sidecar.
@@ -483,62 +483,62 @@ def no_standards(clean):
 
 
 def test_a_standards_axis_the_ledger_does_not_record_as_skipped_needs_its_sidecar(no_standards):
-    expect(no_standards, 1, "records no skip for it")
+    assert_fix_check(no_standards, 1, "records no skip for it")
 
 
 def test_a_skip_recorded_for_another_ticket_excuses_nothing(no_standards):
     no_standards.ledger_skip("standards", ticket=6)
-    expect(no_standards, 1, "records no skip for it")
+    assert_fix_check(no_standards, 1, "records no skip for it")
 
 
 def test_a_standards_axis_the_ledger_records_as_skipped_the_ablation_passes_with_no_sidecar(no_standards):
     no_standards.ledger_skip("standards")
-    expect(no_standards, 0, "0 findings")
+    assert_fix_check(no_standards, 0, "0 findings")
 
 
 # Codex: its findings are `codex-gate-<k>`, the id `review_ledger.py` harvests under.
 def test_a_codex_finding_with_no_disposition(clean):
     clean.codex()
     clean.dispositions(fixed("codex-gate-1", clean.fix_sha))
-    expect(clean, 1, "no disposition for codex-gate-2")
+    assert_fix_check(clean, 1, "no disposition for codex-gate-2")
 
 
 def test_both_codex_findings_disposed(clean):
     clean.codex()
     clean.dispositions(fixed("codex-gate-1", clean.fix_sha), disputed("codex-gate-2"))
-    expect(clean, 0, "2 findings")
+    assert_fix_check(clean, 0, "2 findings")
 
 
 def test_a_codex_run_that_errored_is_a_skipped_pass_named(clean):
     clean.codex(status=1)
-    expect(clean, 0, "codex pass refused")
+    assert_fix_check(clean, 0, "codex pass refused")
 
 
 def test_a_codex_run_the_branch_moved_under_is_refused_the_same_way(clean):
     clean.codex(launch="a" * 40)
-    expect(clean, 0, "codex pass refused")
+    assert_fix_check(clean, 0, "codex pass refused")
 
 
 def test_a_codex_output_the_parser_cannot_read_is_not_a_clean_pass(clean):
     clean.codex(out="garbage\n")
-    expect(clean, 1, "codex-adversarial-5-gate.out")
+    assert_fix_check(clean, 1, "codex-adversarial-5-gate.out")
 
 
 def test_an_unreadable_codex_record_is_refused_not_read_as_no_pass(clean):
     clean.codex(out="garbage\n")
     clean.put("codex-adversarial-5-gate.json", "{not json")
-    expect(clean, 1, "codex-adversarial-5-gate.json is unreadable")
+    assert_fix_check(clean, 1, "codex-adversarial-5-gate.json is unreadable")
 
 
 def test_a_codex_run_with_no_findings_needs_no_dispositions(clean):
     clean.codex(out="No material findings\n")
-    expect(clean, 0, "0 findings")
+    assert_fix_check(clean, 0, "0 findings")
 
 
 def test_no_codex_record_and_no_ledger_row_saying_why_the_pass_neither_ran_nor_was_skipped_on_record(clean):
     ledger = os.path.join(clean.home, ".cache", "agent-reviews", "ledger.jsonl")
     os.rename(ledger, ledger + ".off")
-    expect(clean, 1, "no codex-gate row")
+    assert_fix_check(clean, 1, "no codex-gate row")
 
 
 # From the primary checkout, as the controller runs it: the branch is named, never HEAD.
@@ -555,7 +555,7 @@ def test_the_primary_checkout_resolves_the_branch_not_its_own_head(s1_world):
 
 
 def test_a_branch_that_was_never_pushed_is_no_pr_head_the_environment_cannot_answer(s1_world):
-    expect(s1_world, 2, "origin/implement-5", s1_world.primary, "origin/implement-5")
+    assert_fix_check(s1_world, 2, "origin/implement-5", s1_world.primary, "origin/implement-5")
 
 
 def test_the_pushed_head_named_as_the_controller_names_it_passes(s1_world):

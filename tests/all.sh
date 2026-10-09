@@ -2,9 +2,8 @@
 # Runs every test suite in the repo. Discovery rules over git-tracked
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
 # runs as `uv run --locked pytest <file>` (the tools pinned by pyproject.toml
-# and uv.lock) unless `tests/pytest-transitional.txt` lists it, when it runs
-# directly under python3 (see `transitional`), each `audit.py` that implements
-# `--selfcheck` runs with that flag, each `Cargo.toml` runs `cargo test`, and
+# and uv.lock), each `audit.py` that implements `--selfcheck` runs with that
+# flag, each `Cargo.toml` runs `cargo test`, and
 # each mod folder under `flow/mods/` runs `claude plugin test <folder>`. One
 # line per suite; exits non-zero on the first failure (and prints that
 # suite's output). A suite is failed on its exit status *or* on a failure
@@ -37,37 +36,11 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 
-# The `*_test.py` suites not yet rewritten for pytest (#1494): one path per
-# line of tests/pytest-transitional.txt, blank and `#` lines ignored. The list
-# lives in its own file so a slice that deletes its entries leaves this script
-# unchanged and keeps `--changed` narrow. An entry naming no tracked
-# `*_test.py` stops the run, naming the entry: a renamed or deleted suite
-# would otherwise leave a stale line that nothing ever reads again. No list
-# file is an empty list. Prints the entries, one per line.
-transitional() {
-  local list=tests/pytest-transitional.txt entries tracked entry bad=0
-  [ -f "$list" ] || return 0
-  entries=$(grep -vE '^[[:space:]]*(#|$)' "$list" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
-  tracked=$(git ls-files -- '*_test.py')
-  while IFS= read -r entry; do
-    [ -n "$entry" ] || continue
-    grep -qxF -- "$entry" <<<"$tracked" && continue
-    echo "tests/all.sh: $list lists $entry, which is not a tracked *_test.py file" >&2
-    bad=1
-  done <<<"$entries"
-  [ "$bad" = 0 ] || exit 1
-  printf '%s\n' "$entries"
-}
-transitional_suites=$(transitional) || exit 1
-
 suites() { # prints "<label>\t<command>" per discovered suite
   git ls-files -- '*.test.sh' |
     while IFS= read -r f; do printf '%s\tbash %s\n' "$f" "$f"; done
   git ls-files -- '*_test.py' |
-    while IFS= read -r f; do
-      if grep -qxF -- "$f" <<<"$transitional_suites"; then printf '%s\tpython3 %s\n' "$f" "$f"
-      else printf '%s\tuv run --locked pytest %s\n' "$f" "$f"; fi
-    done
+    while IFS= read -r f; do printf '%s\tuv run --locked pytest %s\n' "$f" "$f"; done
   git ls-files | grep -E '(^|/)audit\.py$' |
     while IFS= read -r f; do
       grep -q -- '--selfcheck' "$f" &&
@@ -153,6 +126,32 @@ fi
 # bare "command not found".
 if printf '%s\n' "$selection" | cut -f2 | grep -q '^uv run ' && ! command -v uv >/dev/null 2>&1; then
   echo "tests/all.sh: uv is not on PATH, and a *_test.py suite runs under it (uv sync, then rerun)" >&2
+  exit 1
+fi
+
+# Every `*_test.py` is a pytest suite (#1494, ruling 4a): one that imports
+# `unittest`, `unittest.mock` included, fails the run, naming the file and the
+# line. pytest would collect and pass a unittest suite, so nothing else here
+# keeps the old idiom from coming back. Checked over every tracked file rather
+# than the `--changed` selection, since a grep costs nothing. `git grep` exits
+# 1 on no match and above 1 on an error, which stops the run: a check that
+# could not read the files has not found them clean. A file from which pytest
+# collects no tests needs no check of its own: pytest exits 5, and any non-zero
+# exit is a failed suite below.
+unittest_imports=$(git grep -nE -e \
+  '^[[:space:]]*(import[[:space:]]+unittest([[:space:].,]|$)|from[[:space:]]+unittest(\.[A-Za-z_]+)*[[:space:]]+import[[:space:]])' \
+  -- '*_test.py')
+case $? in
+  0|1) ;;
+  *) echo "tests/all.sh: the unittest import check could not run (git grep failed)" >&2; rm -rf "$tmp"; exit 2 ;;
+esac
+if [ -n "$unittest_imports" ]; then
+  while IFS= read -r hit; do
+    f=${hit%%:*}
+    echo "FAIL $f"
+    echo "tests/all.sh: $f imports unittest (line ${hit#*:}); write it as a pytest suite"
+  done <<<"$unittest_imports"
+  rm -rf "$tmp"
   exit 1
 fi
 
