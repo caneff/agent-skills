@@ -7,26 +7,6 @@
 # #1504
 burndown/loop_test.py
 
-# #1505
-burndown/closure_test.py
-burndown/counts_test.py
-burndown/frontier_test.py
-burndown/runfile_test.py
-burndown/tier_test.py
-
-
-# #1507
-implement-spec/closing_ticket_test.py
-implement-spec/contradictions_test.py
-implement/codex_audit_range_test.py
-implement/codex_audit_test.py
-implement/codex_usage_gate_test.py
-implement/fix_check_test.py
-implement/gitcmd_test.py
-implement/sidecar_name_test.py
-implement/stale_refs_test.py
-implement/ticket_comment_render_test.py
-
 # #1508
 create-lmd-page/skill_test.py
 drain/drain_test.py
@@ -34,16 +14,7 @@ drain/skill_test.py
 flow/ccstatusline-table/claude_usage_cache_test.py
 flow/claude/pointer_reads_test.py
 tests/always_on_budget_test.py
-tests/codex_rationing_e2e_test.py
 tests/disclosure_levels_e2e_test.py
 tests/integration_branch_e2e_test.py
+tests/review_ledger_e2e_test.py
 tests/section_reference_trimmers_test.py
-
-# #1509
-all-audits/driver_test.py
-all-audits/harness/pagelib_test.py
-crap-audit/audit_test.py
-file-ticket/blocked_by_test.py
-landed/generate_test.py
-multi-axis-code-review/claude_usage_gate_test.py
-multi-axis-code-review/render_brief_test.py

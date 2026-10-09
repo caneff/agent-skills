@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Runs `/file-ticket`'s own issue template through the frontier reader (#911).
 
 The seam is what the skill writes — the issue body — so this test takes the
@@ -61,72 +60,74 @@ def classify(body, states=None, deps=None):
     return named[0] if named else "no bucket"
 
 
-def case(name, got, want):
-    if got == want:
-        return 0
-    print(f"FAIL {name}: classified {got}, wanted {want}", file=sys.stderr)
-    return 1
+NONE_LINE = "- None — can start immediately."
 
 
-def main():
-    fail = 0
-    # The template as it ships — no blockers — is a statement, not silence.
-    fail += case("template as shipped", classify(filed(BODY)), "unblocked")
+def blocked_body():
+    """The blocker form the skill documents: the `None` line replaced by one
+    bare reference per blocking issue."""
+    return filed(BODY).replace(NONE_LINE, "- #890")
 
-    # The blocker form the skill documents: the `None` line replaced by one
-    # bare reference per blocking issue. Its absence is a scored failure
-    # rather than an assert, so the cases below it still run and report.
-    blocked = filed(BODY).replace("- None — can start immediately.", "- #890")
-    fail += case("the template states `None` the documented way",
-                 "#890" in blocked, True)
-    fail += case("one open blocker", classify(blocked, {890: "open"}), "blocked")
-    fail += case("blocker since closed", classify(blocked, {890: "closed"}), "unblocked")
 
+def cross_repo_body():
+    return filed(BODY).replace(NONE_LINE, "- caneff/sudokumaker#906")
+
+
+def test_template_as_shipped_is_unblocked():
+    # No blockers is a statement, not silence.
+    assert classify(filed(BODY)) == "unblocked"
+
+
+def test_template_states_none_the_documented_way():
+    assert "#890" in blocked_body()
+
+
+def test_one_open_blocker_blocks():
+    assert classify(blocked_body(), {890: "open"}) == "blocked"
+
+
+def test_blocker_since_closed_is_unblocked():
+    assert classify(blocked_body(), {890: "closed"}) == "unblocked"
+
+
+def test_prose_reference_without_the_section_is_unresolved():
     # Only the section answers. The same body without it carries `#906` in
-    # its prose and still reads as silence — which is why the skill cannot
+    # its prose and still reads as silence, which is why the skill cannot
     # leave the section to the filer's judgement.
-    fail += case("prose reference, no section", classify(BODY, {906: "open"}),
-                 "unresolved")
+    assert classify(BODY, {906: "open"}) == "unresolved"
 
-    # A quoted scrap of another ticket — `> ` per line — cannot speak for
-    # this one, so the appended section still answers.
+
+def test_blockquoted_evidence_heading_does_not_speak_for_the_ticket():
+    # A quoted scrap of another ticket, `> ` per line, so the appended
+    # section still answers.
     quoted = filed(BODY + "\n\nThe ticket it came from says:\n\n"
                    "> ## Blocked by\n>\n> - #906")
-    fail += case("blockquoted evidence heading", classify(quoted, {906: "open"}),
-                 "unblocked")
+    assert classify(quoted, {906: "open"}) == "unblocked"
 
+
+def test_bare_evidence_heading_overrides_the_section():
     # The same scrap pasted bare is what the skill's quoting rule exists to
     # stop: the reader takes the first visible declaration, so an evidence
-    # heading beats the section below it and the ticket answers with a
-    # number it never claimed. Asserted as "not the section's own verdict"
-    # rather than a bucket, since #922 changes which wrong answer it is.
+    # heading beats the section below it. Asserted as "not the section's
+    # own verdict" rather than a bucket, since #922 changes which wrong
+    # answer it is.
     bare = filed(BODY + "\n\nThe ticket it came from says:\n\n"
                  "## Blocked by\n\n- #906")
-    fail += case("bare evidence heading overrides the section",
-                 classify(bare, {906: "open"}) != "unblocked", True)
+    assert classify(bare, {906: "open"}) != "unblocked"
 
-    # Evidence pasted as a fenced block is quoted material to the reader; a
-    # closed fence leaves the section below it visible.
+
+def test_fenced_evidence_below_the_body_is_quoted_material():
     fenced = filed(BODY + "\n\n```\n## Blocked by\n\n- #906\n```")
-    fail += case("fenced evidence below the body", classify(fenced, {906: "open"}),
-                 "unblocked")
-
-    # A blocker in another repo: the skill writes the full `owner/repo#N`
-    # form, which the grammar refuses on purpose. With no native edge the
-    # ticket reads unresolved (honest: never gated on an unrelated local
-    # #N, never unblocked); with the edge the live gate answers instead.
-    cross = filed(BODY).replace("- None — can start immediately.",
-                                "- caneff/sudokumaker#906")
-    fail += case("cross-repo blocker, no native edge",
-                 classify(cross, {906: "open"}), "unresolved")
-    fail += case("cross-repo blocker, native edge carries it",
-                 classify(cross, deps={"total_blocked_by": 1, "blocked_by": 1}),
-                 "blocked")
-
-    if fail:
-        sys.exit(1)
-    print("ok")
+    assert classify(fenced, {906: "open"}) == "unblocked"
 
 
-if __name__ == "__main__":
-    main()
+def test_cross_repo_blocker_without_a_native_edge_is_unresolved():
+    # The skill writes the full `owner/repo#N` form, which the grammar
+    # refuses on purpose: never gated on an unrelated local #N, never
+    # unblocked.
+    assert classify(cross_repo_body(), {906: "open"}) == "unresolved"
+
+
+def test_cross_repo_blocker_with_a_native_edge_is_blocked():
+    deps = {"total_blocked_by": 1, "blocked_by": 1}
+    assert classify(cross_repo_body(), deps=deps) == "blocked"
