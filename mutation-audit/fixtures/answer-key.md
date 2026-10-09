@@ -88,3 +88,23 @@ Given this fixture directory's paths (`sample.py`, `test_sample.py`,
 returns `["sample.py"]` — the only plain module with a sibling test file;
 `test_sample.py` is a test file itself and `setup.cfg`/`mutmut-results.txt`/
 `answer-key.md` aren't `.py` modules at all.
+
+## JavaScript — `audit.py --run` over `fixtures/js/sample.mjs`
+
+`fixtures/js/sample.mjs` + `sample.test.mjs` mirror `sample.py` (`isAdult`
+tested at its boundary, `clamp` in range only, `scale` untested).
+`fixtures/js/stryker-report.json` is the real report from
+`npx -y -p @stryker-mutator/core@10.0.0 -p @stryker-mutator/tap-runner@10.0.0
+stryker run --testRunner tap --coverageAnalysis perTest --mutate sample.mjs
+--testFiles sample.test.mjs --reporters clear-text,json`: 16 mutants, 10
+`Killed`, 4 `Survived`, 2 `NoCoverage`. `parse_stryker_report` yields 6 rows,
+each with `killed_count`/`survived_count`/`no_coverage_count` = 10/4/2:
+
+| bucket | line | mutant |
+|---|---|---|
+| `rewrite` | 6 | `sample.mjs:6:ConditionalExpression#7` |
+| `rewrite` | 6 | `sample.mjs:6:EqualityOperator#8` |
+| `rewrite` | 7 | `sample.mjs:7:ConditionalExpression#11` |
+| `rewrite` | 7 | `sample.mjs:7:EqualityOperator#12` |
+| `no-coverage` | 11 | `sample.mjs:11:BlockStatement#14` |
+| `no-coverage` | 12 | `sample.mjs:12:ArithmeticOperator#15` |

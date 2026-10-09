@@ -116,6 +116,13 @@ class Inconclusive(Exception):
 
 INCONCLUSIVE_EXIT = 3
 
+JS_SUFFIXES = (".mjs", ".js")
+STRYKER_VERSION = "10.0.0"
+
+# Stryker statuses that carry no verdict of their own: its own score leaves
+# them out of the tally, so they are neither killed nor a finding.
+_STRYKER_NOT_RUN = frozenset({"CompileError", "Ignored"})
+
 
 def parse_or_inconclusive(text):
     """`parse_mutmut_results`, but text holding no mutant line at all (mutmut
@@ -153,6 +160,114 @@ def run_mutmut(target):
     return res.stdout
 
 
+def parse_stryker_report(text):
+    """Parse a StrykerJS `json` reporter report into surviving-mutant rows.
+
+    Pure, like `parse_mutmut_results`. `Survived` -> `rewrite`, `NoCoverage` ->
+    `no-coverage`; `Killed` and `Timeout` (a hung mutant was caught) are
+    counted into `killed_count` and dropped. `CompileError` and `Ignored`
+    never ran, and Stryker's own score leaves them out too. Anything else
+    (`RuntimeError`, `Pending`, an unknown status) raises `Inconclusive`: the
+    mutant was not judged, and dropping it would read as a clean run. Unlike
+    mutmut, the report carries the real source `line`.
+    """
+    try:
+        report = json.loads(text)
+        files = report["files"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise Inconclusive(f"not a Stryker JSON report ({type(e).__name__}: {e})") from None
+    rows = []
+    killed_count = survived_count = no_coverage_count = 0
+    for path, entry in files.items():
+        for m in entry["mutants"]:
+            status = m["status"]
+            if status in ("Killed", "Timeout"):
+                killed_count += 1
+                continue
+            if status in _STRYKER_NOT_RUN:
+                continue
+            line = m["location"]["start"]["line"]
+            mutant = f"{path}:{line}:{m['mutatorName']}#{m['id']}"
+            if status == "Survived":
+                survived_count += 1
+                bucket, extra = "rewrite", {"mutant": mutant, "killed": False, "survived": True}
+            elif status == "NoCoverage":
+                no_coverage_count += 1
+                bucket, extra = "no-coverage", {"mutant": mutant, "killed": False, "survived": False}
+            else:
+                raise Inconclusive(f"mutant {mutant} has status {status!r}, which this audit does not judge")
+            rows.append(auditlib.finding(
+                bucket, path, line, "surviving-mutant",
+                f"mutant survives at {path}:{line} ({m['mutatorName']}, {mutant})", **extra))
+    rows.sort(key=lambda r: (r["file"], r["line"], int(r["extra"]["mutant"].rsplit("#", 1)[1])))
+    for row in rows:
+        row["extra"]["killed_count"] = killed_count
+        row["extra"]["survived_count"] = survived_count
+        row["extra"]["no_coverage_count"] = no_coverage_count
+    return rows
+
+
+def parse_stryker_or_inconclusive(text):
+    """`parse_stryker_report`, but a report holding no mutant at all raises
+    `Inconclusive` instead of returning `[]`, which reads as a clean run."""
+    rows = parse_stryker_report(text)
+    if not any(entry["mutants"] for entry in json.loads(text)["files"].values()):
+        raise Inconclusive("Stryker's report holds no mutant; it did not mutate the target")
+    return rows
+
+
+def js_test_file(target):
+    """The sibling test file of a `.mjs`/`.js` target, or `None` when absent."""
+    stem = target[: target.rindex(".")]
+    for candidate in (f"{stem}.test.mjs", f"{stem}.test.js"):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def run_stryker(target):
+    """Run StrykerJS's tap runner on one `.mjs`/`.js` target, from the cwd,
+    and return its JSON report text. Raises `Inconclusive`, saying why, when
+    `npx` or the sibling test file is missing, Stryker fails or outlives
+    `MUTATION_AUDIT_TIMEOUT`, or it wrote no report.
+
+    Only the target's own test file is passed: the tap runner's workers write
+    `stryker-output-<pid>.json` into the shared sandbox root, which a test
+    that lists the repo root reads as false kills. The JSON reporter is
+    pointed at a temp dir through a config file passed by path, so no
+    `reports/` lands in the audited checkout (Stryker removes `.stryker-tmp/`
+    itself). The audited repo's `package.json` is untouched: the packages come
+    from `npx -p`.
+    """
+    if shutil.which("npx") is None:
+        raise Inconclusive(f"StrykerJS unavailable: `npx` is not on PATH, so nothing was mutated (target {target})")
+    test_file = js_test_file(target)
+    if test_file is None:
+        raise Inconclusive(f"no sibling test file for {target} (looked for <stem>.test.mjs and <stem>.test.js); nothing to mutate against")
+    limit = float(os.environ.get("MUTATION_AUDIT_TIMEOUT", "3600"))
+    with tempfile.TemporaryDirectory() as out:
+        report = os.path.join(out, "report.json")
+        conf = os.path.join(out, "stryker.conf.json")
+        with open(conf, "w", encoding="utf-8") as f:
+            json.dump({"jsonReporter": {"fileName": report}}, f)
+        args = ["npx", "-y", "-p", f"@stryker-mutator/core@{STRYKER_VERSION}",
+                "-p", f"@stryker-mutator/tap-runner@{STRYKER_VERSION}", "stryker", "run", conf,
+                "--testRunner", "tap", "--coverageAnalysis", "perTest",
+                "--mutate", target, "--testFiles", test_file, "--reporters", "clear-text,json"]
+        try:
+            run = subprocess.run(args, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=limit)
+        except subprocess.TimeoutExpired:
+            raise Inconclusive(f"`stryker run` timed out after {limit:g}s (target {target})") from None
+        if run.returncode != 0:
+            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-5:])
+            raise Inconclusive(f"stryker run failed (exit {run.returncode}) (target {target}):\n{tail}")
+        try:
+            with open(report, encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            raise Inconclusive(f"stryker run wrote no JSON report (target {target})") from None
+
+
 def _sibling_tests(p):
     """The sibling-test paths for a mutation-worthy source module `p`, or
     `None` when `p` is not a worthy source module at all — an `__init__.py`, a
@@ -161,10 +276,18 @@ def _sibling_tests(p):
     `suggest_candidates` (keep when a sibling exists) and `no_test_modules`
     (keep when none does) share, so the two can never drift apart.
     """
-    if auditlib.is_test_or_fixture(p):
-        return None
     parts = p.split("/")
     dirs, name = parts[:-1], parts[-1]
+    if name.endswith(JS_SUFFIXES):
+        # `.mjs`/`.js` module: tested by `<stem>.test.mjs` (or `.test.js`)
+        # beside it. `is_test_or_fixture` is Python-only, so its directory
+        # skips are repeated here.
+        if auditlib.EXCLUDED_DIRS & set(dirs) or "fixtures" in dirs or ".test." in name:
+            return None
+        stem = name[: name.rindex(".")]
+        return {"/".join([*dirs, f"{stem}.test.mjs"]), "/".join([*dirs, f"{stem}.test.js"])}
+    if auditlib.is_test_or_fixture(p):
+        return None
     stem = name[: -len(".py")]
     return {
         "/".join([*dirs, f"test_{name}"]),
@@ -421,11 +544,152 @@ def _check_run_reports_findings_when_mutmut_present():
         assert "INCONCLUSIVE" not in err, err
 
 
+_JS_FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "js")
+
+
+def _check_stryker_parsing():
+    """The captured StrykerJS report (`fixtures/js/stryker-report.json`, a real
+    run of `sample.mjs`) maps survivors to `rewrite`, `NoCoverage` to
+    `no-coverage`, and counts `Killed` into the tally."""
+    with open(os.path.join(_JS_FIXTURES, "stryker-report.json"), encoding="utf-8") as f:
+        text = f.read()
+    rows = parse_stryker_report(text)
+    got = [(r["bucket"], r["file"], r["line"], r["extra"]["mutant"]) for r in rows]
+    assert got == [
+        ("rewrite", "sample.mjs", 6, "sample.mjs:6:ConditionalExpression#7"),
+        ("rewrite", "sample.mjs", 6, "sample.mjs:6:EqualityOperator#8"),
+        ("rewrite", "sample.mjs", 7, "sample.mjs:7:ConditionalExpression#11"),
+        ("rewrite", "sample.mjs", 7, "sample.mjs:7:EqualityOperator#12"),
+        ("no-coverage", "sample.mjs", 11, "sample.mjs:11:BlockStatement#14"),
+        ("no-coverage", "sample.mjs", 12, "sample.mjs:12:ArithmeticOperator#15"),
+    ], got
+    for r in rows:
+        assert r["category"] == "surviving-mutant", r
+        assert r["failure"] == "", r
+        assert r["extra"]["killed"] is False, r
+        assert (r["extra"]["killed_count"], r["extra"]["survived_count"],
+                r["extra"]["no_coverage_count"]) == (10, 4, 2), r["extra"]
+    assert [r["extra"]["survived"] for r in rows] == [True] * 4 + [False] * 2
+
+
+def _stryker_report(*statuses):
+    mutants = [{"id": str(i), "mutatorName": "M", "status": s,
+                "location": {"start": {"line": i + 1, "column": 1}, "end": {"line": i + 1, "column": 2}}}
+               for i, s in enumerate(statuses)]
+    return json.dumps({"files": {"m.mjs": {"language": "javascript", "mutants": mutants, "source": ""}}})
+
+
+def _check_stryker_timeout_counts_killed_and_unjudged_statuses_stop():
+    """`Timeout` is a kill (a hung mutant was caught); a `RuntimeError` mutant
+    was never tested, so it must not pass as killed (the shared-sandbox trap),
+    and a report with no mutant at all is not a clean run."""
+    assert parse_stryker_report(_stryker_report("Killed", "Timeout")) == []
+    rows = parse_stryker_report(_stryker_report("Timeout", "Killed", "Survived"))
+    assert len(rows) == 1 and rows[0]["extra"]["killed_count"] == 2, rows
+    # Stryker's own score leaves CompileError and Ignored out of the tally.
+    assert parse_stryker_report(_stryker_report("Killed", "CompileError", "Ignored")) == []
+    for status in ("RuntimeError", "Pending", "Mystery"):
+        try:
+            parse_stryker_report(_stryker_report("Killed", status))
+        except Inconclusive as e:
+            assert status in str(e), e
+        else:
+            raise AssertionError(f"{status} mutant was accepted")
+    for bad in ("", "not json", "{}", _stryker_report()):
+        try:
+            parse_stryker_or_inconclusive(bad)
+        except Inconclusive:
+            pass
+        else:
+            raise AssertionError(f"report {bad!r} was accepted as a run")
+
+
+def _check_js_candidate_selection():
+    paths = ["x.mjs", "x.test.mjs", "lone.mjs", "sub/y.js", "sub/y.test.js",
+             "fixtures/z.mjs", "fixtures/z.test.mjs", "node_modules/q/q.mjs", "node_modules/q/q.test.mjs",
+             "pkg/w.py", "pkg/test_w.py"]
+    assert suggest_candidates(paths) == ["pkg/w.py", "sub/y.js", "x.mjs"], suggest_candidates(paths)
+    assert no_test_modules(paths) == ["lone.mjs"], no_test_modules(paths)
+    with tempfile.TemporaryDirectory() as root:
+        for name in ("x.mjs", "x.test.mjs", ".stryker-tmp/x.mjs", ".stryker-tmp/x.test.mjs"):
+            os.makedirs(os.path.dirname(os.path.join(root, name)), exist_ok=True)
+            open(os.path.join(root, name), "w").close()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["audit.py", "--suggest", root])
+        assert [json.loads(l)["candidate"] for l in buf.getvalue().splitlines()] == ["x.mjs"], buf.getvalue()
+
+
+def _stub_npx(dirpath, report_text, exit_code=0):
+    """A stand-in `npx` (a Python script run by this interpreter) that records
+    its argv and cwd, then writes `report_text` where the config file it was
+    handed says the JSON reporter should."""
+    stub = os.path.join(dirpath, "npx")
+    with open(stub, "w", encoding="utf-8") as f:
+        f.write(f"#!{sys.executable}\n"
+                "import json, os, sys\n"
+                f"open({os.path.join(dirpath, 'argv.json')!r}, 'w').write(json.dumps([os.getcwd()] + sys.argv[1:]))\n"
+                "conf = [a for a in sys.argv if a.endswith('.json')]\n"
+                "if conf:\n"
+                "    out = json.load(open(conf[0]))['jsonReporter']['fileName']\n"
+                f"    open(out, 'w').write({report_text!r})\n"
+                f"sys.exit({exit_code})\n")
+    os.chmod(stub, 0o755)
+
+
+def _check_run_js_target_through_stryker():
+    """`--run x.mjs` runs the pinned StrykerJS command on x.mjs and only its
+    sibling x.test.mjs, writes nothing into the audited checkout, and reports
+    the survivors; every way it cannot judge exits 3."""
+    with open(os.path.join(_JS_FIXTURES, "stryker-report.json"), encoding="utf-8") as f:
+        report = f.read()
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
+        _stub_npx(d, report)
+        for name in ("sample.mjs", "sample.test.mjs"):
+            open(os.path.join(cwd, name), "w").close()
+        code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
+        assert code == 0, (code, out, err)
+        assert len(out.splitlines()) == 6, out
+        argv = json.load(open(os.path.join(d, "argv.json")))
+        assert os.path.realpath(argv[0]) == os.path.realpath(cwd), argv
+        args = argv[1:]
+        assert args[:5] == ["-y", "-p", "@stryker-mutator/core@10.0.0", "-p", "@stryker-mutator/tap-runner@10.0.0"], args
+        assert args[5:7] == ["stryker", "run"], args
+        tail = args[8:]
+        assert tail == ["--testRunner", "tap", "--coverageAnalysis", "perTest",
+                        "--mutate", "sample.mjs", "--testFiles", "sample.test.mjs",
+                        "--reporters", "clear-text,json"], tail
+        assert sorted(os.listdir(cwd)) == ["sample.mjs", "sample.test.mjs"], os.listdir(cwd)
+
+        # No sibling test file: nothing to run against.
+        os.remove(os.path.join(cwd, "sample.test.mjs"))
+        code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
+        assert code == 3 and out == "" and "INCONCLUSIVE" in err and "no sibling test file" in err, (code, out, err)
+        open(os.path.join(cwd, "sample.test.mjs"), "w").close()
+
+        # Stryker fails, or writes no report.
+        _stub_npx(d, report, exit_code=1)
+        code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
+        assert code == 3 and out == "" and "stryker run failed" in err, (code, out, err)
+        _stub_npx(d, "", exit_code=0)
+        code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
+        assert code == 3 and out == "" and "INCONCLUSIVE" in err, (code, out, err)
+
+    with tempfile.TemporaryDirectory() as empty, tempfile.TemporaryDirectory() as cwd:
+        open(os.path.join(cwd, "sample.mjs"), "w").close()
+        open(os.path.join(cwd, "sample.test.mjs"), "w").close()
+        code, out, err = _run_cli(["--run", "sample.mjs"], [empty], cwd)
+        assert code == 3 and out == "" and "npx" in err, (code, out, err)
+
+
 _CHECKS = (_check_parsing, _check_candidate_selection, _check_cli_path,
            _check_inconclusive_when_mutmut_cannot_run,
            _check_run_inconclusive_on_each_broken_mutmut_output,
            _check_unmodelled_status_is_inconclusive,
-           _check_run_reports_findings_when_mutmut_present)
+           _check_run_reports_findings_when_mutmut_present,
+           _check_stryker_parsing,
+           _check_stryker_timeout_counts_killed_and_unjudged_statuses_stop,
+           _check_js_candidate_selection, _check_run_js_target_through_stryker)
 
 
 def _selfcheck():
@@ -447,7 +711,10 @@ def _selfcheck():
 def main(argv):
     if argv[1:2] == ["--suggest"]:
         root = argv[2] if len(argv) > 2 else "."
-        for candidate in suggest_candidates(auditlib.walk_source(root)):
+        paths = auditlib.walk_source(root)
+        for suffix in JS_SUFFIXES:
+            paths += auditlib.walk_source(root, suffix)
+        for candidate in suggest_candidates(paths):
             print(json.dumps({"candidate": candidate}))
         return
     if argv[1:2] == ["--no-tests"]:
@@ -461,9 +728,13 @@ def main(argv):
     try:
         if argv[1:2] == ["--run"]:
             if len(argv) < 3:
-                print("usage: audit.py --run <target-module.py>", file=sys.stderr)
+                print("usage: audit.py --run <target-module.py|.mjs|.js>", file=sys.stderr)
                 sys.exit(1)
-            for row in parse_or_inconclusive(run_mutmut(argv[2])):
+            if argv[2].endswith(JS_SUFFIXES):
+                rows = parse_stryker_or_inconclusive(run_stryker(argv[2]))
+            else:
+                rows = parse_or_inconclusive(run_mutmut(argv[2]))
+            for row in rows:
                 print(json.dumps(row))
             return
         # `--selfcheck` and the file/stdin parse path go through auditlib.run_cli.
