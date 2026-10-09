@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import closure as C  # noqa: E402
+from run_fixtures import reopen_permissions  # noqa: E402
 
 CLOSURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "closure.py")
 
@@ -38,28 +39,19 @@ def git(root, *args):
 
 
 @pytest.fixture(autouse=True)
-def restore_permissions(tmp_path):
+def restore_permissions(tmp_path_factory):
     """Some tests take a directory's or a file's read permission away; open
     every entry back up at teardown so pytest can remove the tree."""
     yield
-    for dirpath, dirnames, filenames in os.walk(tmp_path):
-        for name in dirnames + filenames:
-            try:
-                os.chmod(os.path.join(dirpath, name), 0o700)
-            except OSError:
-                pass
+    reopen_permissions(tmp_path_factory.getbasetemp())
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path_factory):
     """Factory: a fixture repo on disk, `{path: text}` plus an `AGENTS.md`, or
     no `AGENTS.md` at all when `agents` is None. Returns its root as a str."""
-    made = []
-
     def make(files, agents=DECLARED):
-        root = str(tmp_path / f"repo-{len(made)}")
-        made.append(root)
-        os.makedirs(root)
+        root = str(tmp_path_factory.mktemp("repo"))
         git(root, "init", "-q")
         if agents is not None:
             files = {**files, "AGENTS.md": agents}
@@ -666,15 +658,11 @@ def test_a_failed_git_listing_is_not_an_empty_closure(repo):
 
 
 @pytest.fixture
-def fake_git_on_path(tmp_path):
+def fake_git_on_path(tmp_path_factory):
     """Factory: a directory holding a `git` that runs `script`, and nothing
     else."""
-    made = []
-
     def make(script):
-        bin_dir = tmp_path / f"fake-git-{len(made)}"
-        made.append(bin_dir)
-        bin_dir.mkdir()
+        bin_dir = tmp_path_factory.mktemp("fake-git")
         path = bin_dir / "git"
         path.write_text("#!/bin/sh\n" + script + "\n")
         path.chmod(0o755)

@@ -62,18 +62,16 @@ def fixed(fid):
     return {"id": fid, "outcome": "fixed", "sha": "abc1234"}
 
 
-class LedgerEndToEnd:
+class LedgerEndToEnd(Env):
     def __init__(self, tmp_path):
-        env = Env(tmp_path)
-        self.tmp, self.home, self.ledger, self.rows = env.tmp, env.home, env.ledger, env.rows
+        super().__init__(tmp_path)
         self.cache, self.tr = self.tmp / "cache", self.tmp / "projects"
         self.skills = self.cache / "skills"
         self.prices = self.tmp / "prices.json"
         self.prices.write_text(json.dumps(PRICES))
-        self.run_cli = env.run
 
     def ok(self, *args):
-        r = self.run_cli(*args)
+        r = self.run(*args)
         assert r.returncode == 0, r.stderr
         return r
 
@@ -86,7 +84,7 @@ class LedgerEndToEnd:
             sources += ["--cache", self.cache]
         if rtype in ("spec", "standards", "correctness", "verification"):
             sources += ["--transcripts", self.tr]
-        return self.run_cli("append", "--repo", "skills", "--ledger", self.ledger, *sources, *args)
+        return self.run("append", "--repo", "skills", "--ledger", self.ledger, *sources, *args)
 
     # -- fixtures ----------------------------------------------------------------
 

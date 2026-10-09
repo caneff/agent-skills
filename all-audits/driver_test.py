@@ -24,11 +24,16 @@ def _run_driver(*args):
         env={**os.environ, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
     )
 
+def _mkdirs(base, *names):
+    """Create `names` as directories under `base` and return their paths."""
+    paths = [str(base / name) for name in names]
+    for path in paths:
+        os.mkdir(path)
+    return paths
 
 
 def test_index_rerun_replaces_assets_without_nesting(tmp_path):
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    tmp = str(tmp_path)
     os.makedirs(os.path.join(tmp, "collection", "dead-code", "assets", "base"))
     with open(os.path.join(tmp, "collection", "dead-code", "assets", "base", "base.css"), "w") as f:
         f.write("body{}")
@@ -47,8 +52,7 @@ def test_index_over_an_empty_collection_still_links_to_real_assets(tmp_path):
     """#613: assets come from pagelib.copy_assets, not hoisted out of the
     first report folder — so an index whose audits all skipped still links to
     files that exist."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    tmp = str(tmp_path)
     os.makedirs(os.path.join(tmp, "collection"))
 
     r = _run_driver("--index", "--out", tmp)
@@ -67,8 +71,7 @@ def test_index_over_an_old_run_dir_does_not_prune_it(tmp_path):
     """#606 round 2: `--index --out <run older than the TTL>` must index that
     run, not delete it — pruning happens after `--out` is resolved and skips
     the resolved dir."""
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    cache_dir = str(tmp_path)
     base = os.path.join(cache_dir, "all-audits")
     old_run = os.path.join(base, "run-20200101-000000")
     report = os.path.join(old_run, "collection", "dead-code", "report.html")
@@ -91,12 +94,7 @@ def test_collect_from_manifest_mutation_style(tmp_path):
     — through a manifest, never by grepping a log for a stray .html path
     (the marker this replaced, `ALL_AUDITS_REPORT=`, is gone from every
     doc)."""
-    manifests_dir = str(tmp_path / "manifests_dir")
-    os.mkdir(manifests_dir)
-    collection = str(tmp_path / "collection")
-    os.mkdir(collection)
-    reportdir = str(tmp_path / "reportdir")
-    os.mkdir(reportdir)
+    manifests_dir, collection, reportdir = _mkdirs(tmp_path, "manifests_dir", "collection", "reportdir")
     report = os.path.join(reportdir, "report.html")
     with open(report, "w") as f:
         f.write("<html>module report</html>")
@@ -111,10 +109,7 @@ def test_collect_from_manifest_mutation_style(tmp_path):
 
 
 def test_collect_from_manifest_no_manifest_or_missing_report(tmp_path):
-    manifests_dir = str(tmp_path / "manifests_dir")
-    os.mkdir(manifests_dir)
-    collection = str(tmp_path / "collection")
-    os.mkdir(collection)
+    manifests_dir, collection = _mkdirs(tmp_path, "manifests_dir", "collection")
     assert driver.collect_from_manifest(manifests_dir, "missing", collection, "missing") == "no manifest"
 
     manifest = driver.manifest_path_for(manifests_dir, "ghost")
@@ -132,8 +127,7 @@ def test_audit_prompt_whole_repo_override_and_ignore_file(tmp_path):
     assert "not a git diff" in prompt
     assert "rejected" not in prompt
 
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    tmp = str(tmp_path)
     with open(os.path.join(tmp, ".audit-ignore.md"), "w") as f:
         f.write("### god object in solver.py\n- adr: docs/adr/0009-solver-shape.md\n")
     with_file = driver.audit_prompt("dead-code", tmp)
@@ -143,8 +137,7 @@ def test_audit_prompt_whole_repo_override_and_ignore_file(tmp_path):
 
 
 def test_mutation_subindex_and_single_main_row(tmp_path):
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    tmp = str(tmp_path)
     for name in ("dead-code", "test-audit"):
         d = os.path.join(tmp, "collection", name)
         os.makedirs(d)
@@ -179,8 +172,7 @@ def test_mutation_subindex_and_single_main_row(tmp_path):
 
 
 def test_no_mutation_reports_no_row(tmp_path):
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    tmp = str(tmp_path)
     for name in ("dead-code", "test-audit"):
         d = os.path.join(tmp, "collection", name)
         os.makedirs(d)
@@ -194,8 +186,7 @@ def test_no_mutation_reports_no_row(tmp_path):
 
 
 def test_no_test_modules_section(tmp_path):
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    tmp = str(tmp_path)
     d = os.path.join(tmp, "collection", "solver.py")
     os.makedirs(d)
     open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
@@ -228,12 +219,7 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row(tmp_path):
     fixture log containing an unrelated .html path must not land in the
     index — the audit that never wrote a manifest renders as a named
     failure row instead of silently reusing a stray path from its log."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
-    bin_dir = str(tmp_path / "bin_dir")
-    os.mkdir(bin_dir)
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     # A stray .html path in duplication's log — must never be mistaken
     # for its report now that the driver reads manifests, not logs.
     r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code,duplication")
@@ -274,12 +260,7 @@ def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, extra_args=(), **extr
 def test_audit_claude_gets_the_unlimited_bg_wait_ceiling(tmp_path):
     """#1278: `claude -p` kills itself after 600 s of background tasks unless
     the ceiling variable is 0; the audit's own log records what it received."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
-    bin_dir = str(tmp_path / "bin_dir")
-    os.mkdir(bin_dir)
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
     assert r.returncode == 0, r.stdout + r.stderr
     log = open(os.path.join(tmp, "out", "logs", "dead-code.log")).read()
@@ -289,12 +270,7 @@ def test_audit_claude_gets_the_unlimited_bg_wait_ceiling(tmp_path):
 def test_audit_exiting_nonzero_fails_the_sweep_even_with_a_manifest(tmp_path):
     """#1278: a nonzero `claude` exit is a failure line and a nonzero sweep
     exit, never `done`, whatever is on disk."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
-    bin_dir = str(tmp_path / "bin_dir")
-    os.mkdir(bin_dir)
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", FAKE_CLAUDE_EXIT_DEAD_CODE="3")
     assert r.returncode != 0, r.stdout + r.stderr
     assert "[dead-code] FAILED: exit 3" in r.stdout, r.stdout
@@ -307,12 +283,7 @@ def test_manifest_naming_a_missing_report_fails_the_sweep(tmp_path):
     """#1292: success in `run_one` is what `collect_from_manifest` means —
     the manifest's report file exists. The console and exit code must agree
     with the index's failure row."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
-    bin_dir = str(tmp_path / "bin_dir")
-    os.mkdir(bin_dir)
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", FAKE_CLAUDE_MISSING_REPORT="1")
     assert r.returncode != 0, r.stdout + r.stderr
     assert "[dead-code] FAILED: manifest names a missing report:" in r.stdout, r.stdout
@@ -323,12 +294,7 @@ def test_stale_manifest_from_an_earlier_run_does_not_count_as_success(tmp_path):
     """#1278: `--out` accumulates, so a rerun into the same dir (the issue's
     own recovery command) finds the last run's manifest. An audit that writes
     nothing this time must still fail, not inherit the old manifest."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
-    bin_dir = str(tmp_path / "bin_dir")
-    os.mkdir(bin_dir)
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     first = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
     assert first.returncode == 0, first.stdout + first.stderr
     assert os.path.isfile(os.path.join(tmp, "out", "manifests", "dead-code", "manifest.json")), "fixture setup: run 1 leaves a manifest"
@@ -372,10 +338,7 @@ def test_init_git_repo_ignores_leaked_git_dir(tmp_path):
     repo — regression witness for the 2026-09-07 incident, where a leaked
     GIT_DIR made `git init` on a /tmp path silently reinitialize that other
     repo instead and rewrite its .git/config."""
-    victim = str(tmp_path / "victim")
-    os.mkdir(victim)
-    target = str(tmp_path / "target")
-    os.mkdir(target)
+    victim, target = _mkdirs(tmp_path, "victim", "target")
     clean_env = driver.scrubbed_env()
     subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
     subprocess.run(["git", "-C", victim, "-c", "user.email=v@example.com", "-c", "user.name=v",
@@ -401,12 +364,7 @@ def test_decide_and_head_sha_ignore_leaked_git_dir(tmp_path):
     handed. Under a leaked GIT_DIR pointing at a dirty repo, decide() on a
     clean, freshly-cached repo returned run=True "dirty working tree" and
     head_sha() returned the other repo's SHA."""
-    victim = str(tmp_path / "victim")
-    os.mkdir(victim)
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    victim, repo, cache_dir = _mkdirs(tmp_path, "victim", "repo", "cache_dir")
     _init_git_repo(victim)
     # a second commit, so the victim's HEAD can never coincide with the
     # audited repo's (both repos hold the same tree otherwise)
@@ -439,12 +397,7 @@ def test_mutation_worktree_add_ignores_leaked_git_dir(tmp_path):
     """AC (#625): the mutation worktree is the one git call that bypasses
     _run — under a leaked GIT_DIR it registered its worktree in the caller's
     repo instead of the audited one."""
-    victim = str(tmp_path / "victim")
-    os.mkdir(victim)
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    victim, repo, tmp = _mkdirs(tmp_path, "victim", "repo", "tmp")
     # the victim has no commit, so a `worktree add HEAD` aimed at it by a
     # leak fails outright while the same call on `repo` succeeds
     clean_env = driver.scrubbed_env()
@@ -468,10 +421,7 @@ def test_cache_decision_bad_sha_forces_run(tmp_path):
     fresh (regression witness: an old timestamp would trip the backstop
     and pass even if the bad-SHA path itself silently read as unchanged —
     that's exactly the bug this test caught)."""
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
     record_path = driver._record_file(repo, cache_dir)
     driver.save_record(record_path, {
@@ -486,10 +436,7 @@ def test_cache_decision_bad_sha_forces_run(tmp_path):
 
 
 def test_cache_decision_clean_recent_repo_skips(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
     sha = driver.head_sha(repo)
     report_dir = os.path.join(cache_dir, "report")
@@ -511,10 +458,7 @@ def test_corrupt_cache_record_forces_run(tmp_path):
     never crash the sweep — matches the old bash cache.py, whose crashing
     subprocess printed nothing, failed the `= "SKIP"` check, and let the
     audit run."""
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
     record_path = driver._record_file(repo, cache_dir)
     os.makedirs(os.path.dirname(record_path), exist_ok=True)
@@ -525,10 +469,7 @@ def test_corrupt_cache_record_forces_run(tmp_path):
 
 
 def test_legacy_cache_entry_missing_report_dir_forces_run(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
     sha = driver.head_sha(repo)
     driver.save_record(driver._record_file(repo, cache_dir), {
@@ -543,8 +484,7 @@ def test_legacy_cache_entry_missing_report_dir_forces_run(tmp_path):
 
 
 def test_save_record_is_atomic_no_tmp_left_behind(tmp_path):
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    cache_dir = str(tmp_path)
     path = os.path.join(cache_dir, "sub", "record.json")
     driver.save_record(path, {"a": 1})
     assert json.load(open(path)) == {"a": 1}
@@ -555,8 +495,7 @@ def test_crashed_no_tests_probe_renders_could_not_determine_not_zero(tmp_path):
     """#559: a no-tests probe that crashes or returns garbage must render as
     "could not determine" in the sub-index and the main-index verdict —
     never as a silent zero, which would read as a clean 0%-no-tests repo."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    tmp = str(tmp_path)
     d = os.path.join(tmp, "collection", "solver.py")
     os.makedirs(d)
     open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
@@ -589,10 +528,7 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees(tmp_path):
     as the sweep, so it inherits the 3-day prune of old `run-*` dirs that it
     used to skip. No `claude` is needed: naming the module skips the prepass,
     and a module with no env manifest fails setup before any audit runs."""
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
     base = os.path.join(cache_dir, "all-audits")
     stale = os.path.join(base, "run-20200101-000000")
@@ -652,10 +588,7 @@ def _repo_with_env_manifest(path):
 
 
 def test_mutation_audit_that_succeeds_prints_done_and_exits_zero(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _repo_with_env_manifest(repo)
     r = _mutation_with_fake_claude(repo, tmp, os.path.join(tmp, "out"))
     assert r.returncode == 0, r.stdout + r.stderr
@@ -667,10 +600,7 @@ def test_mutation_audit_that_succeeds_prints_done_and_exits_zero(tmp_path):
 def test_mutation_audit_exiting_nonzero_fails_the_run_even_with_a_manifest(tmp_path):
     """#1309, the sweep's #1278 rule in mutation mode: a nonzero `claude`
     exit is a failure line and a nonzero exit, never `done`."""
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _repo_with_env_manifest(repo)
     r = _mutation_with_fake_claude(repo, tmp, os.path.join(tmp, "out"), FAKE_CLAUDE_EXIT_MUTATION="3")
     assert r.returncode != 0, r.stdout + r.stderr
@@ -679,10 +609,7 @@ def test_mutation_audit_exiting_nonzero_fails_the_run_even_with_a_manifest(tmp_p
 
 
 def test_mutation_stale_manifest_from_an_earlier_run_does_not_count_as_success(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _repo_with_env_manifest(repo)
     out = os.path.join(tmp, "out")
     first = _mutation_with_fake_claude(repo, tmp, out)
@@ -709,10 +636,7 @@ def _seed_run_dir(tmp, worktrees=False):
 def test_plan_reuses_the_cached_report_and_runs_the_rest(tmp_path):
     """#606: the plan step decides alone — cache in, lists out. No audit
     process is spawned, so it needs a tmp dir and no fake `claude`."""
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    cache_dir = str(tmp_path / "cache_dir")
-    os.mkdir(cache_dir)
+    repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
     report_dir = os.path.join(cache_dir, "domain-drift-report")
     os.makedirs(report_dir)
@@ -738,10 +662,7 @@ def test_collect_copies_both_report_kinds_and_returns_the_index(tmp_path):
     """#606: the collect step assembles the collection from what is already
     on disk — a manifest for what ran, the cache dir for what was reused —
     and renders. Also needs only a tmp dir and no fake `claude`."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
-    srcdir = str(tmp_path / "srcdir")
-    os.mkdir(srcdir)
+    tmp, srcdir = _mkdirs(tmp_path, "tmp", "srcdir")
     run = _seed_run_dir(tmp)
     ran = os.path.join(srcdir, "ran")
     os.makedirs(ran)
@@ -775,10 +696,7 @@ def test_index_only_rebuild_spawns_nothing_and_needs_no_run_branch(tmp_path):
     """#606: `--index --out DIR` calls the collect step over an existing
     collection. Nothing is spawned — the PATH here holds no `claude` and no
     `git` — and no logs/ or manifests/ content is read."""
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
-    empty_bin = str(tmp_path / "empty_bin")
-    os.mkdir(empty_bin)
+    tmp, empty_bin = _mkdirs(tmp_path, "tmp", "empty_bin")
     d = os.path.join(tmp, "collection", "dead-code")
     os.makedirs(d)
     open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
@@ -815,10 +733,7 @@ def test_mutation_worktree_is_removed_even_when_the_failure_report_raises(tmp_pa
     exception between `git worktree add` and the explicit cleanup call left
     the worktree registered and on disk; here the failure-report write is made
     to fail (a regular file where the collection should be) and the worktree must still be gone."""
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    tmp = str(tmp_path / "tmp")
-    os.mkdir(tmp)
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _init_git_repo(repo)
     run = _seed_run_dir(tmp, worktrees=True)
     # The module has no env manifest, so the driver writes a setup-failure report

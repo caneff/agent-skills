@@ -5,19 +5,15 @@ import json
 
 import pytest
 
-from review_ledger_support import finding, report_rows, write_jsonl
+from review_ledger_support import Env, finding, report_rows, write_jsonl
 
 
-class Mutations:
+class Mutations(Env):
     """The status-file directory of one test and the `append` commands that read it."""
 
-    def __init__(self, env):
-        self.env = env
-        self.tmp = env.tmp
-        self.ledger = env.ledger
-        self.rows = env.rows
-        self.run = env.run
-        self.status = env.tmp / "status"
+    def __init__(self, tmp):
+        super().__init__(tmp)
+        self.status = tmp / "status"
         self.status.mkdir()
 
     def status_file(self, mutation_id, text):
@@ -36,8 +32,8 @@ class Mutations:
 
 
 @pytest.fixture
-def mut(env):
-    return Mutations(env)
+def mut(tmp_path):
+    return Mutations(tmp_path)
 
 
 class TestAppendMutation:

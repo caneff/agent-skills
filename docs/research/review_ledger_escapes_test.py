@@ -12,19 +12,17 @@ import subprocess
 
 import pytest
 
+from review_ledger_support import Env
+
 DAY = 86400
 T0 = 1_790_000_000
 
 
-class Repo:
+class Repo(Env):
     """A throwaway origin and clone, the ledger beside them, and the commands that read both."""
 
-    def __init__(self, env):
-        self.env = env
-        self.tmp = env.tmp
-        self.ledger = env.ledger
-        self.rows = env.rows
-        self.run = env.run
+    def __init__(self, tmp):
+        super().__init__(tmp)
         self.git_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         self.git_env.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
                             GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
@@ -66,8 +64,8 @@ class Repo:
 
 
 @pytest.fixture
-def repo(env):
-    return Repo(env)
+def repo(tmp_path):
+    return Repo(tmp_path)
 
 
 class TestAxisSkipRow:

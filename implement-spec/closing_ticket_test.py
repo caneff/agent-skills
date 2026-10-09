@@ -1,4 +1,4 @@
-"""Tests for the spec's closing check (#897, reshaped by #1402); runs under pytest.
+"""Tests for the spec's closing check (#897, reshaped by #1402).
 
 One seam, named on the ticket: `body(...)` — the closing-check section's
 generated body, asserted against a fixture repo that declares an end-to-end
@@ -39,15 +39,10 @@ def body(*args, **kwargs):
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path_factory):
     """Make a fixture repo dir holding `agents` as its AGENTS.md (none if None)."""
-    count = 0
-
     def make(agents=DECLARED):
-        nonlocal count
-        count += 1
-        root = tmp_path / f"fixture-{count}"
-        root.mkdir()
+        root = tmp_path_factory.mktemp("fixture")
         if agents is not None:
             (root / "AGENTS.md").write_text(agents)
         return str(root)

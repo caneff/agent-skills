@@ -9,8 +9,7 @@ a fake HOME. Every refusal case also asserts the message names its cause, so
 a refusal for another reason (a missing file, a failed setup) does not pass
 for the one under test (`AGENTS.md` § Recurring defect classes, class 3).
 
-Runs under pytest (`uv run --locked pytest implement/fix_check_test.py`); each
-case builds its own throwaway world under `tmp_path`.
+Each case builds its own throwaway world under pytest's temp dir.
 """
 import json
 import os
@@ -136,10 +135,6 @@ def fixed(fid, sha):
     return {"id": fid, "outcome": "fixed", "sha": sha}
 
 
-def fixed(fid, sha):
-    return {"id": fid, "outcome": "fixed", "sha": sha}
-
-
 def disputed(fid, reason="r"):
     return {"id": fid, "outcome": "disputed", "reason": reason}
 
@@ -157,12 +152,9 @@ def age(world, names, seconds_ago):
 
 
 @pytest.fixture
-def make_world(tmp_path):
-    count = []
-
+def make_world(tmp_path_factory):
     def make(**kwargs):
-        count.append(1)
-        return World(tmp_path / f"world{len(count)}", **kwargs)
+        return World(tmp_path_factory.mktemp("world"), **kwargs)
     return make
 
 

@@ -6,23 +6,19 @@ import json
 
 import pytest
 
-from review_ledger_support import OUT_CLEAN, OUT_REFUSED, OUT_TWO, put
+from review_ledger_support import OUT_CLEAN, OUT_REFUSED, OUT_TWO, Env, put
 
 STARTED, COMPLETED = "2026-09-30T09:00:00-04:00", "2026-09-30T09:02:30-04:00"
 W1, W2 = 1790000000, 1790600000  # two windows' reset times
 
 
-class Passes:
+class Passes(Env):
     """The Codex cache and ledger of one test, and the commands that write them."""
 
-    def __init__(self, env):
-        self.env = env
-        self.tmp = env.tmp
-        self.cache = env.tmp / "cache"
-        self.ledger = env.ledger
+    def __init__(self, tmp):
+        super().__init__(tmp)
+        self.cache = tmp / "cache"
         self.skills = self.cache / "skills"
-        self.rows = env.rows
-        self.run = env.run
 
     def record(self, ticket, phase="gate", before=None, after=None, out=OUT_CLEAN, status=0):
         """A pass's record and `.out`; `before` and `after` are the readings the controller took
@@ -55,8 +51,8 @@ class Passes:
 
 
 @pytest.fixture
-def px(env):
-    return Passes(env)
+def px(tmp_path):
+    return Passes(tmp_path)
 
 
 class TestUsageChange:

@@ -1,7 +1,6 @@
 """The Codex usage preflight (#1204): `codex-usage-gate.py` reads the usage
 cache and answers with an exit status a controller can branch on — 0 proceed,
 20 capped (skip, no run), 30 unknown (skip, no run), 40 under the size threshold.
-Runs under pytest.
 
 Every run gets `HOME` set to its temporary directory, so the kill-switch file
 (#1354) on the real box never reaches a test.
@@ -11,7 +10,6 @@ cache file under a temporary `$CODEX_HOME`. `PATH` is emptied so a stale or
 missing cache cannot reach a real `codex app-server`.
 """
 import importlib.util
-import itertools
 import json
 import os
 import shutil
@@ -48,16 +46,9 @@ print(json.dumps({{"labels": [{{"name": x}} for x in names]}}))
 
 
 @pytest.fixture
-def newdir(tmp_path):
-    """A factory of fresh, empty directories under the test's tmp_path."""
-    counter = itertools.count()
-
-    def make():
-        d = tmp_path / f"d{next(counter)}"
-        d.mkdir()
-        return d
-
-    return make
+def newdir(tmp_path_factory):
+    """A factory of fresh, empty directories under pytest's temp dir."""
+    return lambda: tmp_path_factory.mktemp("d")
 
 
 def cache(pct, resets=None, fetched=None, secondary=None):

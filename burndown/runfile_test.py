@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
-from run_fixtures import drop_job, drop_repo_field  # noqa: E402
+from run_fixtures import drop_job, drop_repo_field, reopen_permissions  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
 # A real git checkout for every `start` that is not about the target repo: this
@@ -35,13 +35,7 @@ def cache(tmp_path, monkeypatch):
     root.mkdir()
     monkeypatch.setenv("BURNDOWN_CACHE_DIR", str(root))
     yield str(root)
-    for dirpath, dirnames, filenames in os.walk(root):
-        os.chmod(dirpath, 0o700)
-        for name in dirnames + filenames:
-            try:
-                os.chmod(os.path.join(dirpath, name), 0o700)
-            except OSError:
-                pass
+    reopen_permissions(root)
 
 
 @pytest.fixture

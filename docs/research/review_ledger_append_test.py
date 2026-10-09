@@ -10,21 +10,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from review_ledger_support import (SCRIPT, SKILLS_PROJ, build_cost_fixture, finding, transcript, usage,
+from review_ledger_support import (SCRIPT, Env, SKILLS_PROJ, build_cost_fixture, finding, transcript, usage,
                                    write_jsonl, wt)
 
 
-class Appender:
+class Appender(Env):
     """The cost fixture's cache and transcripts, and the `append`/`harvest` commands over them."""
 
-    def __init__(self, env):
-        self.env = env
-        self.tmp = env.tmp
-        self.home = env.home
-        self.cache, self.tr = build_cost_fixture(env.tmp)
-        self.ledger = env.ledger
-        self.rows = env.rows
-        self.run = env.run
+    def __init__(self, tmp):
+        super().__init__(tmp)
+        self.cache, self.tr = build_cost_fixture(tmp)
 
     def append(self, ticket, rtype, rnd=1, repo="skills", cache=None, tr=None):
         return self.run("append", "--repo", repo, "--ticket", ticket, "--type", rtype, "--round", rnd,
@@ -50,8 +45,8 @@ class Appender:
 
 
 @pytest.fixture
-def ap(env):
-    return Appender(env)
+def ap(tmp_path):
+    return Appender(tmp_path)
 
 
 class TestAppendRow:
