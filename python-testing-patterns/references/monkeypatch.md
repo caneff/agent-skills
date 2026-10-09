@@ -177,4 +177,4 @@ def test_automatic_cleanup(monkeypatch):
 4. **Combine with fixtures**: Use monkeypatch in fixtures for reusable mocking
 5. **Type safety**: Be careful with type checkers, may need type: ignore
 6. **Integration with pytest**: Native pytest fixture, well-integrated
-7. **Not for complex mocking**: Use unittest.mock for complex scenarios
+7. **Not for complex mocking**: Use pytest-mock's `mocker` for complex scenarios
