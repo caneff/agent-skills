@@ -134,13 +134,58 @@ fi
 # Every `*_test.py` is a pytest suite (#1494, ruling 4a): one that imports
 # `unittest`, `unittest.mock` included, fails the run, naming the file and the
 # line. pytest would collect and pass a unittest suite, so nothing else here
-# keeps the old idiom from coming back. tests/unittest_imports.py parses every
-# tracked suite, not the `--changed` selection, so no spelling of the import
-# gets past it; it exits 2 when it could not read a file, which stops the run:
+# keeps the old idiom from coming back. The check below parses every tracked
+# suite, not the `--changed` selection, so no spelling of the import gets
+# past it; it exits 2 when it could not read a file, which stops the run:
 # a check that could not read the files has not found them clean. A file from
 # which pytest collects no tests needs no check of its own: pytest exits 5,
 # and any non-zero exit is a failed suite below.
-unittest_imports=$(python3 tests/unittest_imports.py 2>"$tmp/unittest")
+unittest_imports=$(python3 - 2>"$tmp/unittest" <<'PY'
+# Prints `<path>:<line>` per import of unittest or a submodule in a tracked
+# `*_test.py`, read as Python so `import os, unittest`, an import inside a
+# block, and `importlib.import_module("unittest")` or `__import__` with a
+# literal name are caught. Exits 1 when it found any, 2 when `git ls-files`
+# failed or a file could not be read or parsed.
+import ast, subprocess, sys
+
+def is_unittest(name):
+    return name == "unittest" or name.startswith("unittest.")
+
+def lines(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(is_unittest(a.name) for a in node.names):
+                yield node.lineno
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module and is_unittest(node.module):
+                yield node.lineno
+        elif isinstance(node, ast.Call) and node.args:
+            f, arg = node.func, node.args[0]
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+            if (name in ("import_module", "__import__") and isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str) and is_unittest(arg.value)):
+                yield node.lineno
+
+try:
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*_test.py"],
+                            capture_output=True, check=True).stdout.decode()
+except (OSError, subprocess.CalledProcessError) as exc:
+    print(f"git ls-files failed: {exc}", file=sys.stderr)
+    sys.exit(2)
+found = False
+for path in filter(None, listed.split("\0")):
+    try:
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=path)
+    except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+        print(f"could not read {path}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    for line in sorted(set(lines(tree))):
+        print(f"{path}:{line}")
+        found = True
+sys.exit(1 if found else 0)
+PY
+)
 case $? in
   0|1) ;;
   *) echo "tests/all.sh: the unittest import check could not run: $(cat "$tmp/unittest")" >&2; exit 2 ;;

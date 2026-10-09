@@ -6,9 +6,9 @@
 # <file>` (#1503), that the run fails on a `*_test.py` importing `unittest`,
 # `unittest.mock` included and in any spelling, naming the file, and on one
 # from which pytest collects no tests (exit 5, #1510), that a check which
-# cannot read the suites stops the run, and that labels and the summary line
-# keep their shape. On this repo's own tree it checks that no tracked suite
-# imports unittest and that both testing skills state the ruling (#1511).
+# cannot read the suites stops the run, that labels and the summary line keep
+# their shape, that suites run on the system python3, and that both testing
+# skills state the ruling (#1511).
 #
 # Blind to: whether a model reading python-testing-patterns or
 # setup-python-repo then writes its next test as pytest, which only a reading
@@ -35,14 +35,13 @@ check() { # <name> <0|1 condition status>
   if [ "$2" = 0 ]; then echo "ok   $1"; else echo "  FAIL $1"; fail=1; fi
 }
 
-# fresh <dest>=<fixture>...: a shadow repo holding tests/all.sh, its unittest
-# check, pyproject.toml, uv.lock and each fixture at its dest path.
+# fresh <dest>=<fixture>...: a shadow repo holding tests/all.sh,
+# pyproject.toml, uv.lock and each fixture at its dest path.
 fresh() {
   local pair
   rm -rf "$shadow/repo"; mkdir -p "$shadow/repo/tests"
   cp "$root/tests/all.sh" "$root/pyproject.toml" "$root/uv.lock" "$shadow/repo/" || return 1
   mv "$shadow/repo/all.sh" "$shadow/repo/tests/all.sh"
-  cp "$root/tests/unittest_imports.py" "$shadow/repo/tests/" || return 1
   for pair in "$@"; do
     mkdir -p "$(dirname "$shadow/repo/${pair%%=*}")"
     cp "$fixtures/${pair#*=}.py" "$shadow/repo/${pair%%=*}" || return 1
@@ -115,10 +114,9 @@ got=$(cd "$shadow/repo" && uv run --locked python3 -c 'import sys; print(sys.ver
 check "suites run on the system python3 ($want), not a uv-managed one (got: ${got:-nothing})" \
   "$([ -n "$got" ] && [ "$got" = "$want" ]; echo $?)"
 
-# This repo's own tree: no tracked suite imports unittest, and both testing
-# skills state the ruling and cite ADR 0007 by a path that resolves anywhere.
-out=$(cd "$root" && python3 tests/unittest_imports.py 2>&1); rc=$?
-check "no tracked *_test.py in this repo imports unittest" "$([ "$rc" = 0 ] && [ -z "$out" ]; echo $?)"
+# Both testing skills state the ruling and cite ADR 0007 by a path that
+# resolves from any repo. That no suite of this repo's own imports unittest is
+# the check above, run on the real tree by every `bash tests/all.sh`.
 for skill in python-testing-patterns setup-python-repo; do
   check "$skill states the pytest ruling, citing ADR 0007" \
     "$(grep -qF '~/.agents/skills/docs/adr/0007-pytest-everywhere.md' "$root/$skill/SKILL.md"; echo $?)"
