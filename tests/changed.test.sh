@@ -24,7 +24,7 @@ has_pass() { grep -qE "^PASS $1 \(" <<<"$out"; } # a PASS line ends in the suite
 # `base` is the commit before any case's change.
 fresh() {
   rm -rf "$shadow/repo"; mkdir -p "$shadow/repo/tests" "$shadow/repo/a" "$shadow/repo/b" "$shadow/repo/c"
-  cp "$root/tests/all.sh" "$shadow/repo/tests/all.sh"
+  cp "$root/tests/all.sh" "$root/tests/suite-edges.py" "$shadow/repo/tests/"
   for f in a/a.test.sh b/b.test.sh tests/t.test.sh; do printf '#!/usr/bin/env bash\nexit 0\n' >"$shadow/repo/$f"; done
   echo c >"$shadow/repo/c/note.md"; echo r >"$shadow/repo/README.md"
   git -C "$shadow/repo" init -q
@@ -70,6 +70,60 @@ fresh; change a/x.txt
 out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1); rc=$?
 check "a --changed run passes and runs the narrowed set" "$([ "$rc" = 0 ] && has_pass a/a.test.sh && has_pass tests/t.test.sh && ! has_pass b/b.test.sh; echo $?)"
 check "...and says which scope it chose" "$(has 'changed suites: a + tests'; echo $?)"
+
+# A narrowed green says it was narrowed (#1495, defect class 1): the final line
+# carries both counts and the scope, where a full green keeps its plain line.
+check "a narrowed run's last line says N of M and what it narrowed to" "$(grep -qxF '2 of 3 suites passed (narrowed: a + tests)' <<<"$out"; echo $?)"
+fresh
+out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
+check "a full run keeps the plain '3 suites passed' line" "$([ "$rc" = 0 ] && grep -qxF '3 suites passed' <<<"$out"; echo $?)"
+fresh; echo "# touched" >>"$shadow/repo/tests/all.sh"; git -C "$shadow/repo" commit -qam touch
+out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1); rc=$?
+check "a --changed run that widened to the full suite prints the plain line" "$([ "$rc" = 0 ] && grep -qxF '3 suites passed' <<<"$out"; echo $?)"
+
+# Cross-directory edges (#1495): a change to the directory a suite loads from
+# keeps that suite's directory.
+edge() { # <file> <line>: commit a tracked file whose line reaches another directory
+  mkdir -p "$(dirname "$shadow/repo/$1")"; printf '%s\n' "$2" >"$shadow/repo/$1"
+  git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm "edge $1"; base=$(git -C "$shadow/repo" rev-parse HEAD)
+}
+fresh; edge b/lib.py 'sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "a"))'; change a/x.txt; list
+check "a sys.path line into a/ keeps b/'s suites when only a/ changes" "$(has b/b.test.sh; echo $?)"
+fresh; edge b/b.test.sh '# reads $here/../a/data.txt'; change a/x.txt; list
+check "a '\$here/../a/' read in a shell suite keeps b/'s suites" "$(has b/b.test.sh; echo $?)"
+fresh; edge b/b.test.sh '. "$here/../tests/helper.sh"'; change tests/helper.sh; list
+check "a sourced tests/ helper keeps the suites that source it" "$(has b/b.test.sh; echo $?)"
+fresh; edge b/lib.py 'sys.path.insert(0, os.path.join(HERE, "..", "a"))'; change b/y.txt; list
+check "a change in the dependent alone does not pull in its dependency" "$(has a/a.test.sh; echo $((1 - $?)))"
+fresh; mkdir -p "$shadow/repo/d"; printf '#!/usr/bin/env bash\nexit 0\n' >"$shadow/repo/d/d.test.sh"
+git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm d
+edge b/lib.py 'sys.path.insert(0, os.path.join(HERE, "..", "a"))'; edge d/lib.py 'sys.path.insert(0, os.path.join(HERE, "..", "b"))'; change a/x.txt; list
+check "edges chain: a/ -> b/ -> d/" "$(has d/d.test.sh; echo $?)"
+check "...and the widening is reported" "$(grep -q 'cross-directory edges widen a to:' <<<"$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1)"; echo $?)"
+
+fresh; mkdir -p "$shadow/repo/b"; printf 'sys.path.insert(0, os.path.join(HERE,\n                                os.pardir, "a"))\n' >"$shadow/repo/b/split.py"
+git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm split; base=$(git -C "$shadow/repo" rev-parse HEAD); change a/x.txt; list
+check "a sys.path call split over two lines (os.pardir) is still an edge" "$(has b/b.test.sh; echo $?)"
+fresh; edge b/lib.py 'LABEL = "a"  # a word that names a directory, not a path to it'; change a/x.txt; list
+check "a bare quoted word naming a directory is not an edge" "$(has b/b.test.sh; echo $((1 - $?)))"
+
+# A suite that reads the whole tree says so and is always kept (#1495, C2).
+fresh; printf '#!/usr/bin/env bash\n# all.sh: repo-wide (scans every tracked file)\nexit 0\n' >"$shadow/repo/b/b.test.sh"
+git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm wide; base=$(git -C "$shadow/repo" rev-parse HEAD); change a/x.txt; list
+check "a '# all.sh: repo-wide' suite is kept whatever directory changed" "$(has b/b.test.sh; echo $?)"
+fresh; printf '#!/usr/bin/env bash\n# a mid-file mention of all.sh: repo-wide does not count\nexit 0\n' >"$shadow/repo/b/b.test.sh"
+git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm notwide; base=$(git -C "$shadow/repo" rev-parse HEAD); change a/x.txt; list
+check "...and an unmarked suite is not" "$(has b/b.test.sh; echo $((1 - $?)))"
+
+# A scan that fails runs the full suite, never the narrowed one.
+fresh; printf '#!/usr/bin/env python3\nimport sys\nsys.exit(3)\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
+check "a failing edge scan lists everything" "$([ "$rc" = 0 ] && has a/a.test.sh && has b/b.test.sh; echo $?)"
+out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1)
+check "...and says the scan failed" "$(grep -q 'full suite: the cross-directory edge scan failed' <<<"$out"; echo $?)"
+fresh; printf '#!/usr/bin/env python3\nprint("a")\nprint("b")\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
+check "an edge scan that prints more than one line lists everything" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
+fresh; rm "$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
+check "a missing edge scanner lists everything" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
 
 # Concurrency: two suites that each wait for the other's marker finish only if
 # they run at the same time. The same pair under one job is the control that

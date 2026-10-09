@@ -372,7 +372,7 @@ round follows steps 2–3 below keyed on the spec number:
    `bash tests/all.sh --changed origin/<default>` (`AGENTS.md` § End-to-end
    seam, narrowed to what the PR touched): green is the exit, red is fixed and
    rerun. This is the ticket's one suite run, just before "PR up"; the merger
-   re-runs only when `origin/<default>` has moved past the base it ran on
+   reruns the full seam itself before it merges
    (§ The merge step 3).
    `fix-check.sh <n>` (and the pre-report gate that runs it) checks the
    rest mechanically: every finding id in the three findings sidecars and the
@@ -798,8 +798,8 @@ substitutions:
   unreviewed. Fix-check reads the same base off GitHub and refuses such a
   PR too. It goes back to the worker for
   `gh pr edit <pr> --repo <owner/name> --base spec-<p>`.
-- **The seam rerun compares against `origin/spec-<p>`**: step 3's skip test,
-  its worktree's start point and its `--changed` all name it.
+- **The seam rerun starts from `origin/spec-<p>`**: step 3's worktree start
+  point and its merge of the head name it, and the run is the full seam too.
 - **`closingIssuesReferences` is not required.** GitHub fills it only for a
   PR into the default branch, so a slice PR's reads empty and blocks nothing.
   The slice ticket stays open until the spec's integration PR closes it, so
@@ -848,16 +848,16 @@ closed.
    discovered from `merge-cleanup`'s refusal after the merge. Read the
    report's `Codex pass` line too: a refused pass names a refusal, and the
    merge does not wait on it.
-3. Merge. The worker's one suite run (§ Review step 3) ran on the PR merged
-   with the `<default>` it saw. GitHub's CLEAN is a textual-merge verdict, not a
-   test verdict, and two PRs sharing no file each pass their own gate and can
-   break `<default>` together even though neither PR's own gate saw the
-   other's change (#1145). Before the merge, re-run the seam on the PR as it
-   will land, and only when `<default>` has moved. Run
-   `git fetch origin` first, then skip only when `origin/<default>` has not
-   moved past the PR's merge base
-   (`git merge-base --is-ancestor origin/<default> <headRefOid>` exits
-   0, `headRefOid` being step 2's). Otherwise, from the primary checkout:
+3. Merge. The worker's one suite run (§ Review step 3) is narrowed to what the
+   PR touched and ran on the PR merged with the `<default>` it saw. GitHub's
+   CLEAN is a textual-merge verdict, not a test verdict, and two PRs sharing
+   no file each pass their own gate and can break `<default>` together even
+   though neither PR's own gate saw the other's change (#1145). A narrowed run
+   can also miss a suite in another directory that the diff impacts. So before
+   the merge, re-run the **full** seam on the PR as it will land, every time
+   (#1496, Chris's ruling 6a): this is the only full run a merge made outside
+   `drain` gets, so it is never skipped, not even when `<default>` has not
+   moved. From the primary checkout, after `git fetch origin`:
 
    ```
    git worktree add --detach <absolute path under .scratch/> origin/<default>
@@ -865,8 +865,8 @@ closed.
    ```
 
    `<the repo's seam>` is the command declared in `AGENTS.md` § End-to-end seam,
-   which is `bash tests/all.sh` here, run as
-   `bash tests/all.sh --changed origin/<default>` from the merged worktree; a
+   which is `bash tests/all.sh` here, run whole from the merged worktree, not
+   narrowed; a
    repo declaring none: tell Chris and merge nothing on this step's say-so.
    State the run's worker and core count in your status line before you launch
    it. The controller merges only on green. A merge conflict or a red seam blocks the merge: send the worker
@@ -876,15 +876,14 @@ closed.
 
    Immediately before the merge, `git fetch origin` again: when
    `origin/<default>` is no longer the sha the seam's worktree was created
-   from, re-run this step (or, if it is now an ancestor of the head, apply
-   the skip rule).
+   from, re-run this step.
 
    ```
    gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>
    ```
 
    `--match-head-commit` binds the merge to the head the seam ran on (step
-   2's `headRefOid` on the skip path): GitHub refuses it atomically if the
+   2's `headRefOid`): GitHub refuses it atomically if the
    head moved since. The `ready-for-human` merge line, in § The PR's
    `--chris-merges` report block above, carries the same flag.
 
