@@ -60,6 +60,16 @@ for form in unittest_import unittest_from_import unittest_mock_import unittest_m
   check "$form: ...and names only that file" "$(! has "a/idiom_test.py imports"; echo $?)"
 done
 
+# A unittest check that cannot run has not found the tree clean. A git shim
+# fails only `git grep`, so the run's other git calls still work.
+fresh a/idiom_test.py=pytest_idiom
+mkdir -p "$shadow/bin"
+printf '#!/bin/sh\n[ "$1" = grep ] && exit 128\nexec %s "$@"\n' "$(command -v git)" >"$shadow/bin/git"
+chmod +x "$shadow/bin/git"
+out=$(cd "$shadow/repo" && PATH=$shadow/bin:$PATH bash tests/all.sh 2>&1); rc=$?
+check "a unittest check whose git grep fails stops the gate" \
+  "$([ "$rc" = 2 ] && has "unittest import check could not run"; echo $?)"
+
 fresh a/empty_test.py=zero_tests
 gate
 check "a *_test.py with zero collected tests fails the gate" \

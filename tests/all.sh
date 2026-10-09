@@ -133,11 +133,18 @@ fi
 # `unittest`, `unittest.mock` included, fails the run, naming the file and the
 # line. pytest would collect and pass a unittest suite, so nothing else here
 # keeps the old idiom from coming back. Checked over every tracked file rather
-# than the `--changed` selection, since a grep costs nothing. A file from which
-# pytest collects no tests needs no check of its own: pytest exits 5, and any
-# non-zero exit is a failed suite below.
-unittest_imports=$(git ls-files -z -- '*_test.py' | xargs -0 -r grep -nE \
-  '^[[:space:]]*(import[[:space:]]+unittest([[:space:].,]|$)|from[[:space:]]+unittest(\.[A-Za-z_]+)*[[:space:]]+import[[:space:]])')
+# than the `--changed` selection, since a grep costs nothing. `git grep` exits
+# 1 on no match and above 1 on an error, which stops the run: a check that
+# could not read the files has not found them clean. A file from which pytest
+# collects no tests needs no check of its own: pytest exits 5, and any non-zero
+# exit is a failed suite below.
+unittest_imports=$(git grep -nE -e \
+  '^[[:space:]]*(import[[:space:]]+unittest([[:space:].,]|$)|from[[:space:]]+unittest(\.[A-Za-z_]+)*[[:space:]]+import[[:space:]])' \
+  -- '*_test.py')
+case $? in
+  0|1) ;;
+  *) echo "tests/all.sh: the unittest import check could not run (git grep failed)" >&2; rm -rf "$tmp"; exit 2 ;;
+esac
 if [ -n "$unittest_imports" ]; then
   while IFS= read -r hit; do
     f=${hit%%:*}
