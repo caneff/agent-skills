@@ -1,5 +1,0 @@
-# The *_test.py suites tests/all.sh still runs as `python3 <file>` rather
-# than `uv run --locked pytest <file>` (#1494). Each conversion slice deletes
-# its own group once its suites are rewritten for pytest; an entry naming no
-# tracked *_test.py fails the gate. Blank and `#` lines are ignored. One blank
-# line between groups, so parallel slices never touch adjacent lines.
