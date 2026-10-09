@@ -1036,7 +1036,7 @@ function selfcheck() {
   );
   assert.deepEqual(dupLines(`${body("'a'")}${body("'a'")}`), [], "outside any describe: not this smell");
   assert.deepEqual(
-    dupLines("describe('g', () => {\nit.todo('a');\nit.todo('a');\n});"),
+    dupLines("import { describe, it } from 'vitest';\ndescribe('g', () => {\nit.todo('a');\nit.todo('a');\n});"),
     [],
     "a todo has no body to replace",
   );
