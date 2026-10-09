@@ -98,7 +98,7 @@ def numbers(bucket):
 # Every bucket empty: what a ticket that is off the frontier altogether
 # leaves behind. Spelled out rather than derived, so a bucket added without
 # a thought about the off-the-frontier cases fails here.
-EMPTY = {"unblocked": [], "blocked": [], "unresolved": [], "spec": [], "slice": []}
+EMPTY = {"unblocked": [], "blocked": [], "unresolved": [], "spec": [], "slice": [], "stranded": []}
 
 
 def unresolved_count(issues, dropped, states=None):
@@ -796,7 +796,9 @@ def spec_parent(number=483, labels=("spec",)):
     """The parent issue as `/issues/<n>/parent` answers: a full issue object.
     Its labels omit the queried one by default, the shape burn-2026-09-27 hit:
     the parent carried `spec` and no `ready-for-agent`."""
-    return issue(number, labels=labels)
+    out = issue(number, labels=labels)
+    out["repository_url"] = "https://api.github.com/repos/owner/repo"
+    return out
 
 
 def test_a_slice_of_a_spec_lacking_the_queried_label_is_not_unblocked():
@@ -1290,6 +1292,66 @@ def test_fetch_native_blockers_refuses_an_answer_that_is_not_pages():
     except F.FrontierError:
         raised = True
     assert raised, "a non-list answer was read as no blockers"
+
+
+# --- A slice whose spec cannot run it is stranded, not skipped (#1485) ------
+
+def foreign_spec(number=259, repo="caneff/sudokupad-art", state="open"):
+    out = spec_parent(number)
+    out["state"] = state
+    out["repository_url"] = f"https://api.github.com/repos/{repo}"
+    return out
+
+
+def test_a_slice_of_a_spec_in_another_repo_is_stranded_and_names_the_repo():
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: foreign_spec()})
+    assert numbers(got["stranded"]) == [491], got
+    assert numbers(got["slice"]) == [], got
+    why = got["stranded"][0]["why"]
+    assert "caneff/sudokupad-art#259" in why, why
+    assert "implement-dispatch --spec" not in why, why
+
+
+def test_a_slice_of_a_closed_spec_is_stranded():
+    closed = spec_parent(259)
+    closed["state"] = "closed"
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: closed})
+    assert numbers(got["stranded"]) == [491], got
+    assert numbers(got["slice"]) == [], got
+    assert "#259" in got["stranded"][0]["why"] and "closed" in got["stranded"][0]["why"]
+
+
+def test_a_slice_of_an_open_spec_in_this_repo_is_still_a_slice():
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: spec_parent(483)})
+    assert numbers(got["slice"]) == [491], got
+
+
+def test_a_parent_whose_repo_was_not_read_is_not_handed_off():
+    unread = spec_parent(259)
+    del unread["repository_url"]
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: unread})
+    assert numbers(got["stranded"]) == [491], got
+    assert "implement-dispatch --spec" not in got["stranded"][0]["why"]
+
+
+def test_a_parent_whose_state_was_not_read_is_not_handed_off():
+    unread = spec_parent(259)
+    del unread["state"]
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: unread})
+    assert numbers(got["stranded"]) == [491], got
+
+
+def test_a_blocked_slice_of_a_closed_spec_stays_blocked():
+    closed = spec_parent(259)
+    closed["state"] = "closed"
+    got = read([issue(491, body=NO_BLOCKERS, blocked_by=1)], parents={491: closed})
+    assert numbers(got["blocked"]) == [491], got
+
+
+def test_the_rendered_report_names_a_stranded_slice():
+    line = F.render(read([issue(491, body=NO_BLOCKERS, title="S")],
+                         parents={491: foreign_spec()})).splitlines()[0]
+    assert line.startswith("stranded    491 S  ("), line
 
 
 def main():

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """The frontier of a ticket queue: `python3 burndown/frontier.py <owner/repo>
-<label>` prints the open, unclaimed, dispatchable tickets split five ways —
+<label>` prints the open, unclaimed, dispatchable tickets split six ways —
 
     unblocked   <n> <title>
     blocked     <n> <title>  (blocked by #a, #b)
     unresolved  <n> <title>  (<why>)
     spec        <n> <title>  (a spec parent: dispatch with ... --spec <n> ...)
     slice       <n> <title>  (a slice of spec #<p>: hand off with ... --spec <p> ...)
+    stranded    <n> <title>  (a slice whose spec is closed or in another repo)
 
 Three sources, in order: the tracker's native dependencies where it has them
 (`issue_dependencies_summary.blocked_by`, open blockers only, the live gate),
@@ -252,6 +253,27 @@ def _handoff(number):
     return f"`implement-dispatch --spec {number} --slots <k>`"
 
 
+def _stranded_reason(parent, repo):
+    """Why a spec parent cannot run its slices, `""` when it can: it is in
+    another repo (named with it, since a bare number is a different issue
+    here), its repo or state could not be read, or it is closed. Given no
+    `repo`, only the state is checked."""
+    where = str(parent.get("repository_url") or "")
+    if repo and not where:
+        return (f"a slice of spec #{parent['number']}, whose repo could not be "
+                "read: no dispatch verb is safe to copy")
+    if repo and not where.lower().endswith(f"/repos/{repo}".lower()):
+        other = where.split("/repos/", 1)[-1]
+        return (f"a slice of spec {other}#{parent['number']}, which is in another "
+                "repo: remove the slice's `## Parent` line and sub-issue link, "
+                "or run the spec there")
+    if parent.get("state") != "open":
+        return (f"a slice of spec #{parent['number']}, which is closed or its "
+                "state unread: reopen the spec or remove the slice's "
+                "`## Parent` line and sub-issue link")
+    return ""
+
+
 def _is_clear(name, stated):
     """Whether a ticket's own blocking state leaves it free to be handed off
     by a verb: unblocked, or silent. `blocked` outranks the verb, and a
@@ -260,12 +282,13 @@ def _is_clear(name, stated):
 
 
 # The buckets `classify` fills, in the order `render` prints them.
-BUCKETS = ("unblocked", "blocked", "unresolved", "spec", "slice")
+BUCKETS = ("unblocked", "blocked", "unresolved", "spec", "slice", "stranded")
 
 
-def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=None):
-    """`{unblocked, blocked, unresolved, spec, slice}` over GitHub issue
-    objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
+def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=None,
+             repo=None):
+    """`{unblocked, blocked, unresolved, spec, slice, stranded}` over
+    GitHub issue objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
     state; `None` means it could not be read, which is unresolved rather than
     a guess. `parent_of(ticket) -> issue | None` reads the ticket's parent
     issue, `None` being a ticket with no parent; it raises `FrontierError`
@@ -277,7 +300,12 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     `landed_of(spec_branch) -> {numbers}` and `native_blockers_of(ticket) ->
     [numbers]` carry the landed-blocker rule, stated in
     `references/frontier.md` (#1466); either raises `FrontierError` when it
-    cannot answer, and neither supplied means no blocker has landed."""
+    cannot answer, and neither supplied means no blocker has landed.
+
+    `stranded` is a slice whose parent spec cannot run it (#1485): the spec
+    is closed, or lives in a repo other than `repo`, where
+    `implement-dispatch --spec <n>` would name a different issue. It carries
+    no verb to copy, and drain names it instead of leaving it behind."""
     buckets = {name: [] for name in BUCKETS}
 
     def landed_numbers(issue):
@@ -390,11 +418,12 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
                 if parent and SPEC_LABEL in _labels(parent):
                     entry["blockers"] = []
                     entry["spec"] = parent["number"]
-                    entry["why"] = (
+                    stranded = _stranded_reason(parent, repo)
+                    entry["why"] = stranded or (
                         f"a slice of spec #{parent['number']}: hand off with "
                         + _handoff(parent["number"])
                         + ", never as its own ticket")
-                    name = "slice"
+                    name = "stranded" if stranded else "slice"
         buckets[name].append(entry)
     return buckets
 
@@ -578,7 +607,8 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
     return classify(fetch(repo, label), cached,
                     lambda ticket: parent_of(repo, ticket, run=read_once),
                     landed,
-                    lambda ticket: native_blockers_of(repo, ticket))
+                    lambda ticket: native_blockers_of(repo, ticket),
+                    repo=repo)
 
 
 def render(buckets):

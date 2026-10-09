@@ -236,11 +236,13 @@ def origin_slug(root):
 
 
 def read_frontier(ctx):
-    """`(queue, waiting)`. `queue` is `[(number, title, kind)]`: the unblocked
+    """`(queue, waiting, stranded)`. `queue` is `[(number, title, kind)]`: the unblocked
     ready tickets and the clear spec parents, oldest first; the anchor is the
     first. A slice is neither: it is built inside its spec's run. `waiting` is
     the numbers of specs that have a ready slice and are not in the queue
-    (not ready-for-agent, claimed, blocked), which drain cannot start."""
+    (not ready-for-agent, claimed, blocked), which drain cannot start.
+    `stranded` is `[(number, why)]`: slices whose spec is closed or in another
+    repo, which no spec run can build (#1485)."""
     issues = {}
 
     def fetch(r, label):
@@ -256,7 +258,8 @@ def read_frontier(ctx):
              for t in buckets[bucket]]
     queue = sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
     waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
-    return queue, sorted(waiting)
+    stranded = [(t["number"], t["why"]) for t in buckets["stranded"]]
+    return queue, sorted(waiting), stranded
 
 
 def pick(ctx):
@@ -869,6 +872,7 @@ def drain(ctx, limit):
     """`(merged, handed, stop reason or None)`; `limit` counts tickets."""
     merged, handed, stop, failures, done, want = [], [], None, 0, 0, ctx.want
     started = []  # the tickets of a bundle whose start line is out and whose end line is not
+    told = set()  # stranded slices already named this run (#1485)
     ended = set()  # the anchors this run has taken up: added before `work()`, so none is taken twice
     try:
         if want:  # refuse before any work, and not only when the loop gets there
@@ -879,7 +883,11 @@ def drain(ctx, limit):
             if resumed:
                 anchor, kind = taken
             else:
-                queue, waiting = read_frontier(ctx)
+                queue, waiting, stranded = read_frontier(ctx)
+                for n, why in stranded:
+                    if n not in told:  # every exit names them, once
+                        told.add(n)
+                        say(f"stranded: #{n}, {why}")
                 candidates = anchors(ctx, queue)
                 if not candidates:
                     for spec in waiting:

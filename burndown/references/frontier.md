@@ -12,6 +12,7 @@ blocked     903 The dispatch loop  (blocked by #901)
 unresolved  907 Liveness  (no native dependencies and no `## Blocked by` section)
 spec        885 Spec: the lane rebuilt  (a spec parent: dispatch with `implement-dispatch --spec 885 --slots <k>`)
 slice       891 Slice one  (a slice of spec #885: hand off with `implement-dispatch --spec 885 --slots <k>`, never as its own ticket)
+stranded    895 Slice two  (a slice of spec #880, which is closed or its state unread: reopen the spec or remove the slice's `## Parent` line and sub-issue link)
 ```
 
 **A bucket is a claim about what an entry is**, so an entry that fits no
@@ -104,6 +105,14 @@ dispatches the slice under a spec nobody could see. Only a 404 with no
 parent line is "no parent". A `## Parent` section naming no issue in this
 repo — empty, prose, another repo's link — is a parent line that cannot be
 read, so `unresolved` too (#1406); `None` under it is no parent.
+
+**A slice its spec cannot run is `stranded`** (#1485). When the parent carrying
+`spec` is closed, or lives in another repo (its `repository_url` is not the
+queried repo), or its repo or state could not be read, `--spec <parent>` would hand off nothing or name a different
+issue in this repo. The entry gets no verb to copy: its reason names the
+parent's repo and number, or the closed spec. `drain` prints each as
+`stranded: #<n>, <why>` once per slice, each time it reads the frontier. `blocked` still
+outranks it.
 
 ## Three sources, in order
 
