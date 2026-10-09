@@ -99,12 +99,10 @@ async def test_async_exception():
 
 **Mock async calls:**
 ```python
-from unittest.mock import AsyncMock
-
 @pytest.mark.asyncio
 async def test_with_async_mock(mocker):
     """Mock async function."""
-    mock_fetch = AsyncMock(return_value={"data": "mocked"})
+    mock_fetch = mocker.AsyncMock(return_value={"data": "mocked"})
     mocker.patch("module.fetch_data", mock_fetch)
 
     result = await module.fetch_data("url")
