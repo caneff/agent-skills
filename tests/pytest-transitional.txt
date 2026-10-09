@@ -7,13 +7,6 @@
 # #1504
 burndown/loop_test.py
 
-# #1505
-burndown/closure_test.py
-burndown/counts_test.py
-burndown/frontier_test.py
-burndown/runfile_test.py
-burndown/tier_test.py
-
 # #1506
 docs/research/review_ledger_append_test.py
 docs/research/review_ledger_codex_append_test.py

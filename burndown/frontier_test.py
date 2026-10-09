@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the frontier reader (#890). Seam: `frontier(repo, label)` with
 its three fetchers injected (issues, blocker state, parent) — a list of
 GitHub issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
@@ -8,6 +7,8 @@ the point of the seam.
 import os
 import subprocess
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -101,7 +102,7 @@ def numbers(bucket):
 EMPTY = {"unblocked": [], "blocked": [], "unresolved": [], "spec": [], "slice": [], "stranded": []}
 
 
-def unresolved_count(issues, dropped, states=None):
+def unresolved_count(monkeypatch, issues, dropped, states=None):
     """The size of the `unresolved` bucket over a fixture queue, read with
     `dropped` as the non-dispatchable label set.
 
@@ -111,12 +112,8 @@ def unresolved_count(issues, dropped, states=None):
     difference is the claim. It is parameterised on the label set so the
     claim is about any such label, not about one measured number on one
     repo on one afternoon."""
-    original = F.NON_DISPATCHABLE_LABELS
-    F.NON_DISPATCHABLE_LABELS = frozenset(dropped)
-    try:
-        return len(read(issues, states)["unresolved"])
-    finally:
-        F.NON_DISPATCHABLE_LABELS = original
+    monkeypatch.setattr(F, "NON_DISPATCHABLE_LABELS", frozenset(dropped))
+    return len(read(issues, states)["unresolved"])
 
 
 # --- Native dependencies: the canonical path -------------------------------
@@ -358,7 +355,7 @@ def test_a_needs_info_ticket_with_no_blocked_by_is_dropped_not_unresolved():
     assert got == EMPTY, got
 
 
-def test_dropping_a_label_lowers_unresolved_by_the_tickets_it_takes():
+def test_dropping_a_label_lowers_unresolved_by_the_tickets_it_takes(monkeypatch):
     # The measurement AC3 makes, as a fixture rather than a reading of one
     # repo: the queue the ticket names under Seams under test — two silent
     # tickets carrying the label, a claimed one, a well-formed child, and a
@@ -375,8 +372,9 @@ def test_dropping_a_label_lowers_unresolved_by_the_tickets_it_takes():
     ]
     states = {7: "open"}
     # #3 is claimed and #4 is blocked, so neither is ever unresolved.
-    assert unresolved_count(queue, dropped=(), states=states) == 3, queue
-    assert unresolved_count(queue, dropped=("needs-info",), states=states) == 1, queue
+    assert unresolved_count(monkeypatch, queue, dropped=(), states=states) == 3, queue
+    assert unresolved_count(monkeypatch, queue, dropped=("needs-info",), states=states) == 1, queue
+    monkeypatch.undo()
     # Bound to what ships, not only to the mechanism: reading with no swap
     # at all has to agree with naming the label by hand. Without this line
     # the test passes with `NON_DISPATCHABLE_LABELS` empty, which is the
@@ -591,14 +589,12 @@ def test_the_paginated_fetch_asks_gh_to_slurp_the_pages():
     assert "--slurp" in calls[0], calls
 
 
-def test_an_answer_that_is_not_pages_of_issues_is_an_error():
-    for answer in ({"message": "Not Found"}, [{"number": 1}]):
-        try:
-            F.fetch_issues("owner/repo", "l", run=lambda args: answer)
-        except F.FrontierError as exc:
-            assert "pages" in str(exc), exc
-        else:
-            raise AssertionError(f"{answer!r} must not pass for a queue")
+@pytest.mark.parametrize("answer", [{"message": "Not Found"}, [{"number": 1}]],
+                         ids=["error-object", "flat-list"])
+def test_an_answer_that_is_not_pages_of_issues_is_an_error(answer):
+    with pytest.raises(F.FrontierError) as excinfo:
+        F.fetch_issues("owner/repo", "l", run=lambda args: answer)
+    assert "pages" in str(excinfo.value), excinfo.value
 
 
 # --- A long fence protects a fence -----------------------------------------
@@ -726,13 +722,14 @@ def test_an_ambiguous_spec_parent_stays_unresolved():
     assert "more than once" in got["unresolved"][0]["why"], got
 
 
-def test_an_indented_inline_line_is_a_quotation_not_a_declaration():
+@pytest.mark.parametrize("quoted", ["    Blocked by: #7", "\tBlocked by: #7"],
+                         ids=["four-spaces", "tab"])
+def test_an_indented_inline_line_is_a_quotation_not_a_declaration(quoted):
     # Four spaces or a tab is an indented code block. Beside a real inline
     # line it must not make the body ambiguous.
-    for quoted in ("    Blocked by: #7", "\tBlocked by: #7"):
-        body = quoted + "\nBlocked by: None\n"
-        got = read([issue(1, body=body)], states={7: "open"})
-        assert numbers(got["unblocked"]) == [1], (quoted, got)
+    body = quoted + "\nBlocked by: None\n"
+    got = read([issue(1, body=body)], states={7: "open"})
+    assert numbers(got["unblocked"]) == [1], (quoted, got)
 
 
 def test_an_indented_section_after_a_real_one_adds_nothing_to_its_answer():
@@ -922,12 +919,9 @@ def test_fetch_parent_does_not_read_a_failed_call_as_no_parent():
     # parent and trips the assertion below instead of a missing-key error.
     run = gh_answers({"repos/owner/repo/issues/491/parent": F.FrontierError("gh: HTTP 502"),
                       "repos/owner/repo/issues/483": spec_parent(483)})
-    try:
+    with pytest.raises(F.FrontierError) as excinfo:
         F.fetch_parent("owner/repo", issue(491, body="Part of #483"), run=run)
-    except F.FrontierError as exc:
-        assert "502" in str(exc), exc
-    else:
-        raise AssertionError("a 502 was read as an answer")
+    assert "502" in str(excinfo.value), excinfo.value
 
 
 def test_a_failure_naming_404_in_its_url_is_not_a_missing_parent():
@@ -936,23 +930,17 @@ def test_a_failure_naming_404_in_its_url_is_not_a_missing_parent():
     url_failure = F.FrontierError(
         'gh: Get "https://api.github.com/repos/o/r/issues/1404/parent": connection refused')
     run = gh_answers({"repos/owner/repo/issues/1404/parent": url_failure})
-    try:
+    with pytest.raises(F.FrontierError) as excinfo:
         F.fetch_parent("owner/repo", issue(1404, body="plain"), run=run)
-    except F.FrontierError as exc:
-        assert "connection refused" in str(exc), exc
-    else:
-        raise AssertionError("a failed call naming 404 in its URL was read as no parent")
+    assert "connection refused" in str(excinfo.value), excinfo.value
 
 
 def test_an_empty_parent_answer_is_not_a_missing_parent():
     # `gh_json` turns empty stdout into None; that is no answer, not "no parent".
     run = gh_answers({"repos/owner/repo/issues/491/parent": None})
-    try:
+    with pytest.raises(F.FrontierError) as excinfo:
         F.fetch_parent("owner/repo", issue(491, body="plain"), run=run)
-    except F.FrontierError as exc:
-        assert "no issue" in str(exc), exc
-    else:
-        raise AssertionError("an empty answer was read as no parent")
+    assert "no issue" in str(excinfo.value), excinfo.value
 
 
 def test_a_slice_with_an_unreadable_declaration_stays_unresolved():
@@ -1018,11 +1006,9 @@ def test_fetch_parent_reads_a_bare_issue_url_under_the_parent_heading():
 def unreadable_parent(body):
     """The `FrontierError` `fetch_parent` raises for `body`'s `## Parent`, or
     an `AssertionError` when it answered instead."""
-    try:
-        got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
-    except F.FrontierError as exc:
-        return exc
-    raise AssertionError(f"an unreadable `## Parent` was answered: {got!r}")
+    with pytest.raises(F.FrontierError) as excinfo:
+        F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    return excinfo.value
 
 
 # A `## Parent` section that states something this reader cannot resolve is
@@ -1224,21 +1210,13 @@ def test_fetch_landed_ignores_a_mention_that_is_not_a_closes_line():
 def test_fetch_landed_lets_a_failed_lookup_raise():
     def run(args):
         raise F.FrontierError("gh down")
-    raised = False
-    try:
+    with pytest.raises(F.FrontierError):
         F.fetch_landed("owner/repo", "spec-483", run=run)
-    except F.FrontierError:
-        raised = True
-    assert raised, "a failed lookup was read as nothing landed"
 
 
 def test_fetch_landed_refuses_an_answer_that_is_not_a_list():
-    raised = False
-    try:
+    with pytest.raises(F.FrontierError):
         F.fetch_landed("owner/repo", "spec-483", run=lambda a: {"message": "x"})
-    except F.FrontierError:
-        raised = True
-    assert raised, "a non-list answer was read as nothing landed"
 
 
 def blocker(number, state="open", repo="owner/repo"):
@@ -1266,32 +1244,23 @@ def test_fetch_native_blockers_reads_every_page():
 
 
 def test_fetch_native_blockers_refuses_a_blocker_in_another_repo():
-    raised = False
-    try:
+    with pytest.raises(F.FrontierError):
         F.fetch_native_blockers("owner/repo", issue(2),
                                 run=native_run([blocker(1, repo="other/repo")]))
-    except F.FrontierError:
-        raised = True
-    assert raised, "a foreign blocker was read as a local one"
 
 
-def test_fetch_native_blockers_refuses_a_malformed_entry():
-    for bad in ([{"state": "open"}], ["nope"], [{"number": "1", "state": "open"}]):
-        raised = False
-        try:
-            F.fetch_native_blockers("owner/repo", issue(2), run=native_run(bad))
-        except F.FrontierError:
-            raised = True
-        assert raised, f"malformed entry {bad!r} was accepted"
+@pytest.mark.parametrize(
+    "bad",
+    [[{"state": "open"}], ["nope"], [{"number": "1", "state": "open"}]],
+    ids=["no-number", "not-a-dict", "string-number"])
+def test_fetch_native_blockers_refuses_a_malformed_entry(bad):
+    with pytest.raises(F.FrontierError):
+        F.fetch_native_blockers("owner/repo", issue(2), run=native_run(bad))
 
 
 def test_fetch_native_blockers_refuses_an_answer_that_is_not_pages():
-    raised = False
-    try:
+    with pytest.raises(F.FrontierError):
         F.fetch_native_blockers("owner/repo", issue(2), run=lambda a: {"message": "x"})
-    except F.FrontierError:
-        raised = True
-    assert raised, "a non-list answer was read as no blockers"
 
 
 # --- A slice whose spec cannot run it is stranded, not skipped (#1485) ------
@@ -1352,15 +1321,3 @@ def test_the_rendered_report_names_a_stranded_slice():
     line = F.render(read([issue(491, body=NO_BLOCKERS, title="S")],
                          parents={491: foreign_spec()})).splitlines()[0]
     assert line.startswith("stranded    491 S  ("), line
-
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
-
-
-if __name__ == "__main__":
-    main()
