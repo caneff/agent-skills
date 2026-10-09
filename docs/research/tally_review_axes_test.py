@@ -1,20 +1,14 @@
-#!/usr/bin/env python3
 """Tests for the review-axis tally script (#854). Seams: filename parsing,
 repo/round-kind folding, the round-1<->verify<->PR join (including the
 issue<->PR matcher that used to be ad hoc, per round-1 review finding P1),
 and the mechanical guards (missing cache dir, malformed override file,
 round-1 axis conflicts) — the scaffolding around the LLM classification
-pass, same convention as burndown/phases_test.py (plain test_* functions,
-no pytest)."""
-import contextlib
-import io
+pass, plain test_* functions under pytest, with `tmp_path` for the cache trees."""
 import json
-import os
-import sys
-import tempfile
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pytest
+
 import tally_review_axes as t
 
 SHARED_SIDECAR_FIXTURE = Path(__file__).resolve().parents[2] / "implement" / "fixtures" / "dispositions-sidecar.jsonl"
@@ -98,12 +92,10 @@ def test_join_raises_on_a_round1_axis_conflict():
         ("skills", "review-standards-736.md"),
         ("agent-skills", "review-standards-736.md"),
     ]
-    try:
+    with pytest.raises(ValueError) as e:
         t.build_issue_index(reports)
-        assert False, "expected a ValueError on the round-1 axis conflict"
-    except ValueError as e:
-        assert "736" in str(e)
-        assert "standards" in str(e)
+    assert "736" in str(e.value)
+    assert "standards" in str(e.value)
 
 
 def test_normalize_issue_to_pr_converts_string_keys_to_int():
@@ -151,62 +143,54 @@ def test_match_issue_to_prs_ignores_unrelated_prs():
     assert matched == {}
 
 
-def test_find_report_files_skips_any_scratch_prefixed_dir():
+def test_find_report_files_skips_any_scratch_prefixed_dir(tmp_path):
     # round-1 review C5: the old filter checked for an exact "scratch"
     # path component, so a real dir like "scratch-421" (which exists in
     # the live cache) would NOT be skipped the moment it held a
     # review-*.md file. Use a "scratch-421"-shaped dir here to pin the fix.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "review-standards-1.md").write_text("x")
-        (root / "scratch-421").mkdir()
-        (root / "scratch-421" / "review-standards-2.md").write_text("x")
-        found = t.find_report_files(root)
-        assert found == [("skills", "review-standards-1.md")]
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "review-standards-1.md").write_text("x")
+    (root / "scratch-421").mkdir()
+    (root / "scratch-421" / "review-standards-2.md").write_text("x")
+    found = t.find_report_files(root)
+    assert found == [("skills", "review-standards-1.md")]
 
 
-def test_find_report_files_uses_the_relative_path_not_the_basename():
+def test_find_report_files_uses_the_relative_path_not_the_basename(tmp_path):
     # round-1 review S4: same-named dirs at different depths must not
     # silently merge into one repo bucket.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "review-standards-1.md").write_text("x")
-        nested = root / "nested" / "skills"
-        nested.mkdir(parents=True)
-        (nested / "review-standards-2.md").write_text("x")
-        found = t.find_report_files(root)
-        # the nested "skills" dir is not a real repo bucket under our
-        # cache layout (one level deep only) — it must not be silently
-        # folded into the top-level "skills" bucket.
-        assert ("skills", "review-standards-1.md") in found
-        assert ("skills", "review-standards-2.md") not in found
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "review-standards-1.md").write_text("x")
+    nested = root / "nested" / "skills"
+    nested.mkdir(parents=True)
+    (nested / "review-standards-2.md").write_text("x")
+    found = t.find_report_files(root)
+    # the nested "skills" dir is not a real repo bucket under our
+    # cache layout (one level deep only) — it must not be silently
+    # folded into the top-level "skills" bucket.
+    assert ("skills", "review-standards-1.md") in found
+    assert ("skills", "review-standards-2.md") not in found
 
 
-def test_find_report_files_raises_a_clear_error_on_a_missing_cache_dir():
+def test_find_report_files_raises_a_clear_error_on_a_missing_cache_dir(tmp_path):
     # round-1 review C7: a missing cache dir used to silently print
     # "0 files" and exit 0.
-    with tempfile.TemporaryDirectory() as tmp:
-        missing = Path(tmp) / "does-not-exist"
-        try:
-            t.find_report_files(missing)
-            assert False, "expected FileNotFoundError"
-        except FileNotFoundError as e:
-            assert str(missing) in str(e)
+    missing = tmp_path / "does-not-exist"
+    with pytest.raises(FileNotFoundError) as e:
+        t.find_report_files(missing)
+    assert str(missing) in str(e.value)
 
 
-def test_load_issue_to_pr_override_raises_a_clear_error_on_malformed_json():
+def test_load_issue_to_pr_override_raises_a_clear_error_on_malformed_json(tmp_path):
     # round-1 review C7: malformed --issue-to-pr JSON used to raise a bare
     # traceback.
-    with tempfile.TemporaryDirectory() as tmp:
-        bad = Path(tmp) / "bad.json"
-        bad.write_text("{not valid json")
-        try:
-            t.load_issue_to_pr_override(bad)
-            assert False, "expected a ValueError with a clear message"
-        except ValueError as e:
-            assert "bad.json" in str(e)
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not valid json")
+    with pytest.raises(ValueError) as e:
+        t.load_issue_to_pr_override(bad)
+    assert "bad.json" in str(e.value)
 
 
 def test_parses_a_findings_sidecar_filename():
@@ -307,19 +291,18 @@ def test_disposition_line_rejects_a_leftover_missing_file_title_or_severity():
             assert t.parse_disposition_line(json.dumps({**full, key: wrong})) is None, (key, wrong)
 
 
-def test_tally_sidecars_counts_the_shared_fixture_with_no_undisposed():
+def test_tally_sidecars_counts_the_shared_fixture_with_no_undisposed(tmp_path):
     fixture = SHARED_SIDECAR_FIXTURE
     ids = [json.loads(ln)["id"] for ln in fixture.read_text().splitlines() if ln.strip()]
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-855.jsonl").write_text("\n".join(
-            json.dumps({"id": i, "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
-            for i in ids
-        ))
-        (root / "skills" / "dispositions-855.jsonl").write_text(fixture.read_text())
-        row = t.tally_sidecars(root)["skills/standards"]
-        assert row["undisposed"] == 0 and row["moved"] == 1 and row["raised"] == len(ids)
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-855.jsonl").write_text("\n".join(
+        json.dumps({"id": i, "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+        for i in ids
+    ))
+    (root / "skills" / "dispositions-855.jsonl").write_text(fixture.read_text())
+    row = t.tally_sidecars(root)["skills/standards"]
+    assert row["undisposed"] == 0 and row["moved"] == 1 and row["raised"] == len(ids)
 
 
 def test_disposition_line_rejects_a_list_command():
@@ -346,22 +329,21 @@ def test_disposition_line_rejects_a_string_ticket():
     assert t.parse_disposition_line(bad) is None
 
 
-def test_tally_sidecars_rejects_a_malformed_handed_back_command_as_undisposed():
+def test_tally_sidecars_rejects_a_malformed_handed_back_command_as_undisposed(tmp_path):
     # Codex gate on #973's own PR: a list/dict/number `command` used to
     # tally as handed-back via str(detail) instead of being rejected as an
     # unparseable line, which rolls the finding up as undisposed.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text(
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
-        )
-        (root / "skills" / "dispositions-1.jsonl").write_text(
-            json.dumps({"id": "S1", "outcome": "handed-back", "command": []})
-        )
-        table = t.tally_sidecars(root)
-        assert table["skills/standards"]["undisposed"] == 1
-        assert table["skills/standards"]["handed-back"] == 0
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text(
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+    )
+    (root / "skills" / "dispositions-1.jsonl").write_text(
+        json.dumps({"id": "S1", "outcome": "handed-back", "command": []})
+    )
+    table = t.tally_sidecars(root)
+    assert table["skills/standards"]["undisposed"] == 1
+    assert table["skills/standards"]["handed-back"] == 0
 
 
 def test_disposition_line_rejects_missing_detail_field():
@@ -374,262 +356,230 @@ def test_disposition_line_rejects_malformed_json_without_raising():
     assert t.parse_disposition_line("{not valid json") is None
 
 
-def test_find_sidecar_files_finds_both_kinds_and_skips_scratch():
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text("")
-        (root / "skills" / "dispositions-1.jsonl").write_text("")
-        (root / "skills" / "review-standards-1.md").write_text("x")
-        (root / "scratch-1").mkdir()
-        (root / "scratch-1" / "findings-standards-2.jsonl").write_text("")
-        found = t.find_sidecar_files(root)
-        assert set(found) == {
-            ("skills", "findings-standards-1.jsonl"),
-            ("skills", "dispositions-1.jsonl"),
-        }
+def test_find_sidecar_files_finds_both_kinds_and_skips_scratch(tmp_path):
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text("")
+    (root / "skills" / "dispositions-1.jsonl").write_text("")
+    (root / "skills" / "review-standards-1.md").write_text("x")
+    (root / "scratch-1").mkdir()
+    (root / "scratch-1" / "findings-standards-2.jsonl").write_text("")
+    found = t.find_sidecar_files(root)
+    assert set(found) == {
+        ("skills", "findings-standards-1.jsonl"),
+        ("skills", "dispositions-1.jsonl"),
+    }
 
 
-def test_tally_sidecars_rolls_findings_and_dispositions_into_a_table():
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-855.jsonl").write_text("\n".join([
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
-            json.dumps({"id": "S2", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
-            json.dumps({"id": "S3", "axis": "standards", "severity": "judgement", "file": "c.py", "title": "z"}),
-        ]))
-        (root / "skills" / "dispositions-855.jsonl").write_text("\n".join([
-            json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc123"}),
-            json.dumps({"id": "S2", "outcome": "disputed", "reason": "no"}),
-        ]))
-        table = t.tally_sidecars(root)
-        assert table["skills/standards"] == {
-            "raised": 3, "fixed": 1, "disputed": 1, "moved": 0, "filed": 0, "undisposed": 1,
-            "handed-back": 0, "leftover": 0,
-        }
+def test_tally_sidecars_rolls_findings_and_dispositions_into_a_table(tmp_path):
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-855.jsonl").write_text("\n".join([
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
+        json.dumps({"id": "S2", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
+        json.dumps({"id": "S3", "axis": "standards", "severity": "judgement", "file": "c.py", "title": "z"}),
+    ]))
+    (root / "skills" / "dispositions-855.jsonl").write_text("\n".join([
+        json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc123"}),
+        json.dumps({"id": "S2", "outcome": "disputed", "reason": "no"}),
+    ]))
+    table = t.tally_sidecars(root)
+    assert table["skills/standards"] == {
+        "raised": 3, "fixed": 1, "disputed": 1, "moved": 0, "filed": 0, "undisposed": 1,
+        "handed-back": 0, "leftover": 0,
+    }
 
 
-def test_tally_sidecars_rolls_a_handed_back_disposition_into_the_table():
+def test_tally_sidecars_rolls_a_handed_back_disposition_into_the_table(tmp_path):
     # #973: a fourth outcome (#871's handed-back) must not KeyError the
     # seeded counts dict, and must not roll up as undisposed.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-855.jsonl").write_text(
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
-        )
-        (root / "skills" / "dispositions-855.jsonl").write_text(
-            json.dumps({"id": "S1", "outcome": "handed-back", "command": "gh issue create ..."})
-        )
-        table = t.tally_sidecars(root)
-        assert table["skills/standards"] == {
-            "raised": 1, "fixed": 0, "disputed": 0, "moved": 0, "filed": 0, "undisposed": 0,
-            "handed-back": 1, "leftover": 0,
-        }
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-855.jsonl").write_text(
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+    )
+    (root / "skills" / "dispositions-855.jsonl").write_text(
+        json.dumps({"id": "S1", "outcome": "handed-back", "command": "gh issue create ..."})
+    )
+    table = t.tally_sidecars(root)
+    assert table["skills/standards"] == {
+        "raised": 1, "fixed": 0, "disputed": 0, "moved": 0, "filed": 0, "undisposed": 0,
+        "handed-back": 1, "leftover": 0,
+    }
 
 
-def test_tally_sidecars_keys_a_disposition_to_its_own_repo_and_issue():
+def test_tally_sidecars_keys_a_disposition_to_its_own_repo_and_issue(tmp_path):
     # a disposition in one repo/issue must never resolve a same-id finding
     # filed under a different repo or issue (#855, round-1 correctness C4:
     # the old fixture only varied repo, leaving the issue half of the key
     # unwitnessed — this now checks both independently).
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "other").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text(
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
-        )
-        (root / "other" / "dispositions-1.jsonl").write_text(
-            json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc"})
-        )
-        # same repo as the finding, but a different issue: must not resolve either.
-        (root / "skills" / "dispositions-2.jsonl").write_text(
-            json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc"})
-        )
-        table = t.tally_sidecars(root)
-        assert table["skills/standards"]["undisposed"] == 1
-        assert table["skills/standards"]["fixed"] == 0
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "other").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text(
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+    )
+    (root / "other" / "dispositions-1.jsonl").write_text(
+        json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc"})
+    )
+    # same repo as the finding, but a different issue: must not resolve either.
+    (root / "skills" / "dispositions-2.jsonl").write_text(
+        json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc"})
+    )
+    table = t.tally_sidecars(root)
+    assert table["skills/standards"]["undisposed"] == 1
+    assert table["skills/standards"]["fixed"] == 0
 
 
-def test_tally_sidecars_survives_one_malformed_line_in_a_real_file():
+def test_tally_sidecars_survives_one_malformed_line_in_a_real_file(tmp_path):
     # round-1 standards S4: the file-level guarantee ("a partial write
     # costs one line, not the file") had no witness through tally_sidecars
     # itself — only through the line-parser functions directly.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text("\n".join([
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
-            "{not valid json, a truncated write",
-            json.dumps({"id": "S2", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
-        ]))
-        table = t.tally_sidecars(root)
-        assert table["skills/standards"]["raised"] == 2
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text("\n".join([
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
+        "{not valid json, a truncated write",
+        json.dumps({"id": "S2", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
+    ]))
+    table = t.tally_sidecars(root)
+    assert table["skills/standards"]["raised"] == 2
 
 
-def test_tally_sidecars_skips_one_undecodable_file_without_losing_the_rest():
+def test_tally_sidecars_skips_one_undecodable_file_without_losing_the_rest(tmp_path):
     # round-1 correctness C1: a sidecar truncated mid multibyte character
     # used to raise UnicodeDecodeError out of read_text() and kill the
     # entire tally, losing every other repo/axis's numbers too.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_bytes(b"\xff\xfe" + b"garbage")
-        (root / "skills" / "findings-correctness-2.jsonl").write_text(
-            json.dumps({"id": "C1", "axis": "correctness", "severity": "hard", "file": "a.py", "title": "x"})
-        )
-        table = t.tally_sidecars(root)
-        assert table["skills/correctness"]["raised"] == 1
-        assert "skills/standards" not in table
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_bytes(b"\xff\xfe" + b"garbage")
+    (root / "skills" / "findings-correctness-2.jsonl").write_text(
+        json.dumps({"id": "C1", "axis": "correctness", "severity": "hard", "file": "a.py", "title": "x"})
+    )
+    table = t.tally_sidecars(root)
+    assert table["skills/correctness"]["raised"] == 1
+    assert "skills/standards" not in table
 
 
-def test_tally_sidecars_raises_on_a_duplicate_finding_id_in_one_file():
+def test_tally_sidecars_raises_on_a_duplicate_finding_id_in_one_file(tmp_path):
     # round-1 correctness C2: two lines sharing an id in the same
     # findings-*.jsonl file used to silently collapse to one, undercounting
     # `raised` with no signal that anything was lost.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text("\n".join([
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
-            json.dumps({"id": "S1", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
-        ]))
-        try:
-            t.tally_sidecars(root)
-            assert False, "expected a ValueError on the duplicate finding id"
-        except ValueError as e:
-            assert "S1" in str(e)
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text("\n".join([
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
+        json.dumps({"id": "S1", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
+    ]))
+    with pytest.raises(ValueError) as e:
+        t.tally_sidecars(root)
+    assert "S1" in str(e.value)
 
 
-def test_tally_sidecars_raises_on_a_duplicate_id_across_the_repo_alias_fold():
+def test_tally_sidecars_raises_on_a_duplicate_id_across_the_repo_alias_fold(tmp_path):
     # round-1 correctness C3: the same collision, reached via fold_repo —
     # `agent-skills` and `skills` fold to one repo name, so a same-id
     # finding for the same issue under both directory names must not
     # silently erase one.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "agent-skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text(
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
-        )
-        (root / "agent-skills" / "findings-standards-1.jsonl").write_text(
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
-        )
-        try:
-            t.tally_sidecars(root)
-            assert False, "expected a ValueError on the cross-alias duplicate id"
-        except ValueError as e:
-            assert "S1" in str(e)
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "agent-skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text(
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+    )
+    (root / "agent-skills" / "findings-standards-1.jsonl").write_text(
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+    )
+    with pytest.raises(ValueError) as e:
+        t.tally_sidecars(root)
+    assert "S1" in str(e.value)
 
 
-def test_tally_sidecars_uses_the_filename_axis_over_a_mismatched_line_axis():
+def test_tally_sidecars_uses_the_filename_axis_over_a_mismatched_line_axis(tmp_path):
     # round-1 standards S2 / spec axis: parse_finding_sidecar_filename's
     # axis was discarded in favor of each line's own `axis` field, so a
     # line with a wrong `axis` value silently tallied under the wrong
     # axis. The filename — which axis wrote this file — is authoritative.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text(
-            json.dumps({"id": "S1", "axis": "spec", "severity": "hard", "file": "a.py", "title": "x"})
-        )
-        table = t.tally_sidecars(root)
-        assert table["skills/standards"]["raised"] == 1
-        assert "skills/spec" not in table
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text(
+        json.dumps({"id": "S1", "axis": "spec", "severity": "hard", "file": "a.py", "title": "x"})
+    )
+    table = t.tally_sidecars(root)
+    assert table["skills/standards"]["raised"] == 1
+    assert "skills/spec" not in table
 
 
-def test_tally_sidecars_warns_on_an_orphan_disposition():
+def test_tally_sidecars_warns_on_an_orphan_disposition(tmp_path, capsys):
     # round-1 correctness C4: a disposition whose id matches no finding
     # used to vanish with no signal — the table just shows undisposed
     # counts that don't add up to what the prose says was dispositioned.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text(
-            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
-        )
-        (root / "skills" / "dispositions-1.jsonl").write_text(
-            json.dumps({"id": "S9", "outcome": "fixed", "sha": "abc"})
-        )
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            t.tally_sidecars(root)
-        err = stderr.getvalue()
-        assert "S9" in err
-        assert "orphan" in err
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text(
+        json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+    )
+    (root / "skills" / "dispositions-1.jsonl").write_text(
+        json.dumps({"id": "S9", "outcome": "fixed", "sha": "abc"})
+    )
+    t.tally_sidecars(root)
+    err = capsys.readouterr().err
+    assert "S9" in err
+    assert "orphan" in err
 
 
-def test_tally_sidecars_does_not_warn_on_a_worker_written_sweep_leftover():
+def test_tally_sidecars_does_not_warn_on_a_worker_written_sweep_leftover(tmp_path, capsys):
     # #1259: a sweep item's leftover line is keyed `<file> <id>` and no
     # reviewer raised it, so it is not an orphan.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1.jsonl").write_text("")
-        (root / "skills" / "dispositions-1.jsonl").write_text(
-            json.dumps({"id": "a/one.md P9", "outcome": "leftover", "file": "a/one.md",
-                        "title": "t", "severity": "hard", "text": "x"})
-        )
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            t.tally_sidecars(root)
-        assert "orphan" not in stderr.getvalue(), stderr.getvalue()
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1.jsonl").write_text("")
+    (root / "skills" / "dispositions-1.jsonl").write_text(
+        json.dumps({"id": "a/one.md P9", "outcome": "leftover", "file": "a/one.md",
+                    "title": "t", "severity": "hard", "text": "x"})
+    )
+    t.tally_sidecars(root)
+    err = capsys.readouterr().err
+    assert "orphan" not in err, err
 
 
-def test_tally_sidecars_counts_an_over_engineering_cut_as_a_standards_finding():
+def test_tally_sidecars_counts_an_over_engineering_cut_as_a_standards_finding(tmp_path):
     # #1021: an OE-id finding and its leftover disposition tally exactly
     # like an S-id one — nothing about the join keys on the id's prefix.
     # (This is also the parse_finding_line witness for an OE id: the tally
     # only reaches "raised": 1 if the line parses.)
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1021.jsonl").write_text(
-            json.dumps({"id": "OE1", "axis": "standards", "severity": "judgement",
-                        "file": "a.py", "title": "yagni: one-caller layer"})
-        )
-        (root / "skills" / "dispositions-1021.jsonl").write_text(
-            json.dumps({"id": "OE1", "outcome": "leftover", "file": "a.py",
-                        "title": "yagni: one-caller layer", "severity": "judgement",
-                        "text": "inline it until a second caller exists"})
-        )
-        row = t.tally_sidecars(root)["skills/standards"]
-        assert row == {"raised": 1, "undisposed": 0, "fixed": 0, "disputed": 0,
-                       "moved": 0, "filed": 0, "handed-back": 0, "leftover": 1}
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1021.jsonl").write_text(
+        json.dumps({"id": "OE1", "axis": "standards", "severity": "judgement",
+                    "file": "a.py", "title": "yagni: one-caller layer"})
+    )
+    (root / "skills" / "dispositions-1021.jsonl").write_text(
+        json.dumps({"id": "OE1", "outcome": "leftover", "file": "a.py",
+                    "title": "yagni: one-caller layer", "severity": "judgement",
+                    "text": "inline it until a second caller exists"})
+    )
+    row = t.tally_sidecars(root)["skills/standards"]
+    assert row == {"raised": 1, "undisposed": 0, "fixed": 0, "disputed": 0,
+                   "moved": 0, "filed": 0, "handed-back": 0, "leftover": 1}
 
 
-def test_tally_sidecars_counts_a_fixed_and_a_disputed_oe_id():
+def test_tally_sidecars_counts_a_fixed_and_a_disputed_oe_id(tmp_path):
     # #1021: AC3 covers all three outcomes named in the ticket ("fixed,
     # disputed or leftover"), not only leftover — the join is the same
     # dict lookup regardless of outcome, but each is its own line here.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "skills").mkdir()
-        (root / "skills" / "findings-standards-1021.jsonl").write_text("\n".join((
-            json.dumps({"id": "OE1", "axis": "standards", "severity": "judgement",
-                        "file": "a.py", "title": "yagni: one-caller layer"}),
-            json.dumps({"id": "OE2", "axis": "standards", "severity": "judgement",
-                        "file": "b.py", "title": "delete: dead branch"}),
-        )))
-        (root / "skills" / "dispositions-1021.jsonl").write_text("\n".join((
-            json.dumps({"id": "OE1", "outcome": "fixed", "sha": "abc1234"}),
-            json.dumps({"id": "OE2", "outcome": "disputed", "reason": "a documented standard endorses it"}),
-        )))
-        row = t.tally_sidecars(root)["skills/standards"]
-        assert row == {"raised": 2, "undisposed": 0, "fixed": 1, "disputed": 1,
-                       "moved": 0, "filed": 0, "handed-back": 0, "leftover": 0}
-
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
-
-
-if __name__ == "__main__":
-    main()
+    root = tmp_path
+    (root / "skills").mkdir()
+    (root / "skills" / "findings-standards-1021.jsonl").write_text("\n".join((
+        json.dumps({"id": "OE1", "axis": "standards", "severity": "judgement",
+                    "file": "a.py", "title": "yagni: one-caller layer"}),
+        json.dumps({"id": "OE2", "axis": "standards", "severity": "judgement",
+                    "file": "b.py", "title": "delete: dead branch"}),
+    )))
+    (root / "skills" / "dispositions-1021.jsonl").write_text("\n".join((
+        json.dumps({"id": "OE1", "outcome": "fixed", "sha": "abc1234"}),
+        json.dumps({"id": "OE2", "outcome": "disputed", "reason": "a documented standard endorses it"}),
+    )))
+    row = t.tally_sidecars(root)["skills/standards"]
+    assert row == {"raised": 2, "undisposed": 0, "fixed": 1, "disputed": 1,
+                   "moved": 0, "filed": 0, "handed-back": 0, "leftover": 0}

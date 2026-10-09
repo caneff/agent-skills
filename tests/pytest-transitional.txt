@@ -14,14 +14,6 @@ burndown/frontier_test.py
 burndown/runfile_test.py
 burndown/tier_test.py
 
-# #1506
-docs/research/review_ledger_append_test.py
-docs/research/review_ledger_codex_append_test.py
-docs/research/review_ledger_codex_test.py
-docs/research/review_ledger_escapes_test.py
-docs/research/review_ledger_mutation_test.py
-docs/research/review_ledger_test.py
-docs/research/tally_review_axes_test.py
 
 # #1507
 implement-spec/closing_ticket_test.py
@@ -45,7 +37,6 @@ tests/always_on_budget_test.py
 tests/codex_rationing_e2e_test.py
 tests/disclosure_levels_e2e_test.py
 tests/integration_branch_e2e_test.py
-tests/review_ledger_e2e_test.py
 tests/section_reference_trimmers_test.py
 
 # #1509
