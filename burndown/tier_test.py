@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for the exploration pass's ticket tagger (#898). The seam the ticket
 names is `(candidate) -> labels to write`: `labels_to_write(candidate)`, and
 the tagging pass over a whole candidate set that reports what it wrote.
@@ -10,15 +9,14 @@ cannot read as prose is never labelled, because a wrong `documentation` label
 sends a code change down the light tier and it lands with no PR and no
 reviewer.
 """
-import contextlib
-import io
 import json
 import os
 import re
 import stat
 import subprocess
 import sys
-import tempfile
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -62,16 +60,17 @@ def test_a_skill_body_is_code_however_the_extension_reads():
     assert T.labels_to_write(candidate(700, ["SKILL.md"])) == []
 
 
-def test_an_unrecognised_extension_is_code():
+@pytest.mark.parametrize("path", [
+    "flow/lane/Cargo.toml", "settings.json", "Makefile",
+    "docs/research/probe.py", "docs/research/2026-09-14.md.bak"])
+def test_an_unrecognised_extension_is_code(path):
     """The whitelist direction, stated as a test. A `.json`, a file with no
     extension, a `.py` under `docs/research/` — none of them read as prose
     here, so none of them earns a light tier. Deliberately stricter than
     § Gate 2's research-scripts carve-out: `references/tier.md` § Divergence
     says why, and `tests/all.sh` discovering `*_test.py` anywhere is the
     evidence."""
-    for path in ("flow/lane/Cargo.toml", "settings.json", "Makefile",
-                 "docs/research/probe.py", "docs/research/2026-09-14.md.bak"):
-        assert T.labels_to_write(candidate(1, [path])) == [], path
+    assert T.labels_to_write(candidate(1, [path])) == [], path
 
 
 def test_a_candidate_naming_no_files_is_never_labelled():
@@ -158,21 +157,20 @@ def test_the_report_names_every_label_written():
     assert report.count("documentation") == 2, report
 
 
-def test_a_dry_run_says_would_write_rather_than_written():
+def test_a_dry_run_says_would_write_rather_than_written(capsys):
     """A preview that reports a write is worse than no preview: the line is
     the run's record of what the tracker now carries, and a controller
     reading `labels written:` after a dry run would believe the tier was
     already fixed."""
     gh = FakeGh()
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code = T.main(["tier.py", "caneff/agent-skills", "371=a.md", "--dry-run"],
-                      run=gh)
+    code = T.main(["tier.py", "caneff/agent-skills", "371=a.md", "--dry-run"],
+                  run=gh)
+    out = capsys.readouterr().out
     assert code == 0, code
-    assert "would write:" in out.getvalue(), out.getvalue()
-    assert "would strip: none" in out.getvalue(), out.getvalue()
-    assert "labels written" not in out.getvalue(), out.getvalue()
-    assert "labels stripped" not in out.getvalue(), out.getvalue()
+    assert "would write:" in out, out
+    assert "would strip: none" in out, out
+    assert "labels written" not in out, out
+    assert "labels stripped" not in out, out
     assert gh.calls == [["issue", "view", "371", "--repo", "caneff/agent-skills",
                          "--json", "labels,body"]], gh.calls
 
@@ -185,16 +183,15 @@ def test_the_report_says_so_when_it_wrote_nothing():
                                     "labels withheld: none")
 
 
-def test_a_dry_run_previews_the_strip_and_writes_nothing():
+def test_a_dry_run_previews_the_strip_and_writes_nothing(capsys):
     """The strip is previewed the way the add is: `would strip:` names the
     ticket, and no `issue edit` runs."""
     tracker = Tracker({969: ["documentation"]})
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code = T.main(["tier.py", "caneff/agent-skills", "969=x/SKILL.md", "--dry-run"],
-                      run=tracker)
+    code = T.main(["tier.py", "caneff/agent-skills", "969=x/SKILL.md", "--dry-run"],
+                  run=tracker)
+    out = capsys.readouterr().out
     assert code == 0, code
-    assert "would strip:" in out.getvalue() and "#969" in out.getvalue(), out.getvalue()
+    assert "would strip:" in out and "#969" in out, out
     assert all(c[1] == "view" for c in tracker.calls), tracker.calls
     assert tracker.labels[969] == ["documentation"], tracker.labels
 
@@ -237,7 +234,7 @@ class Tracker:
         return ""
 
 
-def test_a_code_candidate_with_a_prose_body_leaves_the_pass_dispatchable_heavy():
+def test_a_code_candidate_with_a_prose_body_leaves_the_pass_dispatchable_heavy(capsys):
     """#1118: dispatch reads only the ticket body's paths, so a body naming
     only prose keeps a filer's `documentation` label through the claim even
     when the clumper's candidate line names a `SKILL.md`. The tagging pass is
@@ -246,16 +243,15 @@ def test_a_code_candidate_with_a_prose_body_leaves_the_pass_dispatchable_heavy()
     The tracker is what dispatch reads, so the tracker is what is asserted."""
     tracker = Tracker({1118: ["documentation", "ready-for-agent"],
                        372: ["documentation", "ready-for-agent"]})
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code = T.main(["tier.py", "caneff/agent-skills",
-                       "1118=docs/n.md,x/SKILL.md", "372=docs/n.md"], run=tracker)
+    code = T.main(["tier.py", "caneff/agent-skills",
+                   "1118=docs/n.md,x/SKILL.md", "372=docs/n.md"], run=tracker)
+    out = capsys.readouterr().out
     assert code == 0, code
     assert "documentation" not in tracker.labels[1118], tracker.labels
     assert tracker.labels[1118] == ["ready-for-agent"], tracker.labels
     # A prose candidate keeps its label: light stays light.
     assert "documentation" in tracker.labels[372], tracker.labels
-    assert "labels stripped:" in out.getvalue() and "#1118" in out.getvalue(), out.getvalue()
+    assert "labels stripped:" in out and "#1118" in out, out
 
 
 def test_a_candidates_labels_come_from_the_tracker_not_the_command_line():
@@ -280,13 +276,8 @@ def test_the_candidate_grammar_is_closures_own():
     same candidate strings, and two spellings of that grammar are two places
     for it to drift."""
     view = FakeView({371: []})
-    refused = None
-    try:
+    with pytest.raises(C.ClosureError, match="not a candidate: 371"):
         T.candidates_from("caneff/agent-skills", ["371"], run=view)
-    except C.ClosureError as exc:
-        refused = exc
-    assert refused is not None, "a spec with no files was accepted"
-    assert "not a candidate: 371" in str(refused), refused
     assert view.calls == [], "the tracker was read for a spec that is not one"
 
 
@@ -314,23 +305,20 @@ class ExplodingGh:
         return ""
 
 
-@contextlib.contextmanager
-def only_gh_on_path(script):
-    """A `PATH` holding one `gh` — the given shell script — or holding no
-    `gh` at all when `script` is None. The error layer is the one part of
+@pytest.fixture
+def only_gh_on_path(tmp_path, monkeypatch):
+    """Factory: a `PATH` holding one `gh` — the given shell script — or holding
+    no `gh` at all when `script` is None. The error layer is the one part of
     this module a fake cannot reach: every other test injects `run=`."""
-    saved = os.environ["PATH"]
-    with tempfile.TemporaryDirectory(prefix="tier-path-") as path:
+    def install(script):
+        path = tmp_path / "gh-path"
+        path.mkdir()
         if script is not None:
-            gh_path = os.path.join(path, "gh")
-            with open(gh_path, "w") as fh:
-                fh.write("#!/bin/sh\n" + script + "\n")
-            os.chmod(gh_path, os.stat(gh_path).st_mode | stat.S_IEXEC)
-        os.environ["PATH"] = path
-        try:
-            yield
-        finally:
-            os.environ["PATH"] = saved
+            gh_path = path / "gh"
+            gh_path.write_text("#!/bin/sh\n" + script + "\n")
+            gh_path.chmod(gh_path.stat().st_mode | stat.S_IEXEC)
+        monkeypatch.setenv("PATH", str(path))
+    return install
 
 
 def test_a_failure_midway_still_names_the_labels_already_written():
@@ -340,74 +328,55 @@ def test_a_failure_midway_still_names_the_labels_already_written():
     and a controller that never hears about them cannot act on them."""
     gh = ExplodingGh(fails_on=373)
     written = []
-    raised = None
-    try:
+    with pytest.raises(T.TierError):
         T.tag("caneff/agent-skills",
               [candidate(371, ["a.md"]), candidate(372, ["b.md"]),
                candidate(373, ["c.md"]), candidate(374, ["d.md"])],
               run=gh, written=written)
-    except T.TierError as exc:
-        raised = exc
-    assert raised is not None, "the failure was swallowed"
     assert [w["number"] for w in written] == [371, 372], written
     report = T.render(written, [], [])
     assert "#371" in report and "#372" in report, report
 
 
-def test_the_command_line_prints_that_partial_report_before_it_exits():
+def test_the_command_line_prints_that_partial_report_before_it_exits(capsys):
     """The seam above is only worth having if `main` reaches it: the partial
     report goes to stdout, the failure to stderr, and the exit code is still
     a failure."""
     gh = ExplodingGh(fails_on=372)
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = T.main(["tier.py", "caneff/agent-skills", "371=a.md", "372=b.md"],
-                      run=gh)
+    code = T.main(["tier.py", "caneff/agent-skills", "371=a.md", "372=b.md"],
+                  run=gh)
+    captured = capsys.readouterr()
     assert code == 1, code
-    assert "#371" in out.getvalue(), out.getvalue()
-    assert "'documentation' not found" in err.getvalue(), err.getvalue()
+    assert "#371" in captured.out, captured.out
+    assert "'documentation' not found" in captured.err, captured.err
 
 
-def test_a_failing_gh_is_refused_rather_than_read_as_a_write():
+def test_a_failing_gh_is_refused_rather_than_read_as_a_write(only_gh_on_path):
     """The guard that keeps a failed `gh issue edit` from passing for a label
     that landed. Run against a real `gh` on `PATH`, because every other test
     here injects `run=` and never reaches this function."""
-    with only_gh_on_path("exit 4"):
-        raised = None
-        try:
-            T.gh(["issue", "edit", "1"])
-        except T.TierError as exc:
-            raised = exc
-        assert raised is not None, "a non-zero gh exit passed for a write"
-        assert "issue edit 1" in str(raised), raised
+    only_gh_on_path("exit 4")
+    with pytest.raises(T.TierError, match="issue edit 1"):
+        T.gh(["issue", "edit", "1"])
 
 
-def test_no_gh_at_all_is_refused_too():
+def test_no_gh_at_all_is_refused_too(only_gh_on_path):
     """Otherwise a box without `gh` reports `labels written: none` and every
     docs-only ticket in the queue goes heavy with nobody told why."""
-    with only_gh_on_path(None):
-        raised = None
-        try:
-            T.gh(["issue", "edit", "1"])
-        except T.TierError as exc:
-            raised = exc
-        assert raised is not None, "a missing gh passed for a write"
-        assert "gh" in str(raised), raised
+    only_gh_on_path(None)
+    with pytest.raises(T.TierError, match="gh"):
+        T.gh(["issue", "edit", "1"])
 
 
 def test_unreadable_json_from_the_tracker_is_refused():
     """An unreadable answer is not an empty label list: read as one, the pass
     writes the label onto a ticket that may already carry it, every tick."""
-    raised = None
-    try:
+    with pytest.raises(T.TierError, match="unreadable JSON"):
         T.fetch_ticket("caneff/agent-skills", 1, run=lambda args: "{not json")
-    except T.TierError as exc:
-        raised = exc
-    assert raised is not None, "unreadable JSON passed for an unlabelled ticket"
-    assert "unreadable JSON" in str(raised), raised
 
 
-def test_an_unknown_flag_is_usage_not_a_candidate():
+@pytest.mark.parametrize("flag", ["--help", "--strip"])
+def test_an_unknown_flag_is_usage_not_a_candidate(flag, tmp_path, only_gh_on_path):
     """`tier.py <repo> --help` reached the candidate parser and exited 1 with
     "not a candidate: --help". `--strip` is retired (#1118): the pass strips
     itself, and an old report-only call must not run the writing pass.
@@ -415,15 +384,13 @@ def test_an_unknown_flag_is_usage_not_a_candidate():
     The `gh` on `PATH` is a stub that records any call and fails: a flag
     that slipped through would otherwise write a label onto the real
     tracker before this test could fail."""
-    with tempfile.TemporaryDirectory(prefix="tier-usage-") as scratch:
-        called = os.path.join(scratch, "gh-called")
-        with only_gh_on_path(f': >"{called}"; exit 99'):
-            for flag in ("--help", "--strip"):
-                out = subprocess.run([sys.executable, TIER, "example/none", "1=a.md", flag],
-                                     capture_output=True, text=True)
-                assert out.returncode == 2, (flag, out)
-                assert "usage: tier.py" in out.stderr, out.stderr
-        assert not os.path.exists(called), "a rejected flag still reached gh"
+    called = tmp_path / "gh-called"
+    only_gh_on_path(f': >"{called}"; exit 99')
+    out = subprocess.run([sys.executable, TIER, "example/none", "1=a.md", flag],
+                         capture_output=True, text=True)
+    assert out.returncode == 2, (flag, out)
+    assert "usage: tier.py" in out.stderr, out.stderr
+    assert not called.exists(), "a rejected flag still reached gh"
 
 
 # --- #1211: one reader decides -------------------------------------------
@@ -448,13 +415,9 @@ def test_ordinary_prose_in_a_body_does_not_withhold_the_label():
 
 def test_a_candidate_with_no_body_key_is_refused_not_read_as_clean():
     """An absent body is not an empty body (defect class 1)."""
-    raised = None
-    try:
+    with pytest.raises(KeyError) as excinfo:
         T.labels_to_write({"number": 1, "files": ["a.md"], "labels": []})
-    except KeyError as exc:
-        raised = exc
-    assert isinstance(raised, KeyError), "a candidate with no body passed as prose-only"
-    assert raised.args == ("body",), raised
+    assert excinfo.value.args == ("body",), excinfo.value
 
 
 def test_the_pass_reports_the_label_it_withheld_and_why():
@@ -472,17 +435,16 @@ def test_the_pass_reports_the_label_it_withheld_and_why():
     assert "labels withheld:" in report and "#432" in report and "./e2e.sh" in report, report
 
 
-def test_end_to_end_the_report_never_claims_a_label_dispatch_will_strip():
+def test_end_to_end_the_report_never_claims_a_label_dispatch_will_strip(capsys):
     tracker = Tracker({432: ["ready-for-agent"]}, bodies={432: "Look at ./e2e.sh timings"})
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code = T.main(["tier.py", "caneff/agent-skills", "432=docs/research/x.md"],
-                      run=tracker)
+    code = T.main(["tier.py", "caneff/agent-skills", "432=docs/research/x.md"],
+                  run=tracker)
+    out = capsys.readouterr().out
     assert code == 0, code
     assert tracker.labels[432] == ["ready-for-agent"], tracker.labels
-    written_block = out.getvalue().split("labels stripped")[0]
-    assert "#432" not in written_block, out.getvalue()
-    assert "#432" in out.getvalue().split("labels withheld")[1], out.getvalue()
+    written_block = out.split("labels stripped")[0]
+    assert "#432" not in written_block, out
+    assert "#432" in out.split("labels withheld")[1], out
 
 
 def _rust_list(src, name):
@@ -516,15 +478,12 @@ def test_the_body_reader_agrees_with_targets_rs_on_the_shared_fixture():
         assert T.body_code_target(c["body"]) == c["target"], c["body"]
 
 
-def test_fetch_ticket_refuses_an_answer_with_no_body():
+@pytest.mark.parametrize("answer", [
+    '{"labels": []}', '{"labels": [], "body": null}', "null", "[]"])
+def test_fetch_ticket_refuses_an_answer_with_no_body(answer):
     """A body that did not come back is not a body that names no code."""
-    for answer in ('{"labels": []}', '{"labels": [], "body": null}', "null", "[]"):
-        raised = None
-        try:
-            T.fetch_ticket("caneff/agent-skills", 1, run=lambda args, a=answer: a)
-        except T.TierError as exc:
-            raised = exc
-        assert "no body in the answer" in str(raised), (answer, raised)
+    with pytest.raises(T.TierError, match="no body in the answer"):
+        T.fetch_ticket("caneff/agent-skills", 1, run=lambda args: answer)
 
 
 def test_a_dry_run_says_would_withhold_and_a_labelled_ticket_is_not_withheld():
@@ -538,24 +497,10 @@ def test_a_dry_run_says_would_withhold_and_a_labelled_ticket_is_not_withheld():
     assert "would withhold:" in report and "labels withheld" not in report, report
 
 
-def test_fetch_ticket_refuses_an_answer_whose_labels_are_missing_or_malformed():
+@pytest.mark.parametrize("answer", [
+    '{"body": "x"}', '{"labels": null, "body": "x"}', '{"labels": "x", "body": "x"}'])
+def test_fetch_ticket_refuses_an_answer_whose_labels_are_missing_or_malformed(answer):
     """Missing labels read as "no labels" re-write the label every tick (S7)."""
-    for answer in ('{"body": "x"}', '{"labels": null, "body": "x"}', '{"labels": "x", "body": "x"}'):
-        raised = None
-        try:
-            T.fetch_ticket("caneff/agent-skills", 1, run=lambda args, a=answer: a)
-        except T.TierError as exc:
-            raised = exc
-        assert "no labels in the answer" in str(raised), (answer, raised)
+    with pytest.raises(T.TierError, match="no labels in the answer"):
+        T.fetch_ticket("caneff/agent-skills", 1, run=lambda args: answer)
 
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
-
-
-if __name__ == "__main__":
-    main()
