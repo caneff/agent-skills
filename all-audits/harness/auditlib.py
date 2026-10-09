@@ -18,8 +18,11 @@ EXCLUDED_DIRS = frozenset(
 )
 
 
+JS_SUFFIXES = (".mjs", ".js")
+
+
 def walk_source(root, suffix=".py", skip=None):
-    """Sorted repo-relative `suffix` paths under `root`, pruning
+    """Sorted repo-relative `suffix` paths (a string or a tuple of them) under `root`, pruning
     `EXCLUDED_DIRS` and dot-dirs before descending into them.
 
     `skip`, when given, is a callable taking a `/`-joined relative path and
@@ -39,8 +42,9 @@ def walk_source(root, suffix=".py", skip=None):
 
 def is_test_or_fixture(path):
     """True when `path` (a `/`-joined relative path) is not a worthy,
-    testable source module: a test file itself, `conftest*`, `__init__.py`,
-    non-Python, or under an excluded or `fixtures/` directory.
+    testable source module: a test file itself (`test_*.py`, `*_test.py`,
+    `*.test.mjs`/`*.test.js`), `conftest*`, `__init__.py`, not a `.py`,
+    `.mjs` or `.js` file, or under an excluded or `fixtures/` directory.
 
     The one home for the skip rule mutation-audit's `_sibling_tests` used to
     carry by hand — pass it as `walk_source`'s `skip=` to get only "real"
@@ -51,9 +55,9 @@ def is_test_or_fixture(path):
         return True
     if "fixtures" in dirs or "conftest" in name:
         return True
-    if name == "__init__.py" or name.startswith("test_") or name.endswith("_test.py"):
+    if name == "__init__.py" or name.startswith("test_") or name.endswith("_test.py") or ".test." in name:
         return True
-    if not name.endswith(".py"):
+    if not name.endswith((".py", *JS_SUFFIXES)):
         return True
     return False
 

@@ -1,11 +1,12 @@
 ---
 name: mutation-audit
-description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut, scrape the survivors, emit test-audit findings; or check ONE diff against its covering test (single-diff witness mode). Opt-in, never in the default sweep.
+description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut (Python) or StrykerJS (.mjs/.js), scrape the survivors, emit test-audit findings; or check ONE diff against its covering test (single-diff witness mode). Opt-in, never in the default sweep.
 disable-model-invocation: true
-argument-hint: "<target-module.py> | --patch <file> --test <command>"
+argument-hint: "<target-module.py|.mjs|.js> | --patch <file> --test <command>"
 ---
 
-Run mutmut against one target module and report which mutants survive. A
+Run mutmut (a `.py` target) or StrykerJS (a `.mjs`/`.js` target, § JavaScript
+targets) against one target module and report which mutants survive. A
 surviving mutant means one of two things: a test runs that line but doesn't
 assert hard enough to notice the behavior changed (`rewrite`), or no test
 reaches that line at all (`no-coverage`). mutmut runs every mutant against
@@ -68,7 +69,8 @@ covered without re-running mutmut.
    This calls `suggest_candidates` — the tested pure seam: a module is a
    candidate when it's a plain module (not `__init__.py`, not a test file,
    not under a `fixtures/` dir) **and** a sibling test file exists for it
-   (`test_<name>.py` or `<stem>_test.py`) — mutmut needs a test suite to
+   (`test_<name>.py` or `<stem>_test.py`; for a `.mjs`/`.js` module,
+   `<stem>.test.mjs` or `<stem>.test.js`) — the tool needs a test suite to
    mutate against, so an untested module isn't a useful target. Print the
    suggestions and **stop** — ask which one to run. Never fall back to
    running mutmut over the whole repo; an empty suggestion list is a valid
@@ -76,8 +78,10 @@ covered without re-running mutmut.
    error.
 
 2. **Confirm the target is mutation-testable.** It must be a real `.py`
-   file with a sibling test file (same rule as the suggester). If it has
-   no tests, mutmut has nothing to run against — say so and stop.
+   (or `.mjs`/`.js`) file with a sibling test file (same rule as the
+   suggester). A `.mjs`/`.js` target skips steps 3 and 4:
+   § JavaScript targets. If it has no tests, the tool has nothing to run
+   against — say so and stop.
 
 3. **Scope mutmut to just the target.** mutmut 3.x reads `[tool.mutmut]`
    (pyproject.toml) or `[mutmut]` (setup.cfg) for `source_paths` — there is
@@ -188,6 +192,54 @@ in that setup.
    not by assuming the removal worked — a failed cleanup leaves
    mutation-testing state for the next run to trip over.
 
+   For a JavaScript target the artifacts are `.stryker-tmp/` and `reports/`.
+   A normal Stryker exit removes `.stryker-tmp/` itself and the report goes
+   to a temp dir, so `test -e .stryker-tmp` is expected to fail; after an
+   INCONCLUSIVE run it may not, and a `.stryker-tmp/` this run left (untracked,
+   `git status --porcelain` shows it) is removed with `rm -r .stryker-tmp`.
+   Never remove one that was already there before the run.
+
+## JavaScript targets
+
+A `.mjs`/`.js` target runs StrykerJS's tap runner (`node --test` has no native
+Stryker runner; stryker-js #5421 is open), through `npx`, so the audited
+repo's `package.json` is never touched:
+
+```sh
+python3 ~/.agents/skills/mutation-audit/audit.py --run <target.mjs>
+```
+
+Run it from the repo root. `run_stryker` runs `npx -y -p
+@stryker-mutator/core@<v> -p @stryker-mutator/tap-runner@<v> stryker run
+<config> --testRunner tap --coverageAnalysis perTest --mutate <target>
+--testFiles <target's sibling test> --reporters clear-text,json`, `<v>` being
+`STRYKER_VERSION` in `audit.py`, the one place the pin lives. It needs no
+step 3 config. Three things it does for you, which a hand-run must repeat:
+
+- **Only the target's own test file goes to `--testFiles`.** The tap runner's
+  workers write `stryker-output-<pid>.json` into the shared sandbox root; a
+  test that lists the repo root then sees false RuntimeErrors and false kills.
+- **The JSON report goes to a temp dir**, through a config file passed by
+  path (`stryker run` has no CLI flag for `jsonReporter.fileName`), so no
+  `reports/` lands in the checkout. Stryker removes `.stryker-tmp/` itself.
+- **It exits 3 with `INCONCLUSIVE: <why>`**, no rows, when `npx` is missing,
+  the sibling test file is missing, Stryker fails or exceeds
+  `MUTATION_AUDIT_TIMEOUT` (its whole process group is killed), the report
+  holds no judged mutant, or a mutant is `RuntimeError`/`Pending`. After an
+  INCONCLUSIVE run, do step 7's cleanup: a killed or failed Stryker can
+  leave `.stryker-tmp/` behind.
+
+`parse_stryker_report(text) -> list[dict]` is the tested seam, backed by
+`~/.agents/skills/mutation-audit/fixtures/js/` (a real run of `sample.mjs`,
+`stryker-report.json` and its answer key in `fixtures/answer-key.md`). `Survived`
+-> `rewrite`, `NoCoverage` -> `no-coverage`; `Killed` and `Timeout` are counted
+into `killed_count` and dropped; `CompileError` and `Ignored` never ran and
+are left out, as Stryker's own score leaves them. Unlike mutmut, the report
+carries the real `line`, and `extra.mutant` is
+`<file>:<line>:<mutator>#<id>`. Pass two (step 5) still reads the covering
+test and fills `before`/`after`; use the report's `replacement` for the
+concrete mutation. Steps 6 and 7 apply unchanged, minus the mutmut artifacts.
+
 ## Single-diff witness mode
 
 The mutmut run above scores a whole module. To ask whether one test notices
@@ -231,3 +283,5 @@ all (its mutant is `no tests` → `no-coverage`).
 `~/.agents/skills/mutation-audit/fixtures/answer-key.md` has the expected
 pass-one candidate rows and the pass-two finalized findings.
 Running this skill over `~/.agents/skills/mutation-audit/fixtures/sample.py` should reproduce that table.
+`fixtures/js/` is the same three regimes for StrykerJS: `isAdult` killed,
+`clamp` weakly tested, `scale` untested.
