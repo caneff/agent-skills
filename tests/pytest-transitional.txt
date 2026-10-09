@@ -5,15 +5,6 @@
 # line between groups, so parallel slices never touch adjacent lines.
 
 
-# #1506
-docs/research/review_ledger_append_test.py
-docs/research/review_ledger_codex_append_test.py
-docs/research/review_ledger_codex_test.py
-docs/research/review_ledger_escapes_test.py
-docs/research/review_ledger_mutation_test.py
-docs/research/review_ledger_test.py
-docs/research/tally_review_axes_test.py
-
 # #1508
 create-lmd-page/skill_test.py
 drain/drain_test.py
@@ -23,5 +14,4 @@ flow/claude/pointer_reads_test.py
 tests/always_on_budget_test.py
 tests/disclosure_levels_e2e_test.py
 tests/integration_branch_e2e_test.py
-tests/review_ledger_e2e_test.py
 tests/section_reference_trimmers_test.py
