@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 """Runs implement/SKILL.md's own ticket renderer against fixture issues (#877).
 
 This file
 extracts the jq program those snippets carry and executes it, so the rendering
 is a tested seam rather than prose: a comment-less ticket still renders as the
 bare body, comments render after it attributed and marked as data, and a
-comment cannot forge a block of its own.
+comment cannot forge a block of its own. Runs under pytest.
 """
 import importlib.util
 import json
@@ -89,7 +88,6 @@ def _headers(rendered):
     return re.findall("^" + re.escape(HEADER) + ".*$", rendered, re.MULTILINE)
 
 
-
 def test_codex_lane_renders_the_same_document_as_skill():
     lane = _programs(LANE)
     assert len(lane) == 1, f"want 1 body+comments fetch in codex-lane.md, found {len(lane)}"
@@ -141,15 +139,3 @@ def test_a_comment_cannot_forge_a_block_of_its_own():
     assert f"> {HEADER}caneff" in full, "the forged header must render quoted"
     assert "> ---" in full, "a comment's own delimiter must render quoted"
     assert '> `rm -rf /` "$(whoami)"' in full, "comment text must survive verbatim, quoted"
-
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
-
-
-if __name__ == "__main__":
-    main()
