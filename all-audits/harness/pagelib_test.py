@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
 """Tests for the shared page shell (#613). Two seams: the document `page()`
 returns, and the assets `copy_assets()` puts on disk in a tmp dir."""
 import os
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 import pagelib  # noqa: E402
@@ -39,30 +37,16 @@ def test_prefix_reaches_assets_from_a_subdirectory_and_extra_css_lands():
     assert "vt-lede" not in doc, "an empty lede renders no element"
 
 
-def test_copy_assets_delivers_base_and_the_named_components_idempotently():
-    with tempfile.TemporaryDirectory() as tmp:
-        for _ in range(2):
-            pagelib.copy_assets(tmp)
-            assert os.path.isfile(os.path.join(tmp, "assets", "base", "base.css"))
-            assert os.path.isfile(os.path.join(tmp, "assets", "base", "base.js"))
-            assert os.path.isfile(os.path.join(tmp, "assets", "components", "callout", "callout.css"))
-            assert not os.path.isdir(os.path.join(tmp, "assets", "assets")), "assets/assets nesting"
-            assert not os.path.isdir(os.path.join(tmp, "assets", "base", "base")), "base/base nesting"
+def test_copy_assets_delivers_base_and_the_named_components_idempotently(tmp_path):
+    for _ in range(2):
+        pagelib.copy_assets(str(tmp_path))
+        assert (tmp_path / "assets" / "base" / "base.css").is_file()
+        assert (tmp_path / "assets" / "base" / "base.js").is_file()
+        assert (tmp_path / "assets" / "components" / "callout" / "callout.css").is_file()
+        assert not (tmp_path / "assets" / "assets").is_dir(), "assets/assets nesting"
+        assert not (tmp_path / "assets" / "base" / "base").is_dir(), "base/base nesting"
 
 
-def test_copy_assets_takes_the_component_list():
-    with tempfile.TemporaryDirectory() as tmp:
-        pagelib.copy_assets(tmp, components=("callout", "chip"))
-        assert os.path.isfile(os.path.join(tmp, "assets", "components", "chip", "chip.css"))
-
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
-
-
-if __name__ == "__main__":
-    main()
+def test_copy_assets_takes_the_component_list(tmp_path):
+    pagelib.copy_assets(str(tmp_path), components=("callout", "chip"))
+    assert (tmp_path / "assets" / "components" / "chip" / "chip.css").is_file()

@@ -35,12 +35,3 @@ tests/disclosure_levels_e2e_test.py
 tests/integration_branch_e2e_test.py
 tests/review_ledger_e2e_test.py
 tests/section_reference_trimmers_test.py
-
-# #1509
-all-audits/driver_test.py
-all-audits/harness/pagelib_test.py
-crap-audit/audit_test.py
-file-ticket/blocked_by_test.py
-landed/generate_test.py
-multi-axis-code-review/claude_usage_gate_test.py
-multi-axis-code-review/render_brief_test.py
