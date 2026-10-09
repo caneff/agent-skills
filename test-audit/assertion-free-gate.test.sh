@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# The assertion-free check as this repo's own merge gate (#645). Both parsers
-# run over the whole tree in --gate mode: smell 1 only, fixtures excluded,
-# non-zero exit on any hit. The other four smells stay report-only -- see
-# GATE_SMELL in audit.py for why.
+# The assertion-free and duplicate-name checks as this repo's own merge gate
+# (#645, #1488). Both parsers run over the whole tree in --gate mode: those two
+# smells only, fixtures excluded, non-zero exit on any hit. Every other smell
+# stays report-only -- see SKILL.md § Gate mode for why.
 #
 # Discovered by tests/all.sh's `*.test.sh` rule, so wiring is this file alone.
 set -euo pipefail

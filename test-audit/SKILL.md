@@ -37,8 +37,9 @@ Pass one's smells, by the label each prints:
   that belongs outside the block from the target.
 - **lost test (duplicate name)** — a second `def test_x` at the same module or
   class scope replaces the first (`audit.py`, reported at the shadowed
-  definition); two `it`/`test` calls in one `describe` with the same literal
-  title (`audit.mjs`, reported at the repeat). `audit.mjs` looks only inside a
+  definition, a `unittest.TestCase` class included); two `it`/`test` calls
+  with a body in one `describe` of a vitest file with the same literal title
+  (`audit.mjs`, reported at the repeat). `audit.mjs` looks only inside a
   `describe`, not at file scope. Vitest runs both tests of a repeated title,
   so there it is a naming defect the gate still treats as one.
 - **lost test (uncollected class)** (`audit.py`) — a `Test*` class that defines
@@ -54,8 +55,8 @@ Pass one's smells, by the label each prints:
   `.pytest.toml`, `pytest.ini`, `.pytest.ini`, `pyproject.toml`, `tox.ini`,
   `setup.cfg` that configures pytest, walking up from the test file to the repo
   root; one that cannot be read counts as not strict. A non-literal `strict=`
-  is not flagged, and neither is a class- or module-level `xfail` mark: only a
-  decorator on a test function is read.
+  is not flagged. Decorators on a test function or a class are read; a
+  module-level `pytestmark = pytest.mark.xfail` is not.
 
 **JS/TS reach.** `audit.mjs` recognizes vitest and node:test — nothing else.
 A file identifies as **vitest** by importing `vitest`, or by naming tests
@@ -367,7 +368,8 @@ vocabulary, and metabar:
   `mystery-guest`, `eager`, `sensitive-equality`, `name-mismatch`,
   `library-default`, `conditional-logic`, `flaky-by-construction`, `tautology`,
   `interaction-only`, `documented-intent`, `prose-assertion`,
-  `dead-assertion`, `lost-test`, `broad-exception`, `non-strict-xfail`. A rewrite carries `before`/`after`;
+  `dead-assertion`, `lost-test`, `broad-exception`, `non-strict-xfail`. A
+  rewrite carries `before`/`after`;
   a duplicate-coverage cut carries `owner` (the stronger test's `file:line`);
   a `documented-intent` row carries the comment it defers to in
   `extra.author_intent`.

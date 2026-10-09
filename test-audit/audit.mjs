@@ -15,7 +15,9 @@
  *   6. broad exception  — `toThrow()` / `toThrowError()` with no argument
  *                         passes on the wrong error. Vitest `expect` only.
  *   7. duplicate title  — two tests in one describe with the same literal
- *                         title (a "lost test" in the research's wording).
+ *                         title (the "lost test (duplicate name)" smell of
+ *                         docs/research/2026-10-08-test-smell-gaps.md). Vitest
+ *                         files only.
  *
  * audit.py keeps the pytest path untouched.
  */
@@ -585,6 +587,8 @@ function duplicateTitles(tree) {
     const seen = new Set();
     for (const stmt of cb.body.body) {
       if (stmt.type !== "ExpressionStatement" || !isTestCall(stmt.expression)) continue;
+      // `it.todo('a')` has no body for a later definition to replace.
+      if (!testCallback(stmt.expression)) continue;
       const title = literalTitle(stmt.expression);
       if (title === null) continue;
       if (seen.has(title)) found.push([lineOf(stmt.expression), LOST_DUPLICATE]);
@@ -628,7 +632,7 @@ function smellsIn(tree, source) {
       if (detect(call, source, bindings)) found.push([lineOf(call), smell]);
     }
   }
-  found.push(...duplicateTitles(tree));
+  if (isVitestFile(tree)) found.push(...duplicateTitles(tree));
   return found;
 }
 
@@ -1032,12 +1036,24 @@ function selfcheck() {
   );
   assert.deepEqual(dupLines(`${body("'a'")}${body("'a'")}`), [], "outside any describe: not this smell");
   assert.deepEqual(
+    dupLines("describe('g', () => {\nit.todo('a');\nit.todo('a');\n});"),
+    [],
+    "a todo has no body to replace",
+  );
+  assert.deepEqual(
+    dupLines(
+      "import { describe, test } from 'node:test';\ndescribe('g', () => {\ntest('a', () => {});\ntest('a', () => {});\n});",
+    ),
+    [],
+    "node:test files are out: the ticket names vitest",
+  );
+  assert.deepEqual(
     dupLines(`describe('g', () => {\nit.each([1, 2])('a', (n) => { expect(n).toBe(n + 0); });\nit.each([1, 2])('a', (n) => { expect(n).toBe(n + 0); });\n});`),
     [],
     "it.each is not a test call here",
   );
 
-  // gate mode: assertion-free only, and never a fixture.
+  // gate mode: assertion-free only (the duplicate-name case is below), and never a fixture.
   const tmp = mkdtempSync(join(tmpdir(), "test-audit-gate-"));
   try {
     // These two files carry a real `expect`, so the assertion signal alone
@@ -1216,11 +1232,9 @@ function selfcheck() {
 
 // --- gate mode -------------------------------------------------------------
 
-// The smells a build gates on -- the Python side's GATE_SMELLS, same
-// reasoning, each with the label its fixtures-suppression count is reported
-// under. An assertion-free test cannot fail at all; neither can one the
-// duplicate-name rule names. The rest still run and still fail when the
-// behavior breaks.
+// The smells a build gates on -- the Python side's GATE_SMELLS, each with the
+// label its fixtures-suppression count is reported under. SKILL.md § Gate mode
+// says why these two and no other.
 const GATE_SMELLS = new Map([
   ["assertion-free test", "assertion-free"],
   [LOST_DUPLICATE, "duplicate-name"],
