@@ -102,7 +102,7 @@ def run_live(newdir, stale_cache, limits, *args, switch=False):
     return p.returncode, p.stdout, json.loads(path.read_text())
 
 
-def check(got, want_status, want_text=None):
+def assert_gate(got, want_status, want_text=None):
     status, out = got
     assert status == want_status, f"exit {status}, want {want_status}: {out!r}"
     if want_text:
@@ -113,12 +113,12 @@ def check(got, want_status, want_text=None):
 
 
 def test_headroom(newdir):
-    check(run(newdir, cache(44)), 0, "44%")
+    assert_gate(run(newdir, cache(44)), 0, "44%")
 
 
 # The reserve ceiling (#1359): a launch stops at 70%, so the weekly audit keeps the rest.
 def test_one_below_the_ceiling(newdir):
-    check(run(newdir, cache(69)), 0, "69%")
+    assert_gate(run(newdir, cache(69)), 0, "69%")
 
 
 def test_at_the_ceiling_names_the_percent_and_reset(newdir):
@@ -129,21 +129,21 @@ def test_at_the_ceiling_names_the_percent_and_reset(newdir):
 
 
 def test_above_the_ceiling(newdir):
-    check(run(newdir, cache(95)), 20, "reserve ceiling 70%")
+    assert_gate(run(newdir, cache(95)), 20, "reserve ceiling 70%")
 
 
 # `--audit` lifts the ceiling to the 100% cap: the audit may spend the reserve.
 def test_audit_above_the_ceiling(newdir):
-    check(run(newdir, cache(95), "--audit"), 0, "95%")
+    assert_gate(run(newdir, cache(95), "--audit"), 0, "95%")
 
 
 def test_audit_at_the_cap(newdir):
-    check(run(newdir, cache(100), "--audit"), 20, "capped")
+    assert_gate(run(newdir, cache(100), "--audit"), 20, "capped")
 
 
 def test_capped(newdir):
     status, out = run(newdir, cache(100, resets=time.time() + 5 * DAY))
-    check((status, out), 20, "100%")
+    assert_gate((status, out), 20, "100%")
     # A PR gated at the cap answers the ceiling line, never a line of its own: the audit reads only
     # `ceiling` skip rows, so a cap-worded line would leave that PR out of the audit for good (#1405 C1).
     assert "reserve ceiling 70%" in out and "capped" not in out, out
@@ -151,12 +151,12 @@ def test_capped(newdir):
 
 
 def test_over_100(newdir):
-    check(run(newdir, cache(103)), 20, "reserve ceiling 70%")
+    assert_gate(run(newdir, cache(103)), 20, "reserve ceiling 70%")
 
 
 # The worst window governs.
 def test_secondary_governs(newdir):
-    check(run(newdir, cache(10, secondary={"usedPercent": 100, "resetsAt": time.time() + DAY})), 20)
+    assert_gate(run(newdir, cache(10, secondary={"usedPercent": 100, "resetsAt": time.time() + DAY})), 20)
 
 
 # Absent or malformed is never headroom.
@@ -179,7 +179,7 @@ def test_secondary_governs(newdir):
     pytest.param(lambda: "5", id="scalar cache"),
 ])
 def test_absent_or_malformed_cache_is_unknown(newdir, make):
-    check(run(newdir, make()), 30)
+    assert_gate(run(newdir, make()), 30)
 
 
 # A stale cache is refreshed from the live answer, and the refreshed reading —
@@ -188,7 +188,7 @@ def test_refresh_reads_live(newdir):
     stale = cache(5, fetched=time.time() - 3600)
     live = {"usedPercent": 100, "resetsAt": time.time() + 4 * DAY}
     status, out, after = run_live(newdir, stale, {"primary": live, "secondary": None})
-    check((status, out), 20, "100%")
+    assert_gate((status, out), 20, "100%")
     assert "reserve ceiling 70%" in out, out
     assert after["primary"]["usedPercent"] == 100, f"cache not rewritten: {after}"
     assert time.time() - after["fetchedAt"] < 60, f"fetchedAt not renewed: {after}"
@@ -197,7 +197,7 @@ def test_refresh_reads_live(newdir):
 def test_refresh_returns_nothing(newdir):
     stale = cache(5, fetched=time.time() - 3600)
     status, out, after = run_live(newdir, stale, None)
-    check((status, out), 30)
+    assert_gate((status, out), 30)
     assert after == stale, f"a failed refresh must leave the cache alone: {after}"
 
 
@@ -264,12 +264,12 @@ def test_switch_present_is_capped(newdir, content):
 
 def test_switch_absent(newdir):
     status, out, _ = run_switch(newdir, None)
-    check((status, out), 0, "5%")
+    assert_gate((status, out), 0, "5%")
 
 
 # The audit's launch is still a launch: the switch wins over `--audit` too.
 def test_switch_beats_audit(newdir):
-    check(run_switch(newdir, "", "--audit")[:2], 20, "codex reviews off")
+    assert_gate(run_switch(newdir, "", "--audit")[:2], 20, "codex reviews off")
 
 
 # `--percent` is a reading, not a launch: the switch leaves it alone.
@@ -368,17 +368,17 @@ def run_size(newdir, changes, tickets=("1",), base="main", **repo):
 
 
 def test_size_at_threshold(newdir):
-    check(run_size(newdir, {"a.py": 300}), 0, "5%")
+    assert_gate(run_size(newdir, {"a.py": 300}), 0, "5%")
 
 
 # A proceed says why it proceeded (#1405 P1): the churn that passed the threshold, or the label
 # that forced a small PR on, with the churn it overrode.
 def test_proceed_names_churn(newdir):
-    check(run_size(newdir, {"a.py": 300}), 0, "churn 300 >= 300")
+    assert_gate(run_size(newdir, {"a.py": 300}), 0, "churn 300 >= 300")
 
 
 def test_proceed_names_label(newdir):
-    check(run_size(newdir, {"a.py": 5}, labels={"1": ["needs-codex"]}), 0,
+    assert_gate(run_size(newdir, {"a.py": 5}, labels={"1": ["needs-codex"]}), 0,
           "needs-codex label forced it, churn 5 < 300")
 
 
@@ -391,7 +391,7 @@ def test_size_just_under_threshold(newdir):
 
 
 def test_size_far_above(newdir):
-    check(run_size(newdir, {"a.py": 5000}), 0, "5%")
+    assert_gate(run_size(newdir, {"a.py": 5000}), 0, "5%")
 
 
 # Tests and Markdown carry no churn: 2000 lines of them plus 10 counted lines is 10.
@@ -409,22 +409,22 @@ def test_tests_and_markdown_beside_counted_lines(newdir):
 
 # Deleted lines count beside added ones: the PR's 3 seed lines removed and 297 added is 300.
 def test_deletions_count(newdir):
-    check(run_size(newdir, {"seed.py": 0, "b.py": 297}), 0, "5%")
+    assert_gate(run_size(newdir, {"seed.py": 0, "b.py": 297}), 0, "5%")
 
 
 # The forcing label, on any ticket of the clump, sends a small PR on to the usage read.
 def test_label_forces(newdir):
-    check(run_size(newdir, {"a.py": 5}, tickets=("7", "8"), labels={"8": ["needs-codex"]}), 0, "5%")
+    assert_gate(run_size(newdir, {"a.py": 5}, tickets=("7", "8"), labels={"8": ["needs-codex"]}), 0, "5%")
 
 
 # The label never bypasses the reserve ceiling.
 def test_ceiling_beats_label(newdir):
-    check(run_size(newdir, {"a.py": 5}, labels={"1": ["needs-codex"]}, pct=70), 20,
+    assert_gate(run_size(newdir, {"a.py": 5}, labels={"1": ["needs-codex"]}, pct=70), 20,
           "usage 70% at or above reserve ceiling 70%")
 
 
 def test_ceiling_beats_a_large_pr(newdir):
-    check(run_size(newdir, {"a.py": 5000}, pct=70), 20, "reserve ceiling 70%")
+    assert_gate(run_size(newdir, {"a.py": 5000}, pct=70), 20, "reserve ceiling 70%")
 
 
 def test_other_labels_do_not_force(newdir):
@@ -433,15 +433,15 @@ def test_other_labels_do_not_force(newdir):
 
 # The label bypasses the size check only: the kill switch still wins.
 def test_switch_beats_label(newdir):
-    check(run_size(newdir, {"a.py": 5}, labels={"1": ["needs-codex"]}, switch=True), 20, "codex reviews off")
+    assert_gate(run_size(newdir, {"a.py": 5}, labels={"1": ["needs-codex"]}, switch=True), 20, "codex reviews off")
 
 
 def test_switch_beats_a_large_pr(newdir):
-    check(run_size(newdir, {"a.py": 5000}, switch=True), 20, "codex reviews off")
+    assert_gate(run_size(newdir, {"a.py": 5000}, switch=True), 20, "codex reviews off")
 
 
 def test_switch_beats_a_small_pr(newdir):
-    check(run_size(newdir, {"a.py": 5}, switch=True), 20, "codex reviews off")
+    assert_gate(run_size(newdir, {"a.py": 5}, switch=True), 20, "codex reviews off")
 
 
 # A binary file has no lines to review: it counts 0 and does not break the count.

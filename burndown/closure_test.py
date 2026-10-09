@@ -719,7 +719,8 @@ def test_the_scan_pins_git_to_the_c_locale(repo, fake_git_on_path, monkeypatch):
     monkeypatch.setenv("PATH", fake_git_on_path(
         '[ "$LC_ALL" = C ] || exit 1\nexec ' + shutil.which("git") + ' "$@"'))
     # A refusal here (the fake exited 1) raises and fails the test.
-    C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    assert "examples/skyscraper/component.js" in got, got
 
 
 def test_a_callers_git_environment_does_not_redirect_the_scan(repo, monkeypatch):
