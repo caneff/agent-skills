@@ -22,8 +22,7 @@ tool's own docs or source, not from a live call.
   [Manage comments, Google Sheets API guide, Google, updated 2026-09-30](https://developers.google.com/workspace/sheets/api/guides/comments)).
   A single `spreadsheets.get` call can therefore return values, notes and
   cell-anchored comments together.
-- No tool has a snapshot verb that writes a diff-stable file. That is the
-  gap that decides the question (see Recommendation).
+- None of the tools enumerated has a snapshot verb that writes a diff-stable file (see Coverage of this search for what was not enumerated). That is the gap that decides the question (see Recommendation).
 - Two tools reach all four jobs through one binary: **`gog`** (openclaw/gogcli,
   which has named verbs for each job and released 2026-10-01) and **`gws`**
   (googleworkspace/cli, a raw Discovery passthrough whose last release was
@@ -59,8 +58,9 @@ description in the discovery doc).
 ## Candidates enumerated
 
 Release dates come from the GitHub releases API
-(`gh api repos/<r>/releases`) unless a registry is named. Each release page
-is `https://github.com/<r>/releases/tag/<tag>`.
+(`gh api repos/<r>/releases`) unless a registry is named. The same dates
+show on each repo's own `/releases` page (the repo URL in the table plus
+`/releases`).
 
 | Tool | Repo / docs | Last release (where read) | Auth | Kind | Read depth |
 |---|---|---|---|---|---|
@@ -75,10 +75,9 @@ is `https://github.com/<r>/releases/tag/<tag>`.
 | clasp | https://github.com/google/clasp | clasp-v3.4.1, 2026-08-28 | OAuth (`clasp login`); service accounts listed as "EXPERIMENTAL/NOT WORKING" (README) | Apps Script project CLI (`push`, `pull`, `run-function`). It would mean writing Apps Script, which is the scratch-script problem again | README section headings |
 | gspread | https://github.com/burnash/gspread | v6.2.1, 2025-05-14 (GitHub; PyPI upload same day) | service account, OAuth, API key (PyPI description) | **Library, not a CLI** | PyPI description (search snippet) |
 | xing5/mcp-google-sheets | https://github.com/xing5/mcp-google-sheets | v0.6.3, 2026-05-14 | service account (recommended), OAuth, ADC (README) | **MCP server, not a CLI** | README tool list |
-| taylorwilsdon/google_workspace_mcp | https://github.com/taylorwilsdon/google_workspace_mcp | v2.1.0, 2026-10-09 | not read | **MCP server, not a CLI** | metadata only, plus issue #788 in a search snippet (its Sheets comments go through Drive and cannot anchor to a cell) |
+| taylorwilsdon/google_workspace_mcp | https://github.com/taylorwilsdon/google_workspace_mcp | v2.1.0, 2026-10-09 | not read | **MCP server, not a CLI** | GitHub API metadata only. Issue [#788 "feat(sheets): cell-level comment anchoring for manage_spreadsheet_comment"](https://github.com/taylorwilsdon/google_workspace_mcp/issues/788), opened 2026-05-13, still open on 2026-10-09 (GitHub API): its title shows cell-anchored comments were a missing feature; the issue body was not read |
 | Google Sheets MCP (`sheetsmcp.googleapis.com`) | https://developers.google.com/workspace/sheets/api/reference/mcp | remote service; comments support added 2026-10-01 (release notes) | user OAuth | **Remote MCP, not a CLI** | release notes; tool list from a search snippet only |
-| gcloud | — | — | ADC | Has no Sheets command group that I know of. Its only role here is minting a token for gws or gog | not opened |
-| Composio Sheets toolkit | https://composio.dev/toolkits/googlesheets | — | hosted OAuth | **hosted MCP/REST**, third-party custody of tokens | search snippet only |
+| gcloud | https://cloud.google.com/sdk/gcloud/reference | n/a | ADC | The top-level [gcloud CLI reference index, Google Cloud](https://cloud.google.com/sdk/gcloud/reference), fetched 2026-10-09, has no `sheets` match (a text match on the index, not a read of every group page). Its only role here is minting a token for gws or gog | index page only |
 
 ## Capability matrix
 
@@ -86,7 +85,7 @@ Legend: **Y** covered · **P** partial (what is missing) · **N** not covered.
 
 | Tool | 1 Read range | 2 Write plan (batch) | 3 Add tab | 4a Snapshot values | 4b Notes | 4c Comments |
 |---|---|---|---|---|---|---|
-| **gog** | Y `gog sheets get <id> <range> [--render FORMULA\|…] --json` | Y `gog sheets batch-update <id> --data-json @plan.json` (one `values.batchUpdate`; `--dry-run`, `--input RAW\|USER_ENTERED`). Also `sheets batch-request` for raw structural arrays (CHANGELOG 0.42.0) | Y `gog sheets add-tab <id> <name> [--index]` | P `gog sheets raw <id> --include-grid-data [--sheet] --json` dumps `spreadsheets.get` "lossless", but it is raw API JSON and not a flat per-cell file | Y `gog sheets notes <id> <range>`; also in `raw --include-grid-data`; write with `sheets update-note` | P `gog drive comments list <id> --all --json` requests `comments(id,author,content,createdTime,modifiedTime,resolved,replies)` (`comment_ops.go` L18) through **Drive**, so anchors are opaque. No `commentsViewMode` found in its source (GitHub code search, 2026-10-09). `gog api call sheets v4 …` could reach the Sheets route but was not verified |
+| **gog** | Y `gog sheets get <id> <range> [--render FORMULA\|…] --json` | Y `gog sheets batch-update <id> --data-json @plan.json` (one `values.batchUpdate`; `--dry-run`, `--input RAW\|USER_ENTERED`). Also `sheets batch-request` for raw structural arrays (CHANGELOG 0.42.0) | Y `gog sheets add-tab <id> <name> [--index]` | P `gog sheets raw <id> --include-grid-data [--sheet] --json` dumps `spreadsheets.get` "lossless", but it is raw API JSON and not a flat per-cell file | Y `gog sheets notes <id> <range>`; also in `raw --include-grid-data`; write with `sheets update-note` | P `gog drive comments list <id> --all --json` requests `comments(id,author,content,createdTime,modifiedTime,resolved,replies)` (`comment_ops.go` L18) through **Drive**, so anchors are opaque. No `commentsViewMode` found in its source (GitHub code search, 2026-10-09). `gog api call` reads Google's Discovery description at runtime (`internal/discoveryapi/discovery.go`), so it should reach the Sheets route; not run |
 | **gws** | Y `gws sheets spreadsheets values get --params '{"spreadsheetId","range"}'` or the `+read` helper | Y `gws sheets spreadsheets values batchUpdate --json @…` (Discovery method; `--dry-run`) | Y `gws sheets spreadsheets batchUpdate` with an `addSheet` request (Discovery method) | P `gws sheets spreadsheets get` with `includeGridData`, `--fields` mask; raw JSON | Y via the same get (`sheets.data.rowData.values.note`) | P/Y Discovery is fetched at runtime and cached 24h (README "Architecture"), so `commentsViewMode` should be reachable **today** in the same get, cell-anchored. Not run. Drive route `gws drive comments list` also exists |
 | gws-cli (andmarios) | Y `sheets read`, `sheets batch-get` | P `sheets write` takes one range per call; no batch write found in `reference/sheets.md` | Y `sheets add-sheet` | P `sheets read` | N no note command found in `reference/sheets.md` | P Drive comments (PyPI table: "comments, replies") |
 | sheets-cli (gmickel) | Y `read range` | Y `batch --ops '<json>'` (append, updateRow, updateKey, setRange) with `--dry-run` | N no tab command in README "Commands" | P `read table` JSON | N | N |
@@ -122,7 +121,7 @@ https://github.com/xing5/mcp-google-sheets/blob/main/README.md.
 | gws | "All output … is structured JSON" (README "Architecture"); `--page-all` gives NDJSON | same as the API |
 | others | JSON (gmickel, andmarios), CSV (jroehl, shakydata) | values only |
 
-None of them produce a per-cell flat record such as
+None of those enumerated produce a per-cell flat record such as
 `Sheet!A1 \t value \t note \t comment-thread-ids`, sorted, which is what a
 line diff needs. Raw `spreadsheets.get` JSON nests rows positionally, so an
 inserted row shows up as a diff on every row below it.
@@ -134,10 +133,8 @@ inserted row shows up as a diff on every row below it.
   [permission-rule precedence note](2026-10-04-permission-rule-precedence.md),
   read 2026-10-04 from https://code.claude.com/docs/en/permissions). So "one
   allow rule" means one prefix.
-- **gog**: `Bash(gog sheets:*)` covers jobs 1–3 and the values-and-notes half
-  of 4. Comments need a second prefix, `gog drive comments list`, or `gog api
-  call`. Never allow `gog api call` as a bare prefix: it reaches any
-  Discovery API and any method, writes included. gog also enforces its own
+- **gog**: `Bash(gog sheets:*)` covers jobs 1–3 and the values-and-notes half of 4, but it also admits destructive verbs (`delete-tab`, `clear`, `delete-dimension`, `find-replace`, `create`, `table-delete`, `batch-request`; gog `docs/commands` index), so it is as broad as gws's prefix. Comments need a second prefix, `gog drive comments list`, or `gog api
+  call`. Never allow `gog api call` as a bare prefix: it reaches any Discovery API and any method, writes included (gog gates writes behind `--allow-write` and a confirmation or `--force`, but a prefix rule admits those flags too). gog also enforces its own
   allowlist inside the binary (`--enable-commands-exact sheets.get,…`,
   `--readonly`) and documents build-time "Safety Profiles" with the policy
   baked in (README "Automate safely").
@@ -149,35 +146,6 @@ inserted row shows up as a diff on every row below it.
   `add-tab`, `snapshot`) gives one tight prefix, `Bash(gsheet:*)`, and keeps
   the broad underlying binary off the allow list.
 
-## Recommendation
-
-**Wrap one tool: put a thin `gsheet` wrapper over `gog`, and do not build a
-new client.** The deciding gap is **job 4: no tool writes a diff-stable
-snapshot of values, notes and cell-anchored comments.** Every tool returns
-raw API JSON at best, and the tools with curated verbs fetch comments through
-Drive, whose Sheets anchors are opaque. Jobs 1–3 are solved verbs in `gog`
-(`get`, `batch-update --data-json @plan`, `add-tab`), each with `--dry-run`.
-The snapshot is one `spreadsheets.get` with `includeGridData` plus
-`commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`, flattened and sorted by
-(sheet, row, col). That fits in a small script, reached through `gog api
-call` or `gws sheets spreadsheets get`.
-
-Why gog over gws: gog has the steadier release cadence (v0.39.1 to v0.43.0
-between 2026-09-05 and 2026-10-01), named Sheets verbs, notes read and write,
-and an allowlist inside the binary. gws has not released since 2026-03-31 and
-says "Expect breaking changes as we march toward v1.0" (README). gws's one
-advantage is that its runtime Discovery reaches the new comments field with
-no code change. If the `gog api call` path to `commentsViewMode` fails,
-switch the snapshot verb alone to gws, or call the REST endpoint with a
-token from `gog auth`. Building a whole `gsheet` client does not pay: it
-would re-implement OAuth and keyring storage that both tools already ship.
-
-Proposed shape (not built): `gsheet read|apply|add-tab|snapshot`. The first
-three pass through to `gog sheets`. `snapshot` writes sorted TSV or JSONL,
-one record per non-empty cell (value, formula, note) and one per comment post
-(thread id, anchor A1, author, time, status, content). Needed scope:
-`spreadsheets` for writes; read-only would be `spreadsheets.readonly`.
-
 ## Not verified
 
 - No tool was installed or run. In particular, that `gog api call sheets v4
@@ -186,8 +154,7 @@ one record per non-empty cell (value, formula, note) and one per comment post
   their docs (gog: Discovery fallback; gws: runtime Discovery) and from the
   live Discovery doc. Neither was observed.
 - gog's absence of `commentsViewMode` rests on one GitHub code search
-  (2026-10-09); the index can lag. The vendored `google.golang.org/api
-  v0.300.0` may or may not carry the new fields.
+  (2026-10-09); the index can lag. The vendored `google.golang.org/api v0.300.0` may or may not carry the new fields; that matters for gog's curated verbs, not for `gog api call`.
 - Whether `spreadsheets.readonly` alone is enough to read comments on the
   Sheets route. The discovery scope list says yes, but the comments guide
   does not list scopes.
@@ -199,8 +166,7 @@ one record per non-empty cell (value, formula, note) and one per comment post
   taylorwilsdon/google_workspace_mcp capabilities, and the Google Sheets
   MCP tool list: read from search snippets or metadata only, not opened in
   full.
-- gcloud has no Sheets command group: from memory, reference index not
-  opened.
+- gcloud has no Sheets command group: only a text match on the top-level reference index; no group page was opened.
 - Chris's existing scratch scripts and auth setup (service account vs.
   OAuth) were not inspected. The choice between gog's ADC and OAuth depends
   on them.
@@ -215,7 +181,7 @@ one record per non-empty cell (value, formula, note) and one per comment post
   guide, Sheets manage-comments guide, Sheets release notes, Sheets Discovery
   doc rev 20261005.
 - **Metadata or search snippet only**: gspread (PyPI), taylorwilsdon MCP
-  (GitHub API), Google Sheets MCP reference, Composio, and one result
+  (GitHub API), Google Sheets MCP reference, and one result
   (`a6b8/get-sheet`) that returned 404 from the GitHub API.
 - **Searches run**: two web searches for Sheets CLIs on GitHub and PyPI, one
   for Sheets MCP servers with notes or comments. Registry searches were
@@ -224,3 +190,27 @@ one record per non-empty cell (value, formula, note) and one per comment post
   missing. GitHub code search was rate-limited partway through, so notes and
   comments support for jroehl and shakydata rests on their READMEs, not
   their source.
+
+## Recommendation
+
+**Wrap one tool: put a thin `gsheet` wrapper over `gog`, and do not build a
+new client.** The deciding gap is **job 4: none of the tools enumerated writes a diff-stable snapshot of values, notes and cell-anchored comments** (see Coverage of this search for the space searched). Every enumerated tool returns
+raw API JSON at best, and the tools with curated verbs fetch comments through
+Drive, whose Sheets anchors are opaque. Jobs 1–3 are solved verbs in `gog`
+(`get`, `batch-update --data-json @plan`, `add-tab`), each with `--dry-run`.
+The snapshot is one `spreadsheets.get` with `includeGridData` plus
+`commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED`, flattened and sorted by
+(sheet, row, col). That fits in a small script, reached through `gog api
+call` or `gws sheets spreadsheets get`.
+
+Why gog over gws: gog has the steadier release cadence (v0.39.1 to v0.43.0
+between 2026-09-05 and 2026-10-01), named Sheets verbs, notes read and write,
+and an allowlist inside the binary. gws has not released since 2026-03-31 and
+says "Expect breaking changes as we march toward v1.0" (README). Both tools fetch Google's Discovery description at runtime (gws: README "Architecture"; gog: `internal/discoveryapi/discovery.go`, default base `https://www.googleapis.com/discovery/v1`, 24-hour cache in `internal/discoveryapi/cache.go`), so both should reach the new comments field with no code change. Neither path was run. If the `gog api call` path to `commentsViewMode` fails, switch the snapshot verb alone to gws, or call the REST endpoint with a token from `gog auth`. Building a whole `gsheet` client does not pay: it
+would re-implement OAuth and keyring storage that both tools already ship.
+
+Proposed shape (not built): `gsheet read|apply|add-tab|snapshot`. The first
+three pass through to `gog sheets`. `snapshot` writes sorted TSV or JSONL,
+one record per non-empty cell (value, formula, note) and one per comment post
+(thread id, anchor A1, author, time, status, content). Needed scope:
+`spreadsheets` for writes; read-only would be `spreadsheets.readonly`.
