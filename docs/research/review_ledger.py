@@ -1126,7 +1126,12 @@ _MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _unknown_cost_why(row: dict) -> str | None:
-    """Why a row cannot be appended: the cost source it was read from is missing or unreadable."""
+    """Why a row cannot be appended: the cost source it was read from is missing or unreadable.
+    A review axis (and the over-engineering row inside standards) is appended anyway with that
+    cost `unknown` and its reason (#1374): the review ran, and `report` counts it beside the
+    known costs, never as zero; dropping the row would hide the review."""
+    if row["type"] in SKIPPABLE_AXES + ("over-engineering",):
+        return None
     for field in ("tokens", "wall_clock"):
         c = row["cost"][field]
         if c["status"] == "unknown":
@@ -1345,7 +1350,9 @@ def _write_appended(args, mine: list[dict], refresh: list[dict] = ()) -> int:
 def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
-    findings sidecar being absent is a refusal, never a row with zero cost. An axis review
+    findings sidecar being absent is a refusal. An unattributable cost is a refusal for
+    a verification row, and for an axis row an `unknown` cost with its reason (#1374), never
+    zero. An axis review
     ends before its dispositions exist, so its findings' outcomes are `unknown` until
     `harvest` joins them from the dispositions sidecar. (Before #1401 a verification pass's
     own `append --type verification` refilled them; the type is still accepted, for that
