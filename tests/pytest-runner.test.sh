@@ -59,7 +59,9 @@ fresh '' a/listed_test.py=python3_only
 gate
 check "...and the same suite off the list runs under pytest, which fails it" "$([ "$rc" = 1 ] && has "FAIL a/listed_test.py"; echo $?)"
 
-fresh $'a/idiom_test.py\nb/gone_test.py\n' a/idiom_test.py=pytest_idiom
+# The suite here passes under pytest and is off the list, so the stale entry
+# is the only thing that can fail this run.
+fresh $'b/gone_test.py\n' a/idiom_test.py=pytest_idiom
 gate
 check "a list entry naming no tracked suite fails the gate" "$([ "$rc" != 0 ]; echo $?)"
 check "...naming the entry" "$(has "b/gone_test.py"; echo $?)"
