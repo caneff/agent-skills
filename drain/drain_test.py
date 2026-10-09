@@ -348,19 +348,21 @@ class Sandbox:
     def seam_runs(self):
         return [x.rstrip() for x in read(self.seam_log).splitlines()] if os.path.exists(self.seam_log) else []
 
-    def lockfile_repo(self, lock=True):
-        """A main with `package-lock.json` (or not), and an `npm` stub on PATH
-        whose `ci` makes `node_modules` and logs the call; the seam command
-        logs `seam` only when `node_modules` is there."""
+    def lockfile_repo(self, lock=True, where=""):
+        """A main with `package-lock.json` (or not) in the `where` directory,
+        and an `npm` stub on PATH whose `ci` makes `node_modules` in its cwd and
+        logs the call; the seam command logs `seam` only when
+        `<where>/node_modules` is there."""
         write(os.path.join(self.bin, "npm"),
               '#!/bin/sh\necho "npm $*" >> "$SEAM_LOG"\ntest "$NPM_RED" = 1 && exit 1\n'
               'test "$1" = ci && mkdir node_modules\n', 0o755)
         if lock:
-            write(os.path.join(self.repo, "package-lock.json"), "{}\n")
+            os.makedirs(os.path.join(self.repo, where), exist_ok=True)
+            write(os.path.join(self.repo, where, "package-lock.json"), "{}\n")
             self.git(self.repo, "add", ".")
             self.git(self.repo, "commit", "-qm", "lockfile")
             self.git(self.repo, "push", "-q", "origin", "main")
-        self.git(self.repo, "config", "land.testcmd", 'test -d node_modules && echo seam >> "$SEAM_LOG"')
+        self.git(self.repo, "config", "land.testcmd", f'test -d {os.path.join(where, "node_modules")} && echo seam >> "$SEAM_LOG"')
 
 
 @pytest.fixture
@@ -910,6 +912,14 @@ def test_a_lockfile_gets_its_dependencies_installed_before_the_seam_runs(sb):
     sb.write_state({1: {}})
     sb.lockfile_repo()
     r = sb.drain("--once", env={"RESET_TO_OLD": "1"})  # per-PR seam, then the full run
+    assert sb.seam_runs() == ["npm ci", "seam", "npm ci", "seam"], r.stdout
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+
+
+def test_a_nested_lockfile_gets_its_dependencies_installed_in_its_own_directory(sb):
+    sb.write_state({1: {}})
+    sb.lockfile_repo(where="test-audit")
+    r = sb.drain("--once", env={"RESET_TO_OLD": "1"})
     assert sb.seam_runs() == ["npm ci", "seam", "npm ci", "seam"], r.stdout
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
 
