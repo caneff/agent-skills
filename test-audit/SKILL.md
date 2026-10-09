@@ -17,11 +17,45 @@ Applying the changes is a separate, opt-in step the user asks for by name.
 
 This is the judgment pass: the smells only reading can find. `audit.py` and
 `audit.mjs` in this skill's directory are pass one — a mechanical scan for
-the syntactically detectable smells (assertion-free tests, tautologies,
-mock-the-world, interaction-only assertions, empty/skipped tests) and the
-`prose-assertion` smell. `audit.py` covers pytest and `*.test.sh` files; `audit.mjs` covers vitest and node:test. Run both first; their
-combined candidate list feeds the judgment sweep below instead of starting
-from a blank page.
+the syntactically detectable smells and the `prose-assertion` smell.
+`audit.py` covers pytest and `*.test.sh` files; `audit.mjs` covers vitest and
+node:test. Run both first; their combined candidate list feeds the judgment
+sweep below instead of starting from a blank page.
+
+Pass one's smells, by the label each prints:
+
+- **assertion-free test** — no assertion, or only a trivial one.
+- **tautology** — a value asserted against itself.
+- **mock-the-world** — many mocks, little real code.
+- **interaction-only assertion** — every check is that a mock was called.
+- **empty/skipped test** — an empty body, or a skip with no reason.
+- **prose-assertion** — every assertion is that a prose file holds a string.
+- **dead assertion in an expect-exception block** (`audit.py`) — a statement
+  after the first call inside `with pytest.raises(...)` never runs, so it can
+  never fail. Any statement counts, not only an `assert`: `with raises(E):
+  setup(); target()` is a candidate too, and the judgment pass tells the setup
+  that belongs outside the block from the target.
+- **lost test (duplicate name)** — a second `def test_x` at the same module or
+  class scope replaces the first (`audit.py`, reported at the shadowed
+  definition); two `it`/`test` calls in one `describe` with the same literal
+  title (`audit.mjs`, reported at the repeat). `audit.mjs` looks only inside a
+  `describe`, not at file scope. Vitest runs both tests of a repeated title,
+  so there it is a naming defect the gate still treats as one.
+- **lost test (uncollected class)** (`audit.py`) — a `Test*` class that defines
+  `__init__` and a test method: pytest never collects it.
+- **broad exception expectation** — `pytest.raises(Exception)` or
+  `BaseException` with no `match=` (`audit.py`); `toThrow()` or `toThrowError()`
+  with no argument, `.not` excluded (`audit.mjs`). It passes on the wrong
+  error.
+- **non-strict xfail** (`audit.py`) — `@pytest.mark.xfail` without
+  `strict=True`, when the nearest pytest config does not set `xfail_strict`
+  (or `strict_xfail`, or the umbrella `strict`). The test stays green whether
+  the bug is fixed or not. The config is the first of `pytest.toml`,
+  `.pytest.toml`, `pytest.ini`, `.pytest.ini`, `pyproject.toml`, `tox.ini`,
+  `setup.cfg` that configures pytest, walking up from the test file to the repo
+  root; one that cannot be read counts as not strict. A non-literal `strict=`
+  is not flagged, and neither is a class- or module-level `xfail` mark: only a
+  decorator on a test function is read.
 
 **JS/TS reach.** `audit.mjs` recognizes vitest and node:test — nothing else.
 A file identifies as **vitest** by importing `vitest`, or by naming tests
@@ -38,11 +72,13 @@ ci` message and exits — bootstrap with `npm ci` in
 `~/.agents/skills/test-audit/` once.
 
 **Gate mode.** `audit.py --gate [path]` and `audit.mjs --gate [path]` are the
-build-gate form of pass one: they report **only** smell 1 and skip anything
-under a `fixtures/` directory. Smell 1 alone gates because an assertion-free
-test cannot fail at all — a machine can call that a defect without reading
-anything. The other four still run and still fail when the behavior breaks, so
-blocking a merge on one costs more than it buys; they stay report-only.
+build-gate form of pass one: they report **only** the assertion-free and
+duplicate-name smells and skip anything under a `fixtures/` directory. Those
+two gate because a test that has no assertion, or that a later definition of
+the same name replaced, cannot fail at all — a machine can call that a defect
+without reading anything. Every other smell still runs and still fails when
+the behavior breaks, so blocking a merge on one costs more than it buys; they
+stay report-only. That includes the uncollected-class case of lost test.
 
 Three exit statuses: **0** clean, **1** hollow tests found, **2** unable to
 check. Only gate mode ever returns 1 — a report never fails a build — but 0 and
@@ -52,9 +88,10 @@ a repo's wiring would otherwise make that repo's gate permanently green.
 `audit.mjs` also exits 2 when `@babel/parser` is missing.
 
 The `fixtures/` exemption matches a directory of that name at any depth, so the
-gate prints how many findings it suppressed (`N assertion-free finding(s)
-suppressed under fixtures/.`) even when it passes — otherwise a repo could park
-hollow tests under a directory it named `fixtures` and never notice.
+gate prints how many findings it suppressed, per gated smell (`N assertion-free
+finding(s) suppressed under fixtures/.`, `N duplicate-name finding(s) suppressed
+under fixtures/.`) even when it passes — otherwise a repo could park hollow
+tests under a directory it named `fixtures` and never notice.
 
 Wire it into a repo by adding it to that repo's local gate (`git config
 land.testcmd`). In this repo that is `test-audit/assertion-free-gate.test.sh`,
@@ -268,13 +305,16 @@ just no longer this test's problem.
 
 ## Verify against the fixture
 
-`~/.agents/skills/test-audit/fixtures/` carries seven files.
+`~/.agents/skills/test-audit/fixtures/` carries nine files.
 `test_pricing.py`, `test_checkout_e2e.py`, `test_user_service.py`,
 `test_prose_assertions.py` and `prose_assertion.test.sh` span the
 Cut/Rewrite/Keep buckets; `~/.agents/skills/test-audit/fixtures/answer-key.md`
 has the pass-two bucket for each of their tests, and a run over them should
-reproduce that table. `test_pytest_smells.py` and `vitest_smells.test.js`
-exist for pass one's scanners to flag; the answer key does not cover them.
+reproduce that table. `test_pytest_smells.py`, `vitest_smells.test.js`,
+`test_exact_match_smells.py` and `vitest_exact_match_smells.test.js` exist for
+pass one's scanners to flag; the answer key does not cover them.
+`exact-match-fixtures.test.sh` pins what both scanners report on the last two,
+each smell beside its nearest negative.
 
 ## Run
 
@@ -291,9 +331,8 @@ exist for pass one's scanners to flag; the answer key does not cover them.
    ~/.agents/skills/test-audit/audit.py <scope>` scans pytest and `*.test.sh` files; `node
    ~/.agents/skills/test-audit/audit.mjs <scope>` scans
    vitest and node:test files. Run both and concatenate their output into one
-   `file:line: <smell>` candidate list for the six mechanically detectable
-   smells (assertion-free, tautology, mock-the-world, interaction-only
-   assertion, empty/skipped, prose-assertion). This is a candidate list, not a verdict — every
+   `file:line: <smell>` candidate list for the mechanically detectable smells
+   listed above. This is a candidate list, not a verdict — every
    line still needs the judgment pass below to confirm it and assign a
    bucket.
 
@@ -327,7 +366,8 @@ vocabulary, and metabar:
   `keep`. `category` is the smell that named it — `duplicate-coverage`,
   `mystery-guest`, `eager`, `sensitive-equality`, `name-mismatch`,
   `library-default`, `conditional-logic`, `flaky-by-construction`, `tautology`,
-  `interaction-only`, `documented-intent`, `prose-assertion`. A rewrite carries `before`/`after`;
+  `interaction-only`, `documented-intent`, `prose-assertion`,
+  `dead-assertion`, `lost-test`, `broad-exception`, `non-strict-xfail`. A rewrite carries `before`/`after`;
   a duplicate-coverage cut carries `owner` (the stronger test's `file:line`);
   a `documented-intent` row carries the comment it defers to in
   `extra.author_intent`.
