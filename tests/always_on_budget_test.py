@@ -8,9 +8,9 @@ that prove each failure is caught by its own assertion."""
 import os
 import subprocess
 import sys
-import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 CHECKER = ROOT / "tests" / "check-always-on.py"
@@ -27,21 +27,22 @@ def run(claude_md: Path, root: Path = ROOT, home: str | None = None):
     return p.returncode, p.stdout + p.stderr
 
 
-class RealTree(unittest.TestCase):
-    def test_real_claude_md_is_within_budget(self):
-        code, out = run(REAL)
-        print(out, end="")
-        self.assertEqual(code, 0, out)
-        self.assertIn("within budget", out)
+def test_real_claude_md_is_within_budget():
+    code, out = run(REAL)
+    print(out, end="")
+    assert code == 0, out
+    assert "within budget" in out
 
 
-class Fixtures(unittest.TestCase):
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
-        self.home = self.tmp / "home"
+class Fixtures:
+    """A scratch repo with a CLAUDE.md under test and a home holding its imports."""
+
+    def __init__(self, tmp):
+        self.tmp = tmp
+        self.home = tmp / "home"
         (self.home / "mem").mkdir(parents=True)
         (self.home / "mem" / "A.md").write_text("one two three\n")
-        self.root = self.tmp / "repo"
+        self.root = tmp / "repo"
         (self.root / "flow" / "claude").mkdir(parents=True)
         (self.root / "flow" / "claude" / "WORKFLOW.md").write_text("# w\n")
 
@@ -53,58 +54,68 @@ class Fixtures(unittest.TestCase):
     def check(self, text: str):
         return run(self.write(text), self.root, str(self.home))
 
-    def test_imports_are_counted(self):
-        code, out = self.check("alpha beta\n@~/mem/A.md\n")
-        self.assertEqual(code, 0, out)
-        # 3 words in CLAUDE.md (the import line is one) + 3 imported.
-        self.assertIn("total 6 words", out)
 
-    def test_nested_import_is_counted(self):
-        (self.home / "mem" / "A.md").write_text("one @~/mem/B.md\n")
-        (self.home / "mem" / "B.md").write_text("x y z w\n")
-        code, out = self.check("@~/mem/A.md\n")
-        self.assertEqual(code, 0, out)
-        self.assertIn("total 7 words", out)
-
-    def test_missing_import_fails(self):
-        # An import that cannot be read must not count as zero words.
-        code, out = self.check("@~/mem/Gone.md\n")
-        self.assertNotEqual(code, 0, out)
-        self.assertIn("import not found: ~/mem/Gone.md", out)
-
-    def test_dead_pointer_fails(self):
-        code, out = self.check(
-            "- Before you land work: read `~/.agents/skills/flow/claude/NOPE.md`.\n")
-        self.assertNotEqual(code, 0, out)
-        self.assertIn("names a path that does not exist: ~/.agents/skills/flow/claude/NOPE.md", out)
-
-    def test_live_pointer_maps_into_the_checkout(self):
-        # ~/.agents/skills/ is this repo: a pointer resolves into the checkout
-        # under test, so a doc a branch adds is found before it merges.
-        code, out = self.check(
-            "- Before you land work: read `~/.agents/skills/flow/claude/WORKFLOW.md`.\n")
-        self.assertEqual(code, 0, out)
-
-    def test_wrapped_pointer_is_read_as_one_line(self):
-        code, out = self.check(
-            "- Before you land work:\n  read `~/.agents/skills/flow/claude/WORKFLOW.md`.\n")
-        self.assertEqual(code, 0, out)
-
-    def test_pointer_without_an_action_fails(self):
-        code, out = self.check("Detail: `~/.agents/skills/flow/claude/WORKFLOW.md`.\n")
-        self.assertNotEqual(code, 0, out)
-        self.assertIn("pointer line names no action", out)
-
-    def test_real_claude_md_plus_200_words_fails_on_budget(self):
-        text = REAL.read_text() + "\n" + " ".join(["word"] * 200) + "\n"
-        f = self.tmp / "CLAUDE.md"
-        f.write_text(text)
-        code, out = run(f)
-        self.assertNotEqual(code, 0, out)
-        self.assertIn("over budget", out)
-        self.assertNotIn("does not exist", out)
-        self.assertNotIn("import not found", out)
+@pytest.fixture
+def fx(tmp_path):
+    return Fixtures(tmp_path)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_imports_are_counted(fx):
+    code, out = fx.check("alpha beta\n@~/mem/A.md\n")
+    assert code == 0, out
+    # 3 words in CLAUDE.md (the import line is one) + 3 imported.
+    assert "total 6 words" in out
+
+
+def test_nested_import_is_counted(fx):
+    (fx.home / "mem" / "A.md").write_text("one @~/mem/B.md\n")
+    (fx.home / "mem" / "B.md").write_text("x y z w\n")
+    code, out = fx.check("@~/mem/A.md\n")
+    assert code == 0, out
+    assert "total 7 words" in out
+
+
+def test_missing_import_fails(fx):
+    # An import that cannot be read must not count as zero words.
+    code, out = fx.check("@~/mem/Gone.md\n")
+    assert code != 0, out
+    assert "import not found: ~/mem/Gone.md" in out
+
+
+def test_dead_pointer_fails(fx):
+    code, out = fx.check(
+        "- Before you land work: read `~/.agents/skills/flow/claude/NOPE.md`.\n")
+    assert code != 0, out
+    assert "names a path that does not exist: ~/.agents/skills/flow/claude/NOPE.md" in out
+
+
+def test_live_pointer_maps_into_the_checkout(fx):
+    # ~/.agents/skills/ is this repo: a pointer resolves into the checkout
+    # under test, so a doc a branch adds is found before it merges.
+    code, out = fx.check(
+        "- Before you land work: read `~/.agents/skills/flow/claude/WORKFLOW.md`.\n")
+    assert code == 0, out
+
+
+def test_wrapped_pointer_is_read_as_one_line(fx):
+    code, out = fx.check(
+        "- Before you land work:\n  read `~/.agents/skills/flow/claude/WORKFLOW.md`.\n")
+    assert code == 0, out
+
+
+def test_pointer_without_an_action_fails(fx):
+    code, out = fx.check("Detail: `~/.agents/skills/flow/claude/WORKFLOW.md`.\n")
+    assert code != 0, out
+    assert "pointer line names no action" in out
+
+
+def test_real_claude_md_plus_200_words_fails_on_budget(fx):
+    text = REAL.read_text() + "\n" + " ".join(["word"] * 200) + "\n"
+    f = fx.tmp / "CLAUDE.md"
+    f.write_text(text)
+    code, out = run(f)
+    assert code != 0, out
+    assert "over budget" in out
+    assert "does not exist" not in out
+    assert "import not found" not in out
+

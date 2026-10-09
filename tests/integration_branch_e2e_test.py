@@ -31,11 +31,10 @@ What a green run does NOT cover (the seam is blind to it):
 """
 import json
 import os
-import shutil
 import subprocess
-import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 GATE = ROOT / "implement" / "pre-report-gate.sh"
@@ -52,10 +51,11 @@ AGENTS = """# Fixture
 """
 
 
-class SpecLife(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="integration-branch-e2e-")
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+class SpecLife:
+    """A throwaway repo whose `origin` is a bare clone, a fake `gh`, and the review cache under a fake HOME."""
+
+    def __init__(self, tmp):
+        self.tmp = str(tmp)
         home, fakebin = os.path.join(self.tmp, "home"), os.path.join(self.tmp, "bin")
         os.makedirs(fakebin)
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -84,7 +84,7 @@ class SpecLife(unittest.TestCase):
 
     def git(self, cwd, *args):
         done = subprocess.run(["git", *args], cwd=cwd, env=self.env, capture_output=True, text=True)
-        self.assertEqual(done.returncode, 0, (args, done.stderr))
+        assert done.returncode == 0, (args, done.stderr)
         return done.stdout.strip()
 
     def commit(self, cwd, name, message=None):
@@ -97,77 +97,80 @@ class SpecLife(unittest.TestCase):
         done = subprocess.run([str(c) for c in cmd], cwd=cwd, env=self.env, capture_output=True, text=True)
         return done.returncode, done.stdout + done.stderr
 
-    def test_a_spec_lands_through_its_integration_branch(self):
-        # The spec run's integration branch and workspace, as `implement-dispatch --spec 3` leaves them.
-        self.git(self.primary, "push", "-q", "origin", "main:spec-3")
-        spec_ws = os.path.join(self.tmp, "spec-3")
-        self.git(self.primary, "fetch", "-q", "origin")
-        self.git(self.primary, "worktree", "add", "-q", "-b", "spec-3", spec_ws, "origin/spec-3")
 
-        # A slice of #3: branched from origin/spec-3, its base recorded.
-        slice_ws = os.path.join(self.tmp, "implement-4")
-        self.git(self.primary, "worktree", "add", "-q", "-b", "implement-4", slice_ws, "origin/spec-3")
-        self.git(self.primary, "config", "branch.implement-4.base", "spec-3")
-        self.commit(slice_ws, "slice-4", "slice 4\n\nCloses #4")
-        code, out = self.run_tool(slice_ws, "bash", GATE, "HEAD")
-        self.assertEqual(code, 0, out)
-        self.assertIn("slice of spec-3, no review wave", out)
-        self.assertFalse(os.listdir(self.reviews), "a slice wrote review files")
-        Path(self.prs).write_text("40 main\n")
-        code, out = self.run_tool(slice_ws, "bash", FIX_CHECK, "4")
-        self.assertEqual(code, 1, out)
-        self.assertIn("PR #40 from implement-4 targets main, not spec-3", out)
-        Path(self.prs).write_text("40 spec-3\n")
-        code, out = self.run_tool(slice_ws, "bash", FIX_CHECK, "4")
-        self.assertEqual(code, 0, out)
-
-        # The slice lands on origin/spec-3, as its PR's merge does on GitHub; main moves on.
-        self.git(slice_ws, "push", "-q", "origin", "HEAD:spec-3")
-        Path(self.prs).write_text("")
-        self.commit(self.primary, "elsewhere")
-        self.git(self.primary, "push", "-q", "origin", "main")
-
-        # The closing check is the integration PR's.
-        code, section = self.run_tool(self.primary, "python3", CLOSING, self.primary, "3",
-                                      "--surface", "the integration PR on GitHub")
-        self.assertEqual(code, 0, section)
-        self.assertIn("base `main`, head `spec-3`", section)
-        self.assertIn("`origin/main...spec-3`", section)
-        self.assertNotIn("cherry-pick", section)
-
-        # Its keep-current block, run as written in the spec run's workspace: the slice comes
-        # in, main is merged (never rebased), and the push lands.
-        block = section.split("### The spec-level review", 1)[1].split("```\n", 2)[1]
-        code, out = self.run_tool(spec_ws, "bash", "-c", block)
-        self.assertEqual(code, 0, out)
-        self.assertEqual(self.git(spec_ws, "rev-parse", "HEAD"), self.git(spec_ws, "rev-parse", "origin/spec-3"))
-        reviewed = self.git(spec_ws, "log", "--format=%s", "origin/main...spec-3")
-        self.assertIn("slice 4", reviewed)
-        self.git(spec_ws, "merge-base", "--is-ancestor", "origin/main", "spec-3")
-
-        # One review keyed on #3, one fix round on spec-3.
-        for axis in ("standards", "spec", "correctness"):
-            Path(self.reviews, f"findings-{axis}-3.jsonl").write_text(
-                json.dumps({"id": "P1", "axis": "spec", "severity": "hard", "file": "f", "title": "t"}) + "\n"
-                if axis == "spec" else "")
-            Path(self.reviews, f"findings-{axis}-3.done").write_text("")
-        Path(self.reviews, "dispositions-3.jsonl").write_text("")
-        code, out = self.run_tool(spec_ws, "bash", GATE, "HEAD")
-        self.assertEqual(code, 1, out)
-        self.assertIn("no disposition for P1", out)
-        fix = self.commit(spec_ws, "fix-p1")
-        Path(self.reviews, "dispositions-3.jsonl").write_text(
-            json.dumps({"id": "P1", "outcome": "fixed", "sha": fix}) + "\n")
-        code, out = self.run_tool(spec_ws, "bash", GATE, "HEAD")
-        self.assertEqual(code, 0, out)
-        self.assertIn("1 findings, each disposed once", out)
-
-        # The controller's merge check on the pushed integration branch.
-        self.git(spec_ws, "push", "-q", "origin", "spec-3")
-        code, out = self.run_tool(self.primary, "bash", FIX_CHECK, "3", "origin/spec-3")
-        self.assertEqual(code, 0, out)
-        self.assertIn("1 findings, each disposed once", out)
+@pytest.fixture
+def life(tmp_path):
+    return SpecLife(tmp_path)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_a_spec_lands_through_its_integration_branch(life):
+    # The spec run's integration branch and workspace, as `implement-dispatch --spec 3` leaves them.
+    life.git(life.primary, "push", "-q", "origin", "main:spec-3")
+    spec_ws = os.path.join(life.tmp, "spec-3")
+    life.git(life.primary, "fetch", "-q", "origin")
+    life.git(life.primary, "worktree", "add", "-q", "-b", "spec-3", spec_ws, "origin/spec-3")
+
+    # A slice of #3: branched from origin/spec-3, its base recorded.
+    slice_ws = os.path.join(life.tmp, "implement-4")
+    life.git(life.primary, "worktree", "add", "-q", "-b", "implement-4", slice_ws, "origin/spec-3")
+    life.git(life.primary, "config", "branch.implement-4.base", "spec-3")
+    life.commit(slice_ws, "slice-4", "slice 4\n\nCloses #4")
+    code, out = life.run_tool(slice_ws, "bash", GATE, "HEAD")
+    assert code == 0, out
+    assert "slice of spec-3, no review wave" in out
+    assert not os.listdir(life.reviews), "a slice wrote review files"
+    Path(life.prs).write_text("40 main\n")
+    code, out = life.run_tool(slice_ws, "bash", FIX_CHECK, "4")
+    assert code == 1, out
+    assert "PR #40 from implement-4 targets main, not spec-3" in out
+    Path(life.prs).write_text("40 spec-3\n")
+    code, out = life.run_tool(slice_ws, "bash", FIX_CHECK, "4")
+    assert code == 0, out
+
+    # The slice lands on origin/spec-3, as its PR's merge does on GitHub; main moves on.
+    life.git(slice_ws, "push", "-q", "origin", "HEAD:spec-3")
+    Path(life.prs).write_text("")
+    life.commit(life.primary, "elsewhere")
+    life.git(life.primary, "push", "-q", "origin", "main")
+
+    # The closing check is the integration PR's.
+    code, section = life.run_tool(life.primary, "python3", CLOSING, life.primary, "3",
+                                  "--surface", "the integration PR on GitHub")
+    assert code == 0, section
+    assert "base `main`, head `spec-3`" in section
+    assert "`origin/main...spec-3`" in section
+    assert "cherry-pick" not in section
+
+    # Its keep-current block, run as written in the spec run's workspace: the slice comes
+    # in, main is merged (never rebased), and the push lands.
+    block = section.split("### The spec-level review", 1)[1].split("```\n", 2)[1]
+    code, out = life.run_tool(spec_ws, "bash", "-c", block)
+    assert code == 0, out
+    assert life.git(spec_ws, "rev-parse", "HEAD") == life.git(spec_ws, "rev-parse", "origin/spec-3")
+    reviewed = life.git(spec_ws, "log", "--format=%s", "origin/main...spec-3")
+    assert "slice 4" in reviewed
+    life.git(spec_ws, "merge-base", "--is-ancestor", "origin/main", "spec-3")
+
+    # One review keyed on #3, one fix round on spec-3.
+    for axis in ("standards", "spec", "correctness"):
+        Path(life.reviews, f"findings-{axis}-3.jsonl").write_text(
+            json.dumps({"id": "P1", "axis": "spec", "severity": "hard", "file": "f", "title": "t"}) + "\n"
+            if axis == "spec" else "")
+        Path(life.reviews, f"findings-{axis}-3.done").write_text("")
+    Path(life.reviews, "dispositions-3.jsonl").write_text("")
+    code, out = life.run_tool(spec_ws, "bash", GATE, "HEAD")
+    assert code == 1, out
+    assert "no disposition for P1" in out
+    fix = life.commit(spec_ws, "fix-p1")
+    Path(life.reviews, "dispositions-3.jsonl").write_text(
+        json.dumps({"id": "P1", "outcome": "fixed", "sha": fix}) + "\n")
+    code, out = life.run_tool(spec_ws, "bash", GATE, "HEAD")
+    assert code == 0, out
+    assert "1 findings, each disposed once" in out
+
+    # The controller's merge check on the pushed integration branch.
+    life.git(spec_ws, "push", "-q", "origin", "spec-3")
+    code, out = life.run_tool(life.primary, "bash", FIX_CHECK, "3", "origin/spec-3")
+    assert code == 0, out
+    assert "1 findings, each disposed once" in out
+

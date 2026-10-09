@@ -3,15 +3,3 @@
 # its own group once its suites are rewritten for pytest; an entry naming no
 # tracked *_test.py fails the gate. Blank and `#` lines are ignored. One blank
 # line between groups, so parallel slices never touch adjacent lines.
-
-
-# #1508
-create-lmd-page/skill_test.py
-drain/drain_test.py
-drain/skill_test.py
-flow/ccstatusline-table/claude_usage_cache_test.py
-flow/claude/pointer_reads_test.py
-tests/always_on_budget_test.py
-tests/disclosure_levels_e2e_test.py
-tests/integration_branch_e2e_test.py
-tests/section_reference_trimmers_test.py
