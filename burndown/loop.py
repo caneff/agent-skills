@@ -1025,10 +1025,33 @@ def load_run(run_id, root=None):
         raise LoopError(str(exc)) from exc
 
 
+def slice_base(run):
+    """`origin/spec-<p>` when the checkout's branch is a slice, one whose
+    dispatch recorded `branch.<name>.base` as `spec-<p>` (#1486); else None.
+    The branch already holds every slice landed on `spec-<p>`, so those files
+    are not its own. A recorded base naming no `spec-<n>` is refused, and a
+    detached HEAD has no branch to record one on."""
+    try:
+        branch = run(["symbolic-ref", "--short", "HEAD"]).strip()
+    except LoopError:
+        return None
+    # `--default ""` makes an unset key an empty answer, so a git failure
+    # stays an error instead of reading as "no recorded base".
+    recorded = run(["config", "--default", "", "--get",
+                    f"branch.{branch}.base"]).strip()
+    if not recorded:
+        return None
+    if not SPEC_BRANCH.fullmatch(recorded):
+        raise LoopError(f"branch.{branch}.base is {recorded!r}, not a "
+                        "`spec-<n>` branch, so its diff base is unknown")
+    return f"origin/{recorded}"
+
+
 def workspace_diff(workspace):
     """The files a workspace's branch really changes against its origin's
     default branch: `git diff --name-only origin/<default>...HEAD` run inside
-    it (#1212), plus its uncommitted and untracked files. Refuses when git
+    it (#1212), plus its uncommitted and untracked files. A slice branch is
+    diffed against `origin/spec-<p>` instead (`slice_base`). Refuses when git
     cannot answer — a workspace whose diff could not be read is not one that
     changed nothing.
     """
@@ -1045,14 +1068,14 @@ def workspace_diff(workspace):
     if os.path.realpath(top) != os.path.realpath(workspace):
         raise LoopError(f"{workspace} is not a checkout root (git resolves it "
                         f"to {top}), so its diff is not its own")
-    default = origin_default(in_workspace)
+    base = slice_base(in_workspace) or origin_default(in_workspace)
     # NUL-separated, as `closure.py` reads `git ls-files`: the default output
     # C-quotes a non-ASCII name, which then matches no raw path. Committed
     # history, then what the worker has edited but not committed, then what it
     # has created but not added: all three are files it has reached.
     names = []
     for args in (["diff", "--name-only", "-z", "--no-renames",
-                  f"{default}...HEAD"],
+                  f"{base}...HEAD"],
                  ["diff", "--name-only", "-z", "--no-renames", "HEAD"],
                  ["ls-files", "-z", "--others", "--exclude-standard"]):
         names += [n for n in in_workspace(args).split("\0") if n]
