@@ -203,7 +203,7 @@ merge path names no full run, so the fallback has no carrier there.
 
 | Option | How it decides impact | Fit here | Cost and dependencies |
 |---|---|---|---|
-| **pytest-testmon** | Records, per test, the code it executed (through Coverage.py) plus env vars, Python version and package versions, and re-runs the tests whose recorded dependencies changed. It "doesn't track ... static files (txt, xml, other project assets)". It needs a full `--testmon` run first, and keeps state in `.testmondata`. | Poor. pytest is not installed here (`python3 -m pytest` reports "No module named pytest"). The 41 `*_test.py` suites run as scripts under `python3` (by a grep: 20 plain-assert, 19 `unittest`, 2 that mention pytest). It does not see bash, Rust or Markdown, and much of this repo's testing reads Markdown. Most suites here drive scripts as subprocesses, and whether testmon sees code run in a subprocess is my question, not something the page says. | New deps: pytest, pytest-testmon, coverage. A state file to keep. A runner change for 41 suites. |
+| **pytest-testmon** | Records, per test, the code it executed (through Coverage.py) plus env vars, Python version and package versions, and re-runs the tests whose recorded dependencies changed. It "doesn't track ... static files (txt, xml, other project assets)". It needs a full `--testmon` run first, and keeps state in `.testmondata`. | Poor, for coverage reasons, not installation: pytest is not installed (`python3 -m pytest` reports "No module named pytest"), which is a one-time cost. The 41 `*_test.py` suites run as scripts under `python3` (by a grep: 20 plain-assert, 19 `unittest`, 2 that mention pytest). It does not see bash, Rust or Markdown, and much of this repo's testing reads Markdown. Most suites here drive scripts as subprocesses, and whether testmon sees code run in a subprocess is my question, not something the page says. | New deps: pytest, pytest-testmon, coverage. A state file to keep. A runner change for 41 suites. |
 | **pytest-picked** | Runs "tests from modified test files" and folders, read from `git status` (`--mode=unstaged`, the default) or from the branch (`--mode=branch --parent-branch`). | None. It selects test files that changed. It does not follow a source change to its tests, which is the whole question. | pytest plus the plugin. |
 | **pytest `--lf`/`--ff`/`--nf`/`--sw`** | Last-failed, failed-first, new-first and stepwise, from pytest's cache. These are orderings and re-runs, not impact selection. With `--lf` and no known failures, the default `--lfnf=all` runs everything. | Inner-loop convenience at most, and only under pytest, which runs none of this repo's suites. | pytest. |
 | **Pants** `--changed-since --changed-dependents=transitive` | Git diff, then the dependency graph Pants infers, then the targets that depend on the change, transitively. The docs recommend passing the merge base for presubmit. Changing a lockfile "will consider all users of *any* dependency changed, transitively." | The model fits exactly: transitive reverse dependencies from a diff. Adopting it means BUILD files and Pants owning test execution for Python, shell and Rust. I did not open Pants's shell or Rust backend pages, so how it would cover bash and Cargo here is unverified. | A build system adoption, so a new dependency of the largest kind. |
@@ -262,8 +262,13 @@ by about 90 s each.
    outside the selection is a selector miss, and is worth filing as a
    defect-class instance. This turns misses from silent into counted.
 
-**Not recommended now:** pytest-testmon and pytest-picked (pytest is not even
-installed, and they do not see bash, Rust or prose), Pants/Bazel/Buck2 (a
+**Not recommended now:** pytest-testmon could cover at most the 41 Python
+suites of 104. pytest would run the 19 `unittest` suites as they stand, and
+the 20 plain-assert scripts would need converting. Even then it would miss
+this repo's known gaps: 33 of the 41 Python suites drive code through
+`subprocess`, and testmon ignores static files, the prose the tests read.
+pytest not being installed is a one-time cost, not the reason. pytest-picked
+selects only changed test files, so it does not answer the question. Pants/Bazel/Buck2 (a
 build-system migration to save about 90 s a run), and ML selection (no data
 to learn from, and a hosted service). cargo-nextest is worth a look only if
 `flow/lane` splits into several crates. Each of these is a new dependency and
