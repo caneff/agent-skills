@@ -240,7 +240,9 @@ def read_frontier(ctx):
     ready tickets and the clear spec parents, oldest first; the anchor is the
     first. A slice is neither: it is built inside its spec's run. `waiting` is
     the numbers of specs that have a ready slice and are not in the queue
-    (not ready-for-agent, claimed, blocked), which drain cannot start."""
+    (not ready-for-agent, claimed, blocked), which drain cannot start.
+    `stranded` is `[(number, why)]`: slices whose spec is closed or in another
+    repo, which no spec run can build (#1485)."""
     issues = {}
 
     def fetch(r, label):
@@ -256,7 +258,8 @@ def read_frontier(ctx):
              for t in buckets[bucket]]
     queue = sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
     waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
-    return queue, sorted(waiting)
+    stranded = [(t["number"], t["why"]) for t in buckets["stranded"]]
+    return queue, sorted(waiting), stranded
 
 
 def pick(ctx):
@@ -879,9 +882,11 @@ def drain(ctx, limit):
             if resumed:
                 anchor, kind = taken
             else:
-                queue, waiting = read_frontier(ctx)
+                queue, waiting, stranded = read_frontier(ctx)
                 candidates = anchors(ctx, queue)
                 if not candidates:
+                    for n, why in stranded:
+                        say(f"stranded: #{n}, {why}")
                     for spec in waiting:
                         say(f"waiting: ready slices of spec #{spec}, which drain cannot start (it is not "
                             "ready-for-agent, is claimed, or is blocked)")

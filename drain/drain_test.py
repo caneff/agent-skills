@@ -61,7 +61,7 @@ elif args[0] == "api":
         parent = state["issues"][m.group(1)].get("parent")
         if parent is None:
             sys.stderr.write("gh: Not Found (HTTP 404)\n"); sys.exit(1)
-        out(dict(number=parent, labels=names(state["issues"][str(parent)])))
+        out(dict(number=parent, state=state["issues"][str(parent)]["state"], labels=names(state["issues"][str(parent)])))
     elif m:
         out({"state": state["issues"][m.group(1)]["state"]})
 elif args[:2] == ["issue", "edit"]:
@@ -1065,6 +1065,15 @@ class SpecTest(Sandbox):
         r = self.drain()
         self.assertIn("nothing to drain", r.stdout)
         self.assertIn("waiting: ready slices of spec #1, which drain cannot start", r.stdout)
+        self.assertEqual(self.dispatch_runs(), [])
+
+    def test_a_slice_of_a_closed_spec_is_named_not_left_behind(self):
+        # #1485: the slice reads `stranded`, and drain says so beside `waiting:`.
+        self.write_state({1: {**self.SPEC, "state": "closed"}, 2: {"parent": 1}})
+        r = self.drain()
+        self.assertIn("nothing to drain", r.stdout)
+        self.assertIn("stranded: #2", r.stdout)
+        self.assertIn("closed", r.stdout)
         self.assertEqual(self.dispatch_runs(), [])
 
     def test_a_blocked_spec_is_not_dispatched(self):
