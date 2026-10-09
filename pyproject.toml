@@ -1,0 +1,17 @@
+# Not a package: this file only pins the Python test tools that tests/all.sh
+# runs `*_test.py` suites with (`uv run pytest <file>`), locked by uv.lock.
+# Ruled in #1494 (rulings 1a, 2a).
+[project]
+name = "agent-skills"
+version = "0"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = ["pytest", "pytest-mock"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+# Suites run in parallel, one pytest per file; none reads a cache back.
+addopts = "-p no:cacheprovider"
