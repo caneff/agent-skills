@@ -645,7 +645,7 @@ def _stub_npx(dirpath, report_text, exit_code=0, hang=False):
                 f"open({os.path.join(dirpath, 'argv.json')!r}, 'w').write(json.dumps([os.getcwd()] + sys.argv[1:]))\n"
                 "conf = [a for a in sys.argv if a.endswith('.json')]\n"
                 + (f"import subprocess, time\n"
-                   f"open({os.path.join(dirpath, 'child.pid')!r}, 'w').write(str(subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']).pid))\n"
+                   f"open({os.path.join(dirpath, 'child.pid')!r}, 'w').write(str(subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)']).pid))\n"
                    "time.sleep(60)\n" if hang else "") +
                 "if conf and " + ("False" if report_text is None else "True") + ":\n"
                 "    out = json.load(open(conf[0]))['jsonReporter']['fileName']\n"
@@ -704,9 +704,13 @@ def _check_run_js_target_through_stryker():
         assert (code, out) == (0, ""), (code, out, err)
 
         # A hung Stryker is bounded, and its whole process group dies with it.
+        # Killing only the direct child leaves the grandchild holding the
+        # output pipe open, so the run would not return until it exits (20 s).
         _stub_npx(d, report, hang=True)
+        started = time.monotonic()
         code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd,
                                   extra_env={"MUTATION_AUDIT_TIMEOUT": "2"})
+        assert time.monotonic() - started < 10, "the timed-out run waited on its child"
         assert code == 3 and out == "" and "timed out" in err, (code, out, err)
         child = int(open(os.path.join(d, "child.pid")).read())
         for _ in range(50):
