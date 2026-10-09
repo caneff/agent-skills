@@ -1,6 +1,6 @@
 # Answer key
 
-Thirteen test cases across five files, each tagged with the bucket `test-audit`
+Forty test cases across seven files, each tagged with the bucket `test-audit`
 must land it in and the one-line concrete-failure reason. Running the audit
 over `fixtures/` must reproduce this table exactly — every `Cut`/`Rewrite`
 must match, and every `Keep` must be left alone.
@@ -20,5 +20,32 @@ must match, and every `Keep` must be left alone.
 | 11 | `test_skill_says_discounts_are_capped` | `test_prose_assertions.py` | **Cut** | prose-assertion | Its only assertion is that `SKILL.md` contains a sentence. It cannot fail when discounts stop being capped, and fails on any rewording of the prose. Pass one flags it mechanically. |
 | 12 | `test_discount_over_100_percent_is_capped` | `test_prose_assertions.py` | **Keep** | — | Runs `apply_discount` and asserts the result. Pass one must not flag it: a test that runs code is not a prose assertion. |
 | 13 | `prose_assertion.test.sh` | `prose_assertion.test.sh` | **Cut** | prose-assertion | Shell test whose only check is `grep` for a sentence in a Markdown file. Pass one flags it mechanically, per file. |
+| 14 | `test_total_recomputes_the_formula` | `test_candidate_smells.py` | **Rewrite** | leaking domain knowledge | Recomputes the expected total with the code's own formula (`100 + 100 * 0.2`), so it cannot fail when the formula is wrong and fails on a legitimate fix. Rewrite against a worked literal, as the next row does. |
+| 15 | `test_total_matches_a_worked_example` | `test_candidate_smells.py` | **Keep** | — | Expected value is a literal from a worked example, independent of the formula. Pass one stays quiet. |
+| 16 | `test_reads_a_private_attribute` | `test_candidate_smells.py` | **Rewrite** | private-API access | Reads a private member, so an internal rename or restructure turns it red though no caller sees a change. Pass one flags it as a candidate. Rewrite to assert through the public interface. The scanner also flags the module-level `from billing import _round_cents` at its own line. |
+| 17 | `test_reads_the_public_interface` | `test_candidate_smells.py` | **Keep** | — | Public `get` only; the dunder `__class__` is not a private name. Pass one stays quiet. |
+| 18 | `test_self_privates_belong_to_the_test` | `test_candidate_smells.py` | **Keep** | — | `self._seen` is the test's own state, not another object's private member. Pass one stays quiet. |
+| 19 | `test_stub_is_also_asserted_called` | `test_candidate_smells.py` | **Rewrite** | stub asserted called | The stub supplies the input and is also asserted called, so a refactor that gets the same input another way (a cache, a batch) turns it red with the output unchanged. Pass one flags it as a candidate, though a real outcome assertion sits beside it. Rewrite: keep the outcome assertion, drop the call check. |
+| 20 | `test_stub_built_with_a_side_effect_is_checked_called` | `test_candidate_smells.py` | **Rewrite** | stub asserted called | Same smell through `MagicMock(side_effect=...)` and `assert fetch.called`. Pass one flags it as a candidate, though a real outcome assertion sits beside it. Rewrite: keep the outcome assertion, drop the call check. |
+| 21 | `test_stub_is_never_asserted_called` | `test_candidate_smells.py` | **Keep** | — | The stub only feeds input; the outcome is what is asserted. |
+| 22 | `test_a_different_mock_is_asserted_called` | `test_candidate_smells.py` | **Keep** | — | The asserted mock (`mailer.send`) is not the one that supplies input (`repo.get`): a real side effect, checked on its own mock. |
+| 23 | `test_every_assertion_sits_in_a_loop_over_the_output` | `test_candidate_smells.py` | **Rewrite** | vacuous loop assertion | Every assertion sits in a loop over the output, so an empty result runs none of them and the test passes. Pass one flags it. Rewrite: assert the length or non-empty first. |
+| 24 | `test_loop_assertions_behind_a_length_check` | `test_candidate_smells.py` | **Keep** | — | A length check outside the loop makes an empty result fail. |
+| 25 | `test_loop_over_literal_cases` | `test_candidate_smells.py` | **Keep** | — | The loop walks a literal tuple, never empty by accident. |
+| 26 | `recomputes the formula` | `vitest_candidate_smells.test.ts` | **Rewrite** | leaking domain knowledge | Recomputes the expected total with the code's own formula (`100 + 100 * 0.2`), so it cannot fail when the formula is wrong and fails on a legitimate fix. Rewrite against a worked literal. |
+| 27 | `matches a worked example` | `vitest_candidate_smells.test.ts` | **Keep** | — | Expected value is a literal. Pass one stays quiet. |
+| 28 | `casts to any` | `vitest_candidate_smells.test.ts` | **Rewrite** | private-API access | Reads a member through `as any`, so an internal rename or restructure turns it red though no caller sees a change. Pass one flags it as a candidate. Rewrite to assert through the public interface. |
+| 29 | `silences the type error` | `vitest_candidate_smells.test.ts` | **Rewrite** | private-API access | Reads a member under `@ts-expect-error`, so an internal rename or restructure turns it red though no caller sees a change. Pass one flags it as a candidate. Rewrite to assert through the public interface. |
+| 30 | `indexes a private name` | `vitest_candidate_smells.test.ts` | **Rewrite** | private-API access | Reads `cache["_store"]`, so an internal rename or restructure turns it red though no caller sees a change. Pass one flags it as a candidate. Rewrite to assert through the public interface. |
+| 31 | `reads the public interface` | `vitest_candidate_smells.test.ts` | **Keep** | — | Public `size`, by dot and by bracket. Pass one stays quiet. |
+| 32 | `silences a type error that is no member access` | `vitest_candidate_smells.test.ts` | **Keep** | — | The `@ts-expect-error` covers a wrong argument type in a deliberate invalid-input test, not a member access. |
+| 33 | `asserts the stub called` | `vitest_candidate_smells.test.ts` | **Rewrite** | stub asserted called | The stub supplies the input and is also asserted called, so a refactor that gets the same input another way (a cache, a batch) turns it red with the output unchanged. Pass one flags it as a candidate, though a real outcome assertion sits beside it. Rewrite: keep the outcome assertion, drop the call check. |
+| 34 | `asserts a spied method called` | `vitest_candidate_smells.test.ts` | **Rewrite** | stub asserted called | Same smell through `vi.spyOn(repo, "get").mockReturnValueOnce(...)` and `expect(repo.get).toHaveBeenCalled()`. Pass one flags it as a candidate, though a real outcome assertion sits beside it. Rewrite: keep the outcome assertion, drop the call check. |
+| 35 | `never asserts the stub called` | `vitest_candidate_smells.test.ts` | **Keep** | — | The stub only feeds input; the outcome is what is asserted. |
+| 36 | `asserts a different mock called` | `vitest_candidate_smells.test.ts` | **Keep** | — | The asserted mock (`send`) is not the one that supplies input (`get`). |
+| 37 | `asserts only inside forEach over the output` | `vitest_candidate_smells.test.ts` | **Rewrite** | vacuous loop assertion | Every assertion sits in a loop over the output, so an empty result runs none of them and the test passes. Pass one flags it. Rewrite: assert the length or non-empty first. |
+| 38 | `asserts only inside for-of over the output` | `vitest_candidate_smells.test.ts` | **Rewrite** | vacuous loop assertion | Every assertion sits in a loop over the output, so an empty result runs none of them and the test passes. Pass one flags it. Rewrite: assert the length or non-empty first. |
+| 39 | `checks the length before the loop` | `vitest_candidate_smells.test.ts` | **Keep** | — | `toHaveLength(2)` outside the loop makes an empty result fail. |
+| 40 | `loops over literal cases` | `vitest_candidate_smells.test.ts` | **Keep** | — | The loop walks an array literal, never empty by accident. |
 
-Tally: 3 Keep, 5 Cut, 5 Rewrite.
+Tally: 17 Keep, 5 Cut, 18 Rewrite.
