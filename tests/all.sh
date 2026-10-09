@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Runs every test suite in the repo. Discovery rules over git-tracked
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
-# runs directly under python3, each `audit.py` that implements
+# runs as `uv run --locked pytest <file>` (the tools pinned by pyproject.toml
+# and uv.lock) unless `tests/pytest-transitional.txt` lists it, when it runs
+# directly under python3 (see `transitional`), each `audit.py` that implements
 # `--selfcheck` runs with that flag, each `Cargo.toml` runs `cargo test`, and
 # each mod folder under `flow/mods/` runs `claude plugin test <folder>`. One
 # line per suite; exits non-zero on the first failure (and prints that
@@ -35,11 +37,37 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 
+# The `*_test.py` suites not yet rewritten for pytest (#1494): one path per
+# line of tests/pytest-transitional.txt, blank and `#` lines ignored. The list
+# lives in its own file so a slice that deletes its entries leaves this script
+# unchanged and keeps `--changed` narrow. An entry naming no tracked
+# `*_test.py` stops the run, naming the entry: a renamed or deleted suite
+# would otherwise leave a stale line that nothing ever reads again. No list
+# file is an empty list. Prints the entries, one per line.
+transitional() {
+  local list=tests/pytest-transitional.txt entries tracked entry bad=0
+  [ -f "$list" ] || return 0
+  entries=$(grep -vE '^[[:space:]]*(#|$)' "$list" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+  tracked=$(git ls-files -- '*_test.py')
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    grep -qxF -- "$entry" <<<"$tracked" && continue
+    echo "tests/all.sh: $list lists $entry, which is not a tracked *_test.py file" >&2
+    bad=1
+  done <<<"$entries"
+  [ "$bad" = 0 ] || exit 1
+  printf '%s\n' "$entries"
+}
+transitional_suites=$(transitional) || exit 1
+
 suites() { # prints "<label>\t<command>" per discovered suite
   git ls-files -- '*.test.sh' |
     while IFS= read -r f; do printf '%s\tbash %s\n' "$f" "$f"; done
   git ls-files -- '*_test.py' |
-    while IFS= read -r f; do printf '%s\tpython3 %s\n' "$f" "$f"; done
+    while IFS= read -r f; do
+      if grep -qxF -- "$f" <<<"$transitional_suites"; then printf '%s\tpython3 %s\n' "$f" "$f"
+      else printf '%s\tuv run --locked pytest %s\n' "$f" "$f"; fi
+    done
   git ls-files | grep -E '(^|/)audit\.py$' |
     while IFS= read -r f; do
       grep -q -- '--selfcheck' "$f" &&
@@ -118,6 +146,13 @@ selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; rm -rf "$tmp"; e
 # A missing cargo must fail the gate, not silently skip every Cargo suite.
 if printf '%s\n' "$selection" | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
   echo "tests/all.sh: cargo is not on PATH, and a tracked Cargo.toml needs it" >&2
+  exit 1
+fi
+
+# Likewise a missing uv must fail the gate, not fail every pytest suite with a
+# bare "command not found".
+if printf '%s\n' "$selection" | cut -f2 | grep -q '^uv run ' && ! command -v uv >/dev/null 2>&1; then
+  echo "tests/all.sh: uv is not on PATH, and a *_test.py suite runs under it (uv sync, then rerun)" >&2
   exit 1
 fi
 
@@ -237,7 +272,7 @@ cpu_budget() { # <label>: prints the suite's budget in seconds
   case $1 in
     flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir) and runs 140+ process-spawning tests
     flow/install.test.sh) echo 160 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME (measured 109s)
-    drain/drain_test.py) echo 60 ;; # one real git repo, bare origin and stub processes per case, 90 cases (measured 44.6s CPU)
+    drain/drain_test.py) echo 80 ;; # one real git repo, bare origin and stub processes per case, 99 cases (measured 58.4s CPU alone, 64.4s in an 8-job run, 2026-10-09)
     *) echo "$default_cpu_budget" ;;
   esac
 }
