@@ -214,8 +214,14 @@ defines them.
   in the #781 trial two workers finished without reporting and the run
   stalled ~4 h unseen (#820). The controller subscribes to each worker it
   dispatches, and again after every message it sends one: `SendMessage` to
-  the worker with `notify_when_idle: true` (no message needed). The idle
-  notice reaches the controller only. On it, read that worker's pane
+  the worker with `notify_when_idle: true` and no `message` key at all:
+  `SendMessage({to: "<worker session name>", notify_when_idle: true})`.
+  Omit `message` rather than passing `""`: the tool's schema lists `message`
+  under `required` but defaults it, and a call that leaves it out validates
+  and routes (checked 2026-10-11 against a nonexistent name: the error was
+  "not reachable", not a schema error). The digest of 2026-10-04 reported an
+  empty `message` failing as invalid in two controller sessions (#1530). The
+  idle notice reaches the controller only. On it, read that worker's pane
   (`herdr agent read <name>`) and say nothing to Chris unless the pane holds
   a question for him. The `Stop` hook `worker-stop-alert.sh` used to do this
   job by typing a line into the controller's herdr pane. It was unregistered
