@@ -16,23 +16,11 @@ root=$PWD
 
 fail() { echo "FAIL: $*"; exit 1; }
 
-# Prints the gate's output over a one-suite repo; returns 99 when the scratch
-# repo could not be built, else the gate's exit status.
-run_gate() { # <fixture name>
-  local scratch rc
-  scratch=$(mktemp -d) || return 99
-  rc=99
-  if mkdir -p "$scratch/tests" \
-    && cp "$root/tests/all.sh" "$scratch/tests/all.sh" \
-    && cp "$root/tests/fixtures/exit-status/$1.sh" "$scratch/tests/fixture.test.sh" \
-    && git -C "$scratch" init -q \
-    && git -C "$scratch" add -A; then
-    ( cd "$scratch" && bash tests/all.sh 2>&1 )
-    rc=$?
-  fi
-  rm -rf "$scratch"
-  return $rc
-}
+# Runs the gate over a one-suite repo (tests/gate-fixture.sh): prints the
+# gate's output, returns its exit status, or 99 if the scratch repo could not
+# be built.
+. "$root/tests/gate-fixture.sh"
+run_gate() { run_gate_fixture exit-status "$1"; }
 
 gate_red() { # <fixture> -> sets $out, fails the test unless the gate exited 1
   out=$(run_gate "$1"); local rc=$?
@@ -51,9 +39,17 @@ printf '%s\n' "$out" | grep -q 'printed no output' \
 printf '%s\n' "$out" | grep -qi 'signal' \
   && fail "silent exit 3: the report named a signal for a plain exit"$'\n'"$out"
 
+# An exit 255: no signal bears that number, so none is named (a plain exit code
+# a suite chose, or ssh's, is not reported as a kill).
+gate_red exit255
+printf '%s\n' "$out" | grep -q 'exited with status 255' \
+  || fail "exit 255: the report never named the exit status"$'\n'"$out"
+printf '%s\n' "$out" | grep -qi 'signal' \
+  && fail "exit 255: the report named a signal no signal bears"$'\n'"$out"
+
 # A SIGKILL: status 137, the signal named, a kill told apart from an assertion.
 gate_red killed
-printf '%s\n' "$out" | grep -q 'exited with status 137' \
+printf '%s\n' "$out" | grep -q 'exited with status 137, which reads as' \
   || fail "killed: the report never named status 137"$'\n'"$out"
 printf '%s\n' "$out" | grep -qE 'signal 9 \(KILL\)' \
   || fail "killed: the report never named the signal"$'\n'"$out"

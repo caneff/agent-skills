@@ -280,21 +280,21 @@ report_failure() { # <label> <output> [<note>...]
   exit 1
 }
 
-# What a non-zero exit status says about the suite (#1524). Above 128 a shell
-# reports 128 + the signal that ended the process, so a kill is named as one.
+# What a non-zero exit status says about the suite (#1524). A shell reports a
+# signal death as 128 + the signal number, so a status in that range is said to
+# read as a kill. It is an inference: a suite can exit with such a number
+# itself, or pass on the status of a child that was killed. A number no signal
+# bears (255) is named as a bare status.
 status_note() { # <status>
   local status=$1 sig name
   if [ "$status" -gt 128 ]; then
     sig=$((status - 128))
-    name=$(kill -l "$sig" 2>/dev/null) || name=""
-    if [ -n "$name" ]; then
-      echo "tests/all.sh: exited with status $status (signal $sig ($name): the suite was killed, not failed by an assertion)"
-    else
-      echo "tests/all.sh: exited with status $status (above 128, which reads as a signal: $sig)"
+    if name=$(kill -l "$sig" 2>/dev/null) && [ -n "$name" ]; then
+      echo "tests/all.sh: exited with status $status, which reads as signal $sig ($name), a kill and not an assertion (a suite can also exit with this number itself)"
+      return
     fi
-  else
-    echo "tests/all.sh: exited with status $status"
   fi
+  echo "tests/all.sh: exited with status $status"
 }
 
 # The known limit above is recoverable but undiscoverable: both ways out of a
@@ -462,9 +462,8 @@ while IFS=$'\t' read -r label cmd; do
     count=$((count + 1))
   else
     stop_and_wait
-    # The exit status is the one fact a silent failure leaves (#1524): name
-    # it, name the signal above 128 (a kill reads differently from an
-    # assertion), and say so when there was no output to read.
+    # The exit status is the one fact a silent failure leaves (#1524), so it
+    # is always named, and an empty output says so.
     report_failure "$label" "$out" \
       "$(status_note "$suite_status")" \
       "$([ -z "$out" ] && echo "tests/all.sh: the suite printed no output")"
