@@ -3,6 +3,7 @@
 #
 #   job-run --name <name> -- <command> [args...]
 #   job-run --status <name>
+#   job-run --wait <name>
 #
 # A background job that is SIGKILLed cannot report anything on the way down, so
 # the only survivable account of it is what reached disk before it died. job-run
@@ -33,10 +34,21 @@
 # its output keeps flowing to the caller. Readers use `--status` or a tail, not
 # the whole file.
 #
+# `--wait <name>` blocks until the run is no longer alive, then prints the line
+# `--status` would print and exits with the same code (0 finished, 11 killed,
+# 12 unknown) — never 10. Launch it as a `run_in_background` Bash call right
+# after starting the job: the harness wakes the session when it returns, which
+# a Monitor (expires after 30 minutes) does not outlast. It rechecks the run
+# directory every WAIT_INTERVAL seconds and writes nothing. A TERM or INT
+# while waiting prints `interrupted <name>` and exits 13, so an interrupted
+# wait is never read as an ended run. Known gap: a recycled pid keeps `alive`
+# true, so a wait on a run whose pid was reused blocks until that process ends.
+#
 # job-run records; it does not prevent. No setsid, no detaching, no keep-alive.
 set -uo pipefail
 
 PROGRESS_CAP=$((10 * 1024 * 1024))
+WAIT_INTERVAL=3
 
 die() { echo "job-run: $*" >&2; exit 1; }
 
@@ -48,11 +60,12 @@ alive() { # alive <run dir>
   [ -n "$p" ] && kill -0 "$p" 2>/dev/null
 }
 
-name="" status=""
+name="" status="" wait_for=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --name)    [ $# -ge 2 ] || die "--name needs a value"; name="$2"; shift 2 ;;
     --status)  [ $# -ge 2 ] || die "--status needs a value"; status="$2"; shift 2 ;;
+    --wait)    [ $# -ge 2 ] || die "--wait needs a value"; wait_for="$2"; shift 2 ;;
     -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
     --)        shift; break ;;
     -*)        die "unknown flag: $1" ;;
@@ -72,30 +85,60 @@ check_name() {
   esac
 }
 
-# --- --status ---------------------------------------------------------------
+# --- --status and --wait ----------------------------------------------------
 # One line, and an exit status a caller can branch on without parsing it:
 #   0 finished (an exit record exists)  10 alive  11 killed  12 no such run
 # The three live above the range bash and `die` use for their own failures, so a
 # caller's `case $?` cannot read "the interpreter fell over" as "still running".
-if [ -n "$status" ]; then
-  check_name "$status"
-  dir="$jobs_dir/$status"
-  [ -d "$dir" ] || { echo "unknown $status: no run directory at $dir"; exit 12; }
+# --wait adds 13: interrupted while waiting, the run's state not known.
+# `verdict` is the one place that line and code are produced; --wait loops on it.
+verdict() { # verdict <name> ; prints the line, returns the code
+  local n="$1" dir="$jobs_dir/$1" up=0 rc cause ended pid last
+  [ -d "$dir" ] || { echo "unknown $n: no run directory at $dir"; return 12; }
+  # Liveness is read before the exit record: a wrapper writes `exit` and only
+  # then dies, so a pid seen dead has its record on disk already. Reading them
+  # the other way round reports a run that ended between the two as killed.
+  alive "$dir" && up=1
   if [ -e "$dir/exit" ]; then
     rc=$(sed -n 's/^rc=//p' "$dir/exit")
     cause=$(sed -n 's/^cause=//p' "$dir/exit")
     ended=$(sed -n 's/^ended=//p' "$dir/exit")
-    echo "finished $status rc=$rc cause=$cause ended=$ended"
-    exit 0
+    echo "finished $n rc=$rc cause=$cause ended=$ended"
+    return 0
   fi
   pid=$(cat "$dir/pid" 2>/dev/null)
-  if alive "$dir"; then
-    echo "alive $status pid=$pid last=$(tail -n 1 "$dir/progress" 2>/dev/null | cut -d' ' -f1)"
-    exit 10
+  if [ "$up" = 1 ]; then
+    echo "alive $n pid=$pid last=$(tail -n 1 "$dir/progress" 2>/dev/null | cut -d' ' -f1)"
+    return 10
   fi
   last=$(tail -n 1 "$dir/progress" 2>/dev/null)
-  echo "killed $status pid=${pid:-?} gone with no exit record; last progress: ${last:-<none>}"
-  exit 11
+  echo "killed $n pid=${pid:-?} gone with no exit record; last progress: ${last:-<none>}"
+  return 11
+}
+
+if [ -n "$status" ] || [ -n "$wait_for" ]; then
+  [ -n "$status" ] && [ -n "$wait_for" ] && die "--wait cannot be combined with --status"
+  [ -n "$name" ] && die "--wait cannot be combined with --name (a run), and --status takes no --name"
+  [ $# -eq 0 ] || die "--wait cannot be combined with a command, and --status takes none"
+fi
+
+if [ -n "$status" ]; then
+  check_name "$status"
+  verdict "$status"; exit $?
+fi
+
+if [ -n "$wait_for" ]; then
+  check_name "$wait_for"
+  # A trap runs only once the foreground command returns, so the pause is a
+  # background sleep waited on: the signal then interrupts `wait` at once.
+  nap=""
+  trap 'trap - TERM INT; [ -n "$nap" ] && kill "$nap" 2>/dev/null; echo "interrupted $wait_for: stopped waiting, the run was not observed to end"; exit 13' TERM INT
+  while :; do
+    line=$(verdict "$wait_for"); v=$?
+    [ "$v" = 10 ] || { printf '%s\n' "$line"; exit "$v"; }
+    sleep "$WAIT_INTERVAL" & nap=$!
+    wait "$nap" 2>/dev/null
+  done
 fi
 
 # --- a run ------------------------------------------------------------------

@@ -326,5 +326,95 @@ chmod 700 "$jobs_dir/stubborn"
   && ok "a directory prune could not remove is left alone" \
   || no "a directory prune could not remove is left alone"
 
+# --- --wait: block until the run ends, then answer as --status would --------
+# Launched as a run_in_background Bash call so the harness wakes the session
+# when the job ends. Never returns 10: a live run is waited on, not reported.
+"$job_run" --name waited -- sh -c 'echo going; sleep 2' >/dev/null 2>&1 &
+wpid=$!
+await "$jobs_dir/waited/pid"
+t0=$(date +%s)
+out=$("$job_run" --wait waited 2>&1); rc=$?
+t1=$(date +%s)
+case "$rc|$out" in
+  0\|finished\ waited\ rc=0*) ok "--wait prints the finished line and exits 0" ;;
+  *) no "--wait prints the finished line and exits 0" "rc=$rc out=$out" ;;
+esac
+[ -e "$jobs_dir/waited/exit" ] && [ $((t1 - t0)) -ge 1 ] \
+  && ok "--wait returns only after the run's exit record exists" \
+  || no "--wait returns only after the run's exit record exists" \
+       "elapsed=$((t1 - t0))s exit-file=$([ -e "$jobs_dir/waited/exit" ] && echo yes || echo no)"
+[ "$out" = "$("$job_run" --status waited)" ] \
+  && ok "--wait prints exactly the line --status prints" \
+  || no "--wait prints exactly the line --status prints" "$out"
+wait "$wpid" 2>/dev/null
+
+# A run that already ended answers at once.
+out=$(timeout 2 "$job_run" --wait clean 2>&1); rc=$?
+case "$rc|$out" in
+  0\|finished\ clean*) ok "--wait on a finished run returns at once" ;;
+  *) no "--wait on a finished run returns at once" "rc=$rc out=$out" ;;
+esac
+
+# A failed job is still "finished": the job's own rc is in the line, not the exit.
+out=$(timeout 2 "$job_run" --wait failed 2>&1); rc=$?
+case "$rc|$out" in
+  0\|finished\ failed\ rc=7*) ok "--wait reports a failed job's rc in the line, exit 0" ;;
+  *) no "--wait reports a failed job's rc in the line, exit 0" "rc=$rc out=$out" ;;
+esac
+
+# A SIGKILLed wrapper leaves no exit record: --wait says killed, exit 11.
+pid=$(start_bg waitkilled)
+await "$jobs_dir/waitkilled/progress" && sleep 0.2
+( sleep 0.5; kill -9 "$pid" 2>/dev/null ) &
+out=$(timeout 15 "$job_run" --wait waitkilled 2>&1); rc=$?
+case "$rc|$out" in
+  11\|killed\ waitkilled*) ok "--wait on a SIGKILLed run says killed, exit 11" ;;
+  *) no "--wait on a SIGKILLed run says killed, exit 11" "rc=$rc out=$out" ;;
+esac
+wait "$pid" 2>/dev/null
+pkill -9 -f 'sleep 5' 2>/dev/null
+
+# Unknown name: 12 at once. A traversal name is refused as a bad name.
+out=$(timeout 2 "$job_run" --wait nosuch 2>&1); rc=$?
+case "$rc|$out" in
+  12\|unknown\ nosuch*) ok "--wait on an unknown name exits 12 at once" ;;
+  *) no "--wait on an unknown name exits 12 at once" "rc=$rc out=$out" ;;
+esac
+out=$("$job_run" --wait ../x 2>&1); rc=$?
+[ "$rc" != 0 ] && [[ "$out" == *"may hold only"* ]] \
+  && ok "--wait refuses a traversal name via check_name" \
+  || no "--wait refuses a traversal name via check_name" "rc=$rc out=$out"
+
+# TERM while waiting: the interrupted code (13), never 0/10/11/12, and prompt.
+pid=$(start_bg waitterm)
+await "$jobs_dir/waitterm/progress" && sleep 0.2
+"$job_run" --wait waitterm >"$tmp/term.out" 2>&1 &
+wp=$!
+sleep 0.5
+t0=$(date +%s)
+kill -TERM "$wp" 2>/dev/null; wait "$wp" 2>/dev/null; rc=$?
+t1=$(date +%s)
+[ "$rc" = 13 ] && ! grep -q '^finished' "$tmp/term.out" && [ $((t1 - t0)) -le 2 ] \
+  && ok "a TERMed --wait exits 13 promptly and does not say finished" \
+  || no "a TERMed --wait exits 13 promptly and does not say finished" \
+       "rc=$rc elapsed=$((t1 - t0))s out=$(cat "$tmp/term.out")"
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+
+# --wait stands alone and needs a value.
+for args in "--wait a --status b" "--wait a --name b -- true" "--name b --wait a -- true" "--wait a -- true"; do
+  # shellcheck disable=SC2086
+  out=$(timeout 5 "$job_run" $args 2>&1); rc=$?
+  [ "$rc" = 1 ] && [[ "$out" == *"--wait cannot be combined"* ]] \
+    && ok "'$args' is refused" \
+    || no "'$args' is refused" "rc=$rc out=$out"
+done
+out=$(timeout 5 "$job_run" --wait 2>&1); rc=$?
+[ "$rc" = 1 ] && [[ "$out" == *"--wait needs a value"* ]] \
+  && ok "--wait with no value errors instead of hanging" \
+  || no "--wait with no value errors instead of hanging" "rc=$rc out=$out"
+[ ! -e "$jobs_dir/nosuch" ] \
+  && ok "--wait creates no run directory" \
+  || no "--wait creates no run directory"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
