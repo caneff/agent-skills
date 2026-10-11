@@ -1,0 +1,501 @@
+repo /home/caneff/src/twitch-rules-scroller   1 docs   234 tracked non-Markdown files checked against
+
+TOKENS BY KIND AND VERDICT
+  kind               ok   ABSENT  MISSING     skip
+  command             9        0        1        0
+  identifier        551        7        0        0
+  literal           148       42        0       27
+  path              423        0       15        2
+  phrase            259       92        0        0
+  placeholder         0        0        0       70
+  route              29        0        0        4
+  word              292        1        0       27
+
+  1999 tokens, 158 FALSE candidates (144 distinct), 89 relation lines for a reader, 29 counts for a reader
+
+FALSE CANDIDATES (mechanical)
+  docs/obs-layout.md:3               ABSENT   literal    `C:\Users\canef\OneDrive\Documents\twitch\` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:6               MISSING  path       `Sudoku_squareleft_v9.json` — no tracked or on-disk path matches
+  docs/obs-layout.md:11              ABSENT   literal    `#c6a6e8` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:11              ABSENT   literal    `#e496c4` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:12              ABSENT   literal    `#ffc0d5` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:27              MISSING  path       `layout.py` — no tracked or on-disk path matches
+  docs/obs-layout.md:28              MISSING  path       `puzzle_stream_square_left.png` — no tracked or on-disk path matches
+  docs/obs-layout.md:29              MISSING  command    `uv run --with pillow python layout.py` — file argument gone: layout.py
+  docs/obs-layout.md:86              ABSENT   literal    `basic\scenes\Sudoku_Sticker.json` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:115             ABSENT   literal    `140.0.7339.81` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:119             ABSENT   literal    `chrome-stream.new\` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:148             ABSENT   literal    `%LOCALAPPDATA%\twitch-rules-scroller-e2e-profile` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:166             ABSENT   phrase     `powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='chrome-stream.exe'\" | Where-Object { $_.CommandLine -like '*stream-profile*' } | ForEach-Object { (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).CloseMainWindow() }"` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:168             MISSING  path       `tasklist.exe` — no tracked or on-disk path matches
+  docs/obs-layout.md:180             ABSENT   phrase     `) and, 8 s later,` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:183             ABSENT   phrase     `stream browser window owner pid` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:183             ABSENT   phrase     `e2e Chrome window owner pid` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:214             ABSENT   literal    `%APPDATA%\obs-studio\basic\scenes\*` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:253             ABSENT   phrase     `all --deploy` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:268             ABSENT   phrase     `layout/make-sticker.py avatar` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:270             ABSENT   phrase     `all --deploy` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:292             ABSENT   identifier `add_alignment` — name appears in no tracked non-Markdown file
+  docs/obs-layout.md:302             ABSENT   phrase     `align: 10` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:316             ABSENT   phrase     `factor*audio + base` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:353             ABSENT   phrase     `mcs -langversion:5 -target:winexe -r:System.Management.dll -out:/tmp/rig.exe *.cs` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:365             ABSENT   phrase     `stream-rig.exe res 1920x1080` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:367             ABSENT   phrase     `stream-rig.exe res restore` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:379             ABSENT   literal    `%LOCALAPPDATA%\stream-rig\res-state.txt` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:381             ABSENT   literal    `WIDTHxHEIGHT@HERTZ/BITS` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:381             ABSENT   literal    `2560x1440@359/32` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:429             ABSENT   identifier `KILL_ON_JOB_CLOSE` — name appears in no tracked non-Markdown file
+  docs/obs-layout.md:458             ABSENT   literal    `%LOCALAPPDATA%\stream.slime2.desktop\logs` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:483             ABSENT   phrase     `, builds no supervisor, and` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:510             MISSING  path       `scroller-launcher.exe` — no tracked or on-disk path matches
+  docs/obs-layout.md:544             ABSENT   literal    `-1073741819` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:569             MISSING  path       `curl.exe` — no tracked or on-disk path matches
+  docs/obs-layout.md:569             MISSING  path       `tasklist.exe` — no tracked or on-disk path matches
+  docs/obs-layout.md:614             ABSENT   phrase     `tasklist.exe /FI "IMAGENAME eq node.exe"` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:615             ABSENT   phrase     `curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:4777/` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:619             ABSENT   literal    `"puzzle":true` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:623             ABSENT   phrase     `Access-Control-Allow-Private-Network: true` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:687             ABSENT   phrase     `is the branch` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:687             ABSENT   phrase     `picked —` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:690             ABSENT   phrase     `signal leaving=1` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:706             ABSENT   phrase     `— a thin CLI over the shared` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:713             ABSENT   phrase     `) (#562).` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:750             ABSENT   phrase     `./e2e.sh [--force]` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:827             ABSENT   phrase     `./e2e.sh --update-goldens` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:951             ABSENT   phrase     `taskkill /T /F /PID` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1042            ABSENT   literal    `http://127.0.0.1:9333` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1050            ABSENT   literal    `C:\Users\canef\stream-rig\chrome-stream\chrome-stream.exe` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1051            ABSENT   literal    `%LOCALAPPDATA%\twitch-rules-scroller-e2e-profile` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1081            ABSENT   phrase     `Classic U-Bahn #5: X` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1081            ABSENT   phrase     `Classic U-Bahn #225#3A X` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1263            ABSENT   phrase     `rect.width * resol / canvas.width` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1281            ABSENT   literal    `clearInterval(window.__fight)` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1303            ABSENT   identifier `puzzle.selectCell` — name appears in no tracked non-Markdown file
+  docs/obs-layout.md:1339            ABSENT   phrase     `POST /api/station` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1449            ABSENT   phrase     `fail with their frames in` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1450            ABSENT   literal    `clearInterval(window.__sabotage)` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1493            ABSENT   phrase     `Render delay index: 1 (want 0)` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1499            ABSENT   literal    `"filterIndex":0` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1529            ABSENT   literal    `names().desktopInput` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1540            ABSENT   literal    `%APPDATA%\obs-studio\basic\scenes\Sudoku_Sticker.json` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1555            ABSENT   literal    `%LOCALAPPDATA%\stream-rig\app-window.txt` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1556            ABSENT   literal    `%LOCALAPPDATA%\stream-rig\warnings-dock-seen.txt` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1557            ABSENT   literal    `%LOCALAPPDATA%\stream-rig\levels.json` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1558            ABSENT   literal    `%LOCALAPPDATA%\stream-rig\levels-session.json` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1585            ABSENT   phrase     `pos_rel = (pos - (960, 540)) / 540` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1585            ABSENT   phrase     `bounds_rel = bounds / 540` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1586            ABSENT   phrase     `scale_rel = 1` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1586            ABSENT   phrase     `scale_ref = 1920×1080` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1592            ABSENT   literal    `%APPDATA%\obs-studio\basic\scenes\` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1597            ABSENT   phrase     `1130,636 750×404 fill` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1610            ABSENT   phrase     `layout/make-sticker.py puzzle` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1618            MISSING  path       `facecam_mask_raw1920.png` — no tracked or on-disk path matches
+  docs/obs-layout.md:1630            MISSING  path       `laser-grid-frame.png` — no tracked or on-disk path matches
+  docs/obs-layout.md:1630            MISSING  path       `holo-room-frame.png` — no tracked or on-disk path matches
+  docs/obs-layout.md:1630            MISSING  path       `sudoku-grid-frame.png` — no tracked or on-disk path matches
+  docs/obs-layout.md:1712            ABSENT   identifier `scene_load_item` — name appears in no tracked non-Markdown file
+  docs/obs-layout.md:1806            ABSENT   literal    `2fbd2c9` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1822            ABSENT   phrase     `SetSceneItemEnabled false` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1842            ABSENT   phrase     `SetSceneItemEnabled false` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1910            ABSENT   literal    `sudoku-stream-puzzle-{banner,chat}-frame-1920x1080.png` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:1972            ABSENT   phrase     `GET /api/station/events` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2042            ABSENT   identifier `log_changes` — name appears in no tracked non-Markdown file
+  docs/obs-layout.md:2079            ABSENT   phrase     `GET /api/station` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2080            ABSENT   phrase     `{ source, channel, name, sources: [{ id, name, bannerName, genres, channels: [{ id, name, genres }] }] }` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2082            ABSENT   phrase     `POST /api/station` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2104            ABSENT   phrase     `GET /api/station/memory` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2105            ABSENT   phrase     `POST /api/station/favourite { source, channel, starred }` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2118            ABSENT   phrase     `event: memory` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2123            ABSENT   phrase     `POST /api/station` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2132            ABSENT   phrase     `GET /api/station/events` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2132            ABSENT   phrase     `event: station` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2199            ABSENT   phrase     `DI.FM · Atmospheric Breaks` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2304            ABSENT   literal    `data-stream-cursor=hand` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2363            ABSENT   phrase     `W_dev = innerWidth·dpr` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2364            ABSENT   phrase     `H_dev = outerHeight·dpr·innerWidth/outerWidth` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2365            ABSENT   phrase     `cropLeft = rect.left·dpr` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2365            ABSENT   phrase     `cropRight = W_dev − rect.right·dpr` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2366            ABSENT   phrase     `cropTop = H_dev − (innerHeight − rect.top)·dpr` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2367            ABSENT   phrase     `cropBottom = (innerHeight − rect.bottom)·dpr` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2416            ABSENT   phrase     `boardBox(innerHeight - menuHeight, menuHeight)` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2424            ABSENT   phrase     `pu.point[2 * pu.nx0 + 2]` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2431            ABSENT   identifier `CAPTURE.pageY` — name appears in no tracked non-Markdown file
+  docs/obs-layout.md:2439            ABSENT   phrase     `unit = canvasRect.width * pu.resol / pu.canvas.width` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2441            ABSENT   phrase     `pu.point[2 * pu.nx0 + 2]` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2447            ABSENT   phrase     `right = max(0, leftMargin - rightMargin)` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2459            ABSENT   phrase     `pu.nx × pu.ny` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2488            ABSENT   literal    `parseFloat(canvas.style.width)` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2514            ABSENT   phrase     `UserSettings._displaysize = N; redraw_grid()` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2517            ABSENT   literal    `#float-key` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2523            ABSENT   literal    `#ruletext` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2539            ABSENT   literal    `.puzzle-rules` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2624            ABSENT   phrase     `Access-Control-Allow-Private-Network: true` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2646            ABSENT   phrase     `@require file://` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2650            ABSENT   phrase     `sync vN · state` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2651            ABSENT   phrase     `board past the viewport: bottom 22px` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2703            ABSENT   phrase     `function { }` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2709            ABSENT   word       `.lnk` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2715            ABSENT   literal    `archive\` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2715            MISSING  path       `layout.py` — no tracked or on-disk path matches
+  docs/obs-layout.md:2728            MISSING  path       `layout.py` — no tracked or on-disk path matches
+  docs/obs-layout.md:2747            ABSENT   literal    `sudoku-stream-{puzzle,wide,facecam,desktop,starting,brb,guests,guests-wide}-1920x1080.png` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2752            ABSENT   phrase     `layout/make-sticker.py all` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2754            ABSENT   phrase     `layout/make-sticker.py cam-corners` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2770            ABSENT   literal    `frame-*` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2770            ABSENT   literal    `cam-paper-*` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2833            ABSENT   phrase     `{ id: null, pending: true, error }` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2853            ABSENT   phrase     `make-sticker.py desktop` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2861            ABSENT   phrase     `make-sticker.py desktop` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2914            ABSENT   phrase     `make-sticker.py app-window` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2921            ABSENT   literal    `%LOCALAPPDATA%\stream-rig\app-window.txt` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2948            ABSENT   literal    `ok(info)` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2969            ABSENT   phrase     `powershell.exe -EncodedCommand` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2975            ABSENT   phrase     `GET /api/warnings/events` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:2976            ABSENT   phrase     `event: checks` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3018            MISSING  path       `NvBroadcastClientCore_log_*_info.txt` — no tracked or on-disk path matches
+  docs/obs-layout.md:3019            ABSENT   phrase     `C:\ProgramData\NVIDIA Corporation\NVIDIA Broadcast\logs\` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3086            ABSENT   literal    `wasapi_*` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3093            ABSENT   phrase     `Mic/Aux is muted, calibrated unmuted` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3094            ABSENT   phrase     `, in dB like the Levels panel) on an` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3100            ABSENT   phrase     `Chrome (guest voice): muted|unmuted` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3234            ABSENT   phrase     `make-sticker.py wide` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3289            ABSENT   phrase     `{leaving: true}` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3381            ABSENT   phrase     `make-sticker.py wide` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3389            ABSENT   phrase     `make-sticker.py starting` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3395            ABSENT   phrase     `) over the backdrop (` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3422            ABSENT   identifier `audio_move_update` — name appears in no tracked non-Markdown file
+  docs/obs-layout.md:3433            ABSENT   phrase     `[0, 0, 449, 582]` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3434            ABSENT   phrase     `[0, 1309, 449, 0]` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3448            ABSENT   phrase     `factor × level + base_value` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3460            ABSENT   phrase     `threshold: 2` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3514            ABSENT   phrase     `OBS_RENDER_DELAY_MS − OBS_CAM_LATENCY_MS` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3515            ABSENT   phrase     `− OBS_MIC_LATENCY_MS` — string appears in no tracked non-Markdown file
+  docs/obs-layout.md:3537            MISSING  path       `libobs/obs-source.c` — no tracked or on-disk path matches
+  docs/obs-layout.md:3554            ABSENT   phrase     `make-sticker.py --deploy avatar` — string appears in no tracked non-Markdown file
+
+TESTS-ONLY NAMES (a doc names it as live code; only tests hold it)
+  docs/obs-layout.md:156             `E2E_USER_DATA_DIR` — tests only (4 files)
+  docs/obs-layout.md:172             `CREATE_BREAKAWAY_FROM_JOB` — tests only (1 files)
+  docs/obs-layout.md:757             `DEGRADED` — tests only (2 files)
+  docs/obs-layout.md:770             `probeUntilServerReturns` — tests only (6 files)
+  docs/obs-layout.md:794             `restoreCaptureWindow` — tests only (3 files)
+  docs/obs-layout.md:798             `planObsRestart` — tests only (4 files)
+  docs/obs-layout.md:820             `WSLENV` — tests only (2 files)
+  docs/obs-layout.md:844             `OBS_EXE` — tests only (2 files)
+  docs/obs-layout.md:918             `planObsRestart` — tests only (4 files)
+  docs/obs-layout.md:918             `restartObs` — tests only (6 files)
+  docs/obs-layout.md:924             `EPERM` — tests only (4 files)
+  docs/obs-layout.md:959             `E2E_STOP_WAIT_S` — tests only (2 files)
+  docs/obs-layout.md:971             `closeObs` — tests only (4 files)
+  docs/obs-layout.md:978             `E2E_CDP_PORT` — tests only (1 files)
+  docs/obs-layout.md:1000            `visibilityState` — tests only (2 files)
+  docs/obs-layout.md:1017            `detachedLaunchScript` — tests only (3 files)
+  docs/obs-layout.md:1023            `WM_CLOSE` — tests only (1 files)
+  docs/obs-layout.md:1023            `restartObs` — tests only (6 files)
+  docs/obs-layout.md:1034            `Browser.close` — tests only (1 files)
+  docs/obs-layout.md:1046            `Target.activateTarget` — tests only (4 files)
+  docs/obs-layout.md:1050            `E2E_CHROME_EXE` — tests only (3 files)
+  docs/obs-layout.md:1050            `E2E_RIG_DIR` — tests only (2 files)
+  docs/obs-layout.md:1051            `E2E_USER_DATA_DIR` — tests only (4 files)
+  docs/obs-layout.md:1052            `E2E_CDP_PORT` — tests only (1 files)
+  docs/obs-layout.md:1053            `E2E_PLAIN_PORT` — tests only (3 files)
+  docs/obs-layout.md:1053            `WSLENV` — tests only (2 files)
+  docs/obs-layout.md:1058            `profile.default_zoom_level` — tests only (1 files)
+  docs/obs-layout.md:1058            `partition.per_host_zoom_levels` — tests only (1 files)
+  docs/obs-layout.md:1059            `profileZoomVerdict` — tests only (2 files)
+  docs/obs-layout.md:1095            `driveScenarios` — tests only (1 files)
+  docs/obs-layout.md:1107            `launchE2eChromeIfClosed` — tests only (2 files)
+  docs/obs-layout.md:1119            `closeE2eChrome` — tests only (4 files)
+  docs/obs-layout.md:1120            `Browser.close` — tests only (1 files)
+  docs/obs-layout.md:1129            `recheckVisibility` — tests only (4 files)
+  docs/obs-layout.md:1186            `writeScenesPage` — tests only (2 files)
+  docs/obs-layout.md:1196            `scenesPageHtml` — tests only (2 files)
+  docs/obs-layout.md:1200            `rulesDialogStuckError` — tests only (2 files)
+  docs/obs-layout.md:1201            `tabShotLabel` — tests only (3 files)
+  docs/obs-layout.md:1209            `runScenario` — tests only (7 files)
+  docs/obs-layout.md:1224            `Target.activateTarget` — tests only (4 files)
+  docs/obs-layout.md:1227            `DEGRADED` — tests only (2 files)
+  docs/obs-layout.md:1266            `pu.cursol` — tests only (1 files)
+  docs/obs-layout.md:1270            `penpaCellIndex` — tests only (3 files)
+  docs/obs-layout.md:1284            `Window.prototype` — tests only (1 files)
+  docs/obs-layout.md:1296            `xyToRCExact` — tests only (1 files)
+  docs/obs-layout.md:1297            `Framework.app.puzzle.cells` — tests only (1 files)
+  docs/obs-layout.md:1298            `Framework.app.puzzle.selectedCells` — tests only (1 files)
+  docs/obs-layout.md:1299            `Framework.app.puzzle.clearSelection()` — tests only (1 files)
+  docs/obs-layout.md:1301            `window.Framework` — tests only (1 files)
+  docs/obs-layout.md:1317            `validateScenarios` — tests only (5 files)
+  docs/obs-layout.md:1320            `matchEventOrder` — tests only (3 files)
+  docs/obs-layout.md:1358            `runScenario` — tests only (7 files)
+  docs/obs-layout.md:1362            `readJson` — tests only (7 files)
+  docs/obs-layout.md:1374            `readWindowBounds` — tests only (5 files)
+  docs/obs-layout.md:1388            `holdFixturesStill` — tests only (2 files)
+  docs/obs-layout.md:1396            `cropMatrix` — tests only (4 files)
+  docs/obs-layout.md:1396            `withSvenHidden` — tests only (2 files)
+  docs/obs-layout.md:1417            `freshenUserscript` — tests only (3 files)
+  docs/obs-layout.md:1472            `SceneItemTransformChanged` — tests only (4 files)
+  docs/obs-layout.md:1473            `SceneItems` — tests only (1 files)
+  docs/obs-layout.md:1511            `config.mainMonitor` — tests only (1 files)
+  docs/obs-layout.md:1527            `layout_paths.wsl_path` — tests only (1 files)
+  docs/obs-layout.md:1534            `WSLENV` — tests only (2 files)
+  docs/obs-layout.md:1554            `desktopMonitor.error` — tests only (2 files)
+  docs/obs-layout.md:1665            `linear_alpha` — tests only (1 files)
+  docs/obs-layout.md:1676            `linear_alpha` — tests only (1 files)
+  docs/obs-layout.md:1777            `linear_alpha` — tests only (1 files)
+  docs/obs-layout.md:2316            `holdStillStyle` — tests only (3 files)
+  docs/obs-layout.md:2394            `xyToRCExact` — tests only (1 files)
+  docs/obs-layout.md:2596            `acquireCapture` — tests only (6 files)
+  docs/obs-layout.md:2598            `captureOwnerVerdict` — tests only (2 files)
+  docs/obs-layout.md:2608            `acquireCapture` — tests only (6 files)
+  docs/obs-layout.md:2609            `bindingMarkerScript` — tests only (2 files)
+  docs/obs-layout.md:2610            `overlayVerdict` — tests only (3 files)
+  docs/obs-layout.md:2614            `proveCaptureBinding` — tests only (2 files)
+  docs/obs-layout.md:2669            `primaryMonitorVerdict` — tests only (2 files)
+  docs/obs-layout.md:2849            `itemValue` — tests only (2 files)
+
+SAID-GONE BUT PRESENT (the line says it left; the tree still holds it)
+  docs/obs-layout.md:735             `layout/sticker_deploy.py`
+  docs/obs-layout.md:1054            `E2E_RIG_DIR`
+  docs/obs-layout.md:1054            `stream-rig.exe`
+  docs/obs-layout.md:1054            `stream-rig-server.txt`
+  docs/obs-layout.md:1054            `e2e-run.lock`
+  docs/obs-layout.md:1054            `WSLENV`
+  docs/obs-layout.md:1054            `node.exe`
+  docs/obs-layout.md:1113            `acquireCapture`
+  docs/obs-layout.md:1572            `OBS_STREAM_EXE`
+  docs/obs-layout.md:1572            `chrome-stream.exe`
+  docs/obs-layout.md:1572            `chrome.exe`
+  docs/obs-layout.md:1909            `sudoku-stream-puzzle-cam-frame-1920x1080.png`
+  docs/obs-layout.md:2417            `menuHeight`
+  docs/obs-layout.md:2712            `e2e-run.lock`
+  docs/obs-layout.md:2943            `server.log`
+  docs/obs-layout.md:2943            `stream-rig.log`
+  docs/obs-layout.md:3065            `tabGoneMs`
+
+RELATIONS (a reader checks: does the tree agree with the verb?)
+  docs/obs-layout.md:100             [own] layout/check-rig-lock.mjs , lockRefusal
+      (`layout/check-rig-lock.mjs`, the harness's own `lockRefusal` over
+      hint: layout/check-rig-lock.mjs holds lockRefusal
+  docs/obs-layout.md:101             [reads] e2e-run.lock , GetSceneList
+      `e2e-run.lock`); and with OBS open, after the load, it reads `GetSceneList`
+  docs/obs-layout.md:105             [own] INSTALL_DST , INSTALL_RIG_LOCK
+      `INSTALL_DST` and `INSTALL_RIG_LOCK` redirect the files, for tests. OBS's own save carries extra UI state (~220 KB vs our ~110 KB);
+  docs/obs-layout.md:192             [reads] no stream browser pid owns a window yet , stream-rig.test.mjs
+      `no stream browser pid owns a window yet` when no stream browser pid has a window). `stream-rig.test.mjs` reads
+      hint: stream-rig.test.mjs LACKS no stream browser pid owns a window yet
+  docs/obs-layout.md:240             [writes] externalArt , make-sticker.py , gavin.png
+      one. `externalArt` lists names nothing in `make-sticker.py` writes (`gavin.png`
+  docs/obs-layout.md:241             [reads] ground , make-sticker.py
+      and the plain `ground`). Panel geometry nothing outside `make-sticker.py` reads
+  docs/obs-layout.md:244             [reads] layout/layout_paths.py , layout.json
+      `layout/layout_paths.py` reads `layout.json` and resolves both dirs (#462), so
+      hint: layout/layout_paths.py holds layout.json
+  docs/obs-layout.md:259             [call] readGitFileText , .git , main-checkout.mjs , .git
+      makes the call from `readGitFileText`'s read of `.git` (`main-checkout.mjs`): a directory is the primary checkout and deploys; a pointer file is a worktree; an absent or unreadable `.git` is unknown, logs its cause and does not deploy (#370).
+      hint: main-checkout.mjs holds readGitFileText; main-checkout.mjs holds .git; main-checkout.mjs holds .git
+  docs/obs-layout.md:263             [read] make-sticker.py all , install-collection.sh
+      so `make-sticker.py all` then `install-collection.sh` is the whole path. The live folder is still *read* for
+  docs/obs-layout.md:300             [own] avatar() , crop_left , crop_top
+      `avatar()`'s own numbers, not new ones — leave `crop_left`/`crop_top` at 0
+  docs/obs-layout.md:413             [read] res 1920x1080 , res restore
+      The `res 1920x1080` → `res restore` round-trip was confirmed live, each read
+  docs/obs-layout.md:507             [own] OBS_TOASTS=off , OBS_HEADSET_COPY=off , STATION_MEMORY_PATH
+      honoured gets `OBS_TOASTS=off` (#544), `OBS_HEADSET_COPY=off` (#547, #550) and a `STATION_MEMORY_PATH` of its own in the temp dir (#591); see the env table.
+  docs/obs-layout.md:543             [throw] 1 , 129 , 130
+      `1` an uncaught throw or a refusal, `129` SIGHUP (console closed), `130`
+  docs/obs-layout.md:546             [never] server exiting: , server exited:
+      `server exiting:` / `server exited:` line before it means node never ran its
+  docs/obs-layout.md:561             [own] server.log , server.log
+      `server.log` lines carry no timestamps of their own. The fallback `server.log`
+  docs/obs-layout.md:688             [read] switch , stay
+      `switch` or `stay` (issue #119) — and is the first thing to read when the
+  docs/obs-layout.md:713             [read] ) (#562).  ,  requests,  ,  and 
+      read OBS's stream status: …`) (#562). `Get*` requests, `--capture` and `--read`
+  docs/obs-layout.md:732             [own] visible , groupItems
+      `visible`, a group item's own members nested under `groupItems`. It refuses
+  docs/obs-layout.md:790             [read] "pending" , "unknown"
+      `"pending"`, `"unknown"` and a read that did not land are all a chain still
+  docs/obs-layout.md:794             [own] "failed" , restoreCaptureWindow
+      so. A reported `"failed"` is the chain's own answer and refuses at once. That read is the pair `restoreCaptureWindow` writes
+  docs/obs-layout.md:807             [deletes] run_* , %APPDATA%\obs-studio\.sentinel
+      deletes any stale `run_*` files under `%APPDATA%\obs-studio\.sentinel`: OBS 32
+  docs/obs-layout.md:812             [deletes] obs64.exe , obs-endpoint.mjs
+      `obs64.exe` is running, so every one it deletes is stale. `obs-endpoint.mjs`
+      hint: obs-endpoint.mjs LACKS obs64.exe
+  docs/obs-layout.md:815             [caller] server.mjs , layout/obs-request.mjs
+      #188) — so any caller — `server.mjs`, `layout/obs-request.mjs`, a direct
+      hint: server.mjs LACKS layout/obs-request.mjs; layout/obs-request.mjs LACKS server.mjs
+  docs/obs-layout.md:861             [writes] server.mjs , \\wsl.localhost
+      `server.mjs` in the `\\wsl.localhost` form the exe can open. Every run writes
+      hint: server.mjs LACKS \\wsl.localhost
+  docs/obs-layout.md:929             [own] e2e.mjs --release-rig-files , SIGINT
+      `e2e.mjs --release-rig-files`. The harness's own `SIGINT` handler is not what
+  docs/obs-layout.md:971             [own] closeObs , finally
+      it. OBS closes first, through the `closeObs` a run's own `finally` uses, so its
+  docs/obs-layout.md:1016            [returns] detached , unref
+      returns. `detached` and `unref` address neither. The reasoning is in the
+  docs/obs-layout.md:1022            [owns] stream-rig.exe , taskkill
+      by the harness, because `stream-rig.exe` owns them (issue #199). OBS is closed gracefully first (`taskkill` without
+  docs/obs-layout.md:1034            [never] Browser.close , taskkill
+      Chrome is closed over CDP (`Browser.close` on port 9333) — never `taskkill`
+  docs/obs-layout.md:1050            [launch] E2E_CHROME_EXE , C:\Users\canef\stream-rig\chrome-stream\chrome-stream.exe , chrome-stream\chrome-stream.exe , E2E_RIG_DIR
+      | `E2E_CHROME_EXE` | `C:\Users\canef\stream-rig\chrome-stream\chrome-stream.exe` | browser to launch: the rig's mirrored **stream browser** (`chrome-stream\chrome-stream.exe` under `E2E_RIG_DIR`, the rig folder), on the e2e profile (#286). Unaffected by `OBS_STREAM_EXE` |
+  docs/obs-layout.md:1051            [launches] E2E_USER_DATA_DIR , %LOCALAPPDATA%\twitch-rules-scroller-e2e-profile , chrome-stream.exe , stream-rig.exe
+      | `E2E_USER_DATA_DIR` | `%LOCALAPPDATA%\twitch-rules-scroller-e2e-profile` | the e2e profile. Refused, before anything launches, when it is not the default and the e2e Chrome is `chrome-stream.exe`: `stream-rig.exe` knows only the default, and would count an e2e Chrome on another profile as the stream browser, blocking its launch ("Stream browser (#284)", #345) |
+  docs/obs-layout.md:1054            [writes] E2E_RIG_DIR , C:\Users\canef\stream-rig , stream-rig.exe , stream-rig-server.txt
+      | `E2E_RIG_DIR` | `C:\Users\canef\stream-rig` | where `stream-rig.exe` lives, and so where the run writes `stream-rig-server.txt` and `e2e-run.lock` (issue #201). Override it and the exe no longer sees the pointer, so the run refuses on the identity check — which is how that refusal is exercised on purpose. It is a WSL-side variable, so it needs `WSLENV` to cross into Windows `node.exe` |
+  docs/obs-layout.md:1077            [restarts] OBS_ITEM , Puzzle
+      restarts the capture and costs one white frame. `OBS_ITEM` (default `Puzzle`)
+  docs/obs-layout.md:1185            [writes] main , finally
+      **Every run also writes a scenes page (issue #176).** In `main`'s `finally` —
+  docs/obs-layout.md:1296            [own] Framework.app.grid.getCell(0,0).elem , #board , xyToRCExact
+      | `Framework.app.grid.getCell(0,0).elem` | the top-left cell's own rect; the grid is rows × cols of it. Not `#board`: on a board with outside clues (#223) the element is wider than the grid on the clue sides, and SudokuPad itself maps clicks from this cell (`xyToRCExact`). |
+  docs/obs-layout.md:1301            [never] Framework , window.Framework
+      Bare `Framework`, never `window.Framework`: SudokuPad declares it as a lexical
+  docs/obs-layout.md:1338            [reads] settings write fails loud , settings.json , /api/settings
+      | `settings write fails loud` | a directory at the checkout's `settings.json`, then a valid settings POST | the POST answers 500, not 204 or 400, and `/api/settings` reads as it did before (#391) |
+  docs/obs-layout.md:1339            [reads] music sources , POST /api/station , input , /music/<source>/<key>
+      | `music sources` | `POST /api/station` as the dock sends it: di.fm Atmospheric Breaks, Edge, Edge with a channel, Rainwave OC ReMix, a channel Rainwave does not have, then back to Rainwave Game | the run starts on Rainwave Game; each pick lands on the station, in both music sources' `input` (di.fm and Rainwave as this server's `/music/<source>/<key>` relay, which answers 200 audio; Edge as empty)
+  docs/obs-layout.md:1376            [own] physical , devicePixelRatio
+      units: `physical` converts through the tab's own `devicePixelRatio` and is what
+  docs/obs-layout.md:1385            [reads] #sudokupad-sync-badge , synced <time>
+      (`#sudokupad-sync-badge`), whose text reads `synced <time>`. Both were found
+  docs/obs-layout.md:1454            [reads] OBS_ITEM , OBS_OPACITY_FILTER
+      The harness reads `OBS_ITEM` and `OBS_OPACITY_FILTER` from the table below, so
+  docs/obs-layout.md:1472            [own] SceneItemTransformChanged , 1 << 19
+      - `SceneItemTransformChanged` needs a subscription bit of its own (`1 << 19`),
+  docs/obs-layout.md:1533            [read] OBS_URL , ws://<WSL default-gateway IP>:4455 , ip route
+      | `OBS_URL` | `ws://<WSL default-gateway IP>:4455` | obs-websocket endpoint; the gateway is Windows, read from `ip route` |
+  docs/obs-layout.md:1534            [callers] OBS_PASSWORD , obs-password.txt , obs-endpoint.mjs , e2e.sh
+      | `OBS_PASSWORD` | contents of `obs-password.txt` in the main checkout | obs-websocket auth password; `obs-endpoint.mjs` resolves the file itself for same-OS callers (issue #153), and `e2e.sh` forwards it via `WSLENV` for the Windows-side harness (issue #149); missing both names the file and where it looked |
+      hint: obs-endpoint.mjs holds OBS_PASSWORD; obs-endpoint.mjs holds obs-password.txt;
+  docs/obs-layout.md:1541            [reads] OBS_COLLECTION_SRC , layout/sticker/Sudoku Sticker Final.json
+      | `OBS_COLLECTION_SRC` | `layout/sticker/Sudoku Sticker Final.json` | collection file the reinstall reads and asset-preflights; the unit tests point it at a temp-dir fixture so they never read Chris's live twitch art folder (issue #307) |
+      hint: layout/sticker/Sudoku Sticker Final.json LACKS OBS_COLLECTION_SRC
+  docs/obs-layout.md:1545            [own] OBS_CAM_LATENCY_MS , 97 , Render delay , OBS_RENDER_DELAY_MS
+      | `OBS_CAM_LATENCY_MS` | `97` | how far the undelayed face trails the board (the webcam's own latency, less one window-capture frame; measured #381, re-read with the voice on the container timeline #384); the cam's `Render delay` is `OBS_RENDER_DELAY_MS` less this, floored at 0; a cam delay of 0 removes the cam's filter. This one setting may legitimately be negative (the cam can lead the board) an
+  docs/obs-layout.md:1548            [read] OBS_MIC_LATENCY_MS , 236 , Render delay , OBS_CAM_LATENCY_MS
+      | `OBS_MIC_LATENCY_MS` | `236` | how far the undelayed voice already trails the face (Studio Voice and the audio path, net of webcam latency; measured #381, re-read with the voice on the container timeline #384); the mic's Sync Offset is the cam's `Render delay` less this. Like `OBS_CAM_LATENCY_MS`, this one may legitimately be negative and is never floored itself (#431 CX1) — only the derived off
+  docs/obs-layout.md:1551            [never] OBS_EDGE_INPUT , Edge music , msedge.exe , SetInputMute
+      | `OBS_EDGE_INPUT` | `Edge music` | the application audio capture of `msedge.exe`: stream tracks, not track 2, monitoring off (#558, "Music"). The server sets only its mute, one `SetInputMute` per station pick (muted unless Edge is the source, #587), never its settings; the e2e `music sources` scenario reads it to check the capture's tracks and monitor type, and the generator ships the default nam
+  docs/obs-layout.md:1552            [never] STATION_MEMORY_PATH , station-memory.json , stream-rig.exe , .corrupt-<time>-<random>
+      | `STATION_MEMORY_PATH` | `station-memory.json` in the checkout the server runs from | the music picker's recents and favourites (#591, "Music"); gitignored and never served; `stream-rig.exe` sets it to a temp-dir file for the server it starts on the e2e pointer; a missing file is empty, an unreadable one fails the read and every change, a corrupt one is kept as `.corrupt-<time>-<random>` and read
+  docs/obs-layout.md:1553            [read] DIFM_LISTEN_KEY_PATH , difm-listen-key.txt
+      | `DIFM_LISTEN_KEY_PATH` | `difm-listen-key.txt` in the main checkout | the di.fm Premium listen key, one run of letters and digits; read at each di.fm pick and each open of the relay's stream, never sent to OBS or logged (#560, "Music"); gitignored |
+  docs/obs-layout.md:1554            [never] OBS_DESKTOP_MONITOR_PATH , %LOCALAPPDATA%\stream-rig\desktop-monitor-id.txt , monitor_id , monitor_capture
+      | `OBS_DESKTOP_MONITOR_PATH` | `%LOCALAPPDATA%\stream-rig\desktop-monitor-id.txt` | file holding the primary display's `monitor_id` for the Desktop scene's `monitor_capture` source (device-specific, deployment-local, never committed); re-applied on every reconnect (issue #301) alongside the other runtime state, so a picked display now survives the collection reinstall (issue #221) instead of rever
+  docs/obs-layout.md:1556            [writes] OBS_DOCK_SEEN_PATH , %LOCALAPPDATA%\stream-rig\warnings-dock-seen.txt , warnings dock , OBS_DESKTOP_MONITOR_PATH
+      | `OBS_DOCK_SEEN_PATH` | `%LOCALAPPDATA%\stream-rig\warnings-dock-seen.txt` | marker the first load of the warnings dock page writes ("Pre-launch checks", #511); absent, the `warnings dock` check warns that the dock was never added. A file for the same reason as `OBS_DESKTOP_MONITOR_PATH` |
+  docs/obs-layout.md:1557            [read] OBS_LEVELS_PATH , %LOCALAPPDATA%\stream-rig\levels.json , OBS_DESKTOP_MONITOR_PATH
+      | `OBS_LEVELS_PATH` | `%LOCALAPPDATA%\stream-rig\levels.json` | the calibrated levels Chris saves from the warnings dock (#543): each audio input's fader and mute, applied over the collection at rig start. Absent, the collection's values hold; a corrupt file is logged and read as absent. A file outside the repo for the same reason as `OBS_DESKTOP_MONITOR_PATH`; the unit-test rig points it at a tem
+  docs/obs-layout.md:1559            [launch] OBS_MIC_CHECK , off , microphone
+      | `OBS_MIC_CHECK` | on | `off` leaves the `microphone` pre-launch check unregistered (#510): the kill-switch if it misfires on the live rig, and what the unit-test rig sets so its toast counts stay its own |
+  docs/obs-layout.md:1560            [launch] OBS_CAM_CHECK , off , camera
+      | `OBS_CAM_CHECK` | on | `off` leaves the `camera` pre-launch check unregistered (#514): the kill-switch if it misfires on the live rig, and what the unit-test rig sets so its toast counts stay its own |
+  docs/obs-layout.md:1561            [launch] OBS_USERSCRIPT_CHECK , off , userscript
+      | `OBS_USERSCRIPT_CHECK` | on | `off` leaves the `userscript` pre-launch check unregistered (#515): the kill-switch if it misfires on the live rig, and what the unit-test rig sets so its toast counts stay its own |
+  docs/obs-layout.md:1563            [never] OBS_TOASTS , off , server.log , toasts
+      | `OBS_TOASTS` | on | `off` raises no Windows toast (#544); the checks still run and still reach `server.log` and the warnings dock, where a `toasts` row (ok, never toasted) says toasts are off (#546), so an e2e-launched OBS left up by an interrupted run is not silent. `stream-rig.exe` sets it on the server it starts for the e2e pointer, so a live e2e run pops nothing on the desktop and the next p
+  docs/obs-layout.md:1564            [writes] OBS_HEADSET_COPY , off , Rainwave monitor , monitor-type.mjs
+      | `OBS_HEADSET_COPY` | on | `off` makes `Rainwave monitor` a **silent headset copy**, monitoring off (#550; monitor types are spelled once in `monitor-type.mjs`, #553): OBS keeps playing a muted monitor-only source, so a mute is not silence (#547's mute did not work). Four places apply it. The harness writes the collection with `monitoring_type: 0` on the copy to OBS's collection file right before
+  docs/obs-layout.md:1565            [launch] OBS_AUDIO_CHECK , off , audio state , music signal
+      | `OBS_AUDIO_CHECK` | on | `off` leaves the `audio state` and `music signal` pre-launch checks unregistered (#513): the kill-switch if they misfire on the live rig, and what the unit-test rig sets |
+  docs/obs-layout.md:1566            [reads] OBS_MUSIC_METER_WINDOW_MS , 3000 , music signal , InputVolumeMeters
+      | `OBS_MUSIC_METER_WINDOW_MS` | `3000` | how long the `music signal` check reads OBS's `InputVolumeMeters` for the Rainwave source (#513); `server.audio-check.test.mjs` sets a few tens of ms |
+      hint: server.audio-check.test.mjs holds OBS_MUSIC_METER_WINDOW_MS; server.audio-check.test.mjs LACKS 3000; server.audio-check.test.mjs holds music signal; server.audio-check.test.mjs holds InputVolumeM
+  docs/obs-layout.md:1569            [read] SCROLLER_SETTINGS , settings.json , server.mjs
+      | `SCROLLER_SETTINGS` | `settings.json` beside `server.mjs` | file the saved scroller settings are read from and written to; the unit tests point it at a temp file so they never touch the live one |
+      hint: server.mjs LACKS SCROLLER_SETTINGS; server.mjs LACKS settings.json
+  docs/obs-layout.md:1570            [imports] SCROLLER_STATIC_ROOT , server.mjs , publicFiles , endpoints.mjs
+      | `SCROLLER_STATIC_ROOT` | the checkout (beside `server.mjs`) | the directory the server serves its pages from. The static handler serves **only** an allowlist of files by exact name from it (`publicFiles` in `endpoints.mjs`: `index.html`, `output.html`, `warnings.html`, `styles.css`, `app.js`, `settings.mjs`, `post-json.mjs`, `station-picker.mjs`) and answers 404 for anything else, because the ro
+  docs/obs-layout.md:1579            [never] OBS_HIDDEN_HOSTS , defaultHiddenHosts , rig-config.mjs , google.com
+      | `OBS_HIDDEN_HOSTS` | email, chat, money, logins, password vaults, Twitch backstage, cloud docs, GitHub (full list: `defaultHiddenHosts` in `rig-config.mjs`) | comma list of hosts that never reach the stream; while one is the front tab OBS parks on the ground scene (suffix match, so `google.com` covers every Google host) |
+      hint: rig-config.mjs holds OBS_HIDDEN_HOSTS; rig-config.mjs holds de
+  docs/obs-layout.md:1584            [Write] pos , bounds
+      `pos`/`bounds` does nothing. Write both:
+  docs/obs-layout.md:1692            [own] id , versioned_id , "group"
+      entry per sticker group: `id`/`versioned_id` `"group"`, and its own
+  docs/obs-layout.md:1706            [own] bounds_type , scale
+      `bounds_type` 0/none, `scale` 1) so it adds no transform of its own on
+  docs/obs-layout.md:1715            [own] make-wide-scene.mjs , "scene"
+      `make-wide-scene.mjs` only walks `"scene"` sources' own item lists, so
+  docs/obs-layout.md:1857            [call] render , shadow_layer
+      `render` call, per item) instead of one shared `shadow_layer` across all
+  docs/obs-layout.md:2155            [reads] music signal , monitor type none , OBS_HEADSET_COPY=off , docs/research/2026-10-02-muted-monitor-source-still-plays.md
+      like any audio input; the `music signal` check reads the music source only. Under the e2e pointer its monitoring is switched off (`monitor type none`, `OBS_HEADSET_COPY=off`, #550; see the env table), and the check holds it there. It is not muted: OBS keeps playing a muted monitor-only source to the monitoring device (`docs/research/2026-10-02-muted-monitor-source-still-plays.md`).
+  docs/obs-layout.md:2301            [own] [role=button] , pointer , text
+      `[role=button]` and the I-beam on fields. A page's own `pointer`, `text` or
+  docs/obs-layout.md:2306            [own] grab , crosshair , none , url()
+      Every other cursor (`grab`, resize, `crosshair`, `none`, a page's own `url()`)
+  docs/obs-layout.md:2316            [never] holdStillStyle , cursor: none
+      `holdStillStyle` sets `cursor: none` so a stray pointer never lands in a
+  docs/obs-layout.md:2335            [own] getScreenCTM() , paintedInk
+      each mapped through its own `getScreenCTM()` (`paintedInk`), in page px,
+  docs/obs-layout.md:2375            [reads] paintedInk , getBBox()
+      **Ink measurement** (#344). `paintedInk` reads each shape's `getBBox()` by
+  docs/obs-layout.md:2546            [own] fitRulesPane , width , max-width , box-sizing
+      `fitRulesPane` clears its own `width`, `max-width`, `box-sizing` and
+  docs/obs-layout.md:2702            [owns] createPowershellShell , powershell.mjs
+      alive (`createPowershellShell` in `powershell.mjs`, which owns its wait queue and DONE marker), compiles once at start, and writes each resize as one line to its
+      hint: powershell.mjs holds createPowershellShell
+  docs/obs-layout.md:2723            [read] layout/sticker/ , layout/sticker/README.md
+      `layout/sticker/` in this repo — read `layout/sticker/README.md` and
+  docs/obs-layout.md:2792            [reads] method , monitor_id , capture_cursor , force_sdr
+      reads (`method`/`monitor_id`/`capture_cursor`/`force_sdr`), not the older
+  docs/obs-layout.md:2793            [writes] monitor , compatibility
+      bitblt plugin's `monitor`(int)/`compatibility` — the generator writes
+  docs/obs-layout.md:2813            [own] res-state.txt , ResVerb.cs
+      launched, the same reasoning the rig exe's own `res-state.txt` (`ResVerb.cs`) already
+      hint: ResVerb.cs holds res-state.txt
+  docs/obs-layout.md:2830            [restart] desktopMonitor , { id, error }
+      `desktopMonitor` field (`{ id, error }`) after a restart confirms what the
+  docs/obs-layout.md:2907            [own] App window , window_capture , appWindow , bounds_type
+      | `App window` | 32,32 1856×1016 | A `window_capture` source of its own, in the `appWindow` box inset by its 12 px frame; `bounds_type` 2 (scale-inner), crop 0, so a window of another aspect letterboxes on the panel's fill. Not the `Puzzle` source: the server repoints that one at the stream Chrome, blanks it during a leaving-warning and masks it, so sharing it would make the scene show Chrome. No 
+  docs/obs-layout.md:2914            [writes] make-sticker.py app-window , all
+      `make-sticker.py app-window` writes the four images; `all` includes it, so the
+  docs/obs-layout.md:2937            [return] chromeStateFor , sceneFor
+      (`chromeStateFor` and `sceneFor` return null, pinned by name in
+  docs/obs-layout.md:2948            [never] ok() , ok(info) , fixed(what) , warn(message)
+      `ok()` (or `ok(info)`, an information line shown on the dock and never toasted), `fixed(what)` or `warn(message)` (`check-registry.mjs`), sync or async.
+      hint: check-registry.mjs holds ok(); check-registry.mjs LACKS ok(info); check-registry.mjs holds fixed(what); check-registry.mjs holds warn(message)
+  docs/obs-layout.md:2961            [never] rigStartChecksGraceMs , obs-connection.mjs
+      the watcher first tried (`rigStartChecksGraceMs`, `obs-connection.mjs`) on a rig whose OBS never
+      hint: obs-connection.mjs holds rigStartChecksGraceMs
+  docs/obs-layout.md:2970            [spawns] powershell.mjs , powershell.exe
+      `powershell.mjs`, the one module that spawns `powershell.exe`) per
+      hint: powershell.mjs holds powershell.exe
+  docs/obs-layout.md:3034            [own] decodePng , e2e/pixels.mjs
+      source's own filters) and judges its pixels (`decodePng` from `e2e/pixels.mjs`).
+      hint: e2e/pixels.mjs holds decodePng
+  docs/obs-layout.md:3189            [never] diffLevels , Chrome
+      (`diffLevels`: a fader beyond 1e-4 or a mute; never `Chrome`'s mute) and, when
+
+COUNTS (a reader re-counts)
+  docs/obs-layout.md:258             303 was                which #303 was filed to stop (#358). `stickerRenderCommand` in `stickers.mjs`
+  docs/obs-layout.md:274             363 wires              into the live twitch folder). #363 wires them into OBS ("Avatar scene"
+  docs/obs-layout.md:288             9 positions            resolves against the item's bounding box, and none of the 9 positions
+  docs/obs-layout.md:457             41 logs                fires and the chat overlay shows the Slime2 warning all session (4 of 41 logs
+  docs/obs-layout.md:533             30 lines               its last 30 lines under any server refusal, not only an identity mismatch.
+  docs/obs-layout.md:1060            0 counts               run, naming the setting and both values; a zoom of 0 counts as unset, a missing
+  docs/obs-layout.md:1083            2 falls                window and priority 2 falls back to any Chrome (issue #317). The server's
+  docs/obs-layout.md:1113            169 closes             `acquireCapture` reads titles). That check was removed (#145): #169 closes
+  docs/obs-layout.md:1114            221 reinstalls         the e2e Chrome at the end of every run, and #221 reinstalls the collection
+  docs/obs-layout.md:1149            140 fps                480 px wide, ~140 fps) and hashes each frame. The scenario declares the states
+  docs/obs-layout.md:1329            6 changes              | `capture sentinel` | a wrong board-mask state planted straight on OBS | the live server overwrites it back, 
+  docs/obs-layout.md:1332            10 switches            | `rapid tab flips` | 10 switches 300 ms apart | the board settles back on the tab it ended on; no scene chang
+  docs/obs-layout.md:1476            60 fps                 The blank rule carries **16 ms of slack**, one frame of a 60 fps stream. The
+  docs/obs-layout.md:1545            0 removes              | `OBS_CAM_LATENCY_MS` | `97` | how far the undelayed face trails the board (the webcam's own latency, less on
+  docs/obs-layout.md:1583            32 stores              - OBS 32 stores relative transforms next to absolute ones. Editing only
+  docs/obs-layout.md:1622            50 plus                (rotated interior corner 1510,50 plus a by-eye nudge), topmost. The same
+  docs/obs-layout.md:1832            85 pixels              chat frame edge 12,962 px, max delta 39, mean **0.5** — the 85 pixels over 0
+  docs/obs-layout.md:1882            276 rides              question #276 rides on, which is how **OBS** renders the combined frame's
+  docs/obs-layout.md:2034            18 channels            three channels whose stream key is not the API's key). The 18 channels of
+  docs/obs-layout.md:2859            1080 canvas            a 2560×1440 desktop into the 1920×1080 canvas rendered too small at that
+  docs/obs-layout.md:3074            515 sends              toasts every time. A script from before #515 sends no id, so all such tabs count as
+  docs/obs-layout.md:3217            9 feeds                Tiles are `bounds_type` 3 with `bounds_crop`, so the 16:9 feeds centre-crop
+  docs/obs-layout.md:3417            361 layers             Scene **Avatar** (#363), last in `scene_order`, holds the two #361 layers
+  docs/obs-layout.md:3431            1891 canvas            layer's 1549×1891 canvas to end at the join's right end, canvas point
+  docs/obs-layout.md:3459            1 units                - **`threshold` is in the level's own 0–1 units, not percent.** The shipped
+  docs/obs-layout.md:3464            1 reads                syllables; `meter_type` 1 reads 7.5 dB and tracks speech continuously. With
+  docs/obs-layout.md:3524            23 recordings          2026-09-23 recordings, with each voice onset on the container timeline;
+  docs/obs-layout.md:3543            381 was                #381 was a dropped 0 → 500. The server therefore nudges on every connect:
+  docs/obs-layout.md:3548            0 applies              0 target is set directly; nonzero → 0 applies.

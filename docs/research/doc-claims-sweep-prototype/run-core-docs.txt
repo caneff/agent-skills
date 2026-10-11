@@ -1,0 +1,128 @@
+repo /home/caneff/src/twitch-rules-scroller   4 docs   234 tracked non-Markdown files checked against
+
+TOKENS BY KIND AND VERDICT
+  kind               ok   ABSENT  MISSING     skip
+  command            11        0        0        0
+  identifier        102        1        0        0
+  literal            34       16        0        8
+  path              196        0        0        0
+  phrase             38       13        0        0
+  placeholder         0        0        0       13
+  route              18        0        0        0
+  word               58        1        0       10
+
+  519 tokens, 31 FALSE candidates (28 distinct), 23 relation lines for a reader, 3 counts for a reader
+
+FALSE CANDIDATES (mechanical)
+  README.md:51                       ABSENT   literal    `http://127.0.0.1:4777/warnings` — string appears in no tracked non-Markdown file
+  README.md:55                       ABSENT   literal    `http://127.0.0.1:4777/warnings` — string appears in no tracked non-Markdown file
+  README.md:90                       ABSENT   literal    `chrome://extensions` — string appears in no tracked non-Markdown file
+  README.md:94                       ABSENT   literal    `C:\Users\canef\OneDrive\Documents\twitch\` — string appears in no tracked non-Markdown file
+  README.md:97                       ABSENT   phrase     `cp sudokupad-sync.user.js sudokupad-sync.stub.user.js /mnt/c/Users/canef/OneDrive/Documents/twitch/` — string appears in no tracked non-Markdown file
+  README.md:108                      ABSENT   phrase     `sync v89` — string appears in no tracked non-Markdown file
+  README.md:133                      ABSENT   literal    `.puzzle-rules` — string appears in no tracked non-Markdown file
+  README.md:154                      ABSENT   phrase     `OBS_SCENE="Sudoku puzzle"` — string appears in no tracked non-Markdown file
+  README.md:154                      ABSENT   literal    `OBS_ITEM=Puzzle` — string appears in no tracked non-Markdown file
+  README.md:155                      ABSENT   literal    `OBS_FULL_CROP=480,30,150,0` — string appears in no tracked non-Markdown file
+  README.md:157                      ABSENT   phrase     `OBS_MASK_FILTER="Rounded mask"` — string appears in no tracked non-Markdown file
+  AGENTS.md:9                        ABSENT   literal    `@AGENTS.md` — string appears in no tracked non-Markdown file
+  AGENTS.md:33                       ABSENT   literal    `%APPDATA%\obs-studio\basic\scenes\Sudoku_Sticker.json` — string appears in no tracked non-Markdown file
+  AGENTS.md:65                       ABSENT   phrase     `sync v89` — string appears in no tracked non-Markdown file
+  AGENTS.md:78                       ABSENT   identifier `ERR_MODULE_NOT_FOUND` — name appears in no tracked non-Markdown file
+  AGENTS.md:162                      ABSENT   phrase     `mcs -langversion:5 -target:winexe -r:System.Management.dll -out:/tmp/rig.exe *.cs` — string appears in no tracked non-Markdown file
+  AGENTS.md:167                      ABSENT   phrase     `sudo update-binfmts --unimport cli` — string appears in no tracked non-Markdown file
+  AGENTS.md:168                      ABSENT   phrase     `cmd.exe /c echo ok` — string appears in no tracked non-Markdown file
+  AGENTS.md:189                      ABSENT   phrase     `--only "server restart"` — string appears in no tracked non-Markdown file
+  AGENTS.md:210                      ABSENT   phrase     `make-sticker.py --deploy` — string appears in no tracked non-Markdown file
+  AGENTS.md:211                      ABSENT   literal    `Get*` — string appears in no tracked non-Markdown file
+  AGENTS.md:212                      ABSENT   literal    `STICKER_*` — string appears in no tracked non-Markdown file
+  AGENTS.md:214                      ABSENT   literal    `Get*` — string appears in no tracked non-Markdown file
+  AGENTS.md:255                      ABSENT   literal    `%APPDATA%\obs-studio\basic\scenes\*` — string appears in no tracked non-Markdown file
+  AGENTS.md:262                      ABSENT   word       `pkill` — string appears in no tracked non-Markdown file
+  AGENTS.md:273                      ABSENT   literal    `ready-for-human` — string appears in no tracked non-Markdown file
+  AGENTS.md:283                      ABSENT   phrase     `is that edge. Node builtins (` — string appears in no tracked non-Markdown file
+  GLOSSARY.md:120                    ABSENT   phrase     `{collectionReady, reason}` — string appears in no tracked non-Markdown file
+  GLOSSARY.md:129                    ABSENT   literal    `C:\Users\canef\OneDrive\Documents\twitch` — string appears in no tracked non-Markdown file
+  GLOSSARY.md:294                    ABSENT   literal    `127.0.0.1:9333` — string appears in no tracked non-Markdown file
+  CODING_STANDARDS.md:42             ABSENT   phrase     `assert.ok(a === b)` — string appears in no tracked non-Markdown file
+
+TESTS-ONLY NAMES (a doc names it as live code; only tests hold it)
+  AGENTS.md:177                      `restartObs` — tests only (6 files)
+  AGENTS.md:185                      `restartObs` — tests only (6 files)
+  GLOSSARY.md:323                    `pu.maketext()` — tests only (1 files)
+  GLOSSARY.md:343                    `blankFallbackMs` — tests only (1 files)
+  GLOSSARY.md:361                    `obsRunSentinels` — tests only (2 files)
+  GLOSSARY.md:367                    `judgeFrames` — tests only (3 files)
+  GLOSSARY.md:386                    `Page.captureScreenshot` — tests only (3 files)
+  GLOSSARY.md:408                    `matchEventOrder` — tests only (3 files)
+  GLOSSARY.md:408                    `runChoreography` — tests only (3 files)
+  GLOSSARY.md:419                    `settleVerdict` — tests only (3 files)
+  CODING_STANDARDS.md:41             `assert.equal` — tests only (94 files)
+  CODING_STANDARDS.md:41             `assert.deepEqual` — tests only (83 files)
+  CODING_STANDARDS.md:42             `assert.equal` — tests only (94 files)
+  CODING_STANDARDS.md:43             `assert.ok` — tests only (56 files)
+
+SAID-GONE BUT PRESENT (the line says it left; the tree still holds it)
+  AGENTS.md:53                       `OBS_HEADSET_COPY`
+  AGENTS.md:297                      `stream-rig.exe`
+  AGENTS.md:297                      `install-collection.sh`
+
+RELATIONS (a reader checks: does the tree agree with the verb?)
+  README.md:67                       [reads] difm-listen-key.txt , docs/obs-layout.md
+      (Rainwave, di.fm or Edge), then a search box, genre buttons (di.fm's channels carry genres) and a list of the playing source's channels, with your recent picks and starred favourites on top (Edge has no channels: it plays what is open in Edge, and the banner reads Windows' media controls). Every stream starts on Rainwave Game; a di.fm pick needs the listen key in `difm-listen-key.txt` in the main 
+  AGENTS.md:17                       [never] make-sticker.py , layout/sticker/out/
+      - `make-sticker.py` renders into `layout/sticker/out/`, never the live art
+  AGENTS.md:73                       [import] e2e.barrel.test.mjs , e2e.signal.test.mjs
+      or worktree.** `e2e.barrel.test.mjs` and `e2e.signal.test.mjs` import
+      hint: e2e.barrel.test.mjs LACKS e2e.signal.test.mjs; e2e.signal.test.mjs LACKS e2e.barrel.test.mjs
+  AGENTS.md:76                       [imports] jsdom , app.test.mjs
+      test that imports a devDependency (`jsdom` for `app.test.mjs`, #566) needs
+      hint: app.test.mjs holds jsdom
+  AGENTS.md:81                       [imports] index.html , output.html , app.js
+      `index.html` and `output.html` in jsdom, imports `app.js` with a stub
+      hint: index.html LACKS output.html; index.html holds app.js; output.html LACKS index.html; output.html holds app.js; app.js LACKS index.html; app.js holds output.html
+  AGENTS.md:171                      [Never] e2e.mjs , main() , node , ./e2e.sh
+      - **Never run `e2e.mjs` or `main()` with Linux `node`** — only `./e2e.sh`, which
+      hint: e2e.mjs holds main(); e2e.mjs holds node; e2e.mjs holds ./e2e.sh
+  AGENTS.md:181                      [export] e2e.mjs , let
+      on an export or logic in `e2e.mjs`, or on a `let` that grew a second home.
+      hint: e2e.mjs holds let
+  AGENTS.md:193                      [writes] server.mjs , stream-rig.exe
+      file and writes a pointer naming its own `server.mjs`; `stream-rig.exe`
+      hint: server.mjs LACKS stream-rig.exe
+  AGENTS.md:214                      [caller] AGENTS.md , Get*
+      (`AGENTS.md` "Always on") is the one sanctioned caller of the deploy scripts. `Get*`
+  AGENTS.md:215                      [reads] GetSourceScreenshot , ./e2e.sh
+      requests and `GetSourceScreenshot` are reads and fine. `./e2e.sh` closes OBS
+  AGENTS.md:296                      [own] npm test , ./e2e.sh , stream-rig.exe , server.mjs
+      - **Seam**: `npm test` — the fakes-only layer: the server, the rig's source tests and the harness's own logic against fake OBS and fake Chrome, without Chris's screen. This is what a worker runs before its PR and what the merge re-runs on the merged tree. The live layer above it, `./e2e.sh` (real OBS, `stream-rig.exe` pointed at the checkout's `server.mjs`, and a CDP-driven Chrome running the depl
+  AGENTS.md:297                      [read] npm test , stream-rig.exe , res , install-collection.sh
+      - **Blind to**: `npm test` is blind to real OBS and real pixels — capture binding, monitor geometry, transforms, audio actually playing — which is what the batched live run is for. The live layer in turn is blind to anything the rig reports only in a log — the judges read pixels, HTTP status and exit codes, never log text, so a dropped "fail loud" log line passes — and any rig path no scenario lau
+  AGENTS.md:324                      [read] GLOSSARY.md , docs/adr/
+      Single-context: a root `GLOSSARY.md` plus `docs/adr/`, both read lazily. See
+  GLOSSARY.md:14                     [read] settings.json , /api/settings
+      `settings.json` behind `/api/settings`, and the helpers that read them —
+  GLOSSARY.md:44                     [call] e2e.sh , e2e/*.mjs
+      third: `e2e.sh`/`e2e/*.mjs` sometimes call themselves "the rig" too, for the
+      hint: e2e.sh holds e2e/*.mjs
+  GLOSSARY.md:89                     [launches] audio state , levels-store.mjs , Chrome , Edge music
+      muted or quiet Windows mic device at rig start only (a later run warns) and warns when its peak stays exactly 0; when that device is NVIDIA Broadcast's virtual mic it also launches Broadcast if it is down (rig start) and warns when Broadcast's mic source is not the expected headset mic or the headset delivers nothing; `audio state` sets OBS's audio mutes and faders, and the headset copy's monitor 
+  GLOSSARY.md:199                    [returns] leave , dwell , swap , switch
+      **blank** and returns a **route** (`leave`, `dwell`, `swap`, `switch`,
+  GLOSSARY.md:227                    [returns] capturedTitle , shownTitle , shownCrop , planSignal
+      `capturedTitle`, `shownTitle`, `shownCrop`; `planSignal` returns the next
+  GLOSSARY.md:230                    [reads] blankTimer , runPlan
+      `blankTimer`; the planner reads it, and `runPlan`'s steps,
+  GLOSSARY.md:272                    [reads] canvasInk , inkMeter
+      corner background (`canvasInk`), held once two reads agree (`inkMeter`).
+  GLOSSARY.md:276                    [own] getScreenCTM() , paintedInk
+      through its own `getScreenCTM()` (`paintedInk`); unpainted shapes — fill and
+  GLOSSARY.md:279                    [own] padRect , resizeBoard
+      is padded ink (`padRect`), and after SudokuPad's own `resizeBoard` the
+  CODING_STANDARDS.md:41             [never] assert.equal , assert.deepEqual
+      7. **Assert equality with `assert.equal` / `assert.deepEqual`, never
+
+COUNTS (a reader re-counts)
+  AGENTS.md:223                      60 fps                 at 60 fps, measured against the live server — not a guess. Change how or
+  AGENTS.md:287                      13 candidates          candidate in one clump (measured 2026-09-20: 13 candidates, one clump).
+  GLOSSARY.md:319                    138 class              *consistent* — the #138 class, which a run's own baseline passes clean
