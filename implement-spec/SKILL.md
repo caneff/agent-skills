@@ -11,9 +11,8 @@ from different specs — is [`burndown`](../burndown/SKILL.md)'s job.
 
 A spec run needs slices: sub-issues of the spec, filed by `/to-tickets`. A
 spec with none is not run. Slice it with `/to-tickets` first, or, when its
-slices exist unlinked, link them with
-`gh issue edit <spec> --add-sub-issue <slice>`. `implement-dispatch --spec`
-refuses the same spec, naming the same step.
+slices exist unlinked, link them as sub-issues. `implement-dispatch --spec`
+refuses such a spec and prints the link command.
 
 ## The loop is not here
 

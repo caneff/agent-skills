@@ -4,21 +4,15 @@
 controller that enters the skill without that command is stopped only if
 the skill itself names `/to-tickets`.
 """
-import os
 import re
+from pathlib import Path
 
-SKILL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SKILL.md")
-
-
-def first_section():
-    text = open(SKILL).read()
-    # Drop the frontmatter, then take everything up to the second heading.
-    body = text.split("---", 2)[2]
-    parts = re.split(r"^## ", body, flags=re.M)
-    return parts[1]
+SKILL = Path(__file__).with_name("SKILL.md")
 
 
 def test_first_section_names_to_tickets_as_the_prerequisite():
-    section = first_section()
+    match = re.search(r"^## (.*?)(?=^## )", SKILL.read_text(), re.M | re.S)
+    assert match, "SKILL.md has no second '## ' heading to end the first section"
+    section = match.group(1)
     assert "/to-tickets" in section, section[:200]
     assert "sub-issue" in section, section[:200]
