@@ -138,6 +138,10 @@ defines them.
   send it to the controller, naming in the first line whose work it is and
   that the spawner was gone. Why: a report is never dropped because its
   addressee died.
+- A teammate or subagent does its own reading and running and spawns no
+  nested subagent; a task too large for one agent is reported as such and
+  stopped. Why: a nested agent reports to the top-level session instead of
+  its spawner, and the work is lost.
 - Spawning a teammate I can enter, entering one, and handing it an image
   (save a file, message the path): `docs/research/2026-09-28-teammate-attach.md`.
 - **The controller/worker pairing survives `/clear`** (#964). `/clear` wipes
