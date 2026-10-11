@@ -35,14 +35,17 @@
 # the whole file.
 #
 # `--wait <name>` blocks until the run is no longer alive, then prints the line
-# `--status` would print and exits with the same code (0 finished, 11 killed,
-# 12 unknown) — never 10. Launch it as a `run_in_background` Bash call right
-# after starting the job: the harness wakes the session when it returns, which
-# a Monitor (expires after 30 minutes) does not outlast. It rechecks the run
-# directory every WAIT_INTERVAL seconds and writes nothing. A TERM or INT
-# while waiting prints `interrupted <name>` and exits 13, so an interrupted
-# wait is never read as an ended run. Known gap: a recycled pid keeps `alive`
-# true, so a wait on a run whose pid was reused blocks until that process ends.
+# `--status` would print and exits with the same code — never 10. Launch it as a
+# `run_in_background` Bash call right after starting the job: the harness wakes
+# the session when it returns, and a Monitor's expiry never applies. It rechecks
+# the run directory every WAIT_INTERVAL seconds and writes nothing. A TERM or INT
+# while waiting prints `interrupted <name>` and exits 13, so an interrupted wait
+# is never read as an ended run. Two gaps, stated so nobody reads them as
+# guarantees: a wait that runs before job-run has recorded its start answers
+# from the state it finds (`unknown`, 12, for a new name; the previous run's
+# verdict for a reused one), so start the job first; and a recycled pid keeps
+# `alive` true, so a wait on a run whose pid was reused blocks until that
+# process ends.
 #
 # job-run records; it does not prevent. No setsid, no detaching, no keep-alive.
 set -uo pipefail
@@ -107,6 +110,13 @@ verdict() { # verdict <name> ; prints the line, returns the code
     return 0
   fi
   pid=$(cat "$dir/pid" 2>/dev/null)
+  # A run directory with neither a pid nor an exit record is a run between its
+  # `mkdir` and its pid write (below), not a dead one: answering `killed` would
+  # end a --wait on a job that has not yet started.
+  if [ ! -e "$dir/pid" ]; then
+    echo "starting $n: run directory exists, no pid recorded yet"
+    return 10
+  fi
   if [ "$up" = 1 ]; then
     echo "alive $n pid=$pid last=$(tail -n 1 "$dir/progress" 2>/dev/null | cut -d' ' -f1)"
     return 10
@@ -116,10 +126,10 @@ verdict() { # verdict <name> ; prints the line, returns the code
   return 11
 }
 
-if [ -n "$status" ] || [ -n "$wait_for" ]; then
-  [ -n "$status" ] && [ -n "$wait_for" ] && die "--wait cannot be combined with --status"
-  [ -n "$name" ] && die "--wait cannot be combined with --name (a run), and --status takes no --name"
-  [ $# -eq 0 ] || die "--wait cannot be combined with a command, and --status takes none"
+[ -n "$status" ] && [ -n "$wait_for" ] && die "--wait cannot be combined with --status"
+if [ -n "$wait_for" ]; then
+  [ -n "$name" ] && die "--wait cannot be combined with --name"
+  [ $# -eq 0 ] || die "--wait cannot be combined with a command"
 fi
 
 if [ -n "$status" ]; then
@@ -165,7 +175,6 @@ prune() {
   done
   return 0
 }
-prune >/dev/null 2>&1 || true
 
 # A name collision against a live pid is a refusal, never a quietly different
 # name: the path the caller predicted has to be the path that exists. Against a
@@ -177,9 +186,14 @@ fi
 
 mkdir -p "$dir" || die "cannot create $dir"
 
-printf '%s\n' "$*" > "$dir/cmd"
-rm -f "$dir/exit"
+# The previous run's pid and exit record go together, then the new pid lands: a
+# `--wait` racing this start sees `starting`, never the old run's verdict.
+rm -f "$dir/exit" "$dir/pid"
 printf '%s\n' "$$" > "$dir/pid"
+printf '%s\n' "$*" > "$dir/cmd"
+# Pruned only now that this run is recorded alive, so the directory a waiter is
+# looking at is complete before the sweep's time is spent.
+prune >/dev/null 2>&1 || true
 : > "$dir/progress"
 export JOB_PROGRESS="$dir/progress"
 

@@ -365,6 +365,7 @@ esac
 # A SIGKILLed wrapper leaves no exit record: --wait says killed, exit 11.
 pid=$(start_bg waitkilled)
 await "$jobs_dir/waitkilled/progress" && sleep 0.2
+kids=$(pgrep -P "$pid")   # the job's own children, taken before the wrapper dies
 ( sleep 0.5; kill -9 "$pid" 2>/dev/null ) &
 out=$(timeout 15 "$job_run" --wait waitkilled 2>&1); rc=$?
 case "$rc|$out" in
@@ -372,7 +373,8 @@ case "$rc|$out" in
   *) no "--wait on a SIGKILLed run says killed, exit 11" "rc=$rc out=$out" ;;
 esac
 wait "$pid" 2>/dev/null
-pkill -9 -f 'sleep 5' 2>/dev/null
+# Reap what the killed wrapper orphaned, by pid: its children and theirs.
+for k in $kids; do pkill -9 -P "$k" 2>/dev/null; kill -9 "$k" 2>/dev/null; done
 
 # Unknown name: 12 at once. A traversal name is refused as a bad name.
 out=$(timeout 2 "$job_run" --wait nosuch 2>&1); rc=$?
@@ -391,27 +393,65 @@ await "$jobs_dir/waitterm/progress" && sleep 0.2
 "$job_run" --wait waitterm >"$tmp/term.out" 2>&1 &
 wp=$!
 sleep 0.5
-t0=$(date +%s)
+t0=$(date +%s%N)
 kill -TERM "$wp" 2>/dev/null; wait "$wp" 2>/dev/null; rc=$?
-t1=$(date +%s)
-[ "$rc" = 13 ] && ! grep -q '^finished' "$tmp/term.out" && [ $((t1 - t0)) -le 2 ] \
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+# Well under the 3 s poll interval: a signal handled only when a foreground
+# sleep returns would take up to that long.
+[ "$rc" = 13 ] && ! grep -q '^finished' "$tmp/term.out" && [ "$ms" -lt 1000 ] \
   && ok "a TERMed --wait exits 13 promptly and does not say finished" \
   || no "a TERMed --wait exits 13 promptly and does not say finished" \
-       "rc=$rc elapsed=$((t1 - t0))s out=$(cat "$tmp/term.out")"
+       "rc=$rc elapsed=${ms}ms out=$(cat "$tmp/term.out")"
 kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 
-# --wait stands alone and needs a value.
-for args in "--wait a --status b" "--wait a --name b -- true" "--name b --wait a -- true" "--wait a -- true"; do
-  # shellcheck disable=SC2086
-  out=$(timeout 5 "$job_run" $args 2>&1); rc=$?
-  [ "$rc" = 1 ] && [[ "$out" == *"--wait cannot be combined"* ]] \
-    && ok "'$args' is refused" \
-    || no "'$args' is refused" "rc=$rc out=$out"
-done
-out=$(timeout 5 "$job_run" --wait 2>&1); rc=$?
-[ "$rc" = 1 ] && [[ "$out" == *"--wait needs a value"* ]] \
-  && ok "--wait with no value errors instead of hanging" \
-  || no "--wait with no value errors instead of hanging" "rc=$rc out=$out"
+# --wait stands alone and needs a value. Each refusal names its own cause.
+refuse() { # refuse <expected message part> <args...>
+  local want="$1" out rc; shift
+  out=$(timeout 5 "$job_run" "$@" 2>&1); rc=$?
+  [ "$rc" = 1 ] && [[ "$out" == *"$want"* ]] \
+    && ok "'$*' is refused: $want" \
+    || no "'$*' is refused: $want" "rc=$rc out=$out"
+}
+refuse "--wait cannot be combined with --status" --wait a --status b
+refuse "--wait cannot be combined with --name" --wait a --name b
+refuse "--wait cannot be combined with --name" --name b --wait a
+refuse "--wait cannot be combined with a command" --wait a -- true
+refuse "--wait needs a value" --wait
+
+# --status still ignores what it always ignored: the refusals are --wait's own.
+out=$("$job_run" --status clean --name whatever 2>&1); rc=$?
+case "$rc|$out" in
+  0\|finished\ clean*) ok "--status is unchanged by --name beside it" ;;
+  *) no "--status is unchanged by --name beside it" "rc=$rc out=$out" ;;
+esac
+
+# A run directory with no pid and no exit record is a run mid-start, not a dead
+# one: it is `starting` (10), so a --wait keeps waiting instead of ending on it.
+mkdir -p "$jobs_dir/midstart"
+got=$(status_of midstart)
+case "$got" in
+  10\|starting*) ok "a run directory with no pid and no exit reads starting, exit 10" ;;
+  *) no "a run directory with no pid and no exit reads starting, exit 10" "$got" ;;
+esac
+timeout 4 "$job_run" --wait midstart >/dev/null 2>&1; rc=$?
+[ "$rc" = 124 ] \
+  && ok "--wait keeps waiting on a run mid-start" \
+  || no "--wait keeps waiting on a run mid-start" "rc=$rc"
+rmdir "$jobs_dir/midstart"
+
+# A reused name drops the previous run's pid and exit record together, so a
+# reader of the new run never sees the old verdict once the new pid is down.
+"$job_run" --name reuse -- sh -c 'exit 4' >/dev/null 2>&1
+"$job_run" --name reuse -- sh -c 'sleep 1' >/dev/null 2>&1 &
+rpid=$!
+await "$jobs_dir/reuse/pid"; sleep 0.2
+got=$(status_of reuse)
+case "$got" in
+  10\|alive*) ok "a reused name reports the new run alive, not the previous verdict" ;;
+  *) no "a reused name reports the new run alive, not the previous verdict" "$got" ;;
+esac
+wait "$rpid" 2>/dev/null
+
 [ ! -e "$jobs_dir/nosuch" ] \
   && ok "--wait creates no run directory" \
   || no "--wait creates no run directory"
