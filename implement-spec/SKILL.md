@@ -7,6 +7,14 @@ disable-model-invocation: true
 One spec's slices, driven as one run. A mixed-origin queue — several tickets
 from different specs — is [`burndown`](../burndown/SKILL.md)'s job.
 
+## Prerequisite: the spec is sliced
+
+A spec run needs slices: sub-issues of the spec, filed by `/to-tickets`. A
+spec with none is not run. Slice it with `/to-tickets` first, or, when its
+slices exist unlinked, link them with
+`gh issue edit <spec> --add-sub-issue <slice>`. `implement-dispatch --spec`
+refuses the same spec, naming the same step.
+
 ## The loop is not here
 
 Picking the next clump, starting it, waiting, refilling as slots free, the
