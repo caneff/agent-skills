@@ -41,3 +41,31 @@ folder outside the repo, so most paths are absent by design.
    files, and the thing they import is on line 74.
 4. What the mechanical pass did deliver: a bounded reading list. 23 relation
    lines and 3 counts out of about 1,000 doc lines, each with file:line.
+
+## Round two (2026-10-11): the #207 sentences cannot be recovered
+
+Plan: find the four false sentences twitch-rules-scroller #207 shipped across
+four review rounds, and test whether the reading list contains them. It could
+not be run.
+
+- PR #211 (the #207 fix) and PR #208 (the #135 fix) each hold one commit and
+  no GitHub review comments. The rounds were amended away.
+- `git fsck --unreachable` lists 288 commits. One, 5cb0fd0, is an earlier
+  copy of the #211 commit; `git range-diff` against the merged 50abe76 shows
+  it differs only by a rebase onto a newer main.
+- No Claude transcript for that repo predates 2026-09-06. The second-brain
+  digest of 2026-09-06 describes the claims and quotes none.
+
+What the surviving record says about them, from the #207 issue body and its
+2026-09-04 comment: they were code comments. "A comment claiming the editor
+page was the only writer", then "two comments still asserted
+`writeScrollerSettings` was a live writer". The prototype reads Markdown
+only, so it would not have seen any of them.
+
+`comment-audit/SKILL.md` has a "Stale or wrong" category. Its 2026-09-23 run
+on this repo produced the stale-comment list in issue #392 (at least 25
+rows read; the list was cut at 3,000 characters), fixed by PR #414.
+
+Not established: whether stale claims in Markdown docs are a recurring class
+in any repo. No instance was found; the search was the four core docs at
+77544f5 by token lookup, and 6 relation lines by hand.
