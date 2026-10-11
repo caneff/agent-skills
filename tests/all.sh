@@ -280,6 +280,23 @@ report_failure() { # <label> <output> [<note>...]
   exit 1
 }
 
+# What a non-zero exit status says about the suite (#1524). A shell reports a
+# signal death as 128 + the signal number, so a status in that range is said to
+# read as a kill. It is an inference: a suite can exit with such a number
+# itself, or pass on the status of a child that was killed. A number no signal
+# bears (255) is named as a bare status.
+status_note() { # <status>
+  local status=$1 sig name
+  if [ "$status" -gt 128 ]; then
+    sig=$((status - 128))
+    if name=$(kill -l "$sig" 2>/dev/null) && [ -n "$name" ]; then
+      echo "tests/all.sh: exited with status $status, which reads as signal $sig ($name), a kill and not an assertion (a suite can also exit with this number itself)"
+      return
+    fi
+  fi
+  echo "tests/all.sh: exited with status $status"
+}
+
 # The known limit above is recoverable but undiscoverable: both ways out of a
 # logging false positive sit in a comment nobody is reading at the moment a
 # green suite goes red. Say them where that person is looking instead. Printed
@@ -445,7 +462,11 @@ while IFS=$'\t' read -r label cmd; do
     count=$((count + 1))
   else
     stop_and_wait
-    report_failure "$label" "$out"
+    # The exit status is the one fact a silent failure leaves (#1524), so it
+    # is always named, and an empty output says so.
+    report_failure "$label" "$out" \
+      "$(status_note "$suite_status")" \
+      "$([ -z "$out" ] && echo "tests/all.sh: the suite printed no output")"
   fi
   idx=$((idx + 1))
 done <"$tmp/ordered"
