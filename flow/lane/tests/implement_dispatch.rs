@@ -2523,6 +2523,8 @@ fn spec_mode_refuses_a_spec_with_no_linked_slices() {
     let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "0")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "395", "#395 has no sub-issues"), "{}", out_text(&out));
+    // The refusal names the missing step, not only the link command (#1532).
+    assert!(out_text(&out).contains("/to-tickets"), "{}", out_text(&out));
 }
 
 #[test]

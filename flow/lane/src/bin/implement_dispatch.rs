@@ -1237,7 +1237,7 @@ fn run() -> Result<(), ExitCode> {
             // means slices it never linked, not a spec with none.
             if slices == 0 {
                 return Err(die(format!(
-                    "#{n} has no sub-issues; link its slices (gh issue edit {n} --repo {slug} --add-sub-issue <slice>) and dispatch again"
+                    "#{n} has no sub-issues; run /to-tickets to slice it, or link slices already filed (gh issue edit {n} --repo {slug} --add-sub-issue <slice>), and dispatch again"
                 )));
             }
             if remote_branch_exists(&primary, &branch).map_err(die)? {
