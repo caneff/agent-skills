@@ -280,6 +280,23 @@ report_failure() { # <label> <output> [<note>...]
   exit 1
 }
 
+# What a non-zero exit status says about the suite (#1524). Above 128 a shell
+# reports 128 + the signal that ended the process, so a kill is named as one.
+status_note() { # <status>
+  local status=$1 sig name
+  if [ "$status" -gt 128 ]; then
+    sig=$((status - 128))
+    name=$(kill -l "$sig" 2>/dev/null) || name=""
+    if [ -n "$name" ]; then
+      echo "tests/all.sh: exited with status $status (signal $sig ($name): the suite was killed, not failed by an assertion)"
+    else
+      echo "tests/all.sh: exited with status $status (above 128, which reads as a signal: $sig)"
+    fi
+  else
+    echo "tests/all.sh: exited with status $status"
+  fi
+}
+
 # The known limit above is recoverable but undiscoverable: both ways out of a
 # logging false positive sit in a comment nobody is reading at the moment a
 # green suite goes red. Say them where that person is looking instead. Printed
@@ -445,7 +462,12 @@ while IFS=$'\t' read -r label cmd; do
     count=$((count + 1))
   else
     stop_and_wait
-    report_failure "$label" "$out"
+    # The exit status is the one fact a silent failure leaves (#1524): name
+    # it, name the signal above 128 (a kill reads differently from an
+    # assertion), and say so when there was no output to read.
+    report_failure "$label" "$out" \
+      "$(status_note "$suite_status")" \
+      "$([ -z "$out" ] && echo "tests/all.sh: the suite printed no output")"
   fi
   idx=$((idx + 1))
 done <"$tmp/ordered"
