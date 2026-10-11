@@ -234,8 +234,13 @@ defines them.
   stays installed, and re-adding its `Stop` entry restores it.
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
-  killed. Why: a plain background run loses its output and exit code when
-  its shell is killed.
+  killed. Right after starting it, launch `job-run --wait <n>` as a
+  `run_in_background` Bash call: it blocks until the run ends, prints the
+  `--status` line and wakes the session. Exit 13 means the wait was
+  interrupted, not that the run ended. Why: a plain background run loses its
+  output and exit code when its shell is killed, and a Monitor expires and
+  needs re-arming (#1223 reports 30 minutes and about 15 re-arms over one
+  multi-hour hunt).
 - Append a completion line to a progress file (e.g. `PROGRESS.md`) after
   every step and read it on wake; never stage or commit it. Ending the turn
   instead of blocking (`CLAUDE.md` § Work) was ruled 2026-10-04, superseding

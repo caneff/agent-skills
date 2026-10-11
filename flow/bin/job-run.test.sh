@@ -326,5 +326,135 @@ chmod 700 "$jobs_dir/stubborn"
   && ok "a directory prune could not remove is left alone" \
   || no "a directory prune could not remove is left alone"
 
+# --- --wait: block until the run ends, then answer as --status would --------
+# Launched as a run_in_background Bash call so the harness wakes the session
+# when the job ends. Never returns 10: a live run is waited on, not reported.
+"$job_run" --name waited -- sh -c 'echo going; sleep 2' >/dev/null 2>&1 &
+wpid=$!
+await "$jobs_dir/waited/pid"
+t0=$(date +%s)
+out=$("$job_run" --wait waited 2>&1); rc=$?
+t1=$(date +%s)
+case "$rc|$out" in
+  0\|finished\ waited\ rc=0*) ok "--wait prints the finished line and exits 0" ;;
+  *) no "--wait prints the finished line and exits 0" "rc=$rc out=$out" ;;
+esac
+[ -e "$jobs_dir/waited/exit" ] && [ $((t1 - t0)) -ge 1 ] \
+  && ok "--wait returns only after the run's exit record exists" \
+  || no "--wait returns only after the run's exit record exists" \
+       "elapsed=$((t1 - t0))s exit-file=$([ -e "$jobs_dir/waited/exit" ] && echo yes || echo no)"
+[ "$out" = "$("$job_run" --status waited)" ] \
+  && ok "--wait prints exactly the line --status prints" \
+  || no "--wait prints exactly the line --status prints" "$out"
+wait "$wpid" 2>/dev/null
+
+# A run that already ended answers at once.
+out=$(timeout 2 "$job_run" --wait clean 2>&1); rc=$?
+case "$rc|$out" in
+  0\|finished\ clean*) ok "--wait on a finished run returns at once" ;;
+  *) no "--wait on a finished run returns at once" "rc=$rc out=$out" ;;
+esac
+
+# A failed job is still "finished": the job's own rc is in the line, not the exit.
+out=$(timeout 2 "$job_run" --wait failed 2>&1); rc=$?
+case "$rc|$out" in
+  0\|finished\ failed\ rc=7*) ok "--wait reports a failed job's rc in the line, exit 0" ;;
+  *) no "--wait reports a failed job's rc in the line, exit 0" "rc=$rc out=$out" ;;
+esac
+
+# A SIGKILLed wrapper leaves no exit record: --wait says killed, exit 11.
+pid=$(start_bg waitkilled)
+await "$jobs_dir/waitkilled/progress" && sleep 0.2
+kids=$(pgrep -P "$pid")   # the job's own children, taken before the wrapper dies
+( sleep 0.5; kill -9 "$pid" 2>/dev/null ) &
+out=$(timeout 15 "$job_run" --wait waitkilled 2>&1); rc=$?
+case "$rc|$out" in
+  11\|killed\ waitkilled*) ok "--wait on a SIGKILLed run says killed, exit 11" ;;
+  *) no "--wait on a SIGKILLed run says killed, exit 11" "rc=$rc out=$out" ;;
+esac
+wait "$pid" 2>/dev/null
+# Reap what the killed wrapper orphaned, by pid: its children and theirs.
+for k in $kids; do pkill -9 -P "$k" 2>/dev/null; kill -9 "$k" 2>/dev/null; done
+
+# Unknown name: 12 at once. A traversal name is refused as a bad name.
+out=$(timeout 2 "$job_run" --wait nosuch 2>&1); rc=$?
+case "$rc|$out" in
+  12\|unknown\ nosuch*) ok "--wait on an unknown name exits 12 at once" ;;
+  *) no "--wait on an unknown name exits 12 at once" "rc=$rc out=$out" ;;
+esac
+out=$("$job_run" --wait ../x 2>&1); rc=$?
+[ "$rc" != 0 ] && [[ "$out" == *"may hold only"* ]] \
+  && ok "--wait refuses a traversal name via check_name" \
+  || no "--wait refuses a traversal name via check_name" "rc=$rc out=$out"
+
+# TERM while waiting: the interrupted code (13), never 0/10/11/12, and prompt.
+pid=$(start_bg waitterm)
+await "$jobs_dir/waitterm/progress" && sleep 0.2
+"$job_run" --wait waitterm >"$tmp/term.out" 2>&1 &
+wp=$!
+sleep 0.5
+t0=$(date +%s%N)
+kill -TERM "$wp" 2>/dev/null; wait "$wp" 2>/dev/null; rc=$?
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+# Well under the 3 s poll interval: a signal handled only when a foreground
+# sleep returns would take up to that long.
+[ "$rc" = 13 ] && ! grep -q '^finished' "$tmp/term.out" && [ "$ms" -lt 1000 ] \
+  && ok "a TERMed --wait exits 13 promptly and does not say finished" \
+  || no "a TERMed --wait exits 13 promptly and does not say finished" \
+       "rc=$rc elapsed=${ms}ms out=$(cat "$tmp/term.out")"
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+
+# --wait stands alone and needs a value. Each refusal names its own cause.
+refuse() { # refuse <expected message part> <args...>
+  local want="$1" out rc; shift
+  out=$(timeout 5 "$job_run" "$@" 2>&1); rc=$?
+  [ "$rc" = 1 ] && [[ "$out" == *"$want"* ]] \
+    && ok "'$*' is refused: $want" \
+    || no "'$*' is refused: $want" "rc=$rc out=$out"
+}
+refuse "--wait cannot be combined with --status" --wait a --status b
+refuse "--wait cannot be combined with --name" --wait a --name b
+refuse "--wait cannot be combined with --name" --name b --wait a
+refuse "--wait cannot be combined with a command" --wait a -- true
+refuse "--wait needs a value" --wait
+
+# --status still ignores what it always ignored: the refusals are --wait's own.
+out=$("$job_run" --status clean --name whatever 2>&1); rc=$?
+case "$rc|$out" in
+  0\|finished\ clean*) ok "--status is unchanged by --name beside it" ;;
+  *) no "--status is unchanged by --name beside it" "rc=$rc out=$out" ;;
+esac
+
+# A run directory with no pid and no exit record is a run mid-start, not a dead
+# one: it is `starting` (10), so a --wait keeps waiting instead of ending on it.
+mkdir -p "$jobs_dir/midstart"
+got=$(status_of midstart)
+case "$got" in
+  10\|starting*) ok "a run directory with no pid and no exit reads starting, exit 10" ;;
+  *) no "a run directory with no pid and no exit reads starting, exit 10" "$got" ;;
+esac
+timeout 4 "$job_run" --wait midstart >/dev/null 2>&1; rc=$?
+[ "$rc" = 124 ] \
+  && ok "--wait keeps waiting on a run mid-start" \
+  || no "--wait keeps waiting on a run mid-start" "rc=$rc"
+rmdir "$jobs_dir/midstart"
+
+# A reused name drops the previous run's pid and exit record together, so a
+# reader of the new run never sees the old verdict once the new pid is down.
+"$job_run" --name reuse -- sh -c 'exit 4' >/dev/null 2>&1
+"$job_run" --name reuse -- sh -c 'sleep 1' >/dev/null 2>&1 &
+rpid=$!
+await "$jobs_dir/reuse/pid"; sleep 0.2
+got=$(status_of reuse)
+case "$got" in
+  10\|alive*) ok "a reused name reports the new run alive, not the previous verdict" ;;
+  *) no "a reused name reports the new run alive, not the previous verdict" "$got" ;;
+esac
+wait "$rpid" 2>/dev/null
+
+[ ! -e "$jobs_dir/nosuch" ] \
+  && ok "--wait creates no run directory" \
+  || no "--wait creates no run directory"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
