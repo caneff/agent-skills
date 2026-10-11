@@ -382,6 +382,38 @@ for cmd in "git stash list" "git stash show -p" "git stash apply stash@{0}" "git
 done
 RUN_CWD="$wt" run "stash: words in a commit message allowed" 0 'git commit -m "no git stash pop here"'
 RUN_CWD="$wt" run "stash: grep for the verb allowed" 0 "grep -n 'git stash' flow/x.sh"
+# Each stash segment is judged by its own target, not the first stash segment's
+# (P1/C1): a read-only first segment aimed at the primary must not vouch for
+# a later push aimed at a worktree.
+RUN_CWD="$wt" run "stash: chain, primary list then cwd pop blocked" 2 \
+  "git -C $repo stash list && git stash pop" "linked worktree"
+RUN_CWD="$wt" run "stash: chain on separate lines blocked" 2 \
+  "git -C $repo stash list
+git stash push" "linked worktree"
+run "stash: chain, primary list then -C worktree push blocked" 2 \
+  "git -C $repo stash list ; git -C $wt stash push" "linked worktree"
+run "stash: chain of primary-only stash segments allowed" 0 \
+  "git -C $repo stash list && git -C $repo stash push -u"
+# A target the hook cannot resolve is refused, from the primary too (C2, S1),
+# and the message names that cause, not a linked worktree.
+unres="cannot tell which checkout"
+RUN_FORBID="from a linked worktree" run "stash: unresolved -C path blocked, cause named" 2 \
+  "git -C $repo/.claude/worktrees/nope stash pop" "$unres"
+run "stash: -C a shell variable blocked, cause named" 2 \
+  'W=x; git -C "$W" stash pop' "$unres"
+RUN_FORBID="from a linked worktree" run "stash: cd from the primary blocked, cause named" 2 \
+  "cd $repo && git stash" "a cd or pushd"
+RUN_FORBID="from a linked worktree" run "stash: GIT_DIR from the primary blocked, cause named" 2 \
+  "GIT_DIR=$repo/.git git stash push" "GIT_DIR-style"
+RUN_FORBID="from a linked worktree" run "stash: comment from the primary blocked, cause named" 2 \
+  "git stash push # note" "a '#'"
+RUN_FORBID="from a linked worktree" run "stash: second -C from the primary blocked, cause named" 2 \
+  "git -C $repo -C $wt stash push" "more than one -C"
+# The stack-changing verbs outside the four the ticket names (C4).
+for cmd in "git stash clear" "git stash branch b" "git stash store abc"; do
+  RUN_CWD="$wt" run "stash: '$cmd' in a worker worktree blocked" 2 "$cmd" "linked worktree"
+done
+RUN_CWD="$wt" run "stash: the hand-off names untracked files" 2 "git stash -u" "untracked"
 run "stash: push in the primary checkout allowed" 0 "git stash push -u -m tag"
 RUN_CWD="$repo/.scratch/mutation-m1" run "stash: push in a mutation worktree blocked" 2 "git stash push" "BLOCKED"
 

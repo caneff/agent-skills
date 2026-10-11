@@ -66,30 +66,45 @@ restore_is_unstage_only() {
 git_verb() {
   echo "$2" | grep -qE "(^|[[:space:](])git([[:space:]]+(-[Cc][[:space:]]+[^[:space:]]+|--[a-z-]+(=[^[:space:]]+)?))*[[:space:]]+$1([[:space:]]|\$)"
 }
-# A discard aimed at a linked worktree under `.scratch/mutation-*` is the
-# point of that worktree (#1387): a disposable copy a reviewer or worker
-# plants one mutation in. The target is `git -C <path>` or the cwd, resolved
-# with realpath so a `..` or a symlink cannot name the primary checkout, and
-# its top level must itself be the mutation worktree (a directory that only
-# carries the name, inside another worktree, is not one) and a linked one
-# (git-dir differs from the common dir). Anything that can move git off the
-# directory this reads is refused rather than parsed: a `cd`, a `GIT_DIR`-style
-# variable or flag, a second `-C`, a comment.
-# $1 the segment; $SCAN the whole command.
-is_mutation_worktree() {
-  local dir real top gitdir common
+# The checkout a command segment's git runs in. Anything that can move git
+# off the directory this reads is refused rather than parsed (#1387, #1529): a
+# `cd`, a `GIT_DIR`-style variable or flag, a second `-C`, a comment, a path
+# that does not resolve. The target is `git -C <path>` or the cwd, resolved
+# with realpath so a `..` or a symlink cannot name another checkout.
+# $1 the segment; $SCAN the whole command. Returns 1, TARGET_WHY saying why,
+# when the directory cannot be told; else 0 with TARGET_TOP the checkout's top
+# level and TARGET_LINKED 1 when it is a linked worktree (git-dir differs from
+# the common dir).
+git_target() {
+  local dir real gitdir common
+  TARGET_TOP="" TARGET_LINKED=0
+  TARGET_WHY="a cd or pushd in the command"
   echo "$SCAN" | grep -qE '(^|[;&|(`[:space:]])(cd|pushd)([[:space:]]|$)' && return 1
+  TARGET_WHY="a GIT_DIR-style variable or flag"
   echo "$SCAN" | grep -qE 'GIT_(DIR|WORK_TREE|COMMON_DIR)=|--(git-dir|work-tree)' && return 1
+  TARGET_WHY="a '#' in the command"
   case "$1" in *'#'*) return 1 ;; esac
+  TARGET_WHY="more than one -C"
   [ "$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]' | wc -l)" -le 1 ] || return 1
   dir=$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]+[^[:space:]]+' | sed -E 's/^[[:space:]]*-C[[:space:]]+//')
   dir=$(printf '%s' "${dir:-.}" | tr -d "'\"")
+  TARGET_WHY="a -C path that does not resolve to a checkout ('$dir')"
   real=$(realpath -- "$dir" 2>/dev/null) || return 1
-  top=$(git -C "$real" rev-parse --show-toplevel 2>/dev/null) || return 1
-  case "$top" in */.scratch/mutation-*) ;; *) return 1 ;; esac
+  TARGET_TOP=$(git -C "$real" rev-parse --show-toplevel 2>/dev/null) || return 1
   gitdir=$(git -C "$real" rev-parse --absolute-git-dir 2>/dev/null) || return 1
   common=$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
-  [ "$gitdir" != "$common" ]
+  [ "$gitdir" != "$common" ] && TARGET_LINKED=1
+  return 0
+}
+# A discard aimed at a linked worktree under `.scratch/mutation-*` is the
+# point of that worktree (#1387): a disposable copy a reviewer or worker
+# plants one mutation in. Its top level must itself be the mutation worktree
+# (a directory that only carries the name, inside another worktree, is not
+# one) and a linked one.
+is_mutation_worktree() {
+  git_target "$1" || return 1
+  case "$TARGET_TOP" in */.scratch/mutation-*) ;; *) return 1 ;; esac
+  [ "$TARGET_LINKED" = 1 ]
 }
 discards_worktree() {
   has_dot_pathspec "$1" || return 1
@@ -119,46 +134,35 @@ done
 # The stash stack lives in the common git dir: a push from a worker's worktree
 # lands on the stack every worktree and session shares, and a pop takes
 # whichever entry is on top, which may be another session's. Refused there:
-# set work aside with a WIP commit. Refused are the verbs that change the
-# stack by adding or taking the top entry: bare `git stash` or one led by an
-# option (an implicit push), `push`, `save`, `pop`. `list`, `show`, `apply`
-# and `drop` stay, so an entry found there can be read and removed. The
-# primary checkout keeps its stash. Matched on BARE, so a verb inside quoted
-# text is data; a verb handed to a shell (`sh -c`) is not read, as this guard
-# stops a drifting agent, not a determined one.
-# The target is `git -C <path>` or the cwd. A `cd`, a `GIT_DIR`-style
-# variable or flag, a second `-C` or a comment can move git off what this
-# reads, so such a command is refused rather than parsed.
+# set work aside with a WIP commit. Allowed are the verbs that only read the
+# stack or remove a named entry (`list`, `show`, `apply`, `drop`, `create`),
+# so an entry found there can be read and removed; every other form is refused,
+# bare `git stash` and one led by an option (an implicit push) included. The
+# primary checkout keeps its stash. Each segment is read for its own target,
+# with its quoted text dropped, so a verb inside quotes is data; a verb
+# handed to a shell (`sh -c`) is not read, as this guard stops a drifting
+# agent, not a determined one. A target that cannot be told is refused, since
+# the guard cannot say the stack is safe.
 stash_opt='(-[^[:space:]]+[[:space:]]+([^-[:space:]][^[:space:]]*[[:space:]]+)?)*'
-stash_mutates() { # <segment of BARE>
-  echo "$1" | grep -qE "(^|[[:space:](])git[[:space:]]+${stash_opt}stash([[:space:]]+(push|save|pop)([[:space:]]|\$)|[[:space:]]+-|[[:space:]]*\$|[[:space:]]*\))"
+stash_ok='(list|show|apply|drop|create)'
+stash_mutates() { # <segment, quoted text dropped>
+  echo "$1" | grep -qE "(^|[[:space:](])git[[:space:]]+${stash_opt}stash([[:space:]]|\$|\))" \
+    && ! echo "$1" | grep -qE "(^|[[:space:](])git[[:space:]]+${stash_opt}stash[[:space:]]+${stash_ok}([[:space:]]|\$|\))"
 }
-# $1 the raw segment (SCAN): 0 when git would run in a linked worktree, or
-# when that cannot be told.
-stash_target_is_linked() {
-  local dir real gitdir common
-  echo "$SCAN" | grep -qE '(^|[;&|(`[:space:]])(cd|pushd)([[:space:]]|$)' && return 0
-  echo "$SCAN" | grep -qE 'GIT_(DIR|WORK_TREE|COMMON_DIR)=|--(git-dir|work-tree)' && return 0
-  case "$1" in *'#'*) return 0 ;; esac
-  [ "$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]' | wc -l)" -le 1 ] || return 0
-  dir=$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]+[^[:space:]]+' | sed -E 's/^[[:space:]]*-C[[:space:]]+//')
-  dir=$(printf '%s' "${dir:-.}" | tr -d "'\"")
-  real=$(realpath -- "$dir" 2>/dev/null) || return 1
-  gitdir=$(git -C "$real" rev-parse --absolute-git-dir 2>/dev/null) || return 1
-  common=$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
-  [ "$gitdir" != "$common" ]
+stash_handoff() {
+  echo "BLOCKED: '$COMMAND' $1. The stash stack is shared by every worktree and session, so a worker never changes it. Set the work aside with a WIP commit instead ('git add -A && git commit -m wip' takes untracked files too) and stack the fix commits on it. 'git stash list', 'show', 'apply' and 'drop' are allowed." >&2
+  exit 2
 }
 if printf '%s\n' "$COMMAND" | grep -q stash; then
-  quote_views "$SCAN"
   while IFS= read -r segment; do
-    stash_mutates "$segment" || continue
-    # BARE lost the quoted `-C` path; the raw segment at the same position has it.
-    raw=$(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -E '(^|[[:space:](])git[[:space:]].*stash' | head -n 1)
-    if stash_target_is_linked "$raw"; then
-      echo "BLOCKED: '$COMMAND' changes the stash stack from a linked worktree, and that stack is shared with every worktree and session. Set the work aside with a WIP commit ('git commit -am wip') and stack fix commits on it. 'git stash list', 'show', 'apply' and 'drop' are allowed here." >&2
-      exit 2
+    quote_views "$segment"
+    stash_mutates "$BARE" || continue
+    if ! git_target "$segment"; then
+      stash_handoff "changes the stash stack, and this guard cannot tell which checkout git runs in (${TARGET_WHY}). Give 'git -C <absolute path> stash ...' with none of those"
+    elif [ "$TARGET_LINKED" = 1 ]; then
+      stash_handoff "changes the stash stack from a linked worktree"
     fi
-  done < <(printf '%s\n' "$BARE" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep stash)
+  done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep stash)
 fi
 
 # --- Bare force-push: blocked. `--force-with-lease` is fine (the lease refuses
