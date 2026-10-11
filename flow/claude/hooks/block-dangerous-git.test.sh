@@ -363,6 +363,28 @@ run "dot discard: mutation-named dir that is no worktree blocked" 2 \
 run "dot discard: allowed target chained to a blocked one blocked" 2 \
   "git -C $repo/.scratch/mutation-m1 checkout -- . && git checkout -- ." "$blocked"
 
+# `git stash` in a linked worker worktree (#1529): the stash stack is shared
+# with the primary checkout and every other worktree, so a worker's push or pop
+# lands on, or takes, another session's entry. The primary checkout keeps its
+# stash; read-only verbs and the apply/drop pair stay allowed everywhere.
+wt="$repo/.claude/worktrees/implement-9"
+for cmd in "git stash" "git stash push" "git stash push -u -m tag" "git stash save wip" \
+           "git stash pop" "git stash -u" "git stash --include-untracked" \
+           "git -C $wt stash" "git -c core.x=y stash pop" "git add -A && git stash"; do
+  RUN_CWD="$wt" run "stash: '$cmd' in a worker worktree blocked" 2 "$cmd" "git stash"
+done
+run "stash: -C a worker worktree from the primary blocked" 2 "git -C $wt stash push" "BLOCKED"
+RUN_CWD="$wt" run "stash: the message hands off, naming a WIP commit" 2 "git stash" "WIP commit"
+RUN_CWD="$wt" run "stash: cd out of the worker cwd blocked, unresolved" 2 "cd /tmp && git stash" "BLOCKED"
+RUN_CWD="$wt" run "stash: -C the primary from a worker cwd allowed" 0 "git -C $repo stash"
+for cmd in "git stash list" "git stash show -p" "git stash apply stash@{0}" "git stash drop stash@{0}"; do
+  RUN_CWD="$wt" run "stash: '$cmd' in a worker worktree allowed" 0 "$cmd"
+done
+RUN_CWD="$wt" run "stash: words in a commit message allowed" 0 'git commit -m "no git stash pop here"'
+RUN_CWD="$wt" run "stash: grep for the verb allowed" 0 "grep -n 'git stash' flow/x.sh"
+run "stash: push in the primary checkout allowed" 0 "git stash push -u -m tag"
+RUN_CWD="$repo/.scratch/mutation-m1" run "stash: push in a mutation worktree blocked" 2 "git stash push" "BLOCKED"
+
 # A command's length must not decide the guard's cost. A quadratic lexer took
 # 2.6 s on 44 KB and 5.9 s on 66 KB (#1423), and the teaching hooks, which share
 # it, time out at 5 s. 100 KB of quoted words, comments and escapes, no

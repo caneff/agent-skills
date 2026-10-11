@@ -1,7 +1,7 @@
 #!/bin/bash
 # Git guardrails (PreToolUse, Bash).
 #
-# Two narrow guards; everything else about a push is the agent's business.
+# Narrow guards; everything else about a push is the agent's business.
 #   - PUSH is gated on OWNERSHIP, not on branch or file type. If origin's owner
 #     is the `gh` login (resolving a fork to its parent), every push is allowed
 #     — any branch, any content, default branch included. A repo someone else
@@ -17,6 +17,8 @@
 #     the user merges that ticket's PR — is enforced by `/implement`'s prose,
 #     not here: a squash merge on the user's own repo is undone with a revert,
 #     so a prose miss there costs a revert, not a merge nobody can take back.
+#   - `git stash` that adds or takes an entry is refused in a linked worktree
+#     (#1529): the stack is shared by every worktree and session.
 #   - History/worktree destroyers and bare force-pushes stay blocked; those
 #     guard against losing work, not against skipping a review lane.
 # The user lands anything via the `!` prefix, which runs in the user's own
@@ -112,6 +114,52 @@ for pattern in "${DANGEROUS_PATTERNS[@]}"; do
     exit 2
   fi
 done
+
+# --- `git stash` in a linked worktree (#1529). ---
+# The stash stack lives in the common git dir: a push from a worker's worktree
+# lands on the stack every worktree and session shares, and a pop takes
+# whichever entry is on top, which may be another session's. Refused there:
+# set work aside with a WIP commit. Refused are the verbs that change the
+# stack by adding or taking the top entry: bare `git stash` or one led by an
+# option (an implicit push), `push`, `save`, `pop`. `list`, `show`, `apply`
+# and `drop` stay, so an entry found there can be read and removed. The
+# primary checkout keeps its stash. Matched on BARE, so a verb inside quoted
+# text is data; a verb handed to a shell (`sh -c`) is not read, as this guard
+# stops a drifting agent, not a determined one.
+# The target is `git -C <path>` or the cwd. A `cd`, a `GIT_DIR`-style
+# variable or flag, a second `-C` or a comment can move git off what this
+# reads, so such a command is refused rather than parsed.
+stash_opt='(-[^[:space:]]+[[:space:]]+([^-[:space:]][^[:space:]]*[[:space:]]+)?)*'
+stash_mutates() { # <segment of BARE>
+  echo "$1" | grep -qE "(^|[[:space:](])git[[:space:]]+${stash_opt}stash([[:space:]]+(push|save|pop)([[:space:]]|\$)|[[:space:]]+-|[[:space:]]*\$|[[:space:]]*\))"
+}
+# $1 the raw segment (SCAN): 0 when git would run in a linked worktree, or
+# when that cannot be told.
+stash_target_is_linked() {
+  local dir real gitdir common
+  echo "$SCAN" | grep -qE '(^|[;&|(`[:space:]])(cd|pushd)([[:space:]]|$)' && return 0
+  echo "$SCAN" | grep -qE 'GIT_(DIR|WORK_TREE|COMMON_DIR)=|--(git-dir|work-tree)' && return 0
+  case "$1" in *'#'*) return 0 ;; esac
+  [ "$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]' | wc -l)" -le 1 ] || return 0
+  dir=$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]+[^[:space:]]+' | sed -E 's/^[[:space:]]*-C[[:space:]]+//')
+  dir=$(printf '%s' "${dir:-.}" | tr -d "'\"")
+  real=$(realpath -- "$dir" 2>/dev/null) || return 1
+  gitdir=$(git -C "$real" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  common=$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  [ "$gitdir" != "$common" ]
+}
+if printf '%s\n' "$COMMAND" | grep -q stash; then
+  quote_views "$SCAN"
+  while IFS= read -r segment; do
+    stash_mutates "$segment" || continue
+    # BARE lost the quoted `-C` path; the raw segment at the same position has it.
+    raw=$(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -E '(^|[[:space:](])git[[:space:]].*stash' | head -n 1)
+    if stash_target_is_linked "$raw"; then
+      echo "BLOCKED: '$COMMAND' changes the stash stack from a linked worktree, and that stack is shared with every worktree and session. Set the work aside with a WIP commit ('git commit -am wip') and stack fix commits on it. 'git stash list', 'show', 'apply' and 'drop' are allowed here." >&2
+      exit 2
+    fi
+  done < <(printf '%s\n' "$BARE" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep stash)
+fi
 
 # --- Bare force-push: blocked. `--force-with-lease` is fine (the lease refuses
 # to clobber commits this clone hasn't seen), and still goes through the
