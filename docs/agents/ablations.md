@@ -6,7 +6,21 @@ here whose heading ends in its state, `running` or `ended`. A worker reads the
 heading to know whether the component runs; a controller appends to the log
 when a burn closes and brings Chris the table when the third burn has.
 
-## Codex pass — running
+## Codex pass — ended
+
+- **Ended:** 2026-10-11 by Chris's ruling: the Codex pass stays in the wave,
+  and `~/.config/agent-skills/codex-reviews-off` is removed. The escapes table
+  did not decide it. In `skills` its matches were dominated by two commits
+  whose subjects contain "fix" (`82f5d39f`, the #1401 redesign, and
+  `c608dced`, #1467), and tickets where Codex ran matched at the same rate as
+  tickets where it was skipped.
+- **What decided it:** the ledger's record of the pass when it ran. 168 runs
+  on 131 tickets produced 95 findings on 42 tickets, every one marked
+  `unique`; of the 29 with a recorded outcome, 10 were fixed, 1 filed, 14
+  leftover and 4 disputed. The other 66 have no disposition line. Read from
+  titles and outcomes on 2026-10-11, not from the PR diffs.
+- **Ledger:** 60 `codex-gate` skip rows that named the kill switch in free
+  text were rewritten to `ablation` the same day (#1481).
 
 - **Off:** the Codex pass of the review wave, on every PR. The three review
   axes run as before.
