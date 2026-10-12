@@ -21,7 +21,8 @@ The principle behind the gates: **I see it before any OTHER human does.** My
 own repos land unreviewed; revert is the undo.
 
 - Before you delete, force-push, rebase, label an issue, choose a lane or
-  report a denial: read `~/.agents/skills/flow/claude/WORKFLOW.md`.
+  report a denial or a search, hunt or solver result: read
+  `~/.agents/skills/flow/claude/WORKFLOW.md`.
 
 # Precedence — highest wins
 

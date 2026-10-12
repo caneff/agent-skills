@@ -181,6 +181,20 @@ private repos.
 - **Summarizing a source**: reword it; any verbatim phrase gets quotation
   marks. Why: unmarked verbatim text passes someone else's words off as mine.
 
+## Reporting a search, hunt or solver run
+
+A search result is reported with the space it actually covered. Never state a
+ceiling, a floor or an impossibility from a sampled, annealed or time-capped
+run: say what was enumerated and what was not, and call a bound proven only
+after an exhaustive pass over a stated space. A solver or hunt report splits
+its runs into proven infeasible, timed out and found, and labels any count a
+cap or timeout stopped as capped. The same holds for a catalogue or web
+search: 'none found' names the pages actually opened and the field that was
+matched. Why: a title-only pass misses what a full-page pass finds, and a
+bound read off a capped run gets built on as if it were proven. Promoted from
+`Memory/RULES.md` on 2026-10-12; `research/SKILL.md` item 6 states it for
+research runs.
+
 ## Personas
 
 Humanizer is a plugin/hook, not this file: it governs *deliverable prose*
