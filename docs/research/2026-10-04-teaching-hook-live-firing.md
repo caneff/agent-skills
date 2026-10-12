@@ -101,3 +101,24 @@ and `teach_emit` is unchanged. The auto-mode run ended in the same
 auto-mode classifier denial of a call the classifier judges unsafe was not
 separately produced, and is inferred to behave the same since it decides after
 PreToolUse.
+
+## Inside a teammate session (#1531, 2026-10-11)
+
+Question: does a teaching hook fire in a teammate session, the herdr-started
+`claude` a dispatcher briefs? Every earlier run here was `claude -p`.
+
+Checked from the `implement-1531` worker itself, started by
+`implement-dispatch` through `herdr agent start --kind claude` with the live
+user settings (`~/.claude/settings.json`, a link to
+`flow/claude/settings.json`). Its one Bash call `shot-scraper --version`
+returned with the PreToolUse `additionalContext` attached: "Reference text
+from .../flow/claude/VISUAL-INSPECTION.md § Reading a rendered page
+yourself". The cache record for session
+`1608fc12-d01a-455c-88b5-26492693f21e`
+(`~/.cache/claude-teaching-hooks/1608fc12-d01a-455c-88b5-26492693f21e`) lists
+that one section.
+
+Answer: yes, it fires in a teammate session. Not shown: a subagent started by
+the Agent tool inside a teammate (its calls key as `<session>-<agent>`,
+`teach-lib.sh`), and the opener branch live (`teach-visual.test.sh` covers
+its process contract).

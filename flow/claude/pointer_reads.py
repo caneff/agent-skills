@@ -60,7 +60,7 @@ DOCS = [
     ("OPERATIONS", "gh pr merge|implement-dispatch|merge-cleanup", "burndown|implement"),
     ("WORKFLOW", "gh issue create|gh issue edit",
      "burndown|implement|file-ticket|to-tickets|to-spec|wayfinder|grilling"),
-    ("VISUAL-INSPECTION", "shot-scraper|zed ", "computer-use|visual-teach|prototype"),
+    ("VISUAL-INSPECTION", "shot-scraper|zed |wslview", "computer-use|visual-teach|prototype"),
     ("SHELL-SAFETY", "pkill|kill -|kill [0-9]", "diagnosing-bugs"),
 ]
 

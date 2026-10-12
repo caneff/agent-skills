@@ -1,8 +1,10 @@
 # Visual inspection (read when showing me a file, or looking at a rendered page, window, or image, or when an image I pasted did not reach you)
 
 The teaching hook `hooks/teach-visual.sh` shows the matching section on a
-session's first `zed` or `shot-scraper` call; `CLAUDE.md` no longer points
-here (#1413).
+session's first `zed` or image-opener call (`wslview`, `xdg-open`,
+`explorer.exe`, `eog`, `feh`, `mspaint.exe`) or `shot-scraper` call;
+`CLAUDE.md` no longer points here (#1413). A dispatched worker's brief
+(`implement/SKILL.md` § The brief) carries the pointer too (#1531).
 
 ## Showing me a file
 
