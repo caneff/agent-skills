@@ -646,6 +646,65 @@ grep -q 'nl1: HOLLOW' "$scratch/nolink.out" ||
   { echo "FAIL: a reviewed tree without node_modules still got a link in its witness" >&2; cat "$scratch/nolink.out" >&2; fail=1; }
 unset target
 
+# A Python repo with a `uv.lock` gets its own `uv sync` in each witness (#1528,
+# Chris's ruling): never a symlink to the reviewed tree's `.venv`, whose editable
+# install would import the reviewed tree's code and test the wrong tree. A stub
+# `uv` stands in so no network or cache is touched; it records the directory it
+# ran in and the arguments, and leaves a `.venv` holding that record.
+mkdir -p "$scratch/bin-uv"
+cat >"$scratch/bin-uv/uv" <<'UV'
+#!/usr/bin/env bash
+[ "${STUB_UV_FAIL:-0}" = 1 ] && { echo "uv: sync failed (stub)" >&2; exit 1; }
+mkdir -p .venv && printf '%s\n' "$PWD" >.venv/ran-in && printf '%s\n' "$*" >.venv/args
+printf '%s\n' "${UV_PROJECT_ENVIRONMENT-unset}" >.venv/env
+UV
+chmod +x "$scratch/bin-uv/uv"
+uv_setup="$py_setup"'
+printf ".venv/\n" >.gitignore
+printf "version = 1\n" >uv.lock'
+target="$(make_repo uvrepo "$uv_setup")" || exit 1
+mkdir -p "$target/.venv" && printf '%s\n' "$target" >"$target/.venv/ran-in"
+# red only when the witness's .venv was synced in the witness itself, not
+# carried over from (or linked to) the reviewed tree.
+substitute 'uv1' ': >"$3"; if [ -L "$2/.venv" ]; then echo "SYMLINKED-VENV: .venv points at the reviewed tree"; exit 1; fi; if [ "$(cat "$2/.venv/ran-in" 2>/dev/null)" = "$2" ]; then echo "SYNCED-HERE: uv ran in the witness; ARGS: $(cat "$2/.venv/args"); ENV: $(cat "$2/.venv/env")"; exit 1; fi; echo "no synced .venv"; exit 0' "$target" >"$scratch/launcher-uv.sh"
+# The caller's UV_PROJECT_ENVIRONMENT must not reach the sync: set, it would put
+# every witness into one shared environment.
+UV_PROJECT_ENVIRONMENT=/nonexistent/shared-venv PATH="$scratch/bin-uv:$PATH" hygiene_run uv "$target" "$scratch/launcher-uv.sh"
+if ! grep -q 'uv1: red' "$scratch/uv.out" || ! grep -q 'uv1|.*SYNCED-HERE' "$scratch/uv.out"; then
+  echo "FAIL: a repo with a uv.lock did not get a uv sync run inside its witness" >&2
+  cat "$scratch/uv.out" >&2; fail=1
+fi
+grep -q 'uv1|.*ARGS: sync --frozen --quiet; ENV: unset' "$scratch/uv.out" ||
+  { echo "FAIL: the sync did not run with --frozen and without UV_PROJECT_ENVIRONMENT" >&2; cat "$scratch/uv.out" >&2; fail=1; }
+[ "$(cat "$target/.venv/ran-in")" = "$target" ] ||
+  { echo "FAIL: the witness's sync wrote into the reviewed tree's .venv" >&2; fail=1; }
+
+# No uv.lock: `.venv` stays unset in the witness, and the run says so.
+target="$(make_repo nouvrepo "$py_setup")" || exit 1
+substitute 'uv2' ': >"$3"; if [ -e "$2/.venv" ] || [ -L "$2/.venv" ]; then echo "UNEXPECTED-VENV: .venv exists"; exit 1; fi; exit 0' "$target" >"$scratch/launcher-nouv.sh"
+PATH="$scratch/bin-uv:$PATH" hygiene_run nouv "$target" "$scratch/launcher-nouv.sh"
+grep -q 'uv2: HOLLOW' "$scratch/nouv.out" ||
+  { echo "FAIL: a repo without a uv.lock got a .venv in its witness" >&2; cat "$scratch/nouv.out" >&2; fail=1; }
+grep -q 'no uv.lock at HEAD.*\.venv.*unset' "$scratch/nouv.out" ||
+  { echo "FAIL: a repo without a uv.lock was not told its .venv is left unset" >&2; cat "$scratch/nouv.out" >&2; fail=1; }
+
+# The notice reads HEAD, as the witnesses do: a uv.lock only in the reviewed
+# tree's working copy is not synced, so the run must say so, not stay silent.
+target="$(make_repo uvuntracked "$py_setup")" || exit 1
+printf 'version = 1\n' >"$target/uv.lock"
+substitute 'uv4' ': >"$3"; exit 0' "$target" >"$scratch/launcher-uvun.sh"
+PATH="$scratch/bin-uv:$PATH" hygiene_run uvun "$target" "$scratch/launcher-uvun.sh"
+grep -q 'no uv.lock at HEAD' "$scratch/uvun.out" ||
+  { echo "FAIL: an uncommitted uv.lock was neither synced nor reported" >&2; cat "$scratch/uvun.out" >&2; fail=1; }
+
+# A sync that fails leaves the mutation unreached: unknown, never a pass.
+target="$(make_repo uvfail "$uv_setup")" || exit 1
+substitute 'uv3' ': >"$3"; exit 1' "$target" >"$scratch/launcher-uvfail.sh"
+STUB_UV_FAIL=1 PATH="$scratch/bin-uv:$PATH" hygiene_run uvfail "$target" "$scratch/launcher-uvfail.sh"
+grep -q 'uv3: unknown' "$scratch/uvfail.out" ||
+  { echo "FAIL: a failed uv sync was not reported unknown" >&2; cat "$scratch/uvfail.out" >&2; fail=1; }
+unset target
+
 # The two argument guards are refused by name before any worktree exists.
 mf="$scratch/mutate-def-guards.sh"; printf 'mutate() { :; }\n' >"$mf"
 refuses() { # <why> <expected message> <checker args...>
