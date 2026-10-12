@@ -58,8 +58,9 @@ shell_handed="$cmd_start(${shell_word}[[:space:]]+(-[^[:space:]]+[[:space:]]+)*-
 # drops quoted text, CMD_EXPANDS keeps what `$(...)` and backticks still run.
 # The pass costs two awk forks, so it runs on first need (#1566): a command
 # that no raw gate below matches never pays for it.
+CMD_VIEWS_DONE=   # owned here: an inherited value would skip the lexer
 command_views() {
-  [ -n "${CMD_VIEWS_DONE:-}" ] && return 0
+  [ -n "$CMD_VIEWS_DONE" ] && return 0
   CMD_VIEWS_DONE=1
   quote_views "$SCAN"
   CMD_BARE=$BARE
