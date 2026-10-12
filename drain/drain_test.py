@@ -43,13 +43,25 @@ if args[:2] == ["api", "user"]:
 elif args[0] == "api":
     url = args[-1]
     m = re.search(r"/issues/(\d+)(/parent)?$", url)
-    if "--paginate" in args:
+    events = re.search(r"/issues/(\d+)/events$", url)
+    if events:
+        # The closing event carries the commit that closed the issue, or none for a close by hand.
+        if os.environ.get("FAIL_EVENTS"):
+            sys.stderr.write("fake gh: events refused\n"); sys.exit(1)
+        issue = state["issues"][events.group(1)]
+        out([[dict(event="closed", commit_id=issue.get("closed_by"))] if issue["state"] == "closed" else []])
+    elif "--paginate" in args:
         label = re.search(r"labels=([^&]+)", url).group(1)
         issues = [dict(number=int(n), title=i["title"], body=i["body"], state="open", labels=names(i),
                        assignees=[dict(login=a) for a in i.get("assignees", [])])
                   for n, i in state["issues"].items()
                   if (i["state"] == "open" or n in os.environ.get("STALE_LISTING", "").split())
                   and (label in i["labels"] or (label == "in-progress" and n in os.environ.get("STALE_LABELS", "").split()))]
+        if label == "ready-for-agent":  # LAG_LISTING: that many reads answer empty, as GitHub does just after a relabel
+            state["ready_reads"] = state.get("ready_reads", 0) + 1
+            save()
+            if state["ready_reads"] <= int(os.environ.get("LAG_LISTING", 0)):
+                issues = []
         for t in os.environ.get("TAKE_AFTER_PICK", "").split() if label == "ready-for-agent" else []:
             if "ready-for-agent" in state["issues"][t]["labels"]:
                 state["issues"][t]["labels"].remove("ready-for-agent")
@@ -188,6 +200,25 @@ json.dump(st, open(env["FAKE_STATE"], "w"))
 subprocess.run(["git", "worktree", "add", "-q", "--no-track", "-b", branch, wt, "origin/main"], cwd=repo, check=True)
 if env.get("DISPATCH_FAIL_AFTER_CLAIM"):
     sys.stderr.write("herdr agent start failed after the workspace exists\n"); sys.exit(1)
+if env.get("LIGHT"):  # the light tier pushes to main; MOOT tickets are closed by hand, with no commit
+    open(os.path.join(wt, "light-%s.txt" % n), "w").write("landed\n")
+    subprocess.run(["git", "add", "."], cwd=wt, check=True)
+    # A commit carries `Closes #t` for every ticket it landed; a MOOT ticket has none.
+    trailers = "".join("\nCloses #%s" % t for t in tickets if t not in env.get("MOOT", "").split())
+    subprocess.run(["git", "commit", "-q", "-m", "light %s\n%s" % (n, trailers)], cwd=wt, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:" + ("refs/heads/side" if env.get("OFF_MAIN") else "main")],
+                   cwd=wt, check=True)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=wt, text=True).strip()
+    st = json.load(open(env["FAKE_STATE"]))
+    for t in tickets:  # HAND: the trailer did not fire, so a hand closed it: no commit on its closed event
+        if t not in env.get("MOOT", "").split() and t not in env.get("HAND", "").split():
+            st["issues"][t]["closed_by"] = "1" * 40 if env.get("BOGUS") else sha
+    json.dump(st, open(env["FAKE_STATE"], "w"))
+    if env.get("LATER"):  # another ticket's commit lands after this one's
+        open(os.path.join(wt, "later.txt"), "w").write("later\n")
+        subprocess.run(["git", "add", "."], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "later"], cwd=wt, check=True)
+        subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=wt, check=True)
 if env.get("LIGHT") or n in env.get("FAIL_TICKETS", "").split():
     sys.exit(0)
 os.chdir(wt)
@@ -205,6 +236,10 @@ st["prs"][branch] = {"number": 100 + int(n), "url": "https://example.test/pull/%
                      "head": head, "closes": closes, "draft": n in env.get("DRAFT_TICKETS", "").split(),
                      "status": env.get("STATUS", "CLEAN")}
 json.dump(st, open(env["FAKE_STATE"], "w"))
+for t in env.get("TAKE_AFTER_BUILD", "").split():  # another worker claims it while this one builds
+    st = json.load(open(env["FAKE_STATE"]))
+    st["issues"][t]["labels"] = ["ready-for-agent", "in-progress"]
+    json.dump(st, open(env["FAKE_STATE"], "w"))
 """
 
 # Stands in for herdr. `agent get` answers for the worker: HERDR_STATUS (default
@@ -322,7 +357,7 @@ class Sandbox:
         return {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
                 "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
                 "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
-                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
+                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_FRONTIER_RETRY_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
                 "DRAIN_LOG_DIR": os.path.join(self.tmp, "logs"), **(env or {})}
 
     def drain(self, *argv, env=None):
@@ -1253,8 +1288,199 @@ def test_a_drain_run_from_a_linked_worktree_names_the_primary_checkout(sb):
 def test_an_empty_queue_says_so(sb):
     r = sb.drain()
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == "nothing to drain"
+    assert r.stdout.splitlines()[0] == "nothing to drain"
+    assert "ended: queue empty" in r.stdout
     assert sb.dispatch_runs() == []
+
+
+def test_a_ticket_closed_by_hand_is_moot_with_no_sha_and_never_landed(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "MOOT": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "closed, no PR:\n  #1  moot (closed, no PR)\n" in r.stdout
+    assert "landed" not in r.stdout
+    assert "merged:" not in r.stdout
+    assert "nothing to drain" not in r.stdout
+    assert not os.path.exists(os.path.join(sb.tmp, "logs", "last-green-me__repo")), "a moot close landed nothing to test"
+    assert "implement-1" in read(sb.cleanup_log)
+
+
+def test_a_landed_ticket_is_recorded_with_the_commit_that_closed_it_not_mains_tip(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "LATER": "1"})
+    assert r.returncode == 0, r.stderr
+    closing = sb.state()["issues"]["1"]["closed_by"]
+    tip = sb.git(sb.origin, "rev-parse", "main")
+    assert closing != tip
+    assert f"  #1  (landed on main, no PR)  {closing}\n" in r.stdout + "\n"
+    assert tip not in r.stdout
+
+
+def test_a_bundle_of_one_landed_and_one_moot_ticket_records_each_as_what_it_was(sb):
+    sb.write_state({1: {}, 2: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "MOOT": "2", "TAKE": "2"})
+    assert r.returncode == 0, r.stderr
+    closing = sb.state()["issues"]["1"]["closed_by"]
+    assert f"merged:\n  #1  (landed on main, no PR)  {closing}" in r.stdout
+    assert "closed, no PR:\n  #2  moot (closed, no PR)" in r.stdout
+
+
+def test_a_close_whose_cause_cannot_be_read_is_not_called_landed_or_moot(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "FAIL_EVENTS": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "landing not verified" in r.stdout
+    assert "(landed on main" not in r.stdout
+    assert "moot" not in r.stdout
+
+
+def test_an_empty_first_listing_is_read_again_before_drain_gives_up(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LAG_LISTING": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "nothing to drain" not in r.stdout
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+
+
+def test_a_listing_that_stays_empty_is_read_once_more_and_not_again(sb):
+    sb.write_state({})
+    r = sb.drain()
+    assert "nothing to drain" in r.stdout
+    assert sb.state()["ready_reads"] == 2
+
+
+def test_a_run_that_empties_the_queue_says_so_and_still_exits_zero(sb):
+    sb.write_state({1: {}})
+    r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    assert "merged:" in r.stdout
+    assert r.stdout.splitlines()[-1] == "ended: queue empty"
+    assert not any(x.startswith("stopped:") for x in r.stdout.splitlines())
+
+
+def test_a_run_that_reaches_once_names_the_limit_and_the_tickets_left(sb):
+    sb.write_state({1: {}, 2: {}})
+    r = sb.drain("--once")
+    assert "ended: --once reached" in r.stdout
+    assert "passed over: #2 ready, not started (--once reached)" in r.stdout
+
+
+def test_a_run_that_reaches_max_names_the_limit_and_the_tickets_left(sb):
+    sb.write_state({1: {}, 2: {}})
+    r = sb.drain("--max", "1")
+    assert "ended: --max 1 reached" in r.stdout
+    assert "passed over: #2 ready, not started (--max 1 reached)" in r.stdout
+
+
+def test_every_ready_ticket_drain_passed_over_is_named_with_its_reason(sb):
+    sb.write_state({1: {"body": "## Blocked by\n\n- #2\n"},
+                    2: {"labels": ["ready-for-agent", "in-progress"]},
+                    3: {"labels": ["ready-for-agent", "ready-for-human"]},
+                    4: {"labels": ["ready-for-agent", "needs-info"]}})
+    r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    assert "passed over: #1 blocked by #2" in lines
+    assert "passed over: #2 claimed (in-progress)" in lines
+    assert "passed over: #3 ready-for-human" in lines
+    assert "passed over: #4 label needs-info" in lines
+    assert lines[-1] == "ended: queue empty"
+    assert sb.dispatch_runs() == []
+
+
+def test_a_ready_ticket_with_a_kept_workspace_is_named_as_passed_over(sb):
+    sb.write_state({1: {}})
+    os.makedirs(sb.worktree(1))
+    r = sb.drain()
+    assert "passed over: #1 workspace kept" in r.stdout
+
+
+def test_a_run_that_stops_ends_with_a_line_saying_it_stopped(sb):
+    sb.write_state({1: {}, 2: {}, 3: {}})
+    r = sb.drain(env={"FAIL_TICKETS": "1 2"})
+    assert r.returncode == 1
+    assert "stopped: 2 bundles in a row" in r.stdout
+    assert r.stdout.splitlines()[-1] == "ended: stopped"
+
+
+def test_a_ticket_closed_by_hand_whose_commit_on_main_says_closes_is_landed_not_moot(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "HAND": "1"})
+    assert r.returncode == 0, r.stderr
+    tip = sb.git(sb.origin, "rev-parse", "main")
+    assert f"merged:\n  #1  (landed on main, no PR)  {tip}" in r.stdout
+    assert "moot" not in r.stdout
+
+
+def test_a_closing_commit_that_is_not_on_main_is_not_called_landed(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "OFF_MAIN": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "landing not verified: closing commit" in r.stdout
+    assert "is not on origin/main" in r.stdout
+    assert "(landed on main" not in r.stdout
+
+
+def test_a_closing_commit_git_cannot_find_says_it_could_not_be_checked_not_that_it_is_off_main(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "BOGUS": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "landing not verified: could not check closing commit" in r.stdout
+    assert "is not on origin/main" not in r.stdout
+
+
+def test_an_unverified_close_still_gets_the_full_run_on_main(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "FAIL_EVENTS": "1"})
+    assert r.returncode == 0, r.stderr
+    assert os.path.exists(os.path.join(sb.tmp, "logs", "last-green-me__repo")), "code may be on main: run the suite"
+
+
+def test_a_ticket_claimed_by_an_assignee_alone_is_not_said_to_carry_in_progress(sb):
+    sb.write_state({1: {"assignees": ["me"]}})
+    r = sb.drain()
+    assert "passed over: #1 claimed (assigned)" in r.stdout.splitlines()
+    assert "in-progress" not in r.stdout
+
+
+def test_a_spec_drain_cannot_start_is_named_when_the_run_ends_on_a_limit(sb):
+    sb.write_state({1: {}, 9: {"labels": ["spec"]}, 10: {"parent": 9}})
+    r = sb.drain("--once")
+    assert "ended: --once reached" in r.stdout
+    assert "waiting: ready slices of spec #9, which drain cannot start" in r.stdout
+
+
+def test_a_limit_exit_lists_what_is_ready_now_not_what_was_ready_at_the_last_read(sb):
+    sb.write_state({1: {}, 2: {}})
+    # ticket 2 is claimed by another worker while drain builds ticket 1
+    r = sb.drain("--once", env={"TAKE_AFTER_BUILD": "2"})
+    assert "passed over: #2 claimed (in-progress)" in r.stdout.splitlines()
+    assert "ready, not started" not in r.stdout
+
+
+def test_a_resumed_anchor_under_once_still_reads_the_queue_to_say_what_it_passed_over(sb):
+    sb.write_state({1: {"labels": ["in-progress"]}, 2: {}}, comments=[["1", "drain anchor: implement-1"]])
+    sb.git(sb.repo, "worktree", "add", "-q", "--no-track", "-b", "implement-1", sb.worktree(1), "origin/main")
+    r = sb.drain("--once", env={"HERDR_GONE": "1"})
+    assert "not read" not in r.stdout
+    assert "passed over: #2 ready, not started (--once reached)" in r.stdout
+
+
+def test_an_anchor_refusal_does_not_claim_the_queue_was_never_read(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--anchor", "5")
+    assert r.returncode == 1
+    assert "not read (no queue read" not in r.stdout
+    assert "ended: stopped" in r.stdout
+
+
+def test_a_non_empty_queue_never_waits_out_the_retry(sb):
+    import time
+    sb.write_state({1: {}})
+    started = time.monotonic()
+    r = sb.drain("--once", env={"DRAIN_FRONTIER_RETRY_SECONDS": "60"})
+    assert r.returncode == 0, r.stderr
+    assert time.monotonic() - started < 30
 
 
 def test_a_queue_of_one_spec_and_its_slices_is_dispatched_as_a_spec_run_and_merged(sb):
