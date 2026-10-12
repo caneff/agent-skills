@@ -335,3 +335,21 @@ def test_cli_counts_refuses_both_repo_and_reviews_dir(root):
     got = cli(root, "burn-w", "--repo", "/x", "--reviews-dir", "/y")
     assert got.returncode == 2, got
     assert "not allowed with" in got.stderr, got.stderr
+
+
+def test_cli_counts_reads_the_folded_cache_directory_for_a_repo_named_agent_skills_1527(root, home):
+    # `review_ledger.py cache-dir` folds `agent-skills` onto `skills`: workers write there.
+    work = os.path.join(home, "the-checkout")
+    gitdir = os.path.join(home, "agent-skills", "sep.git")
+    os.makedirs(os.path.dirname(gitdir))
+    os.makedirs(work)
+    subprocess.run(["git", "init", "-q", "--separate-git-dir", gitdir, work], check=True)
+    runfile.start("burn-x", slots=1, root=root, repo=work)
+    runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-x", 901, "abc1234", root=root)
+    d = os.path.join(home, ".cache", "agent-reviews", "skills")
+    os.makedirs(d)
+    write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "sha": "a", "ticket": 5}])
+    got = cli(root, "burn-x", "--repo", work, home=home)
+    assert got.returncode == 0, got
+    assert "moved: 1" in got.stdout, got.stdout

@@ -14,13 +14,15 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "research"))
 import runfile  # noqa: E402
+from tally_review_axes import fold_repo  # noqa: E402
 
 
 def default_reviews_dir(checkout):
     """`~/.cache/agent-reviews/<repo>`, keyed the same way
-    `multi-axis-code-review/SKILL.md`'s own dir expansion is: the basename of
-    the directory holding the common `.git`, which is also right for a
+    `review_ledger.py cache-dir` is (#1527): the basename of the directory
+    holding the common `.git`, folded by `fold_repo`, which is also right for a
     submodule or a `--separate-git-dir` checkout where the primary
     checkout's own name is not the key. `checkout` is `runfile.checkout_top`'s
     answer, so it is already a checkout of the repo the run targets."""
@@ -28,7 +30,7 @@ def default_reviews_dir(checkout):
         ["git", "-C", checkout, "rev-parse", "--path-format=absolute",
          "--git-common-dir"], capture_output=True, text=True, check=True,
         env=runfile.clean_git_env()).stdout.strip()
-    repo = os.path.basename(os.path.dirname(top))
+    repo = fold_repo(os.path.basename(os.path.dirname(top)))
     return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 
 

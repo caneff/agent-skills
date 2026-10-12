@@ -259,7 +259,7 @@ No PR and no reviewer; Chris reads the log after.
   once it has gone red, green or never reached its suite, record it (#1270):
 
   ```
-  python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type worker-mutation --mutation-id <id> --outcome red|green|unknown --seconds <s>
+  python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo <repo> --ticket <n> --type worker-mutation --mutation-id <id> --outcome red|green|unknown --seconds <s>
   ```
 
   `<repo>` is the review cache's directory name, as in § The PR. A mutation
@@ -379,6 +379,7 @@ round follows steps 2–3 below keyed on the spec number:
    Codex output has exactly one disposition, every `fixed` sha is a commit on
    this branch past `origin/<default>`, every `moved` ticket is open and is not one this PR
    closes, and every review that ran left its sidecar beside its completion marker
+   and its `review_ledger.py append` row, a skip row not counting
    (`multi-axis-code-review/SKILL.md` § 4). A review the ledger records as
    skipped needs no sidecar.
 
@@ -529,7 +530,7 @@ live and not from the cache. Once the gate above has ruled on the run, write
 its row from the record, with `<repo>` the review cache's directory name:
 
 ```
-python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-gate
+python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo <repo> --ticket <n> --type codex-gate
 ```
 
 A usage reading that fails, on either side, is `unknown`, never zero, and so
@@ -653,8 +654,9 @@ sha the controller was handed.
 
 Write the body to `~/.cache/agent-reviews/<repo>/pr-body-<n>.md` first
 (`mkdir -p` the directory; `<n>` is the lowest ticket of a clump; `<repo>` is
-the repo's own name, taken from the common `.git` as § Review's Codex block
-does, not the worktree's directory name), never under
+the repo's own name, folded: the last component of
+`python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py cache-dir`,
+not the worktree's directory name), never under
 this workspace's `.scratch/`. The file's content is already the PR body on
 GitHub, and § Before the PR step 3 makes you clear `.scratch/` anyway. A
 `gh pr edit` reuses the same file.

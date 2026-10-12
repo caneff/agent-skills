@@ -15,6 +15,7 @@ per-review-type value table.
     review_ledger.py append  --repo R --ticket N --type standards|spec|correctness --skip-reason WHY [--ledger PATH]
     review_ledger.py escapes --repo-dir CHECKOUT [--ledger PATH] [--days 14] [--fix-pattern RE] [--no-fetch]
                              [--format md|json]
+    review_ledger.py cache-dir [--repo NAME]
     review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
@@ -101,7 +102,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
-from tally_review_axes import (
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "docs" / "research"))
+from tally_review_axes import (  # noqa: E402
     ALL_AXES, OUTCOME_DETAIL_FIELD, REVIEWS_ROOT, find_codex_records, find_sidecar_files, fold_repo, load_jsonl)
 
 DEFAULT_LEDGER = REVIEWS_ROOT / "ledger.jsonl"
@@ -1207,12 +1209,15 @@ def _parse_usage(text) -> tuple[tuple[float, int] | None, str]:
 def _usage_delta(before_text, after_text) -> dict:
     """The usage change of a pass in percentage points of the window both readings name, or
     `unknown` with the reason: a missing or failed reading on either side is never a zero, and
-    neither is a pair from two windows, or a window that reset under the pass."""
+    neither is a pair from two windows, or a window that reset under the pass. A 0% before-reading
+    names no window and is compared by percent alone."""
     (before, bwhy), (after, awhy) = _parse_usage(before_text), _parse_usage(after_text)
     if before is None or after is None:
         return {"status": "unknown", "reason": "; ".join(
             f"{name} reading {why}" for name, why in (("before", bwhy), ("after", awhy)) if why)}
-    if before[1] != after[1]:
+    # A reading at 0% names no started window, so its `resetsAt` moves with the clock (#1552): it is
+    # no evidence of a different window, and the pass's cost is what the after-reading shows.
+    if before[0] > 0 and before[1] != after[1]:
         return {"status": "unknown", "before": before[0], "after": after[0],
                 "reason": "the readings name different windows: the worst window changed or reset during the pass"}
     if after[0] < before[0]:
@@ -1700,6 +1705,29 @@ def cmd_report(args) -> int:
     return 0
 
 
+class CacheDirError(Exception):
+    """The repo whose cache directory was asked for cannot be named."""
+
+
+def cache_dir_for(cwd: Path | str) -> Path:
+    """The review cache directory of the repo `cwd` is in (#1527): the repo's own name off the
+    common `.git`, never the worktree's, folded by `fold_repo`. The one place it is chosen."""
+    done = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd,
+                          capture_output=True, text=True)
+    if done.returncode != 0:
+        raise CacheDirError(f"git cannot name the repo of {cwd}: {done.stderr.strip() or 'no output'}")
+    return REVIEWS_ROOT / fold_repo(os.path.basename(os.path.dirname(done.stdout.strip())))
+
+
+def cmd_cache_dir(args) -> int:
+    try:
+        print(REVIEWS_ROOT / fold_repo(args.repo) if args.repo else cache_dir_for(Path.cwd()))
+    except CacheDirError as e:
+        print(f"review_ledger cache-dir: {e}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def append_family(row_type: str) -> str:
     """Which `append` writer a type goes to, and so which flags it takes (`_APPEND_FLAGS`)."""
     if row_type in MUTATION_TYPES:
@@ -1760,6 +1788,10 @@ def main(argv=None) -> int:
     h.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     h.add_argument("--review-file", type=Path)
     h.set_defaults(func=cmd_harvest)
+    c = sub.add_parser("cache-dir", help="print this repo's review cache directory, folded by fold_repo (#1527)")
+    c.add_argument("--repo", help="a repo name to fold, for a caller with no checkout; default: the repo of the "
+                   "current directory")
+    c.set_defaults(func=cmd_cache_dir)
     # Read by `parse_append`, never here: listed so the usage names it.
     sub.add_parser("append", help="`append --type T --help` lists the flags type T takes")
     e = sub.add_parser("escapes", help="bugs fixed on the default branch within days of a reviewed PR landing, "

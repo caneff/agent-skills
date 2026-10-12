@@ -7,7 +7,12 @@
                     [--ruling <text>]... [--choice <text>]... [--claim "<id>: <text>"]...
                     [--workers <k>] [--ceiling <seconds>] [--test-command <cmd>] [--capture-stat <line>]
 
-Prints the whole prompt for a `diff-reviewer` of that axis. About sixty hand-
+Writes the whole prompt for a `diff-reviewer` of that axis to
+`~/.cache/agent-reviews/<repo>/brief-<ticket>-<axis>[-<n>].md` (#1548) and prints
+one line naming that path: the dispatch prompt, sent to `Agent` unedited. The
+file is created exclusively, so a second wave of the same ticket and axis takes
+`-2`, `-3`, never another wave's file. `<repo>` goes through the ledger's
+`fold_repo` (#1527), the one key every cache file uses. About sixty hand-
 composed briefs drifted from one skeleton; this is the skeleton, so the parts
 that drifted have one home each:
 
@@ -26,15 +31,19 @@ that drifted have one home each:
 - the worker count and wall-clock ceiling any test run is held to, and that a
   reviewer spawns no nested subagent (#1400).
 
-Exit 0 and the prompt on stdout; 2 on a bad input, with nothing on stdout: a
-missing or empty diff capture, a worktree that is not a directory, an unknown
-axis, a claim with no finding id.
+Exit 0 and the dispatch line on stdout; 2 on a bad input, with nothing written
+and nothing on stdout: a missing or empty diff capture, a worktree that is not
+a directory, an unknown axis, a claim with no finding id.
 """
 import argparse
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import review_ledger  # noqa: E402  (fold_repo and REVIEWS_ROOT: the one cache key)
+
 AXES = ("standards", "spec", "correctness")
 STANDARDS_FILES = ("CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", "GLOSSARY.md")
 DEFECT_CLASSES = "docs/agents/defect-classes.md"
@@ -93,7 +102,7 @@ def render(a):
         classes = (f"`{DEFECT_CLASSES}` does not exist in this worktree. Check these three shapes:\n"
                    + "\n".join(f"{n}. {s}" for n, s in enumerate(filter(None, shapes), 1)))
     spec = "no spec available" if a.no_spec else a.spec
-    out_dir = f"~/.cache/agent-reviews/{a.repo}"
+    out_dir = f"~/.cache/agent-reviews/{a.repo}"  # a.repo is folded in main
     n, axis = a.ticket, a.axis
     inputs = [
         f"- Worktree: {a.worktree}",
@@ -140,7 +149,7 @@ def render(a):
             f"- Findings sidecar: `{out_dir}/findings-{axis}-{n}.jsonl`, one line per finding: `{SIDECAR[axis]}`. "
             "Empty file when you found nothing.",
             f"- Then the empty completion marker `{out_dir}/findings-{axis}-{n}.done`, last, once the sidecar is complete.",
-            f"- Then `python3 ~/.agents/skills/docs/research/review_ledger.py append --repo {a.repo} --ticket {n} --type {axis}`."]),
+            f"- Then `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo {a.repo} --ticket {n} --type {axis}`."]),
         "## Limits",
         "\n".join([
             "- You do your own reading and running and spawn no nested subagent: a nested agent reports to the "
@@ -151,6 +160,25 @@ def render(a):
                if axis == "correctness" else [])),
     ]
     return "\n\n".join(p for p in parts if p) + "\n"
+
+
+def write_brief(text, repo, ticket, axis):
+    """Write `text` to a ticket-numbered file of `repo`'s (folded) review cache directory that no
+    earlier wave holds, and return its path. `O_EXCL` is the never-overwrite: a taken name moves on to `-2`, `-3`."""
+    directory = review_ledger.REVIEWS_ROOT / repo
+    directory.mkdir(parents=True, exist_ok=True)
+    # SKILL.md allows a branch name for `--ticket`; a `/` in it must not name a directory.
+    stem, k = f"brief-{re.sub(r'[^A-Za-z0-9._-]', '-', ticket)}-{axis}", 1
+    while True:
+        path = directory / (f"{stem}.md" if k == 1 else f"{stem}-{k}.md")
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            k += 1
+            continue
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        return path
 
 
 def main(argv):
@@ -173,11 +201,13 @@ def main(argv):
     p.add_argument("--test-command")
     p.add_argument("--capture-stat")
     a = p.parse_args(argv)
+    a.repo = review_ledger.fold_repo(a.repo)  # once: every path and the ledger line below read it folded
     try:
-        sys.stdout.write(render(a))
+        path = write_brief(render(a), a.repo, a.ticket, a.axis)
     except BadInput as exc:
         print(f"render-brief: {exc}", file=sys.stderr)
         return 2
+    print(f"Read {path} and carry out the {a.axis} review of #{a.ticket} it describes: that file is your whole brief.")
     return 0
 
 

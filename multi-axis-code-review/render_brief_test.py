@@ -15,8 +15,9 @@ RENDER = os.path.join(HERE, "render-brief.py")
 SHAPES = ("an absent or malformed answer read as a benign one",
           "a stated fallback with no mechanism behind it",
           "a test that passes for a reason other than the one it claims")
-def render(worktree, diff, *extra, axis="standards", explicit_spec=False):
-    args = ["python3", RENDER, "--axis", axis, "--repo", "skills", "--worktree", worktree,
+def render_line(worktree, diff, *extra, axis="standards", explicit_spec=False, repo="skills"):
+    """Run the CLI: (exit code, stdout, stderr). On success stdout is the one dispatch line (#1548)."""
+    args = ["python3", RENDER, "--axis", axis, "--repo", repo, "--worktree", worktree,
             "--ticket", "1395", "--base", "origin/main", "--diff", diff,
             "--diff-command", "git -C WT diff origin/main...HEAD", "--commit", "abc1234 first commit",
             *extra]
@@ -24,6 +25,28 @@ def render(worktree, diff, *extra, axis="standards", explicit_spec=False):
         args.append("--no-spec")
     done = subprocess.run(args, capture_output=True, text=True)
     return done.returncode, done.stdout, done.stderr
+
+
+def render(worktree, diff, *extra, **kwargs):
+    """The rendered brief itself: read from the file the dispatch line names."""
+    code, out, err = render_line(worktree, diff, *extra, **kwargs)
+    if code != 0:
+        return code, out, err
+    return code, brief_at(out), err
+
+
+def brief_at(line):
+    path = re.search(r"(/\S+\.md)", line)
+    assert path, f"the dispatch line names no brief path: {line!r}"
+    with open(path.group(1)) as fh:
+        return fh.read()
+
+
+@pytest.fixture(autouse=True)
+def home(tmp_path, monkeypatch):
+    """The review cache is under HOME: no render writes the real one."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    return tmp_path / "home" / ".cache" / "agent-reviews"
 
 
 def section(out, heading):
@@ -234,3 +257,56 @@ def test_a_prompt_with_no_witness_check_carries_no_slots(wt, diff):
 def test_each_axis_brief_is_included(wt, diff, axis, needle):
     _, out, _ = render(wt, diff, axis=axis)
     assert needle in (section(out, "Brief") or ""), out
+
+
+# #1548: one ticket-numbered path, one dispatch line, never an overwritten brief.
+def test_a_render_writes_the_brief_to_a_ticket_numbered_path_and_prints_one_line_naming_it(wt, diff, home):
+    code, line, err = render_line(wt, diff)
+    path = home / "skills" / "brief-1395-standards.md"
+    assert code == 0, err
+    assert line.count("\n") == 1 and str(path) in line, line
+    assert path.read_text().startswith("# Standards review of #1395 in skills")
+
+
+def test_the_line_is_a_pointer_not_the_briefs_text(wt, diff):
+    _, line, _ = render_line(wt, diff)
+    assert "Settled decisions" not in line and "## " not in line and len(line) < 400, line
+
+
+def test_a_second_wave_of_the_same_ticket_and_axis_writes_its_own_file(wt, diff, home):
+    render_line(wt, diff, "--ruling", "first wave")
+    first = (home / "skills" / "brief-1395-standards.md").read_text()
+    code, line, err = render_line(wt, diff, "--ruling", "second wave")
+    assert code == 0, err
+    second = home / "skills" / "brief-1395-standards-2.md"
+    assert str(second) in line and "second wave" in second.read_text()
+    assert (home / "skills" / "brief-1395-standards.md").read_text() == first
+    assert "first wave" in first and "second wave" not in first
+
+
+def test_another_axis_of_the_same_ticket_takes_no_suffix(wt, diff, home):
+    render_line(wt, diff)
+    code, line, err = render_line(wt, diff, axis="spec")
+    assert code == 0 and str(home / "skills" / "brief-1395-spec.md") in line, (line, err)
+
+
+def test_a_repo_typed_as_agent_skills_lands_in_the_skills_directory(wt, diff, home):
+    code, line, err = render_line(wt, diff, repo="agent-skills")
+    assert code == 0 and str(home / "skills" / "brief-1395-standards.md") in line, (line, err)
+    assert not (home / "agent-skills").exists()
+
+
+def test_a_bad_input_writes_no_brief_and_prints_no_line(wt, tmp_path, home):
+    empty = tmp_path / "empty.patch"
+    empty.write_text("")
+    code, line, err = render_line(wt, str(empty))
+    assert code == 2 and line == "" and "is empty" in err
+    assert not (home / "skills").exists()
+
+
+def test_a_branch_name_given_as_the_ticket_cannot_name_a_directory(wt, diff, home):
+    args = ["python3", RENDER, "--axis", "standards", "--repo", "skills", "--worktree", wt,
+            "--ticket", "feature/x", "--base", "origin/main", "--diff", diff, "--diff-command", "d"]
+    done = subprocess.run(args, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert (home / "skills" / "brief-feature-x-standards.md").is_file()

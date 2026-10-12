@@ -4,7 +4,7 @@ as one diff range for a single Codex run.
 
     codex-audit-range.py --ledger PATH --repo R --mark SHA|DATE [--base REF]
 
-Run from a checkout of the repo. Reads the review ledger (`docs/research/review_ledger.py`) for
+Run from a checkout of the repo. Reads the review ledger (`multi-axis-code-review/review_ledger.py`) for
 gate skip rows of repo R whose skip reason is exactly `size`, `ceiling` or `unmeasured` (`SKILL.md`
 § The Codex pass): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass
 that ran.
@@ -39,6 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "docs" / "research"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "multi-axis-code-review"))
 from gitcmd import GitError, git  # noqa: E402
 from review_ledger import read_ledger  # noqa: E402
 from tally_review_axes import fold_repo  # noqa: E402

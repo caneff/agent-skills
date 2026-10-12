@@ -193,7 +193,7 @@ reviewers each defaulting to 8 workers is 24 cores for one diff.
 
 Every prompt carries only the **diff, the commit list, the spec/standards sources, the settled decisions and the id prefix** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
-Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
+The brief carries its own report path, `<dir>/review-<axis>-<n>.md` (`render-brief.py` writes it into the brief; append nothing to the prompt for it), `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
 
 A finding whose failure cannot occur here is disputed under
 `implement/SKILL.md` § Review's reachability bar, whatever its rating. Every
@@ -228,7 +228,9 @@ that ran left its sidecar beside its `findings-<axis>-<n>.done` marker, so a
 clean round that left no file is refused at "PR up". A sidecar alone cannot
 show the reviewer finished: an empty one is what a reviewer that crashed
 before writing leaves behind, and a truncated one reads as a shorter list.
-The marker is written by the reviewer once the sidecar is complete. The safe
+The marker is written by the reviewer once the sidecar is complete. The same
+check refuses a review whose sidecar has no ledger row for the ticket (#1527):
+the `append` below is what writes it, and a skip row does not count. The safe
 direction stays: an absent sidecar is refused, because it cannot be told from
 a reviewer that never ran, unless the ledger records that review as skipped.
 
@@ -237,7 +239,7 @@ and the `diff-reviewer` definition points here). Once its sidecar is
 written, each axis reviewer runs, from any directory:
 
 ```
-python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type <axis>
+python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo <repo> --ticket <n> --type <axis>
 ```
 
 `<repo>` is the review cache's directory name (the `<repo>` of `<dir>`), `<n>`
@@ -275,11 +277,13 @@ untouched for 14 days, the same folder style and retention `job-run` gives
 prose report, so the same expansion and pruning cover it with no extra
 step. `<repo>` must be the repo's own name, not the worktree's — reviews
 always run from a task worktree, and `git rev-parse --show-toplevel` there
-returns the worktree path, so key on the common `.git` instead:
+returns the worktree path. `review_ledger.py cache-dir` is the one place the
+directory is chosen (#1527): it keys on the common `.git` and folds the name
+with the ledger's `fold_repo`, so a checkout named `agent-skills` writes
+`skills/`. Never type the directory or `basename` it yourself:
 
 ```
-top=$(git rev-parse --path-format=absolute --git-common-dir) || exit 1
-dir="$HOME/.cache/agent-reviews/$(basename "$(dirname "$top")")"
+dir=$(python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py cache-dir) || exit 1
 mkdir -p "$dir"
 find "$dir" -maxdepth 1 -type f -mtime +13 -delete  # +13, not +14: find's -mtime +N means "older than N+1 days"
 n=<issue number from step 2, or the branch name>
@@ -442,8 +446,14 @@ check* — a heading that is absent when there are none. It writes no outcome of
 its own. It states the worker count (default 1) and wall-clock ceiling (default
 600 seconds) any solve, build or test run is held to, and that the reviewer
 spawns no nested subagent; the correctness prompt also passes the worker count
-to `witness-check.sh --slots`. Exit 2 means a bad input and no prompt. Pass the
-printed prompt to `Agent` as it stands.
+to `witness-check.sh --slots`. Exit 2 means a bad input and nothing written.
+
+It writes the brief to `<dir>/brief-<n>-<axis>.md` (`-2`, `-3` for a later wave
+of the same ticket and axis: an earlier wave's brief is never overwritten) and
+prints one line naming that path. **That line is the prompt: pass it to `Agent`
+unedited**, never the brief's text and nothing appended to it, since the brief
+already holds the report path, the sidecar and marker, the append step and the
+limits (#1548). Two wording changes to a brief are two renders.
 
 **Standards sub-agent prompt** — include:
 

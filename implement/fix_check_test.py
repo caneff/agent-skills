@@ -37,7 +37,7 @@ class World:
     """One repo, one branch (`implement-5` unless named) with commits past main, and the
     review cache keyed on `ticket`."""
 
-    def __init__(self, tmp, author_date=None, ticket=5, branch="implement-5"):
+    def __init__(self, tmp, author_date=None, ticket=5, branch="implement-5", checkout="skills-repo"):
         self.n = ticket
         self.tmp = str(tmp)
         self.home = os.path.join(self.tmp, "home")
@@ -50,7 +50,7 @@ class World:
             self.env["GIT_AUTHOR_DATE"] = f"{int(author_date)} +0000"
         origin = os.path.join(self.tmp, "origin.git")
         self.git(self.tmp, "init", "-q", "--bare", "-b", "main", origin)
-        self.primary = os.path.join(self.tmp, "skills-repo")
+        self.primary = os.path.join(self.tmp, checkout)
         self.git(self.tmp, "clone", "-q", origin, self.primary)
         self.commit(self.primary, "base")
         self.git(self.primary, "push", "-q", "origin", "main")
@@ -61,7 +61,8 @@ class World:
         self.fix_sha = self.commit(self.work, "fix")
         # A second commit, so the branch's history is read across commits: one of them closes #6.
         self.commit(self.work, "more", "more\n\nCloses #6")
-        self.reviews = os.path.join(self.home, ".cache", "agent-reviews", "skills-repo")
+        self.key = "skills" if checkout == "agent-skills" else checkout  # the ledger's fold_repo
+        self.reviews = os.path.join(self.home, ".cache", "agent-reviews", self.key)
         os.makedirs(self.reviews)
         self.tickets = {}
         self.prs = []
@@ -96,9 +97,12 @@ class World:
         with open(os.path.join(self.reviews, name), "w") as fh:
             fh.write(text)
 
-    def findings(self, **by_axis):
-        """Write the three sidecars (axis -> ids), each beside its completion marker."""
+    def findings(self, ledger=True, **by_axis):
+        """Write the three sidecars (axis -> ids), each beside its completion marker, and
+        (unless `ledger` is False) the ledger row `append --type <axis>` writes for each run."""
         for axis in ("standards", "spec", "correctness"):
+            if ledger:
+                self.ledger_ran(axis)
             ids = by_axis.get(axis, [])
             self.put(f"findings-{axis}-{self.n}.jsonl",
                      "".join(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t",
@@ -106,14 +110,22 @@ class World:
                              for i in ids))
             self.put(f"findings-{axis}-{self.n}.done", "")
 
-    def ledger_skip(self, rtype, ticket=None):
-        """A ledger row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
+    def ledger_row(self, rtype, status, ticket=None, repo=None, **fields):
+        """One ledger row: review `rtype` of `ticket` in `repo` (the checkout's key by default)."""
         ticket = self.n if ticket is None else ticket
-        row = {"repo": "skills-repo", "ticket": ticket, "tickets": [ticket], "type": rtype,
-               "status": {"fields": {"findings": {"status": "skipped", "reason": "test"}}}}
+        row = {"repo": repo or self.key, "ticket": ticket, "tickets": [ticket], "type": rtype,
+               "status": {"fields": {"findings": {"status": status, **fields}}}}
         path = os.path.join(self.home, ".cache", "agent-reviews", "ledger.jsonl")
         with open(path, "a") as fh:
             fh.write(json.dumps(row) + "\n")
+
+    def ledger_skip(self, rtype, ticket=None):
+        """A row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
+        self.ledger_row(rtype, "skipped", ticket, reason="test")
+
+    def ledger_ran(self, rtype, ticket=None, repo=None):
+        """A row for review `rtype` that ran (what `append --type <axis>` writes)."""
+        self.ledger_row(rtype, "known", ticket, repo)
 
     def dispositions(self, *lines):
         self.put(f"dispositions-{self.n}.jsonl", "".join(json.dumps(line) + "\n" for line in lines))
@@ -486,6 +498,60 @@ def test_a_skip_recorded_for_another_ticket_excuses_nothing(no_standards):
 def test_a_standards_axis_the_ledger_records_as_skipped_the_ablation_passes_with_no_sidecar(no_standards):
     no_standards.ledger_skip("standards")
     assert_fix_check(no_standards, 0, "0 findings")
+
+
+# #1527: the cache directory is the folded repo name, the same key the ledger rows carry.
+def test_a_checkout_named_agent_skills_reads_the_skills_cache_directory(make_world):
+    w = make_world(checkout="agent-skills")
+    w.findings()
+    w.dispositions()
+    assert_fix_check(w, 0, "0 findings")
+
+
+# #1527: a review that ran left a ledger row beside its sidecar. The sidecar alone is
+# not the row: a wave that never ran `append` leaves the ledger blind to the axis.
+def test_an_axis_with_a_sidecar_and_no_ledger_row_is_refused(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    w.dispositions()
+    assert_fix_check(w, 1, "no ledger row for the standards review")
+
+
+def test_only_the_axis_missing_its_ledger_row_is_named(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    w.ledger_ran("standards")
+    w.ledger_ran("correctness")
+    w.dispositions()
+    code, out = w.run()
+    assert code == 1 and "no ledger row for the spec review" in out, out
+    assert "standards review" not in out and "correctness review" not in out, out
+
+
+def test_a_ledger_row_of_another_repo_is_no_row_for_this_one(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    for axis in ("standards", "spec", "correctness"):
+        w.ledger_ran(axis, repo="sudoku-kit")
+    w.dispositions()
+    assert_fix_check(w, 1, "no ledger row for the standards review of #5 under repo skills-repo")
+
+
+def test_a_skip_row_beside_a_sidecar_is_no_evidence_the_review_ran(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    w.ledger_skip("standards")
+    w.dispositions()
+    assert_fix_check(w, 1, "a skip row is not one")
+
+
+def test_a_ledger_row_of_another_ticket_is_no_row_for_this_one(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    for axis in ("standards", "spec", "correctness"):
+        w.ledger_ran(axis, ticket=6)
+    w.dispositions()
+    assert_fix_check(w, 1, "no ledger row for the standards review")
 
 
 # Codex: its findings are `codex-gate-<k>`, the id `review_ledger.py` harvests under.

@@ -109,6 +109,23 @@ class TestUsageChange:
         assert delta["status"] == "unknown"
         assert "different windows" in delta["reason"]
 
+    def test_a_zero_percent_before_reading_names_no_window_so_its_drifting_reset_time_is_no_change(self, px):
+        # #1552: at 0% no window has started, so `resetsAt` moves with the clock (8 s apart in the two
+        # rows that showed it). The pass is one weekly window and its 2 points are the cost.
+        px.record(500, before=f"0 {W1}", after=f"2 {W2}")
+        px.ok(500, "gate")
+        assert px.only_row()["cost"]["usage_delta"] == {"status": "known", "before": 0.0, "after": 2.0, "delta": 2.0}
+
+    def test_a_pass_that_cost_nothing_from_zero_percent_is_a_zero_not_an_unknown(self, px):
+        px.record(500, before=f"0 {W1}", after=f"0 {W2}")
+        px.ok(500, "gate")
+        assert px.only_row()["cost"]["usage_delta"]["delta"] == 0
+
+    def test_a_reset_after_a_nonzero_reading_is_still_a_different_window(self, px):
+        px.record(500, before=f"1 {W1}", after=f"2 {W2}")
+        px.ok(500, "gate")
+        assert "different windows" in px.only_row()["cost"]["usage_delta"]["reason"]
+
     def test_a_percent_that_fell_within_one_window_is_unknown(self, px):
         px.record(500, before=f"90 {W1}", after=f"3 {W1}")
         px.ok(500, "gate")

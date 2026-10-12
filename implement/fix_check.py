@@ -47,6 +47,11 @@ spec and the branch is `spec-<ticket>` (the controller passes
 branch past the default branch, and a finding `moved` onto a slice the
 integration PR closes is refused like any other closed-by-this-PR ticket.
 
+A review that ran also has its ledger row (#1527): a sidecar with no
+`review_ledger.py append --type <axis>` row for this ticket and repo (a skip
+row does not count) is refused, since a wave that never appended leaves the
+ledger blind to it. Rows carry no timestamp, so a row left by an earlier
+dispatch of the ticket satisfies the check.
 A review the ledger records as skipped (`review_ledger.py append --type
 <axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
 record, or a `codex-gate` ledger row saying why it did not run (size gate,
@@ -64,9 +69,11 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "docs", "research"))
+sys.path.insert(0, os.path.join(HERE, "..", "multi-axis-code-review"))
 sys.path.insert(0, os.path.join(HERE, "..", "burndown"))
 import review_ledger  # noqa: E402
 import runfile  # noqa: E402
@@ -114,9 +121,11 @@ def slice_prs(n):
 
 
 def reviews_dir():
-    common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
-    return os.path.join(os.path.expanduser("~"), ".cache", "agent-reviews",
-                        os.path.basename(os.path.dirname(common)))
+    """The review cache directory of this repo: `review_ledger.py cache-dir`, the one place it is chosen."""
+    try:
+        return str(review_ledger.cache_dir_for(Path.cwd()))
+    except review_ledger.CacheDirError as exc:
+        raise Unanswerable(str(exc))
 
 
 def read_lines(path):
@@ -138,18 +147,19 @@ def json_object(line):
     return obj if isinstance(obj, dict) else None
 
 
-def skipped_types(reviews, n):
-    """The review types the ledger records as not run for ticket `n` of this repo."""
+def ledger_types(reviews, n):
+    """The review types the ledger holds a row for on ticket `n` of this repo that ran, and the
+    types it records as not run: `(ran, skipped)`. A skip row is no evidence a review ran."""
     repo = review_ledger.fold_repo(os.path.basename(reviews))
     try:
         rows = review_ledger.read_ledger(review_ledger.DEFAULT_LEDGER)
     except FileNotFoundError:
-        return set()
+        return set(), set()
     except ValueError as exc:
         raise Unanswerable(str(exc))
-    return {r["type"] for r in rows
-            if r.get("repo") == repo and n in (r.get("tickets") or [r.get("ticket")])
-            and r["status"]["fields"]["findings"]["status"] == "skipped"}
+    mine = [r for r in rows if r.get("repo") == repo and n in (r.get("tickets") or [r.get("ticket")])]
+    skipped = {r["type"] for r in mine if r["status"]["fields"]["findings"]["status"] == "skipped"}
+    return {r["type"] for r in mine} - skipped, skipped
 
 
 class Branch:
@@ -179,7 +189,7 @@ class Branch:
                 "an earlier dispatch of this ticket, not this review")
 
 
-def axis_findings(reviews, n, branch, skipped, problems):
+def axis_findings(reviews, n, branch, rowed, skipped, problems):
     ids = []
     for axis in AXES:
         name = f"findings-{axis}-{n}.jsonl"
@@ -192,6 +202,11 @@ def axis_findings(reviews, n, branch, skipped, problems):
             problems.append(f"{name} is missing — that reviewer never ran, and the ledger "
                             "records no skip for it")
             continue
+        if axis not in rowed:
+            problems.append(f"no ledger row for the {axis} review of #{n} under repo "
+                            f"{os.path.basename(reviews)}, though {name} exists — a skip row is not one: "
+                            f"review_ledger.py append --repo {os.path.basename(reviews)} --ticket {n} "
+                            f"--type {axis}")
         if not os.path.exists(os.path.join(reviews, marker)):
             problems.append(f"{name} has no completion marker {marker} — a reviewer that crashed or "
                             "was cut off leaves an empty or truncated sidecar too")
@@ -302,9 +317,9 @@ def check(n, branch_name):
         return [], f"{summary}; " + ", ".join(f"PR #{number} into {base}" for number, base in prs)
     reviews = reviews_dir()
     branch = Branch(branch_name)
-    skipped = skipped_types(reviews, n)
+    rowed, skipped = ledger_types(reviews, n)
     problems, notes = [], []
-    ids = axis_findings(reviews, n, branch, skipped, problems)
+    ids = axis_findings(reviews, n, branch, rowed, skipped, problems)
     ids += codex_findings(reviews, n, branch, skipped, problems, notes)
     for fid in sorted({i for i in ids if ids.count(i) > 1}):
         problems.append(f"{fid} is raised twice across the findings sidecars")
