@@ -26,14 +26,20 @@ expect_has "extraction: both triggers in one command, new session" \
 
 # The image openers share § Showing me a file with zed, once per session across
 # all of them (#1531).
-for opener in "wslview sheet-2.png" "xdg-open sheet.png" "explorer.exe sheet.png" "eog sheet.png" "feh sheet.png"; do
-  sid="open-${opener%% *}"
+for opener in "wslview sheet-2.png" "xdg-open sheet.png" "explorer.exe sheet.png" "eog sheet.png" "feh sheet.png" "mspaint.exe sheet.png" "/mnt/c/Windows/explorer.exe sheet.png" "/usr/bin/xdg-open sheet.png" "cmd.exe /c start sheet.png"; do
+  sid="open-$(printf %s "${opener%% *}" | tr -c 'A-Za-z0-9' _)"
   expect_has "extraction: ${opener%% *} returns § Showing me a file" \
     "$(context "$hook" "$sid" "$opener")" "${showing[@]}"
   expect_none "second ${opener%% *} in the same session" "$(context "$hook" "$sid" "$opener")"
 done
+# Two openers in one command, new session: the section appears once (the loop's break).
+got=$(context "$hook" s7 "zed a.png && wslview b.png")
+expect_has "two openers in one command return the section" "$got" "${showing[@]}"
+[ "$(printf '%s' "$got" | grep -c 'Reference text from')" = 1 ] \
+  || { echo "FAIL: two openers in one command showed the section more than once" >&2; fails=1; }
 expect_none "zed after wslview in the same session" "$(context "$hook" open-wslview "zed README.md")"
 expect_has "wslview in a pipeline after a guard" "$(context "$hook" s5 "ls sheet.png && wslview sheet.png")" "${showing[@]}"
+expect_none "path-prefixed opener as an argument" "$(context "$hook" s6 "which /usr/bin/xdg-open")"
 expect_none "opener as an argument" "$(context "$hook" s6 "which wslview")"
 expect_none "opener in a grep pattern" "$(context "$hook" s6 "rg 'wslview' docs/")"
 

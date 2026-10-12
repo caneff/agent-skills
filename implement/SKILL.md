@@ -102,12 +102,11 @@ was read before anyone saw the diff, and code landing unreviewed is the
 outcome the heavy tier exists to stop.
 
 **Showing Chris an image?** A task that has you show Chris an image, a
-contact sheet or a render (open it, or send him its path) starts by reading
-`~/.agents/skills/flow/claude/VISUAL-INSPECTION.md` § Showing me a file: a
-fresh filename per round, decoded before opening, opened once. The hook
-`flow/claude/hooks/teach-visual.sh` teaches the same section on an opener's
-first call, and fires in a worker session (#1531); this line covers the task
-that never reaches an opener.
+contact sheet or a render starts by reading
+`~/.agents/skills/flow/claude/VISUAL-INSPECTION.md` § Showing me a file. The
+hook `flow/claude/hooks/teach-visual.sh` teaches the same section on an
+opener's first call and fires in a worker session (#1531); this line covers
+the task that never reaches an opener.
 
 **Codex builds this one?** `--codex` on the invocation, the owner saying
 their Claude quota is short, or a ruling by the owner in a ticket comment that
