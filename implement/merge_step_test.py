@@ -53,3 +53,20 @@ def test_slice_paragraph_names_no_skip_test_or_narrowing():
     assert "skip test" not in bullet
     assert "--changed" not in bullet
     assert "origin/spec-<p>" in bullet
+
+
+def test_step3_records_the_selector_check_around_the_seam():
+    text = step3()
+    assert "selector_check.py list" in text
+    assert "selector_check.py comment" in text
+    # the listing is taken before the seam, the comment after it
+    assert text.index("selector_check.py list") < text.index("tee ") < text.index("selector_check.py comment")
+    for verdict in ("selector: clean", "selector: miss", "selector: hit", "selector: not checked"):
+        assert verdict in text
+
+
+def test_step3_says_the_selector_comment_never_changes_the_merge_decision():
+    text = step3()
+    assert "evidence only" in text
+    assert "a red seam blocks the merge above whatever the" in text.replace("\n   ", " ")
+    assert "no listing and no comment are owed" in text.replace("\n   ", " ")
