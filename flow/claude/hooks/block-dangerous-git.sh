@@ -97,20 +97,21 @@ git_target() {
   [ "$gitdir" != "$common" ] && TARGET_LINKED=1
   return 0
 }
-# A discard aimed at a linked worktree under `.scratch/mutation-*` is the
-# point of that worktree (#1387): a disposable copy a reviewer or worker
-# plants one mutation in. Its top level must itself be the mutation worktree
-# (a directory that only carries the name, inside another worktree, is not
-# one) and a linked one.
-is_mutation_worktree() {
+# A discard aimed at a linked worktree under `.scratch/` is the point of that
+# worktree (#1387, widened from `mutation-*` by #1539): `.scratch/` is
+# throwaway by convention, a disposable copy a reviewer or worker plants a
+# mutation or a spike in, and a prefix list refuses the next new name. Its top
+# level must itself sit under `.scratch/` and be a linked one: a plain
+# directory under `.scratch/`, or one inside another worktree, is not one.
+is_scratch_worktree() {
   git_target "$1" || return 1
-  case "$TARGET_TOP" in */.scratch/mutation-*) ;; *) return 1 ;; esac
+  case "$TARGET_TOP" in */.scratch/*) ;; *) return 1 ;; esac
   [ "$TARGET_LINKED" = 1 ]
 }
 discards_worktree() {
   has_dot_pathspec "$1" || return 1
   git_verb checkout "$1" || { git_verb restore "$1" && ! restore_is_unstage_only "$1"; } || return 1
-  ! is_mutation_worktree "$1"
+  ! is_scratch_worktree "$1"
 }
 # The two segment loops fork several greps per segment, so each is fed only the
 # segments that hold the verb it looks for: a long command of other words costs
@@ -122,8 +123,27 @@ while IFS= read -r segment; do
   fi
 done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -e checkout -e restore)
 
+# A destroyer is matched in the command run, not in text an argument carries
+# (#1539): `rg -n 'reset --hard' docs` and a commit message naming one are
+# data. The cheap raw grep gates the lexer; only a raw hit pays for
+# quote_views. A hit is then confirmed in BARE, the words the shell runs. Text
+# a shell is handed (`sh -c`, `eval`, a pipe or heredoc into a shell) or a
+# command substitution can run quoted text, so those are confirmed in the raw
+# $SCAN instead: the guard over-blocks there and never lets one through.
+shell_handed='((bash|sh|zsh)[[:space:]]+-[a-z]*c|eval)([[:space:]]|$)|\|[[:space:]]*(bash|sh|zsh)([[:space:]]|$)|(bash|sh|zsh)[[:space:]]*<<'
+cmd_start_any='(^|[;&|(`[:space:]])'
+destroyer_runs() { # <pattern>
+  echo "$SCAN" | grep -qE "$1" || return 1
+  if [ -z "${DESTROYER_VIEWS:-}" ]; then
+    quote_views "$SCAN"
+    DESTROYER_VIEWS=1
+  fi
+  echo "$BARE" | grep -qE "$1" && return 0
+  echo "$BARE" | grep -qE "$cmd_start_any($shell_handed)" && return 0
+  echo "$EXPANDS" | grep -qE '\$\(|`' && echo "$EXPANDS" | grep -qE "$1"
+}
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
-  if echo "$SCAN" | grep -qE "$pattern"; then
+  if destroyer_runs "$pattern"; then
     hint=""
     [ "$pattern" = "git branch -D" ] && hint=" FIRST try 'git branch -d' (lowercase), which is allowed: git itself refuses it on an unmerged branch, so it deletes the safe ones and needs no hand-off. Hand off only what -d refuses."
     echo "BLOCKED: '$COMMAND' matches protected pattern '$pattern'. That part is the user's, not yours.${hint} HAND OFF: re-run the command without it, then give the user the exact '! $pattern ...' line to run themselves. Do not attempt it yourself." >&2

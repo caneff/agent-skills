@@ -369,6 +369,44 @@ run "dot discard: mutation-named dir that is no worktree blocked" 2 \
 run "dot discard: allowed target chained to a blocked one blocked" 2 \
   "git -C $repo/.scratch/mutation-m1 checkout -- . && git checkout -- ." "$blocked"
 
+# The exemption covers any linked worktree under .scratch/, not a named set of
+# prefixes (#1539, Chris's ruling 2026-10-11): `.scratch/` is throwaway by
+# convention, and a prefix list refuses the next spike name the same way.
+git -C "$repo" worktree add -q --detach "$repo/.scratch/spike-s1"
+mkdir -p "$repo/.scratch/deep"
+git -C "$repo" worktree add -q --detach "$repo/.scratch/deep/spike-s2"
+run "dot discard: -C a non-mutation .scratch worktree allowed" 0 \
+  "git -C $repo/.scratch/spike-s1 checkout -q -- ."
+RUN_CWD="$repo/.scratch/spike-s1" run "dot discard: cwd in a non-mutation .scratch worktree allowed" 0 \
+  "git restore --worktree ."
+run "dot discard: -C a nested .scratch worktree allowed" 0 \
+  "git -C $repo/.scratch/deep/spike-s2 checkout -- ."
+mkdir -p "$repo/.scratch/plain-dir"
+run "dot discard: .scratch dir that is no worktree blocked" 2 \
+  "git -C $repo/.scratch/plain-dir checkout -- ." "$blocked"
+run "dot discard: .scratch worktree chained to a primary discard blocked" 2 \
+  "git -C $repo/.scratch/spike-s1 checkout -- . && git checkout -- ." "$blocked"
+
+# The destroyer patterns match the git command run, not text in an argument
+# (#1539): quoted text is data, as in the stash and PR-merge guards.
+run "destroyer text: single-quoted rg pattern allowed" 0 \
+  "rg -n 'reset --hard' docs"
+run "destroyer text: double-quoted grep pattern allowed" 0 \
+  "grep -rn \"git branch -D\" docs"
+run "destroyer text: commit message naming a destroyer allowed" 0 \
+  "git commit -m \"docs: explain git clean -fd and reset --hard\""
+run "destroyer text: quoted text then a real destroyer blocked" 2 \
+  "echo 'reset --hard' && git reset --hard HEAD~1" "protected pattern"
+run "destroyer text: unquoted destroyer blocked" 2 "git clean -fd" "protected pattern 'git clean -fd'"
+run "destroyer text: destroyer handed to sh -c blocked" 2 \
+  "sh -c 'git reset --hard HEAD'" "protected pattern"
+run "destroyer text: destroyer handed to eval blocked" 2 \
+  "eval \"git branch -D x\"" "protected pattern"
+run "destroyer text: destroyer in a command substitution blocked" 2 \
+  "echo \"\$(git reset --hard)\"" "protected pattern"
+run "destroyer text: destroyer piped into a shell blocked" 2 \
+  "echo 'git branch -D x' | bash" "protected pattern"
+
 # `git stash` in a linked worker worktree (#1529): the stash stack is shared
 # with the primary checkout and every other worktree, so a worker's push or pop
 # lands on, or takes, another session's entry. The primary checkout keeps its
