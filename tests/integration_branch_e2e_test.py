@@ -14,7 +14,8 @@ review cache under a fake HOME:
   written in the spec run's workspace, takes the slice in and merges `main`;
 - the spec review is keyed on #3: the pre-report gate on `spec-3` refuses an
   undisposed finding, and with every finding disposed it and the
-  controller's `fix-check.sh 3 origin/spec-3` pass.
+  controller's `fix-check.sh 3 origin/spec-3` pass; each axis's ledger row is
+  appended through `review_ledger.py`, as a real wave does (#1527).
 
 What a green run does NOT cover (the seam is blind to it):
 - `implement-dispatch --spec` cutting `spec-<n>`, a slice's workspace
@@ -37,6 +38,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 GATE = ROOT / "implement" / "pre-report-gate.sh"
+LEDGER = ROOT / "multi-axis-code-review" / "review_ledger.py"
 FIX_CHECK = ROOT / "implement" / "fix-check.sh"
 CLOSING = ROOT / "implement-spec" / "closing_ticket.py"
 IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
@@ -76,10 +78,12 @@ class SpecLife:
         self.git(self.primary, "remote", "set-head", "origin", "main")
         self.reviews = os.path.join(home, ".cache", "agent-reviews", "repo")
         os.makedirs(self.reviews)
+        self.transcripts = os.path.join(home, ".claude", "projects")  # empty: no cost attributable
+        os.makedirs(self.transcripts)
         # The Codex pass skipped by the size gate, on record, for the spec's review.
-        Path(home, ".cache", "agent-reviews", "ledger.jsonl").write_text(json.dumps(
-            {"repo": "repo", "ticket": 3, "tickets": [3], "type": "codex-gate",
-             "status": {"fields": {"findings": {"status": "skipped", "reason": "size"}}}}) + "\n")
+        code, out = self.run_tool(self.primary, "python3", LEDGER, "append", "--repo", "repo",
+                                  "--ticket", "3", "--type", "codex-gate", "--skip-reason", "size")
+        assert code == 0, out
 
     def git(self, cwd, *args):
         done = subprocess.run(["git", *args], cwd=cwd, env=self.env, capture_output=True, text=True)
@@ -156,6 +160,11 @@ def test_a_spec_lands_through_its_integration_branch(life):
             json.dumps({"id": "P1", "axis": "spec", "severity": "hard", "file": "f", "title": "t"}) + "\n"
             if axis == "spec" else "")
         Path(life.reviews, f"findings-{axis}-3.done").write_text("")
+        # A real wave appends its ledger row per axis (#1527); the gate refuses a sidecar without one.
+        code, out = life.run_tool(life.primary, "python3", LEDGER, "append", "--repo", "repo",
+                                  "--ticket", "3", "--type", axis,
+                                  "--transcripts", life.transcripts)
+        assert code == 0, out
     Path(life.reviews, "dispositions-3.jsonl").write_text("")
     code, out = life.run_tool(spec_ws, "bash", GATE, "HEAD")
     assert code == 1, out
