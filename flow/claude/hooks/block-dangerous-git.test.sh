@@ -542,6 +542,50 @@ stubdir_saved=$stubdir; stubdir="$tmp/noawk:$stubdir"
 run "foreign merge blocked when the lexer's awk fails" 2 \
   "bash -c 'gh pr merge 5 --repo someone-else/x'" "BLOCKED"
 stubdir=$stubdir_saved
+# A command that names no destroyer, merge, checkout or stash runs no lexer
+# pass: the quote views cost two awk forks and are read only once a raw gate
+# matches (#1566). The stub logs each lexer call and leaves its answer alone.
+mkdir -p "$tmp/countawk"
+cat > "$tmp/countawk/awk" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = "-v" ] && [[ "$2" == view=* ]] && echo lexed >> "$LEXER_LOG"
+exec /usr/bin/awk "$@"
+STUB
+chmod +x "$tmp/countawk/awk"
+export LEXER_LOG="$tmp/lexer.log"
+# lexer_passes <command> <want-exit> <want-passes: none|some>
+lexer_passes() {
+  local cmd=$1 want=$2 passes=$3 out rc
+  : > "$LEXER_LOG"
+  out=$(printf '%s' "$cmd" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+    | (cd "$repo" && PATH="$tmp/countawk:$stubdir:$PATH" bash "$hook") 2>&1)
+  rc=$?
+  if [ "$rc" != "$want" ]; then
+    echo "FAIL: lexer count '$cmd' — want exit $want, got $rc"; echo "  out: $out"; fails=1; return
+  fi
+  if [ "$passes" = none ] && [ -s "$LEXER_LOG" ]; then
+    echo "FAIL: '$cmd' ran the lexer ($(wc -l < "$LEXER_LOG") passes)"; fails=1
+  elif [ "$passes" = some ] && [ ! -s "$LEXER_LOG" ]; then
+    echo "FAIL: '$cmd' never ran the lexer, so the stub counts nothing"; fails=1
+  else
+    echo "PASS: '$cmd' lexer passes: $passes"
+  fi
+}
+for plain in "git status" "ls -la" "git log --oneline -5"; do
+  lexer_passes "$plain" 0 none
+done
+# The positive control: a command that reaches a raw gate does lex.
+lexer_passes "git branch -D x" 2 some
+# A whole-tree discard handed to a shell is read as code (#1539): the views
+# must be computed for it, not only for a destroyer pattern.
+run "discard handed to sh -c blocked" 2 "bash -c \" git checkout -- . \"" "BLOCKED"
+run "discard handed to eval blocked" 2 "eval \" git restore . \"" "BLOCKED"
+# An inherited memo flag must not switch the lexer off.
+out=$(printf '%s' "git branch -D x" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+      | (cd "$repo" && CMD_VIEWS_DONE=1 PATH="$stubdir:$PATH" bash "$hook") 2>&1)
+rc=$?
+if [ "$rc" = 2 ]; then echo "PASS: an inherited CMD_VIEWS_DONE does not skip the lexer"
+else echo "FAIL: inherited CMD_VIEWS_DONE — want exit 2, got $rc: $out"; fails=1; fi
 # The guard reads commands through command-scan-lib.sh beside its real path.
 # Without the lib no pattern can match, so it blocks every command rather than
 # letting each one through unscanned.
