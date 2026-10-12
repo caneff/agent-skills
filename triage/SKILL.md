@@ -65,7 +65,9 @@ Query the issue tracker and present four buckets, oldest first:
 
 When PRs are in scope, include external PRs in these buckets and tag each line `[PR]` or `[issue]`. Discovery surfaces only *external* PRs (the tracker config defines who counts as external) — a collaborator's in-flight PR is not triage work. This filter is discovery-only; an explicitly named PR is always triaged regardless of author.
 
-Show counts and a one-line summary per item. Let the maintainer pick.
+Show counts and a one-line summary per item. Let the maintainer pick. A round
+over more than one item opens with § Offer the batch option, before the first
+item is worked.
 
 **Large list (more than five items), or the maintainer says "all":** do not
 walk it one issue at a time. Read every body first. For each, decide
@@ -95,6 +97,42 @@ per-issue work:
 Plus a **dismiss** line for anything that is a checklist item, already done,
 or has no gate. Then ask the maintainer to confirm the sort. Buckets 2 and 3
 run start to finish on a "go"; bucket 1 comes back one issue at a time.
+
+## Offer the batch option
+
+A round over more than one item (the buckets above, or a "do all of them")
+opens with one question, after the counts and before any per-item work:
+
+> Walk each item (default), or apply my recommended route to every item and
+> ask only the contested ones?
+
+A reply in that spirit selects the batch option too: "all as recommended
+except controversial" is one. Any other reply is the default, unchanged. Ask
+once per round, never again between items.
+
+Choosing it applies each non-contested item's recommended route at once (the
+role change, the brief or notes comment, the close), through the same steps a
+walked item gets: gather context, verify the claim, then § Triage a specific
+issue or PR step 5. It skips only the wait for direction. Batch the one-line
+docs and config edits into one commit, as in the large-list buckets.
+
+These items are contested and go to the maintainer as questions, never
+decided by the agent:
+
+- a `wontfix` of an enhancement, which writes `.out-of-scope/`, and any other
+  close that cannot be reopened cheaply;
+- an item that resembles an existing `.out-of-scope/` entry, or reverses one;
+- an item whose claim did not verify, or whose evidence is thin, so the route
+  rests on a guess;
+- a design or scope decision only the maintainer can make (the large-list
+  bucket 1);
+- an item whose state roles conflict, or whose recommendation is a transition
+  that looks unusual.
+
+Before applying anything, post one message that names each contested item and
+why it is contested, and lists the non-contested items with their routes. The
+contested ones are then asked one at a time, each with a recommendation. A
+rejection decided by the maintainer's answer is applied then, not before.
 
 ## Triage a specific issue or PR
 
