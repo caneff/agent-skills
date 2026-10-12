@@ -761,8 +761,8 @@ def _rec(sha, date):
 
 def test_order_never_run_then_changed_then_oldest_run():
     cands = ["a.py", "b.py", "c.py", "d.py"]
-    record = {"a.py": _rec("s", "2026-10-01"), "b.py": _rec("s", "2026-09-01"), "c.py": _rec("s", "2026-08-01")}
-    # d never ran; c changed since its sha; of the unchanged, b (Sep) is older than a (Oct).
+    record = {"a.py": _rec("s", "2026-10-01"), "b.py": _rec("s", "2026-09-01"), "c.py": _rec("s", "2026-10-02")}
+    # d never ran; c changed since its sha (though the newest run); of the unchanged, b (Sep) is older than a (Oct).
     assert driver.order_mutation_targets(cands, [], record, {"c.py"}) == ["d.py", "c.py", "b.py", "a.py"]
 
 
