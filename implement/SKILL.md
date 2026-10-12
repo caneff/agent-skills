@@ -888,7 +888,7 @@ closed.
    read and re-run like any other commit. Remove the worktree afterwards with
    `git worktree remove --force`, since a conflicted merge leaves it dirty.
 
-   **Selector evidence** (#1537). When `AGENTS.md` § End-to-end seam also
+   **Selector evidence** (#1537). When `AGENTS.md`'s § End-to-end seam
    declares a `**Narrowed**` line, the same run records whether that narrowed
    command would have selected what the seam failed on, as one comment on the
    PR. These three lines replace the single seam line above for such a repo:
