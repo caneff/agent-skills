@@ -89,7 +89,8 @@ argparse error, `drain.py: ...`) is reported verbatim as a start that never
 ran, not as a crash. A run that ran ends with drain's summary, in
 `~/.cache/agent-jobs/drain-<repo-short>/progress` after the timestamp on each
 line, starting at the line `merged:`, `closed, no PR:`, `handed to Chris:`,
-`stopped:` or `nothing to drain`, and ending with its `ended:` line. Open the report with every bundle the run worked, one per
+`stopped:` or `nothing to drain`, and ending with its `ended:` line. Open
+the report with every bundle the run worked, one per
 `bundle started:` line in the progress file with its `bundle ended:` outcome,
 then the summary:
 
@@ -98,9 +99,9 @@ then the summary:
   `moot (closed, no PR)` is a ticket closed by hand, which landed nothing.
 - **handed to Chris**: each ticket set with the reason, as drain printed it.
 - **stopped**: the reason, when drain printed one.
-- **ended**: the closing `ended: <cause>` line, as printed (`queue empty`,
-  `--once reached`, `--max <n> reached`, `stopped`), then each `passed over:`
-  ticket with its reason. It is not a stop: an empty queue exits 0.
+- **ended**: the closing `ended: <cause>` line, as printed (its causes are
+  in the `drain/drain.py` docstring), then each `passed over:` ticket with
+  its reason. It is not a stop: an empty queue exits 0.
 - **Live layer**: when the target repo declares a live layer above its merge
   seam in its `AGENTS.md` § End-to-end seam, a command run once per run on
   Chris's go (`./e2e.sh` in twitch-rules-scroller, #1392), end the report with the ask

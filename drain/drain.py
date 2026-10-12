@@ -74,14 +74,18 @@ pane <repo-short>-<anchor>` when a bundle's worker exists, `bundle ended: #<n>
 ... merged <pr> <sha>` or `... handed to Chris: <reason>` or `... stopped:
 <reason>` when it ends, then the summary. A ticket the worker closed with no
 PR is recorded as what closed it, from its `closed` event: `(landed on main,
-no PR)` with that commit's sha, `moot (closed, no PR)` with none when a hand
-closed it, or an unverified close with the reason; never as main's tip. The
-run's last lines are one `passed over: #<n> <why>` per ready ticket it did not
-build (human-held, claimed, blocked, a kept workspace, not started) and one
-`ended: <cause>`: `queue empty`, `--once reached`, `--max <n> reached`, or
-`stopped` beside its `stopped:` line. `ended:` is no `stopped:` line and leaves
-the exit code alone. A queue read that comes back empty is read once more
-after 45 s, since GitHub's label listing lags a relabel. `drain/SKILL.md`
+no PR)` with that commit's sha, or with the sha of the main commit whose
+message says `Closes #<n>` when a hand closed it after the trailer did not
+fire; `moot (closed, no PR)` with no sha when neither exists; or an unverified
+close with the reason, never as main's tip. An unverified close gets the full
+run on main like a merge. The run's last lines are one `passed over: #<n>
+<why>` per ready ticket it did not build (human-held, claimed, blocked, a kept
+workspace, not started), read fresh when a limit ends the run, and one
+`ended: <cause>`: `queue empty`, `no startable ticket` (every queued ticket has
+a kept workspace), `--once reached`, `--max <n> reached`, or `stopped` beside
+its `stopped:` line. `ended:` is no `stopped:` line and leaves the exit code
+alone. A queue read that comes back empty is read once more after 45 s, since
+GitHub's label listing lags a relabel. `drain/SKILL.md`
 reads these lines for its same-turn print, its status and its completion
 report.
 
@@ -190,6 +194,11 @@ class WorkerGone(DrainError):
     """The worker's herdr agent is gone and its build has no PR."""
 
 
+def refs(tickets):
+    """`#1 #2`: tickets as they are written in a line of output."""
+    return " ".join(f"#{n}" for n in tickets)
+
+
 def one_line(text, limit=300):
     return " ".join(str(text).split())[:limit]
 
@@ -257,9 +266,9 @@ def origin_slug(root):
 
 
 def read_frontier(ctx, retry=True):
-    """`read_queue`, read once more after `FRONTIER_RETRY_SECONDS` when the queue
-    came back empty (GitHub's label listing lags a relabel). A queue that is
-    still empty is the answer: one retry, never a loop."""
+    """`read_queue`, read once more after `FRONTIER_RETRY_SECONDS` when the
+    queue came back empty (GitHub's label listing lags a relabel). A queue
+    that is still empty is the answer: one retry, never a loop."""
     got = read_queue(ctx)
     if retry and not got[0]:
         time.sleep(FRONTIER_RETRY_SECONDS)
@@ -268,7 +277,8 @@ def read_frontier(ctx, retry=True):
 
 
 def read_queue(ctx):
-    """`(queue, waiting, stranded, passed)`. `queue` is `[(number, title, kind)]`: the unblocked
+    """`(queue, waiting, stranded, passed)`. `queue` is
+    `[(number, title, kind)]`: the unblocked
     ready tickets and the clear spec parents, oldest first; the anchor is the
     first. A slice is neither: it is built inside its spec's run. `waiting` is
     the numbers of specs that have a ready slice and are not in the queue
@@ -314,7 +324,14 @@ def passed_over(issues, buckets):
             why[n] = HUMAN
         elif n not in why:
             held = labels & frontier.NON_DISPATCHABLE_LABELS
-            why[n] = f"label {', '.join(sorted(held))}" if held else f"claimed ({CLAIMED})"
+            if CLAIMED in labels:
+                why[n] = f"claimed ({CLAIMED})"
+            elif issue.get("assignees"):
+                why[n] = "claimed (assigned)"
+            elif held:
+                why[n] = f"label {', '.join(sorted(held))}"
+            else:
+                why[n] = "left off the frontier, reason not read"
     return sorted(why.items())
 
 
@@ -613,10 +630,10 @@ def slices_working(ctx, spec):
 
 def wait_for_worker(ctx, branch, agent, bundle, spec=None):
     """`"pr"` once the branch has an open PR and its worker has gone idle (or is
-    gone), `"closed"` when it went idle with every ticket closed and no PR (the
-    light tier lands on main itself, or a ticket was closed as moot). A worker idle or blocked with no PR past
-    the grace, a vanished one with neither, and the wall clock are failed
-    builds. A look that errors (`gh`, herdr) is tried again; `LOOK_ERRORS` in a
+    gone), `"closed"` when it went idle with every ticket closed and no PR
+    (the light tier lands on main itself, or a ticket was closed as moot). A
+    worker idle or blocked with no PR past the grace, a vanished one with
+    neither, and the wall clock are failed builds. A look that errors (`gh`, herdr) is tried again; `LOOK_ERRORS` in a
     row end the wait. `spec` is the spec number when the worker is a spec run:
     its wall clock is `SPEC_WALL_CLOCK_SECONDS`, and a slice worker at work
     restarts its idle grace."""
@@ -829,7 +846,7 @@ def full_run(ctx, merged):
     try:
         run_in_scratch_tree(ctx, seam_cmd(ctx), full_log_path(ctx))
     except DrainError as exc:
-        since = [f"{m['pr']} ({m['sha']})" for m in merged]
+        since = [f"{m['via']} ({m['sha'] or 'no sha'})" for m in merged]
         last = None
         try:
             with open(last_green_path(ctx)) as f:
@@ -888,7 +905,7 @@ def cleanup_notes(ctx, branch):
 
 # What a result is: a PR drain merged (or a commit that landed on main), or a
 # close with no PR that no sha stands behind.
-MERGED, CLOSED = "merged", "closed"
+MERGED, CLOSED, UNVERIFIED = "merged", "closed", "unverified"
 LANDED_LABEL, MOOT_LABEL = "(landed on main, no PR)", "moot (closed, no PR)"
 
 
@@ -900,7 +917,23 @@ def closing_commit(ctx, n):
     events = [e for page in pages for e in page if e.get("event") == "closed"]
     if not events:
         raise DrainError("it has no closed event")
-    return events[-1].get("commit_id")
+    if "commit_id" not in events[-1]:
+        raise DrainError("its closed event carries no commit_id field")
+    return events[-1]["commit_id"]
+
+
+def closes_commit(ctx, n):
+    """The sha of the newest commit on the default branch whose message says
+    `Closes #<n>` (or Fixes, Resolves), `None` when there is none. The light
+    tier's worker closes by hand when the trailer did not fire, so a close
+    with no commit on its event is moot only when no landed commit says it
+    closed the ticket either. Raises `DrainError` when git cannot say."""
+    pattern = rf"\b(closes|fixes|resolves) #{n}([^0-9]|$)"
+    found = subprocess.run(["git", "log", "-n1", "--format=%H", "-i", "-E", f"--grep={pattern}", ctx.default],
+                           cwd=ctx.root, capture_output=True, text=True)
+    if found.returncode:
+        raise DrainError(f"git log on {ctx.default} failed: {one_line(found.stderr, 100)}")
+    return found.stdout.strip() or None
 
 
 def close_outcome(ctx, n):
@@ -913,11 +946,18 @@ def close_outcome(ctx, n):
     except (DrainError, KeyError, TypeError) as exc:
         return f"closed, no PR (landing not verified: {one_line(exc, 100)})", None
     if commit is None:
-        return MOOT_LABEL, None
+        try:
+            commit = closes_commit(ctx, n)
+        except DrainError as exc:
+            return f"closed, no PR (landing not verified: {one_line(exc, 100)})", None
+        return (LANDED_LABEL, commit) if commit else (MOOT_LABEL, None)
     on_main = subprocess.run(["git", "merge-base", "--is-ancestor", commit, ctx.default], cwd=ctx.root,
                              capture_output=True, text=True)
-    if on_main.returncode:
+    if on_main.returncode == 1:
         return f"closed, no PR (landing not verified: closing commit {commit[:8]} is not on {ctx.default})", None
+    if on_main.returncode:
+        return (f"closed, no PR (landing not verified: could not check closing commit {commit[:8]}: "
+                f"{one_line(on_main.stderr, 80)})"), None
     return LANDED_LABEL, commit
 
 
@@ -935,7 +975,10 @@ def finish_closed(ctx, branch, tickets):
     groups = {}
     for n in sorted(tickets):
         groups.setdefault(close_outcome(ctx, n), []).append(n)
-    results = [{"tickets": ts, "pr": label, "sha": sha or "", "note": "", "outcome": MERGED if sha else CLOSED}
+    def outcome_of(label, sha):
+        return MERGED if sha else CLOSED if label == MOOT_LABEL else UNVERIFIED
+
+    results = [{"tickets": ts, "via": label, "sha": sha or "", "note": "", "outcome": outcome_of(label, sha)}
                for (label, sha), ts in groups.items()]
     results[0]["note"] = "; ".join(notes)
     return results
@@ -957,7 +1000,7 @@ def finish(ctx, anchor, branch, view, kind):
                "--remove-assignee", "@me")
     except DrainError as exc:
         notes.append("releasing unclosed tickets failed: " + one_line(exc, 150))
-    return [{"tickets": view["closes"], "pr": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED}]
+    return [{"tickets": view["closes"], "via": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED}]
 
 
 def nudge_text(reason, pr_up, kind):
@@ -1060,49 +1103,63 @@ def hand_to_chris(ctx, anchor, reason, kind):
         gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", HUMAN,
            "--remove-assignee", "@me")
         gh("issue", "comment", str(n), "--repo", ctx.repo, "--body",
-           f"{HANDED_NOTE} this ticket (bundle {' '.join(f'#{x}' for x in bundle)}) after two attempts. "
+           f"{HANDED_NOTE} this ticket (bundle {refs(bundle)}) after two attempts. "
            f"Last failure: {reason} The worktree {branch} is kept for inspection and its worker's "
            "pane is closed; drain skips this ticket until that worktree is removed.")
     return bundle
 
 
-Run = collections.namedtuple("Run", "merged closed handed stop ended passed")
+Run = collections.namedtuple("Run", "merged closed handed stop ended passed unread")
 
 
-def drain(ctx, limit, limit_name="the limit"):
+def survey(ctx, retry=True):
+    """`(queue, waiting, stranded, candidates, passed)`: one read of the queue.
+    `candidates` is the queue's tickets that may anchor a bundle; `passed`
+    also names the queued ones whose workspace is kept."""
+    queue, waiting, stranded, passed = read_frontier(ctx, retry)
+    candidates = anchors(ctx, queue)
+    kept = sorted({t[0] for t in queue} - {t[0] for t in candidates})
+    return queue, waiting, stranded, candidates, passed + [(n, "workspace kept") for n in kept]
+
+
+def say_waiting(waiting):
+    for spec in waiting:
+        say(f"waiting: ready slices of spec #{spec}, which drain cannot start (it is not "
+            "ready-for-agent, is claimed, or is blocked)")
+
+
+def drain(ctx, limit, limit_name):
     """`Run`: what merged, what closed with no PR, what was handed over, the stop
     reason or `None`, the cause the run ended on, and the ready tickets it
-    passed over as `[(number, why)]` (`None` when no queue was read, as with a
-    resumed anchor and `--once`). `limit` counts tickets; `limit_name` is how a
-    reached limit is worded, e.g. `--max 3`."""
+    passed over as `[(number, why)]`. `passed` is `None` when no queue could be
+    read for it, and `unread` then says why. `limit` counts tickets;
+    `limit_name` is how a reached limit is worded, e.g. `--max 3`."""
     merged, closed, handed, stop, failures, done, want = [], [], [], None, 0, 0, ctx.want
     started = []  # the tickets of a bundle whose start line is out and whose end line is not
     told = set()  # stranded slices already named this run (#1485)
     ended = set()  # the anchors this run has taken up: added before `work()`, so none is taken twice
-    cause, last_queue, last_passed = None, None, []  # the last queue read: its tickets and the ones passed over
+    cause, seen = None, None  # the cause the run ended on, and the last queue read `(queue, waiting, passed)`
     try:
         if want:  # refuse before any work, and not only when the loop gets there
-            put_first(anchors(ctx, pick(ctx)), want)
+            queue, waiting, _, candidates, passed = survey(ctx)
+            seen = (queue, waiting, passed)
+            put_first(candidates, want)
         while done < limit:
             taken = resumable(ctx, ended)
             resumed, others = taken is not None, []
             if resumed:
                 anchor, kind = taken
             else:
-                queue, waiting, stranded, passed = read_frontier(ctx)
+                queue, waiting, stranded, candidates, passed = survey(ctx)
+                seen = (queue, waiting, passed)
                 for n, why in stranded:
                     if n not in told:  # every exit names them, once
                         told.add(n)
                         say(f"stranded: #{n}, {why}")
-                candidates = anchors(ctx, queue)
-                kept = {t[0] for t in queue} - {t[0] for t in candidates}
-                last_queue = queue
-                last_passed = passed + [(n, "workspace kept") for n in sorted(kept)]
                 if not candidates:
-                    for spec in waiting:
-                        say(f"waiting: ready slices of spec #{spec}, which drain cannot start (it is not "
-                            "ready-for-agent, is claimed, or is blocked)")
+                    say_waiting(waiting)
                     cause = "queue empty" if not queue else "no startable ticket"
+                    seen = (queue, [], passed)  # named just above
                     break
                 if want:
                     if not any(t[0] == want for t in candidates):
@@ -1117,17 +1174,15 @@ def drain(ctx, limit, limit_name="the limit"):
             if results:
                 for result in results:
                     if result["outcome"] == MERGED:
-                        say(f"bundle ended: {' '.join(f'#{n}' for n in result['tickets'])}  merged  {result['pr']}  "
-                            f"{result['sha']}")
-                        merged.append(result)
+                        say(f"bundle ended: {refs(result['tickets'])}  merged  {result['via']}  {result['sha']}")
                     else:
-                        say(f"bundle ended: {' '.join(f'#{n}' for n in result['tickets'])}  {result['pr']}")
-                        closed.append(result)
+                        say(f"bundle ended: {refs(result['tickets'])}  {result['via']}")
+                    (merged if result["outcome"] == MERGED else closed).append(result)
                 started.clear()
                 done, failures = done + sum(len(r["tickets"]) for r in results), 0
             else:
                 bundle = hand_to_chris(ctx, anchor, reason, kind)
-                say(f"bundle ended: {' '.join(f'#{n}' for n in bundle)}  handed to Chris: {reason}")
+                say(f"bundle ended: {refs(bundle)}  handed to Chris: {reason}")
                 started.clear()
                 handed.append((bundle, reason))
                 done, failures = done + len(bundle), failures + 1
@@ -1143,22 +1198,44 @@ def drain(ctx, limit, limit_name="the limit"):
     except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
         stop = f"unexpected {type(exc).__name__}: {one_line(exc)}"
     if started:
-        say(f"bundle ended: {' '.join(f'#{n}' for n in started)}  stopped: {stop}")
-    if merged:
+        say(f"bundle ended: {refs(started)}  stopped: {stop}")
+    # A close drain could not verify may have put code on main, so it is tested like a merge.
+    landed = merged + [c for c in closed if c["outcome"] == UNVERIFIED]
+    if landed:
         try:
-            red = full_run(ctx, merged)
+            red = full_run(ctx, landed)
         except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
             red = f"the full suite could not run on main: {type(exc).__name__}: {one_line(exc, 150)}"
         stop = "; ".join(x for x in (stop, red) if x) or None
     if stop:
         cause = "stopped"
+    return Run(merged, closed, handed, stop, cause, *passed_at_exit(ctx, cause, seen, ended, merged, closed, handed))
+
+
+def passed_at_exit(ctx, cause, seen, ended, merged, closed, handed):
+    """`(passed, unread)`: the ready tickets this run passed over, read fresh at
+    an exit that left work behind (a limit, or no queue read yet) so a list
+    from the start of an hours-long run is not reported as current; a stopped
+    run, whose environment may be failing, keeps its last read. Ready tickets
+    this run never started carry the cause as their reason."""
     worked = set(ended) | {n for r in merged + closed for n in r["tickets"]} | {n for b, _ in handed for n in b}
-    passed = None
-    if last_queue is not None:
-        listed = {n for n, _ in last_passed}
-        passed = last_passed + [(n, f"ready, not started ({cause})") for n, _, _ in last_queue
-                                if n not in worked and n not in listed]
-    return Run(merged, closed, handed, stop, cause, passed)
+    fresh = cause != "stopped" and (seen is None or cause.endswith("reached"))
+    unread = None
+    if fresh:
+        try:
+            queue, waiting, _, _, passed = survey(ctx, retry=False)
+        except DrainError as exc:
+            seen, unread = None, f"not read (the queue could not be listed at exit: {one_line(exc, 150)})"
+        else:
+            seen = (queue, waiting, passed)
+    if seen is not None:  # specs the loop's own break did not already name
+        say_waiting(seen[1])
+    if seen is None:
+        return None, unread or "not read (the run stopped before the queue was listed)"
+    queue, _, passed = seen
+    listed = {n for n, _ in passed}
+    return passed + [(n, f"ready, not started ({cause})") for n, _, _ in queue
+                     if n not in worked and n not in listed], None
 
 
 def summary(run):
@@ -1167,19 +1244,19 @@ def summary(run):
     exit code."""
     lines = []
     if run.merged:
-        lines += ["merged:"] + [f"  {' '.join(f'#{n}' for n in m['tickets'])}  {m['pr']}  {m['sha']}"
+        lines += ["merged:"] + [f"  {refs(m['tickets'])}  {m['via']}  {m['sha']}"
                                  + (f"  ({m['note']})" if m["note"] else "") for m in run.merged]
     if run.closed:
-        lines += ["closed, no PR:"] + [f"  {' '.join(f'#{n}' for n in m['tickets'])}  {m['pr']}"
+        lines += ["closed, no PR:"] + [f"  {refs(m['tickets'])}  {m['via']}"
                                         + (f"  ({m['note']})" if m["note"] else "") for m in run.closed]
     if run.handed:
-        lines += ["handed to Chris:"] + [f"  {' '.join(f'#{n}' for n in b)}  {r}" for b, r in run.handed]
+        lines += ["handed to Chris:"] + [f"  {refs(b)}  {r}" for b, r in run.handed]
     if run.stop:
         lines.append(f"stopped: {run.stop}")
     if not (run.merged or run.closed or run.handed or run.stop):
         lines.append("nothing to drain")
     if run.passed is None:
-        lines.append("passed over: not read (no queue read this run)")
+        lines.append(f"passed over: {run.unread}")
     else:
         lines += [f"passed over: #{n} {why}" for n, why in run.passed]
     lines.append(f"ended: {run.ended}")

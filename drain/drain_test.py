@@ -43,11 +43,12 @@ if args[:2] == ["api", "user"]:
 elif args[0] == "api":
     url = args[-1]
     m = re.search(r"/issues/(\d+)(/parent)?$", url)
-    if re.search(r"/issues/(\d+)/events$", url):
+    events = re.search(r"/issues/(\d+)/events$", url)
+    if events:
         # The closing event carries the commit that closed the issue, or none for a close by hand.
         if os.environ.get("FAIL_EVENTS"):
             sys.stderr.write("fake gh: events refused\n"); sys.exit(1)
-        issue = state["issues"][re.search(r"/issues/(\d+)/events$", url).group(1)]
+        issue = state["issues"][events.group(1)]
         out([[dict(event="closed", commit_id=issue.get("closed_by"))] if issue["state"] == "closed" else []])
     elif "--paginate" in args:
         label = re.search(r"labels=([^&]+)", url).group(1)
@@ -202,13 +203,16 @@ if env.get("DISPATCH_FAIL_AFTER_CLAIM"):
 if env.get("LIGHT"):  # the light tier pushes to main; MOOT tickets are closed by hand, with no commit
     open(os.path.join(wt, "light-%s.txt" % n), "w").write("landed\n")
     subprocess.run(["git", "add", "."], cwd=wt, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "light %s" % n], cwd=wt, check=True)
-    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=wt, check=True)
+    # A commit carries `Closes #t` for every ticket it landed; a MOOT ticket has none.
+    trailers = "".join("\nCloses #%s" % t for t in tickets if t not in env.get("MOOT", "").split())
+    subprocess.run(["git", "commit", "-q", "-m", "light %s\n%s" % (n, trailers)], cwd=wt, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:" + ("refs/heads/side" if env.get("OFF_MAIN") else "main")],
+                   cwd=wt, check=True)
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=wt, text=True).strip()
     st = json.load(open(env["FAKE_STATE"]))
-    for t in tickets:
-        if t not in env.get("MOOT", "").split():
-            st["issues"][t]["closed_by"] = sha
+    for t in tickets:  # HAND: the trailer did not fire, so a hand closed it: no commit on its closed event
+        if t not in env.get("MOOT", "").split() and t not in env.get("HAND", "").split():
+            st["issues"][t]["closed_by"] = "1" * 40 if env.get("BOGUS") else sha
     json.dump(st, open(env["FAKE_STATE"], "w"))
     if env.get("LATER"):  # another ticket's commit lands after this one's
         open(os.path.join(wt, "later.txt"), "w").write("later\n")
@@ -232,6 +236,10 @@ st["prs"][branch] = {"number": 100 + int(n), "url": "https://example.test/pull/%
                      "head": head, "closes": closes, "draft": n in env.get("DRAFT_TICKETS", "").split(),
                      "status": env.get("STATUS", "CLEAN")}
 json.dump(st, open(env["FAKE_STATE"], "w"))
+for t in env.get("TAKE_AFTER_BUILD", "").split():  # another worker claims it while this one builds
+    st = json.load(open(env["FAKE_STATE"]))
+    st["issues"][t]["labels"] = ["ready-for-agent", "in-progress"]
+    json.dump(st, open(env["FAKE_STATE"], "w"))
 """
 
 # Stands in for herdr. `agent get` answers for the worker: HERDR_STATUS (default
@@ -1292,7 +1300,8 @@ def test_a_ticket_closed_by_hand_is_moot_with_no_sha_and_never_landed(sb):
     assert "closed, no PR:\n  #1  moot (closed, no PR)\n" in r.stdout
     assert "landed" not in r.stdout
     assert "merged:" not in r.stdout
-    assert "#1  moot (closed, no PR)  merged" not in r.stdout
+    assert "nothing to drain" not in r.stdout
+    assert not os.path.exists(os.path.join(sb.tmp, "logs", "last-green-me__repo")), "a moot close landed nothing to test"
     assert "implement-1" in read(sb.cleanup_log)
 
 
@@ -1338,13 +1347,6 @@ def test_a_listing_that_stays_empty_is_read_once_more_and_not_again(sb):
     r = sb.drain()
     assert "nothing to drain" in r.stdout
     assert sb.state()["ready_reads"] == 2
-
-
-def test_a_listing_with_tickets_is_read_once_and_waits_for_nothing(sb):
-    sb.write_state({1: {}})
-    r = sb.drain("--once")
-    assert r.returncode == 0, r.stderr
-    assert sb.state()["ready_reads"] == 1
 
 
 def test_a_run_that_empties_the_queue_says_so_and_still_exits_zero(sb):
@@ -1399,6 +1401,86 @@ def test_a_run_that_stops_ends_with_a_line_saying_it_stopped(sb):
     assert r.returncode == 1
     assert "stopped: 2 bundles in a row" in r.stdout
     assert r.stdout.splitlines()[-1] == "ended: stopped"
+
+
+def test_a_ticket_closed_by_hand_whose_commit_on_main_says_closes_is_landed_not_moot(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "HAND": "1"})
+    assert r.returncode == 0, r.stderr
+    tip = sb.git(sb.origin, "rev-parse", "main")
+    assert f"merged:\n  #1  (landed on main, no PR)  {tip}" in r.stdout
+    assert "moot" not in r.stdout
+
+
+def test_a_closing_commit_that_is_not_on_main_is_not_called_landed(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "OFF_MAIN": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "landing not verified: closing commit" in r.stdout
+    assert "is not on origin/main" in r.stdout
+    assert "(landed on main" not in r.stdout
+
+
+def test_a_closing_commit_git_cannot_find_says_it_could_not_be_checked_not_that_it_is_off_main(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "BOGUS": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "landing not verified: could not check closing commit" in r.stdout
+    assert "is not on origin/main" not in r.stdout
+
+
+def test_an_unverified_close_still_gets_the_full_run_on_main(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "FAIL_EVENTS": "1"})
+    assert r.returncode == 0, r.stderr
+    assert os.path.exists(os.path.join(sb.tmp, "logs", "last-green-me__repo")), "code may be on main: run the suite"
+
+
+def test_a_ticket_claimed_by_an_assignee_alone_is_not_said_to_carry_in_progress(sb):
+    sb.write_state({1: {"assignees": ["me"]}})
+    r = sb.drain()
+    assert "passed over: #1 claimed (assigned)" in r.stdout.splitlines()
+    assert "in-progress" not in r.stdout
+
+
+def test_a_spec_drain_cannot_start_is_named_when_the_run_ends_on_a_limit(sb):
+    sb.write_state({1: {}, 9: {"labels": ["spec"]}, 10: {"parent": 9}})
+    r = sb.drain("--once")
+    assert "ended: --once reached" in r.stdout
+    assert "waiting: ready slices of spec #9, which drain cannot start" in r.stdout
+
+
+def test_a_limit_exit_lists_what_is_ready_now_not_what_was_ready_at_the_last_read(sb):
+    sb.write_state({1: {}, 2: {}})
+    # ticket 2 is claimed by another worker while drain builds ticket 1
+    r = sb.drain("--once", env={"TAKE_AFTER_BUILD": "2"})
+    assert "passed over: #2 claimed (in-progress)" in r.stdout.splitlines()
+    assert "ready, not started" not in r.stdout
+
+
+def test_a_resumed_anchor_under_once_still_reads_the_queue_to_say_what_it_passed_over(sb):
+    sb.write_state({1: {"labels": ["in-progress"]}, 2: {}}, comments=[["1", "drain anchor: implement-1"]])
+    sb.git(sb.repo, "worktree", "add", "-q", "--no-track", "-b", "implement-1", sb.worktree(1), "origin/main")
+    r = sb.drain("--once", env={"HERDR_GONE": "1"})
+    assert "not read" not in r.stdout
+    assert "passed over: #2 ready, not started (--once reached)" in r.stdout
+
+
+def test_an_anchor_refusal_does_not_claim_the_queue_was_never_read(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--anchor", "5")
+    assert r.returncode == 1
+    assert "not read (no queue read" not in r.stdout
+    assert "ended: stopped" in r.stdout
+
+
+def test_a_non_empty_queue_never_waits_out_the_retry(sb):
+    import time
+    sb.write_state({1: {}})
+    started = time.monotonic()
+    r = sb.drain("--once", env={"DRAIN_FRONTIER_RETRY_SECONDS": "60"})
+    assert r.returncode == 0, r.stderr
+    assert time.monotonic() - started < 30
 
 
 def test_a_queue_of_one_spec_and_its_slices_is_dispatched_as_a_spec_run_and_merged(sb):
