@@ -129,6 +129,32 @@ def test_blocked_with_no_checks_yet_gets_the_unknown_window():
     assert isinstance(exc, pr_settle.SettleError) and 60 <= clock.t < 75
 
 
+def test_a_running_check_does_not_extend_a_state_a_wait_cannot_change():
+    running = [run_check("IN_PROGRESS", "")]
+    for state in ("DIRTY", "BEHIND"):
+        exc, clock, _ = settle_seq([view(state, checks=running)])
+        assert isinstance(exc, pr_settle.SettleError) and f"is {state}, not CLEAN" in str(exc)
+        assert clock.sleeps == 0, state
+
+
+def test_unknown_with_a_running_check_still_gets_only_the_unknown_window():
+    exc, clock, _ = settle_seq([view("UNKNOWN", checks=[run_check("IN_PROGRESS", "")])])
+    assert isinstance(exc, pr_settle.SettleError) and 60 <= clock.t < 75
+
+
+def test_an_unrecognised_status_context_state_is_a_failure():
+    odd = view("UNSTABLE", checks=[{"__typename": "StatusContext", "context": "ci", "state": "MYSTERY"}])
+    exc, clock, _ = settle_seq([odd])
+    assert isinstance(exc, pr_settle.SettleError) and "failed check: ci" in str(exc)
+    assert clock.sleeps == 0
+
+
+def test_settle_refuses_a_head_other_than_the_one_named():
+    clock = Clock()
+    with pytest.raises(pr_settle.SettleError, match="head moved"):
+        pr_settle.settle(lambda: view("CLEAN", head="b" * 40), head=SHA, sleep=clock.sleep, now=clock.now)
+
+
 def test_a_draft_fails_at_once():
     exc, clock, _ = settle_seq([view("CLEAN", draft=True)])
     assert isinstance(exc, pr_settle.SettleError) and "draft" in str(exc)
@@ -243,11 +269,11 @@ def cli(tmp_path):
     gh.chmod(0o755)
     state = tmp_path / "state.json"
 
-    def call(views, merge=((0, ""),), *args, login="o"):
+    def call(views, merge=((0, ""),), *args, login="o", pr="7", repo="o/r"):
         state.write_text(json.dumps({"n": 0, "views": views, "merge": merge, "login": login}))
-        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", FAKE_STATE=str(state))
-        r = subprocess.run([sys.executable, os.path.join(HERE, "pr_settle.py"), "7", "--repo", "o/r",
-                            "--poll", "0", *args], capture_output=True, text=True, env=env)
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", FAKE_STATE=str(state), PR_SETTLE_POLL="0")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "pr_settle.py"), pr, "--repo", repo, *args],
+                           capture_output=True, text=True, env=env)
         return r, json.loads(state.read_text())
     return call
 
@@ -278,6 +304,21 @@ def test_cli_merge_retries_base_modified(cli):
     r, st = cli([view("CLEAN")], (BASE, (0, "")), "--head", SHA, "--merge")
     assert r.returncode == 0, r.stderr
     assert len(st["merge_calls"]) == 2
+
+
+def test_cli_without_merge_still_refuses_a_moved_head(cli):
+    r, _ = cli([view("CLEAN", head="b" * 40)], ((0, ""),), "--head", SHA)
+    assert r.returncode == 1 and "head moved" in r.stderr
+
+
+def test_cli_merge_takes_only_a_pr_number(cli):
+    r, st = cli([view("CLEAN")], ((0, ""),), "--head", SHA, "--merge", pr="https://github.com/other/x/pull/3")
+    assert r.returncode == 2 and "merge_calls" not in st
+
+
+def test_cli_merge_takes_only_an_owner_slash_name_repo(cli):
+    r, st = cli([view("CLEAN")], ((0, ""),), "--head", SHA, "--merge", repo="github.com/o/r")
+    assert r.returncode == 1 and "merge_calls" not in st
 
 
 def test_cli_merge_needs_head(cli):

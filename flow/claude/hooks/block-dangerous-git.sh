@@ -9,7 +9,8 @@
 #     run themselves: the outward-facing step is the user's. The ownership
 #     lookup FAILS CLOSED: gh erroring or the network being down means "not
 #     owned" means blocked.
-#   - `gh pr merge` is gated on the same OWNERSHIP (#790): allowed when this
+#   - `gh pr merge` (and `implement/pr_settle.py ... --merge`, which runs one,
+#     #1526) is gated on the same OWNERSHIP (#790): allowed when this
 #     checkout and every repo the line names are the `gh` login's, blocked
 #     everywhere else. Only the command is matched, not the phrase: quoted
 #     text (a grep pattern, a commit message) is data unless a shell runs
@@ -265,7 +266,9 @@ repo_is_owned() {
 }
 
 # --- PR merge policy: your repo = allowed, anyone else's = handed off. ---
-merge_re='gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)'
+# `pr_settle.py ... --merge` is a `gh pr merge` run in a process this hook does
+# not see (#1526), so its command line is read as one.
+merge_re='(gh[[:space:]]+pr[[:space:]]+merge|[^[:space:];&|]*pr_settle\.py[^;&|]*[[:space:]]--merge)([[:space:]]|$)'
 cmd_start='(^|[;&|(`[:space:]])'
 runs_pr_merge() {
   # Cheap gate on the raw command (heredoc bodies included) before the lexer.

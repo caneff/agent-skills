@@ -580,6 +580,18 @@ def test_a_base_branch_modified_refusal_is_retried(sb):
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
 
 
+@pytest.mark.parametrize("env", [{"STATUS": "DIRTY"}, {"STATUS": "UNSTABLE", "CHECK_CONCLUSION": "FAILURE"}])
+def test_a_pr_the_wait_refuses_never_reaches_the_seam(sb, env):
+    # `verify_pr`'s own settle, not the merge's: the seam is a full test run,
+    # so a conflict or a failed check is refused before it, not after.
+    marker = os.path.join(str(sb.tmp), "seam-ran")
+    sb.write_state({1: {}})
+    sb.git(sb.repo, "config", "land.testcmd", f"touch {marker}")
+    sb.drain("--once", env=dict(env, RESET_TO_OLD="1"))  # main moved past the PR's base, so a seam would run
+    assert not os.path.exists(marker)
+    assert "merged" not in sb.state()
+
+
 def test_a_red_seam_is_a_failed_build(sb):
     sb.write_state({1: {}})
     sb.git(sb.repo, "config", "land.testcmd", "false")

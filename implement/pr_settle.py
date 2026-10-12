@@ -4,25 +4,31 @@ PR to read CLEAN, then optionally squash-merge it (#1526).
 
 One wait for both callers, `drain/drain.py` and `implement/SKILL.md` § The
 merge, which used to raise on UNKNOWN and "poll a few seconds" respectively.
-Prints one line, `draft=<bool> state=<mergeStateStatus> head=<sha>`, whatever
-the outcome, and exits 0 only on a PR that is not a draft, reads CLEAN and
+Prints one line, `draft=<bool> state=<mergeStateStatus> head=<sha>` (the last
+view read, on a failure too; none when no view was read), and exits 0 only on a PR that is not a draft, reads CLEAN and
 (with `--head`) still has that head; with `--merge` it has then been merged.
 Exit 1 is a limit or a refusal, named on stderr with the last state read; exit
 2 is a usage error. `--merge` refuses a repo whose owner is not the `gh` login
-(`require_own_repo`): the merge happens inside this process, out of the
-ownership hook's sight, so the rule is kept here.
+(`require_own_repo`) and a PR named by anything but its number. The ownership
+rule's one owner is the hook (`block-dangerous-git.sh`, which reads this
+command line for `pr_settle.py ... --merge` as it does for `gh pr merge`);
+this check is the same rule inside the process, for a caller the hook does not
+see, drain's own subprocess included.
 
 What it waits for:
 - `UNKNOWN` (GitHub still computing), or a non-CLEAN state with no check
   registered yet: re-read for up to 60 s.
 - `UNSTABLE` or `BLOCKED` with a check still running: until the checks finish,
-  capped at 15 minutes. CI on these repos is GitHub Actions and ran about
-  2 minutes in the 2026-10-08 drain run that handed three PRs over on
-  UNSTABLE, so the cap is generous.
+  capped at 15 minutes. CI on these repos is GitHub Actions, not local:
+  in the 2026-10-08 drain run that handed #755 and #757 over on UNSTABLE, the
+  `gate (check)` job ran about 7 minutes (#755: 17:00:33 to 17:07:18) and
+  drain read UNSTABLE at 17:01:42, while it was still running. The cap covers
+  that twice over.
 - A "Base branch was modified" refusal at `gh pr merge`: re-settled and
   retried, up to 3 times.
-It does not wait for a failed check, a draft, a closed or merged PR, or
-`BEHIND`/`DIRTY`: nothing waited on resolves those.
+It does not wait for a failed check, a draft, a closed or merged PR, or any
+state but the three above (`BEHIND`, `DIRTY`, ...): nothing waited on resolves
+those, even with a check running.
 """
 import argparse
 import json
@@ -42,6 +48,8 @@ FIELDS = "isDraft,mergeStateStatus,headRefOid,state,statusCheckRollup"
 PASSING = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 FAILING_CONTEXT = {"FAILURE", "ERROR"}
 PENDING_CONTEXT = {"PENDING", "EXPECTED"}
+# The only states a wait can change: GitHub still computing, or checks pending.
+WAITED = {"UNKNOWN", "UNSTABLE", "BLOCKED"}
 
 
 class SettleError(Exception):
@@ -61,8 +69,10 @@ def classify(rollup):
             name, state = check.get("context") or check.get("name") or "?", check.get("state")
             if state in FAILING_CONTEXT:
                 failed.append(name)
-            elif state != "SUCCESS":
+            elif state in PENDING_CONTEXT:
                 pending.append(name)
+            elif state != "SUCCESS":  # a state this table has never seen is a failure, as for a CheckRun
+                failed.append(name)
             continue
         name = check.get("name") or "?"
         if check.get("status") != "COMPLETED":
@@ -76,9 +86,10 @@ def line(view):
     return f"draft={str(bool(view['isDraft'])).lower()} state={view['mergeStateStatus']} head={view['headRefOid']}"
 
 
-def settle(read, sleep=time.sleep, now=time.monotonic, poll=POLL_SECONDS):
+def settle(read, head=None, sleep=time.sleep, now=time.monotonic, poll=POLL_SECONDS):
     """Re-read `read()` (a `gh pr view` as a dict) until the PR is CLEAN and
-    return that view, or raise `SettleError` on a limit or a refusal."""
+    return that view, or raise `SettleError` on a limit or a refusal. With
+    `head`, a PR whose head is another sha is refused too."""
     start = quiet_since = now()
     while True:
         view = read()
@@ -93,10 +104,14 @@ def settle(read, sleep=time.sleep, now=time.monotonic, poll=POLL_SECONDS):
         pending, failed = classify(view["statusCheckRollup"])
         if failed:
             raise SettleError(f"has a failed check: {', '.join(failed)} (state {state})", view)
+        if head and view["headRefOid"] != head:
+            raise SettleError(f"head moved from {head} to {view['headRefOid']}", view)
         if state == "CLEAN":
             return view
+        if state not in WAITED:
+            raise SettleError(f"is {state}, not CLEAN", view)
         t = now()
-        if pending:
+        if pending and state != "UNKNOWN":
             quiet_since = t
             if t - start >= CHECKS_SECONDS:
                 raise SettleError(f"is {state} with {', '.join(pending)} still running after "
@@ -115,9 +130,7 @@ def merge(read, gh_merge, head, sleep=time.sleep, now=time.monotonic, poll=POLL_
     times. The merge is bound to `head`: a PR whose head moved is refused."""
     refusal = ""
     for attempt in range(MERGE_RETRIES + 1):
-        view = settle(read, sleep=sleep, now=now, poll=poll)
-        if view["headRefOid"] != head:
-            raise SettleError(f"head moved from {head} to {view['headRefOid']}", view)
+        view = settle(read, head=head, sleep=sleep, now=now, poll=poll)
         code, text = gh_merge(head)
         if code == 0:
             return view
@@ -163,7 +176,7 @@ def require_own_repo(repo):
     login = out.stdout.strip()
     if out.returncode != 0 or not login:
         raise SettleError(f"refusing to merge: could not read the gh login ({(out.stderr or '').strip()})")
-    owner = repo.split("/")[-2] if repo.count("/") >= 1 else ""
+    owner = repo.split("/")[0] if repo.count("/") == 1 else ""
     if owner.lower() != login.lower():
         raise SettleError(f"refusing to merge {repo}: owner {owner or '?'} is not the gh login {login}; "
                           "that merge is the owner's to run")
@@ -175,8 +188,9 @@ def main(argv):
     ap.add_argument("--repo", required=True)
     ap.add_argument("--head", help="the sha the PR must still have (required with --merge)")
     ap.add_argument("--merge", action="store_true", help="squash-merge once CLEAN")
-    ap.add_argument("--poll", type=float, default=POLL_SECONDS, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
+    if args.merge and not args.pr.isdigit():
+        ap.error("--merge takes the PR's number: a URL or branch names its own repo, past the ownership check")
     if args.merge and not args.head:
         ap.error("--merge needs --head <sha>: the merge is bound to the head the seam ran on")
     read = gh_reader(args.pr, args.repo)
@@ -189,11 +203,9 @@ def main(argv):
     try:
         if args.merge:
             require_own_repo(args.repo)
-            view = merge(tracked, gh_merger(args.pr, args.repo), args.head, poll=args.poll)
+            view = merge(tracked, gh_merger(args.pr, args.repo), args.head, poll=POLL_SECONDS)
         else:
-            view = settle(tracked, poll=args.poll)
-            if args.head and view["headRefOid"] != args.head:
-                raise SettleError(f"head moved from {args.head} to {view['headRefOid']}", view)
+            view = settle(tracked, head=args.head, poll=POLL_SECONDS)
     except SettleError as exc:
         shown = exc.view or last
         if shown.get("mergeStateStatus"):

@@ -603,10 +603,10 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
 6. **`python3 ~/.agents/skills/implement/pr_settle.py <pr> --repo <owner/name>`**
    exits 0 and prints `draft=false state=CLEAN head=<headRefOid>` before "PR up"
    goes out — a PR reported on a draft or a conflict fails the controller's
-   merge. It waits itself for what resolves (`UNKNOWN` for up to 60 s, a
-   running check for up to 15 minutes; #1526) and exits non-zero, naming the
-   last state, on a failed check, a draft or a limit: that is not a "CLEAN"
-   to report, so fix the cause. `head` is the sha GitHub computed that
+   merge. It waits itself for what resolves (`UNKNOWN`, a running check; its
+   docstring holds the limits, #1526) and exits non-zero, naming the last
+   state, on a failed check, a draft or a limit: that is not a "CLEAN" to
+   report, so fix the cause. `head` is the sha GitHub computed that
    reading against, and it is the one the report's "CLEAN observed at" carries
    (§ The PR) — never `git rev-parse HEAD`, which is your local tip and may be
    a commit GitHub has not read yet. Then
@@ -888,9 +888,9 @@ closed.
    ```
 
    It settles the PR to CLEAN again, then runs `gh pr merge --squash
-   --match-head-commit <headRefOid>`, retrying up to 3 times on GitHub's "Base
-   branch was modified" refusal (#1526), and exits non-zero naming the last
-   state on any limit. `--head` is required: the match binds the merge to the
+   --match-head-commit <headRefOid>`, retrying GitHub's "Base branch was
+   modified" refusal (#1526), and exits non-zero naming the last state on any
+   limit. `--head` is required: the match binds the merge to the
    head the seam ran on (step 2's `headRefOid`), and GitHub refuses it
    atomically if the head moved since. It refuses a repo whose owner is not
    the `gh` login, as the ownership hook does for a bare `gh pr merge`. The
