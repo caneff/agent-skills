@@ -895,7 +895,7 @@ closed.
    atomically if the head moved since. It refuses a repo whose owner is not
    the `gh` login, as the ownership hook does for a bare `gh pr merge`. The
    `ready-for-human` merge line, in the `--chris-merges` report block of
-   § The PR above, is a bare `gh pr merge` with the same flag, which Chris runs.
+   § The PR, is a bare `gh pr merge` with the same flag, which Chris runs.
 
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
