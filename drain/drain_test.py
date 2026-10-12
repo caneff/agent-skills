@@ -43,13 +43,24 @@ if args[:2] == ["api", "user"]:
 elif args[0] == "api":
     url = args[-1]
     m = re.search(r"/issues/(\d+)(/parent)?$", url)
-    if "--paginate" in args:
+    if re.search(r"/issues/(\d+)/events$", url):
+        # The closing event carries the commit that closed the issue, or none for a close by hand.
+        if os.environ.get("FAIL_EVENTS"):
+            sys.stderr.write("fake gh: events refused\n"); sys.exit(1)
+        issue = state["issues"][re.search(r"/issues/(\d+)/events$", url).group(1)]
+        out([[dict(event="closed", commit_id=issue.get("closed_by"))] if issue["state"] == "closed" else []])
+    elif "--paginate" in args:
         label = re.search(r"labels=([^&]+)", url).group(1)
         issues = [dict(number=int(n), title=i["title"], body=i["body"], state="open", labels=names(i),
                        assignees=[dict(login=a) for a in i.get("assignees", [])])
                   for n, i in state["issues"].items()
                   if (i["state"] == "open" or n in os.environ.get("STALE_LISTING", "").split())
                   and (label in i["labels"] or (label == "in-progress" and n in os.environ.get("STALE_LABELS", "").split()))]
+        if label == "ready-for-agent":  # LAG_LISTING: that many reads answer empty, as GitHub does just after a relabel
+            state["ready_reads"] = state.get("ready_reads", 0) + 1
+            save()
+            if state["ready_reads"] <= int(os.environ.get("LAG_LISTING", 0)):
+                issues = []
         for t in os.environ.get("TAKE_AFTER_PICK", "").split() if label == "ready-for-agent" else []:
             if "ready-for-agent" in state["issues"][t]["labels"]:
                 state["issues"][t]["labels"].remove("ready-for-agent")
@@ -188,6 +199,22 @@ json.dump(st, open(env["FAKE_STATE"], "w"))
 subprocess.run(["git", "worktree", "add", "-q", "--no-track", "-b", branch, wt, "origin/main"], cwd=repo, check=True)
 if env.get("DISPATCH_FAIL_AFTER_CLAIM"):
     sys.stderr.write("herdr agent start failed after the workspace exists\n"); sys.exit(1)
+if env.get("LIGHT"):  # the light tier pushes to main; MOOT tickets are closed by hand, with no commit
+    open(os.path.join(wt, "light-%s.txt" % n), "w").write("landed\n")
+    subprocess.run(["git", "add", "."], cwd=wt, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "light %s" % n], cwd=wt, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=wt, check=True)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=wt, text=True).strip()
+    st = json.load(open(env["FAKE_STATE"]))
+    for t in tickets:
+        if t not in env.get("MOOT", "").split():
+            st["issues"][t]["closed_by"] = sha
+    json.dump(st, open(env["FAKE_STATE"], "w"))
+    if env.get("LATER"):  # another ticket's commit lands after this one's
+        open(os.path.join(wt, "later.txt"), "w").write("later\n")
+        subprocess.run(["git", "add", "."], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "later"], cwd=wt, check=True)
+        subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=wt, check=True)
 if env.get("LIGHT") or n in env.get("FAIL_TICKETS", "").split():
     sys.exit(0)
 os.chdir(wt)
@@ -322,7 +349,7 @@ class Sandbox:
         return {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
                 "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
                 "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
-                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
+                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_FRONTIER_RETRY_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
                 "DRAIN_LOG_DIR": os.path.join(self.tmp, "logs"), **(env or {})}
 
     def drain(self, *argv, env=None):
@@ -1253,8 +1280,125 @@ def test_a_drain_run_from_a_linked_worktree_names_the_primary_checkout(sb):
 def test_an_empty_queue_says_so(sb):
     r = sb.drain()
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == "nothing to drain"
+    assert r.stdout.splitlines()[0] == "nothing to drain"
+    assert "ended: queue empty" in r.stdout
     assert sb.dispatch_runs() == []
+
+
+def test_a_ticket_closed_by_hand_is_moot_with_no_sha_and_never_landed(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "MOOT": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "closed, no PR:\n  #1  moot (closed, no PR)\n" in r.stdout
+    assert "landed" not in r.stdout
+    assert "merged:" not in r.stdout
+    assert "#1  moot (closed, no PR)  merged" not in r.stdout
+    assert "implement-1" in read(sb.cleanup_log)
+
+
+def test_a_landed_ticket_is_recorded_with_the_commit_that_closed_it_not_mains_tip(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "LATER": "1"})
+    assert r.returncode == 0, r.stderr
+    closing = sb.state()["issues"]["1"]["closed_by"]
+    tip = sb.git(sb.origin, "rev-parse", "main")
+    assert closing != tip
+    assert f"  #1  (landed on main, no PR)  {closing}\n" in r.stdout + "\n"
+    assert tip not in r.stdout
+
+
+def test_a_bundle_of_one_landed_and_one_moot_ticket_records_each_as_what_it_was(sb):
+    sb.write_state({1: {}, 2: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "MOOT": "2", "TAKE": "2"})
+    assert r.returncode == 0, r.stderr
+    closing = sb.state()["issues"]["1"]["closed_by"]
+    assert f"merged:\n  #1  (landed on main, no PR)  {closing}" in r.stdout
+    assert "closed, no PR:\n  #2  moot (closed, no PR)" in r.stdout
+
+
+def test_a_close_whose_cause_cannot_be_read_is_not_called_landed_or_moot(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LIGHT": "1", "FAIL_EVENTS": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "landing not verified" in r.stdout
+    assert "(landed on main" not in r.stdout
+    assert "moot" not in r.stdout
+
+
+def test_an_empty_first_listing_is_read_again_before_drain_gives_up(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"LAG_LISTING": "1"})
+    assert r.returncode == 0, r.stderr
+    assert "nothing to drain" not in r.stdout
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+
+
+def test_a_listing_that_stays_empty_is_read_once_more_and_not_again(sb):
+    sb.write_state({})
+    r = sb.drain()
+    assert "nothing to drain" in r.stdout
+    assert sb.state()["ready_reads"] == 2
+
+
+def test_a_listing_with_tickets_is_read_once_and_waits_for_nothing(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once")
+    assert r.returncode == 0, r.stderr
+    assert sb.state()["ready_reads"] == 1
+
+
+def test_a_run_that_empties_the_queue_says_so_and_still_exits_zero(sb):
+    sb.write_state({1: {}})
+    r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    assert "merged:" in r.stdout
+    assert r.stdout.splitlines()[-1] == "ended: queue empty"
+    assert not any(x.startswith("stopped:") for x in r.stdout.splitlines())
+
+
+def test_a_run_that_reaches_once_names_the_limit_and_the_tickets_left(sb):
+    sb.write_state({1: {}, 2: {}})
+    r = sb.drain("--once")
+    assert "ended: --once reached" in r.stdout
+    assert "passed over: #2 ready, not started (--once reached)" in r.stdout
+
+
+def test_a_run_that_reaches_max_names_the_limit_and_the_tickets_left(sb):
+    sb.write_state({1: {}, 2: {}})
+    r = sb.drain("--max", "1")
+    assert "ended: --max 1 reached" in r.stdout
+    assert "passed over: #2 ready, not started (--max 1 reached)" in r.stdout
+
+
+def test_every_ready_ticket_drain_passed_over_is_named_with_its_reason(sb):
+    sb.write_state({1: {"body": "## Blocked by\n\n- #2\n"},
+                    2: {"labels": ["ready-for-agent", "in-progress"]},
+                    3: {"labels": ["ready-for-agent", "ready-for-human"]},
+                    4: {"labels": ["ready-for-agent", "needs-info"]}})
+    r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    assert "passed over: #1 blocked by #2" in lines
+    assert "passed over: #2 claimed (in-progress)" in lines
+    assert "passed over: #3 ready-for-human" in lines
+    assert "passed over: #4 label needs-info" in lines
+    assert lines[-1] == "ended: queue empty"
+    assert sb.dispatch_runs() == []
+
+
+def test_a_ready_ticket_with_a_kept_workspace_is_named_as_passed_over(sb):
+    sb.write_state({1: {}})
+    os.makedirs(sb.worktree(1))
+    r = sb.drain()
+    assert "passed over: #1 workspace kept" in r.stdout
+
+
+def test_a_run_that_stops_ends_with_a_line_saying_it_stopped(sb):
+    sb.write_state({1: {}, 2: {}, 3: {}})
+    r = sb.drain(env={"FAIL_TICKETS": "1 2"})
+    assert r.returncode == 1
+    assert "stopped: 2 bundles in a row" in r.stdout
+    assert r.stdout.splitlines()[-1] == "ended: stopped"
 
 
 def test_a_queue_of_one_spec_and_its_slices_is_dispatched_as_a_spec_run_and_merged(sb):

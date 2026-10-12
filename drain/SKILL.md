@@ -54,7 +54,8 @@ steps below.
      worker pane, as drain printed them, and say `/drain status` shows the
      batch from here on. Then end the turn.
    - `nothing to drain`, `stopped:` or `drain.py:`: drain ended first; report
-     that line as it stands.
+     that line as it stands, with the `passed over:` and `ended:` lines
+     that follow it in the progress file.
    - No line before the deadline, or the background command ends first (the
      `already live` refusal of step 2 never reaches the progress file): report
      it, quoting `job-run --status drain-<repo-short>` and the background
@@ -87,14 +88,19 @@ read the background command's own output: a refusal (`already live`, an
 argparse error, `drain.py: ...`) is reported verbatim as a start that never
 ran, not as a crash. A run that ran ends with drain's summary, in
 `~/.cache/agent-jobs/drain-<repo-short>/progress` after the timestamp on each
-line, starting at the line `merged:`, `handed to Chris:`, `stopped:` or
-`nothing to drain`. Open the report with every bundle the run worked, one per
+line, starting at the line `merged:`, `closed, no PR:`, `handed to Chris:`,
+`stopped:` or `nothing to drain`, and ending with its `ended:` line. Open the report with every bundle the run worked, one per
 `bundle started:` line in the progress file with its `bundle ended:` outcome,
 then the summary:
 
 - **merged**: each ticket set with its PR and squash sha.
+- **closed, no PR**: each ticket set with how drain recorded it, as printed:
+  `moot (closed, no PR)` is a ticket closed by hand, which landed nothing.
 - **handed to Chris**: each ticket set with the reason, as drain printed it.
 - **stopped**: the reason, when drain printed one.
+- **ended**: the closing `ended: <cause>` line, as printed (`queue empty`,
+  `--once reached`, `--max <n> reached`, `stopped`), then each `passed over:`
+  ticket with its reason. It is not a stop: an empty queue exits 0.
 - **Live layer**: when the target repo declares a live layer above its merge
   seam in its `AGENTS.md` § End-to-end seam, a command run once per run on
   Chris's go (`./e2e.sh` in twitch-rules-scroller, #1392), end the report with the ask

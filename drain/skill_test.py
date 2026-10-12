@@ -67,3 +67,8 @@ def test_live_run_waits_for_chris_and_runs_once_on_merged_main(completion):
     step = " ".join(completion.split("**Live layer**", 1)[1].lower().split())
     for needle in ("on his go", "once on merged `main`", "owed live checks", "fix or revert ticket"):
         assert needle in step, f"the live-run step does not say {needle!r}"
+
+
+def test_completion_report_reads_the_closing_lines_drain_prints(completion):
+    for needle in ("`ended:", "`passed over:`", "`closed, no PR:`", "moot (closed, no PR)"):
+        assert needle in completion, f"On completion does not read {needle!r}"
