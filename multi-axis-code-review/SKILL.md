@@ -573,8 +573,13 @@ status; the header lists the other exit codes.
 
 Each witness gets the setup a fresh worktree lacks (#1219), which the script's
 header states: no Python bytecode, no `__pycache__`, and a link to the reviewed
-tree's `node_modules`. Other ignored dependency directories (`.venv`,
-`vendor`) are not set up. A Cargo `target/` is not shared either: a fresh
+tree's `node_modules`. A reviewed tree with a `uv.lock` gets `uv sync
+--frozen` run in each witness, so every witness has its own `.venv`; one
+with no `uv.lock` leaves `.venv` unset and the run says so (#1528). The
+reviewed tree's `.venv` is never symlinked in: an editable install there
+imports the reviewed tree's code, so the suite would test the wrong tree.
+Briefs carry no hand-written advice about it. Other ignored dependency
+directories (`vendor`) are not set up. A Cargo `target/` is not shared either: a fresh
 worktree has no `target/`, so each witness builds into its own.
 
 `git worktree remove`, never `rm -rf`: a directory deleted out from under the

@@ -24,6 +24,11 @@
 # the link shows as untracked where `.gitignore` says `node_modules/`
 # (docs/research/2026-10-04-witness-node-modules-symlink.md).
 #
+# A repo whose reviewed tree has a `uv.lock` gets `uv sync --frozen` run in each
+# witness (#1528): its own `.venv`, never a link to the reviewed tree's, whose
+# editable install would import the reviewed tree's code. With no `uv.lock`
+# the `.venv` stays unset and the run says so. `vendor` directories are not set up.
+#
 # Exit: 0 every mutation was run and reported (red, HOLLOW or unknown — read
 # the output); 1 setup failed before any mutation; 2 bad arguments; 3 a
 # throwaway worktree could not be removed and is still registered; 4 a ledger
@@ -197,7 +202,19 @@ prepare() { # <witness>
     ln -s "$top/node_modules" "$1/node_modules" || {
       echo "witness check: could not link node_modules into $1" >&2; return 1; }
   fi
+  # `uv sync` in the witness itself (#1528), never a link to the reviewed
+  # tree's `.venv`: an editable install there imports the reviewed tree's code,
+  # so the covering suite would test the wrong tree. `--frozen` installs the
+  # lock as committed and never rewrites it. A failed sync leaves the mutation
+  # unreached, so it reads `unknown`, never a pass.
+  if [ -f "$1/uv.lock" ]; then
+    (cd "$1" && uv sync --frozen --quiet) || {
+      echo "witness check: uv sync failed in $1" >&2; return 1; }
+  fi
 }
+# Said once per run, not per witness: a Python suite that needs a `.venv` fails
+# for that reason, and the reviewer should be told it was never set up.
+[ -f "$top/uv.lock" ] || echo "witness check: no uv.lock in the reviewed tree - .venv is left unset in every witness" >&2
 for id in "${mutations[@]}"; do
   while [ "$(jobs -pr | wc -l)" -ge "$slots" ]; do wait -n; done
   witness="$root/worktrees/$id"
