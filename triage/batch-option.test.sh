@@ -26,13 +26,20 @@ check_in "$batch" 'one at a time, each with a recommendation' "$w"
 check_in "$batch" 'except controversial' "$w"
 check_in "$batch" 'ask only the contested ones' "$w"
 check_in "$batch" 'Ask once per round' "$w"
+check_in "$batch" 'Any other reply is the default' "$w"
+check_in "$batch" 'never decided by the agent' "$w"
+check_in "$batch" 'applied then, not before' "$w"
+check_in "$batch" 'an item that needs grilling' "$w"
+check_in "$batch" 'stands in for the sort' "$w"
 check_in "$batch" 'a `wontfix` of an enhancement' "$w"
 
 # The offer comes before the per-item work: its heading sits ahead of
 # "Triage a specific issue or PR", and the large-list step points at it.
-offer_line=$(grep -n '^## Offer the batch option$' "$skill" | cut -d: -f1)
-triage_line=$(grep -n '^## Triage a specific issue or PR$' "$skill" | cut -d: -f1)
-[ -n "$triage_line" ] && [ "$offer_line" -lt "$triage_line" ] ||
+offer_line=$(grep -n '^## Offer the batch option$' "$skill" | cut -d: -f1 || true)
+triage_line=$(grep -n '^## Triage a specific issue or PR$' "$skill" | cut -d: -f1 || true)
+[ -n "$offer_line" ] || { echo "FAIL: heading '## Offer the batch option' is missing from triage/SKILL.md" >&2; exit 1; }
+[ -n "$triage_line" ] || { echo "FAIL: heading '## Triage a specific issue or PR' is missing from triage/SKILL.md" >&2; exit 1; }
+[ "$offer_line" -lt "$triage_line" ] ||
   { echo "FAIL: § Offer the batch option does not precede § Triage a specific issue or PR" >&2; fail=1; }
 check_in "$(section 'Show what needs attention')" '§ Offer the batch option' '§ Show what needs attention'
 
