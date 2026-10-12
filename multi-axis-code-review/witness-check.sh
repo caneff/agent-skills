@@ -251,7 +251,7 @@ if [ "$no_ledger" -eq 0 ]; then
   for id in "${mutations[@]}"; do
     kind=witness-mutation
     case "$call_site_ids" in *" $id "*) kind=call-site-mutation ;; esac
-    python3 "$here/../docs/research/review_ledger.py" append "${ledger_args[@]}" --type "$kind" \
+    python3 "$here/review_ledger.py" append "${ledger_args[@]}" --type "$kind" \
       --mutation-id "$id" --status-file "$root/outcome/$id" --seconds "$(cat "$root/seconds/$id" 2>/dev/null)" \
       || append_failed=$(( append_failed + 1 ))
   done

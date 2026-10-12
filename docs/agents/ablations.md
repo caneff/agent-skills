@@ -33,7 +33,7 @@ when a burn closes and brings Chris the table when the third burn has.
   closed burns or drain runs.
 - **Why this one:** on 2026-10-04 no PR ran the pass anyway. Of eight merged,
   six were under the size threshold and two hit the 70% reserve ceiling.
-- **Measure:** `python3 ~/.agents/skills/docs/research/review_ledger.py
+- **Measure:** `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py
   escapes --repo-dir <checkout>`; the component is the Codex pass's
   `ablation` skip rows.
 - **Decision rule:** keep the Codex pass if the table attributes any escape to
@@ -49,7 +49,7 @@ when a burn closes and brings Chris the table when the third burn has.
   #1357 size threshold. The other two axes and Codex run as before. A PR at or
   above the threshold runs all of them.
 - **Started:** with #1401's landing. It runs for three closed burns.
-- **Measure:** `python3 ~/.agents/skills/docs/research/review_ledger.py
+- **Measure:** `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py
   escapes --repo-dir <checkout>`; the component is `standards:ablation` in its
   table. A skipped run is recorded in the ledger by `append --type standards
   --skip-reason ablation`, so the count has something to attribute to.

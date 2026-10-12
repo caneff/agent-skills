@@ -182,7 +182,7 @@ A burn ends with one report to Chris, and no sweep ticket: every valid review
 finding was fixed in the PR that raised it, or moved onto the open ticket for
 its component (`implement/SKILL.md` § Review), so no run carries findings
 forward. Before writing it, run `python3
-~/.agents/skills/docs/research/review_ledger.py harvest`, which joins each
+~/.agents/skills/multi-axis-code-review/review_ledger.py harvest`, which joins each
 finding's outcome from the dispositions sidecars into the ledger. The report
 carries two counts, **fixed** and **moved**,
 
@@ -203,7 +203,7 @@ ends `running`), the report also carries its escape table, read from the
 ledger, and the controller appends the burn's line to that file's log:
 
 ```
-python3 ~/.agents/skills/docs/research/review_ledger.py escapes --repo-dir <primary checkout>
+python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py escapes --repo-dir <primary checkout>
 ```
 
 The table has one line per skipped component, with the number of PRs it was

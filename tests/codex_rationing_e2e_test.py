@@ -61,7 +61,7 @@ from codex_audit_test import FINDINGS_OUT  # noqa: E402
 
 GATE = ROOT / "implement" / "codex-usage-gate.py"
 AUDIT = ROOT / "implement" / "codex-audit.py"
-LEDGER_CLI = ROOT / "docs" / "research" / "review_ledger.py"
+LEDGER_CLI = ROOT / "multi-axis-code-review" / "review_ledger.py"
 WEEK = "2026-09-2{}T12:00:00+00:00"
 
 

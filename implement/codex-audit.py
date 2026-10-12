@@ -59,10 +59,11 @@ RANGE = HERE / "codex-audit-range.py"
 TRIAL = HERE.parent / "docs" / "research" / "2026-09-14-codex-review-trial.md"
 SKILL = HERE / "SKILL.md"
 PLUGINS = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
-LEDGER_CLI = HERE.parent / "docs" / "research" / "review_ledger.py"
+LEDGER_CLI = HERE.parent / "multi-axis-code-review" / "review_ledger.py"
 
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "docs" / "research"))
+sys.path.insert(0, str(HERE.parent / "multi-axis-code-review"))
 from gitcmd import GitError, git  # noqa: E402
 from review_ledger import DEFAULT_LEDGER, parse_codex_out  # noqa: E402
 from tally_review_axes import REVIEWS_ROOT  # noqa: E402

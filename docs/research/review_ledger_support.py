@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT = Path(__file__).with_name("review_ledger.py")
+SCRIPT = Path(__file__).resolve().parent.parent.parent / "multi-axis-code-review" / "review_ledger.py"
 
 
 def write_jsonl(path: Path, rows: list) -> None:

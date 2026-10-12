@@ -259,7 +259,7 @@ No PR and no reviewer; Chris reads the log after.
   once it has gone red, green or never reached its suite, record it (#1270):
 
   ```
-  python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type worker-mutation --mutation-id <id> --outcome red|green|unknown --seconds <s>
+  python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo <repo> --ticket <n> --type worker-mutation --mutation-id <id> --outcome red|green|unknown --seconds <s>
   ```
 
   `<repo>` is the review cache's directory name, as in § The PR. A mutation
@@ -529,7 +529,7 @@ live and not from the cache. Once the gate above has ruled on the run, write
 its row from the record, with `<repo>` the review cache's directory name:
 
 ```
-python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-gate
+python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo <repo> --ticket <n> --type codex-gate
 ```
 
 A usage reading that fails, on either side, is `unknown`, never zero, and so
@@ -653,8 +653,9 @@ sha the controller was handed.
 
 Write the body to `~/.cache/agent-reviews/<repo>/pr-body-<n>.md` first
 (`mkdir -p` the directory; `<n>` is the lowest ticket of a clump; `<repo>` is
-the repo's own name, taken from the common `.git` as § Review's Codex block
-does, not the worktree's directory name), never under
+the repo's own name, folded: the last component of
+`python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py cache-dir`,
+not the worktree's directory name), never under
 this workspace's `.scratch/`. The file's content is already the PR body on
 GitHub, and § Before the PR step 3 makes you clear `.scratch/` anyway. A
 `gh pr edit` reuses the same file.
