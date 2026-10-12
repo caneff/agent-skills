@@ -61,7 +61,7 @@ runs() {
   local w re="(^|[^A-Za-z0-9_.-])$1([^A-Za-z0-9_.-]|\$)"
   [[ "$TEACH_COMMAND" =~ $re ]] || return 1
   teach_parse
-  re="^$1"
+  re="^([^[:space:]]*/)?$1"   # a path-prefixed call (/usr/bin/xdg-open) runs it too
   shift
   for w in "$@"; do re+="[[:space:]]+$w"; done
   printf '%s\n' "$TEACH_RUN" | grep -qE "$re([[:space:]]|\$)"

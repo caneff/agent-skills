@@ -101,6 +101,13 @@ included — and say so to the controller. Never lower heavy to light: the label
 was read before anyone saw the diff, and code landing unreviewed is the
 outcome the heavy tier exists to stop.
 
+**Showing Chris an image?** A task that has you show Chris an image, a
+contact sheet or a render starts by reading
+`~/.agents/skills/flow/claude/VISUAL-INSPECTION.md` § Showing me a file. The
+hook `flow/claude/hooks/teach-visual.sh` teaches the same section on an
+opener's first call and fires in a worker session (#1531); this line covers
+the task that never reaches an opener.
+
 **Codex builds this one?** `--codex` on the invocation, the owner saying
 their Claude quota is short, or a ruling by the owner in a ticket comment that
 names the lane, moves the build and its reviews to Codex: read
