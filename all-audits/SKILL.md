@@ -50,6 +50,11 @@ instead, with no separate log file:
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and
 targeted at one module (never a whole-repo sweep); invoke it by name, or run
 `driver.py --mutation a.py,b.py` for the scripted per-module form.
+With no value, `--mutation` takes its candidates from `mutation-audit/audit.py
+--suggest` (the model's prepass only ranks that list) and orders them never-run
+first, then changed since their recorded sha, then oldest run first, before
+`MUTATION_MAX` cuts. Each finished module is recorded under `mutation_modules`
+in the per-repo cache file.
 
 ## Opt-in edits
 

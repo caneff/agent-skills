@@ -558,24 +558,29 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees(tmp_path):
     assert os.path.isfile(os.path.join(run_dir, "collection", "assets", "base", "base.css"))
 
 
+def _fake_tools_env(tmp, **extra_env):
+    """An env whose PATH has the fake `claude` and a succeeding `uv`; `tmp`
+    holds both the cache and the fake binaries."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.lexists(os.path.join(tmp, "claude")):
+        os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(tmp, "claude"))
+        with open(os.path.join(tmp, "uv"), "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(tmp, "uv"), 0o755)
+    # The ceiling is dropped from the ambient env, as in `_sweep_with_fake_claude`.
+    ambient = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"}
+    return {**ambient, "PATH": f"{tmp}:{os.environ['PATH']}", "XDG_CACHE_HOME": tmp,
+            "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env}
+
+
 def _mutation_with_fake_claude(repo, tmp, out, **extra_env):
     """Mutation mode over `solver.py` with the fake `claude` and a `uv` that
     succeeds, so the module reaches its audit. `tmp` holds both the cache and
     the fake binaries."""
-    cache_dir = bin_dir = tmp
     here = os.path.dirname(os.path.abspath(__file__))
-    if not os.path.lexists(os.path.join(bin_dir, "claude")):
-        os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
-        with open(os.path.join(bin_dir, "uv"), "w") as f:
-            f.write("#!/bin/sh\nexit 0\n")
-        os.chmod(os.path.join(bin_dir, "uv"), 0o755)
-    # The ceiling is dropped from the ambient env, as in `_sweep_with_fake_claude`.
-    ambient = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"}
-    env = {**ambient, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
-           "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env}
     return subprocess.run(
         [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation", "solver.py", "--out", out],
-        capture_output=True, text=True, env=env,
+        capture_output=True, text=True, env=_fake_tools_env(tmp, **extra_env),
     )
 
 
@@ -751,3 +756,240 @@ def test_mutation_worktree_is_removed_even_when_the_failure_report_raises(tmp_pa
 def test_domain_drift_is_gated_on_the_glossary_file():
     assert "GLOSSARY.md" in driver.GATED["domain-drift"], driver.GATED["domain-drift"]
     assert "CONTEXT.md" not in driver.GATED["domain-drift"], driver.GATED["domain-drift"]
+
+
+# --- mutation target ordering (#1567) -----------------------------------------
+
+def _rec(sha, date):
+    return {"sha": sha, "date": date}
+
+
+def test_order_never_run_then_changed_then_oldest_run():
+    cands = ["a.py", "b.py", "c.py", "d.py"]
+    record = {"a.py": _rec("s", "2026-10-01"), "b.py": _rec("s", "2026-09-01"), "c.py": _rec("s", "2026-10-02")}
+    # d never ran; c changed since its sha (though the newest run); of the
+    # unchanged, b (Sep) is older than a (Oct).
+    assert driver.order_mutation_targets(cands, [], record, {"c.py"}) == ["d.py", "c.py", "b.py", "a.py"]
+
+
+def test_order_recency_outranks_prepass_risk_and_nothing_is_dropped():
+    cands = ["risky.py", "boring.py"]
+    record = {"risky.py": _rec("s", "2026-10-11")}
+    # boring.py is ranked last by the prepass but never ran, so it goes first.
+    assert driver.order_mutation_targets(cands, ["risky.py", "boring.py"], record, set()) == ["boring.py", "risky.py"]
+
+
+def test_order_prepass_rank_breaks_ties_inside_each_group():
+    cands = ["a.py", "b.py", "c.py", "d.py", "e.py"]
+    record = {"c.py": _rec("s", "2026-09-01"), "d.py": _rec("s", "2026-09-01"), "e.py": _rec("s", "2026-08-01")}
+    rank = ["b.py", "a.py", "d.py", "c.py"]
+    # never-run: b before a by rank; same run date: d before c by rank;
+    # e is older, so first.
+    assert driver.order_mutation_targets(cands, rank, record, set()) == ["b.py", "a.py", "e.py", "d.py", "c.py"]
+
+
+def test_order_unranked_follow_ranked_and_a_malformed_entry_counts_as_never_run():
+    cands = ["a.py", "b.py", "c.py"]
+    record = {"b.py": {"sha": "s"}, "c.py": _rec("s", "2026-09-01")}  # b.py has no date
+    assert driver.order_mutation_targets(cands, ["b.py"], record, set()) == ["b.py", "a.py", "c.py"]
+
+
+def test_parse_rank_keeps_only_candidates_once_in_printed_order():
+    out = "b.py\n  a.py \nfake.py\nb.py\n\n"
+    assert driver.parse_mutation_rank(out, ["a.py", "b.py", "c.py"]) == ["b.py", "a.py"]
+
+
+def test_record_mutation_sits_beside_audit_records(tmp_path):
+    repo, cache = _mkdirs(tmp_path, "repo", "cache")
+    _init_git_repo(repo)
+    driver.update_cache(repo, "dead-code", "/r", base=cache)
+    driver.record_mutation(repo, "a.py", base=cache)
+    rec = driver.load_record(driver._record_file(repo, cache))
+    assert rec["dead-code"]["report_dir"] == "/r"
+    assert rec[driver.MUTATION_KEY]["a.py"]["sha"] == driver.head_sha(repo)
+    assert rec[driver.MUTATION_KEY]["a.py"]["date"]
+
+
+def _commit_all(repo, msg):
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", repo, "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", repo, "commit", "-q", "-m", msg], check=True, env=env)
+
+
+def test_changed_modules_since_recorded_sha(tmp_path):
+    repo = str(tmp_path / "repo")
+    os.mkdir(repo)
+    _init_git_repo(repo)
+    for n in ("a", "b"):
+        open(os.path.join(repo, f"{n}.py"), "w").write("x = 1\n")
+    _commit_all(repo, "two")
+    sha = driver.head_sha(repo)
+    open(os.path.join(repo, "b.py"), "w").write("x = 2\n")
+    _commit_all(repo, "b changes")
+    record = {"a.py": _rec(sha, "2026-10-01"), "b.py": _rec(sha, "2026-10-01"), "c.py": _rec("deadbeef", "2026-10-01")}
+    # an unresolvable sha proves nothing, so it reads as changed, never as clean
+    assert driver.mutation_changed(repo, record) == {"b.py", "c.py"}
+
+
+def _mutation_repo(path, modules):
+    _init_git_repo(path)
+    open(os.path.join(path, "pyproject.toml"), "w").write("[project]\nname = 'x'\n")
+    for m in modules:
+        open(os.path.join(path, m), "w").write("x = 1\n")
+        open(os.path.join(path, f"test_{m}"), "w").write("def test_x(): pass\n")
+    _commit_all(path, "mods")
+
+
+def _mutation_no_modules(repo, tmp, **extra_env):
+    """`--mutation` with no value over a repo, fake claude and uv on PATH."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return subprocess.run(
+        [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation", "--out", os.path.join(tmp, "out")],
+        capture_output=True, text=True, env=_fake_tools_env(tmp, **extra_env))
+
+
+def _cache_record(repo, tmp):
+    return driver.load_record(driver._record_file(repo, os.path.join(tmp, "all-audits")))
+
+
+def test_mutation_without_a_value_runs_the_mechanical_list_unranked_and_records(tmp_path):
+    """AUDITS_NO_SYNTH=1 skips the prepass; the candidate list is mechanical,
+    so the run still has targets, and each finished module is recorded."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _mutation_repo(repo, ["m.py", "n.py"])
+    r = _mutation_no_modules(repo, tmp)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "mutation-target: m.py" in r.stdout and "mutation-target: n.py" in r.stdout, r.stdout
+    rec = _cache_record(repo, tmp)
+    assert sorted(rec[driver.MUTATION_KEY]) == ["m.py", "n.py"], rec
+
+
+def test_mutation_prepass_ranks_but_never_adds_and_never_run_goes_first(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _mutation_repo(repo, ["m.py", "n.py", "o.py"])
+    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {driver.MUTATION_KEY: {
+        "o.py": _rec(driver.head_sha(repo), "2026-10-01T00:00:00+00:00")}})
+    r = _mutation_no_modules(repo, tmp, AUDITS_NO_SYNTH="0", MUTATION_MAX="2",
+                             FAKE_CLAUDE_PREPASS="o.py\nghost.py\nn.py\nm.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    targets = [ln for ln in r.stdout.splitlines() if ln.startswith("mutation-target:")]
+    # o.py is top-ranked but already ran and is unchanged: pushed behind
+    # the never-run n.py and m.py.
+    assert targets == ["mutation-target: n.py", "mutation-target: m.py"], r.stdout
+    assert "1 more modules skipped" in r.stdout, r.stdout
+
+
+def test_explicit_mutation_run_records_too(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_env_manifest(repo)
+    r = _mutation_with_fake_claude(repo, tmp, os.path.join(tmp, "out"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    rec = _cache_record(repo, tmp)
+    assert rec[driver.MUTATION_KEY]["solver.py"]["sha"] == driver.head_sha(repo)
+    # a dotted spelling of the same module is the same key, never a second one
+    again = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), repo,
+         "--mutation", "./solver.py", "--out", os.path.join(tmp, "out2")],
+        capture_output=True, text=True, env=_fake_tools_env(tmp))
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert list(_cache_record(repo, tmp)[driver.MUTATION_KEY]) == ["solver.py"]
+
+
+def test_failed_module_is_not_recorded(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_env_manifest(repo)
+    r = _mutation_with_fake_claude(repo, tmp, os.path.join(tmp, "out"), FAKE_CLAUDE_EXIT_MUTATION="3")
+    assert r.returncode != 0
+    rec = _cache_record(repo, tmp)
+    assert "solver.py" not in rec.get(driver.MUTATION_KEY, {}), rec
+
+
+def test_prepass_prompt_names_the_candidates_and_drops_solver_oracle(tmp_path):
+    p = driver.mutation_prepass_prompt("/r", ["a.py", "b.py"])
+    assert "a.py" in p and "b.py" in p
+    assert "solver" not in p and "oracle" not in p
+    assert "wrong result" in p
+
+
+def test_missing_or_empty_recorded_sha_reads_as_changed(tmp_path):
+    repo = str(tmp_path / "repo")
+    os.mkdir(repo)
+    _init_git_repo(repo)
+    runs = {"a.py": {"date": "2026-10-01"}, "b.py": _rec("", "2026-10-01")}
+    assert driver.mutation_changed(repo, runs) == {"a.py", "b.py"}
+
+
+def test_a_changed_sibling_test_counts_as_the_module_changed(tmp_path):
+    repo = str(tmp_path / "repo")
+    os.mkdir(repo)
+    _init_git_repo(repo)
+    for f in ("m.py", "test_m.py", "n.py", "test_n.py"):
+        open(os.path.join(repo, f), "w").write("x = 1\n")
+    _commit_all(repo, "pairs")
+    sha = driver.head_sha(repo)
+    open(os.path.join(repo, "test_m.py"), "w").write("x = 2\n")
+    _commit_all(repo, "weaken m's test")
+    runs = {"m.py": _rec(sha, "2026-10-01"), "n.py": _rec(sha, "2026-10-01")}
+    assert driver.mutation_changed(repo, runs) == {"m.py"}
+
+
+def test_record_mutation_keys_a_dotted_path_as_the_repo_relative_one(tmp_path):
+    repo, cache = _mkdirs(tmp_path, "repo", "cache")
+    _init_git_repo(repo)
+    driver.record_mutation(repo, "./a.py", base=cache)
+    assert list(driver.load_record(driver._record_file(repo, cache))[driver.MUTATION_KEY]) == ["a.py"]
+
+
+def test_changed_module_runs_first_and_max_cuts_after_ordering(tmp_path):
+    """Through the real run: o.py is the newest run and alphabetically last,
+    but changed since its sha, so it leads; MUTATION_MAX=1 keeps only it."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _mutation_repo(repo, ["m.py", "n.py", "o.py"])
+    before = driver.head_sha(repo)
+    open(os.path.join(repo, "o.py"), "w").write("x = 2\n")
+    _commit_all(repo, "o changes")
+    now = driver.head_sha(repo)
+    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {driver.MUTATION_KEY: {
+        "m.py": _rec(now, "2026-10-01T00:00:00+00:00"),
+        "n.py": _rec(now, "2026-09-01T00:00:00+00:00"),
+        "o.py": _rec(before, "2026-10-05T00:00:00+00:00")}})
+    r = _mutation_no_modules(repo, tmp, MUTATION_MAX="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    targets = [ln for ln in r.stdout.splitlines() if ln.startswith("mutation-target:")]
+    assert targets == ["mutation-target: o.py"], r.stdout
+
+
+def _fake_python3(tmp, body):
+    """A `python3` first on PATH, so the driver's own `python3` probes get it."""
+    path = os.path.join(tmp, "python3")
+    with open(path, "w") as f:
+        f.write(f"#!/bin/sh\n{body}\n")
+    os.chmod(path, 0o755)
+
+
+def test_a_crashed_suggest_probe_fails_the_run_not_an_empty_target_list(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _mutation_repo(repo, ["m.py"])
+    _fake_python3(tmp, "echo boom >&2; exit 2")
+    r = _mutation_no_modules(repo, tmp)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "mutation-target probe failed" in r.stderr and "boom" in r.stderr, r.stderr
+    assert "mutation-target:" not in r.stdout
+
+
+def test_an_unparseable_suggest_probe_fails_the_run(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _mutation_repo(repo, ["m.py"])
+    _fake_python3(tmp, "echo not-json")
+    r = _mutation_no_modules(repo, tmp)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "mutation-target probe failed" in r.stderr, r.stderr
+
+
+def test_a_failed_prepass_is_named_and_the_run_orders_by_recency_alone(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _mutation_repo(repo, ["m.py"])
+    r = _mutation_no_modules(repo, tmp, AUDITS_NO_SYNTH="0", FAKE_CLAUDE_PREPASS="m.py", FAKE_CLAUDE_PREPASS_EXIT="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "mutation prepass gave no ranking (exit 1)" in r.stderr, r.stderr
+    assert "mutation-target: m.py" in r.stdout

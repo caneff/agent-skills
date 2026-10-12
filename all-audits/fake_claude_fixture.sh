@@ -6,6 +6,8 @@
 # FAKE_CLAUDE_NOOP=1 makes every audit, dead-code included, write nothing.
 # FAKE_CLAUDE_MISSING_REPORT=1 makes dead-code write a manifest whose
 # report_path names a file that does not exist (#1292).
+# FAKE_CLAUDE_PREPASS="a.py\nb.py" makes a prompt with no manifest request
+# (the mutation prepass) print that ranking (#1567).
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
 # manifest as a named failure, never as a silent skip.
@@ -18,6 +20,12 @@ echo "ceiling=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
 
 # An audit that dies silently: exits 0, writes nothing (#1278).
 [ -z "${FAKE_CLAUDE_NOOP:-}" ] || exit 0
+
+# The mutation prepass (#1567) asks for no manifest: it prints a ranking.
+if [ -n "${FAKE_CLAUDE_PREPASS:-}" ] && ! printf '%s' "$prompt" | grep -q 'write a manifest to'; then
+  printf '%s\n' "$FAKE_CLAUDE_PREPASS"
+  exit "${FAKE_CLAUDE_PREPASS_EXIT:-0}"
+fi
 
 manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true)"
 [ -n "$manifest" ] || exit 0
