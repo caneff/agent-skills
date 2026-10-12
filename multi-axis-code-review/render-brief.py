@@ -32,8 +32,8 @@ that drifted have one home each:
   reviewer spawns no nested subagent (#1400).
 
 Exit 0 and the dispatch line on stdout; 2 on a bad input, with nothing written
-and nothing on stdout: a missing or empty diff capture, a worktree that is not a directory, an unknown
-axis, a claim with no finding id.
+and nothing on stdout: a missing or empty diff capture, a worktree that is not
+a directory, an unknown axis, a claim with no finding id.
 """
 import argparse
 import os
@@ -102,7 +102,7 @@ def render(a):
         classes = (f"`{DEFECT_CLASSES}` does not exist in this worktree. Check these three shapes:\n"
                    + "\n".join(f"{n}. {s}" for n, s in enumerate(filter(None, shapes), 1)))
     spec = "no spec available" if a.no_spec else a.spec
-    out_dir = f"~/.cache/agent-reviews/{review_ledger.fold_repo(a.repo)}"
+    out_dir = f"~/.cache/agent-reviews/{a.repo}"  # a.repo is folded in main
     n, axis = a.ticket, a.axis
     inputs = [
         f"- Worktree: {a.worktree}",
@@ -149,7 +149,7 @@ def render(a):
             f"- Findings sidecar: `{out_dir}/findings-{axis}-{n}.jsonl`, one line per finding: `{SIDECAR[axis]}`. "
             "Empty file when you found nothing.",
             f"- Then the empty completion marker `{out_dir}/findings-{axis}-{n}.done`, last, once the sidecar is complete.",
-            f"- Then `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo {review_ledger.fold_repo(a.repo)} --ticket {n} --type {axis}`."]),
+            f"- Then `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo {a.repo} --ticket {n} --type {axis}`."]),
         "## Limits",
         "\n".join([
             "- You do your own reading and running and spawn no nested subagent: a nested agent reports to the "
@@ -163,9 +163,9 @@ def render(a):
 
 
 def write_brief(text, repo, ticket, axis):
-    """Write `text` to a ticket-numbered file of the review cache that no earlier wave holds, and
-    return its path. `O_EXCL` is the never-overwrite: a taken name moves on to `-2`, `-3`."""
-    directory = review_ledger.REVIEWS_ROOT / review_ledger.fold_repo(repo)
+    """Write `text` to a ticket-numbered file of `repo`'s (folded) review cache directory that no
+    earlier wave holds, and return its path. `O_EXCL` is the never-overwrite: a taken name moves on to `-2`, `-3`."""
+    directory = review_ledger.REVIEWS_ROOT / repo
     directory.mkdir(parents=True, exist_ok=True)
     # SKILL.md allows a branch name for `--ticket`; a `/` in it must not name a directory.
     stem, k = f"brief-{re.sub(r'[^A-Za-z0-9._-]', '-', ticket)}-{axis}", 1
@@ -201,6 +201,7 @@ def main(argv):
     p.add_argument("--test-command")
     p.add_argument("--capture-stat")
     a = p.parse_args(argv)
+    a.repo = review_ledger.fold_repo(a.repo)  # once: every path and the ledger line below read it folded
     try:
         path = write_brief(render(a), a.repo, a.ticket, a.axis)
     except BadInput as exc:

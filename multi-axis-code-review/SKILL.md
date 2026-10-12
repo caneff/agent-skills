@@ -193,7 +193,7 @@ reviewers each defaulting to 8 workers is 24 cores for one diff.
 
 Every prompt carries only the **diff, the commit list, the spec/standards sources, the settled decisions and the id prefix** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
-The brief carries its own report path, `<dir>/review-<axis>-<n>.md` (`render-brief.py` prints it; append nothing to the prompt for it), `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
+The brief carries its own report path, `<dir>/review-<axis>-<n>.md` (`render-brief.py` writes it into the brief; append nothing to the prompt for it), `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
 
 A finding whose failure cannot occur here is disputed under
 `implement/SKILL.md` § Review's reachability bar, whatever its rating. Every
@@ -228,7 +228,9 @@ that ran left its sidecar beside its `findings-<axis>-<n>.done` marker, so a
 clean round that left no file is refused at "PR up". A sidecar alone cannot
 show the reviewer finished: an empty one is what a reviewer that crashed
 before writing leaves behind, and a truncated one reads as a shorter list.
-The marker is written by the reviewer once the sidecar is complete. The safe
+The marker is written by the reviewer once the sidecar is complete. The same
+check refuses a review whose sidecar has no ledger row for the ticket (#1527):
+the `append` below is what writes it, and a skip row does not count. The safe
 direction stays: an absent sidecar is refused, because it cannot be told from
 a reviewer that never ran, unless the ledger records that review as skipped.
 

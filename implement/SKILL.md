@@ -379,6 +379,7 @@ round follows steps 2–3 below keyed on the spec number:
    Codex output has exactly one disposition, every `fixed` sha is a commit on
    this branch past `origin/<default>`, every `moved` ticket is open and is not one this PR
    closes, and every review that ran left its sidecar beside its completion marker
+   and its `review_ledger.py append` row, a skip row not counting
    (`multi-axis-code-review/SKILL.md` § 4). A review the ledger records as
    skipped needs no sidecar.
 

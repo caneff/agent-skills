@@ -102,7 +102,8 @@ done
 # 14-day sweep removes files only, so a root kept after exit 3 stays until
 # its worktrees are removed by hand. `--no-ledger` runs have no repo and keep `mktemp -d`.
 if [ -n "$repo_name" ]; then
-  home_dir="${HOME:?}/.cache/agent-reviews/$repo_name"
+  # The ledger's own fold of the name (#1527), so `--repo agent-skills` lands in `skills/`.
+  home_dir=$(python3 "$here/review_ledger.py" cache-dir --repo "$repo_name") || exit 1
   mkdir -p "$home_dir" && root=$(mktemp -d "$home_dir/witness.XXXXXX") || exit 1
 else
   root=$(mktemp -d) || exit 1

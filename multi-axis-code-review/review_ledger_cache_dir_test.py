@@ -45,6 +45,12 @@ def test_a_linked_worktree_keys_on_the_repo_not_the_worktree(tmp_path):
     assert (code, out) == (0, str(tmp_path / "home" / ".cache" / "agent-reviews" / "skills")), err
 
 
+def test_a_name_given_with_no_checkout_is_folded_the_same_way(tmp_path):
+    home = tmp_path / "home"
+    code, out, err = run(tmp_path, home, "--repo", "agent-skills")
+    assert (code, out) == (0, str(home / ".cache" / "agent-reviews" / "skills")), err
+
+
 def test_outside_a_git_repo_it_refuses_rather_than_printing_a_directory(tmp_path):
     code, out, err = run(tmp_path, tmp_path / "home")
     assert code != 0 and out == "" and "git" in err.lower()

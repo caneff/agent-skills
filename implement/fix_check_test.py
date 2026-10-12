@@ -110,23 +110,22 @@ class World:
                              for i in ids))
             self.put(f"findings-{axis}-{self.n}.done", "")
 
-    def ledger_skip(self, rtype, ticket=None):
-        """A ledger row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
+    def ledger_row(self, rtype, status, ticket=None, repo=None, **fields):
+        """One ledger row: review `rtype` of `ticket` in `repo` (the checkout's key by default)."""
         ticket = self.n if ticket is None else ticket
-        row = {"repo": self.key, "ticket": ticket, "tickets": [ticket], "type": rtype,
-               "status": {"fields": {"findings": {"status": "skipped", "reason": "test"}}}}
+        row = {"repo": repo or self.key, "ticket": ticket, "tickets": [ticket], "type": rtype,
+               "status": {"fields": {"findings": {"status": status, **fields}}}}
         path = os.path.join(self.home, ".cache", "agent-reviews", "ledger.jsonl")
         with open(path, "a") as fh:
             fh.write(json.dumps(row) + "\n")
 
-    def ledger_ran(self, rtype, ticket=None):
-        """A ledger row for review `rtype` that ran for `ticket` (what `append --type <axis>` writes)."""
-        ticket = self.n if ticket is None else ticket
-        row = {"repo": self.key, "ticket": ticket, "tickets": [ticket], "type": rtype,
-               "status": {"fields": {"findings": {"status": "known"}}}}
-        path = os.path.join(self.home, ".cache", "agent-reviews", "ledger.jsonl")
-        with open(path, "a") as fh:
-            fh.write(json.dumps(row) + "\n")
+    def ledger_skip(self, rtype, ticket=None):
+        """A row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
+        self.ledger_row(rtype, "skipped", ticket, reason="test")
+
+    def ledger_ran(self, rtype, ticket=None, repo=None):
+        """A row for review `rtype` that ran (what `append --type <axis>` writes)."""
+        self.ledger_row(rtype, "known", ticket, repo)
 
     def dispositions(self, *lines):
         self.put(f"dispositions-{self.n}.jsonl", "".join(json.dumps(line) + "\n" for line in lines))
@@ -527,6 +526,23 @@ def test_only_the_axis_missing_its_ledger_row_is_named(make_world):
     code, out = w.run()
     assert code == 1 and "no ledger row for the spec review" in out, out
     assert "standards review" not in out and "correctness review" not in out, out
+
+
+def test_a_ledger_row_of_another_repo_is_no_row_for_this_one(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    for axis in ("standards", "spec", "correctness"):
+        w.ledger_ran(axis, repo="sudoku-kit")
+    w.dispositions()
+    assert_fix_check(w, 1, "no ledger row for the standards review of #5 under repo skills-repo")
+
+
+def test_a_skip_row_beside_a_sidecar_is_no_evidence_the_review_ran(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    w.ledger_skip("standards")
+    w.dispositions()
+    assert_fix_check(w, 1, "a skip row is not one")
 
 
 def test_a_ledger_row_of_another_ticket_is_no_row_for_this_one(make_world):

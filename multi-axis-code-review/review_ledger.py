@@ -15,7 +15,7 @@ per-review-type value table.
     review_ledger.py append  --repo R --ticket N --type standards|spec|correctness --skip-reason WHY [--ledger PATH]
     review_ledger.py escapes --repo-dir CHECKOUT [--ledger PATH] [--days 14] [--fix-pattern RE] [--no-fetch]
                              [--format md|json]
-    review_ledger.py cache-dir [--repo-dir CHECKOUT]
+    review_ledger.py cache-dir [--repo NAME]
     review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
@@ -1705,18 +1705,26 @@ def cmd_report(args) -> int:
     return 0
 
 
-def cache_dir_for(cwd: Path) -> Path:
+class CacheDirError(Exception):
+    """The repo whose cache directory was asked for cannot be named."""
+
+
+def cache_dir_for(cwd: Path | str) -> Path:
     """The review cache directory of the repo `cwd` is in (#1527): the repo's own name off the
     common `.git`, never the worktree's, folded by `fold_repo`. The one place it is chosen."""
     done = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd,
                           capture_output=True, text=True)
     if done.returncode != 0:
-        raise SystemExit(f"cache-dir: {cwd} is not in a git repo: {done.stderr.strip() or 'git said nothing'}")
+        raise CacheDirError(f"git cannot name the repo of {cwd}: {done.stderr.strip() or 'no output'}")
     return REVIEWS_ROOT / fold_repo(os.path.basename(os.path.dirname(done.stdout.strip())))
 
 
 def cmd_cache_dir(args) -> int:
-    print(cache_dir_for(args.repo_dir))
+    try:
+        print(REVIEWS_ROOT / fold_repo(args.repo) if args.repo else cache_dir_for(Path.cwd()))
+    except CacheDirError as e:
+        print(f"review_ledger cache-dir: {e}", file=sys.stderr)
+        return 2
     return 0
 
 
@@ -1781,7 +1789,8 @@ def main(argv=None) -> int:
     h.add_argument("--review-file", type=Path)
     h.set_defaults(func=cmd_harvest)
     c = sub.add_parser("cache-dir", help="print this repo's review cache directory, folded by fold_repo (#1527)")
-    c.add_argument("--repo-dir", type=Path, default=Path.cwd(), help="default: the current directory")
+    c.add_argument("--repo", help="a repo name to fold, for a caller with no checkout; default: the repo of the "
+                   "current directory")
     c.set_defaults(func=cmd_cache_dir)
     # Read by `parse_append`, never here: listed so the usage names it.
     sub.add_parser("append", help="`append --type T --help` lists the flags type T takes")

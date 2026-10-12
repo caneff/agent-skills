@@ -48,8 +48,10 @@ branch past the default branch, and a finding `moved` onto a slice the
 integration PR closes is refused like any other closed-by-this-PR ticket.
 
 A review that ran also has its ledger row (#1527): a sidecar with no
-`review_ledger.py append --type <axis>` row for this ticket is refused, since
-a wave that never appended leaves the ledger blind to it.
+`review_ledger.py append --type <axis>` row for this ticket and repo (a skip
+row does not count) is refused, since a wave that never appended leaves the
+ledger blind to it. Rows carry no timestamp, so a row left by an earlier
+dispatch of the ticket satisfies the check.
 A review the ledger records as skipped (`review_ledger.py append --type
 <axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
 record, or a `codex-gate` ledger row saying why it did not run (size gate,
@@ -122,7 +124,7 @@ def reviews_dir():
     """The review cache directory of this repo: `review_ledger.py cache-dir`, the one place it is chosen."""
     try:
         return str(review_ledger.cache_dir_for(Path.cwd()))
-    except SystemExit as exc:
+    except review_ledger.CacheDirError as exc:
         raise Unanswerable(str(exc))
 
 
@@ -146,8 +148,8 @@ def json_object(line):
 
 
 def ledger_types(reviews, n):
-    """The review types the ledger holds a row for on ticket `n` of this repo, and the subset it
-    records as not run: `(rowed, skipped)`."""
+    """The review types the ledger holds a row for on ticket `n` of this repo that ran, and the
+    types it records as not run: `(ran, skipped)`. A skip row is no evidence a review ran."""
     repo = review_ledger.fold_repo(os.path.basename(reviews))
     try:
         rows = review_ledger.read_ledger(review_ledger.DEFAULT_LEDGER)
@@ -156,8 +158,8 @@ def ledger_types(reviews, n):
     except ValueError as exc:
         raise Unanswerable(str(exc))
     mine = [r for r in rows if r.get("repo") == repo and n in (r.get("tickets") or [r.get("ticket")])]
-    return ({r["type"] for r in mine},
-            {r["type"] for r in mine if r["status"]["fields"]["findings"]["status"] == "skipped"})
+    skipped = {r["type"] for r in mine if r["status"]["fields"]["findings"]["status"] == "skipped"}
+    return {r["type"] for r in mine} - skipped, skipped
 
 
 class Branch:
@@ -201,8 +203,9 @@ def axis_findings(reviews, n, branch, rowed, skipped, problems):
                             "records no skip for it")
             continue
         if axis not in rowed:
-            problems.append(f"no ledger row for the {axis} review of #{n}, though {name} exists — its "
-                            f"reviewer ran and never appended: review_ledger.py append --ticket {n} "
+            problems.append(f"no ledger row for the {axis} review of #{n} under repo "
+                            f"{os.path.basename(reviews)}, though {name} exists — a skip row is not one: "
+                            f"review_ledger.py append --repo {os.path.basename(reviews)} --ticket {n} "
                             f"--type {axis}")
         if not os.path.exists(os.path.join(reviews, marker)):
             problems.append(f"{name} has no completion marker {marker} — a reviewer that crashed or "

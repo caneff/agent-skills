@@ -66,7 +66,7 @@ sys.path.insert(0, str(HERE.parent / "docs" / "research"))
 sys.path.insert(0, str(HERE.parent / "multi-axis-code-review"))
 from gitcmd import GitError, git  # noqa: E402
 from review_ledger import DEFAULT_LEDGER, parse_codex_out  # noqa: E402
-from tally_review_axes import REVIEWS_ROOT  # noqa: E402
+from tally_review_axes import REVIEWS_ROOT, fold_repo  # noqa: E402
 
 OK, ERROR, EMPTY, REFUSED, UNREADABLE, UNMATCHED = 0, 2, 3, 4, 5, 6
 CAPPED, UNKNOWN = 20, 30
@@ -105,7 +105,8 @@ class Stop(Exception):
 
 
 def repo_name() -> str:
-    return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()).parent.name
+    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+    return fold_repo(common.parent.name)
 
 
 def append_row(ledger: Path, repo: str, *args: str) -> None:
