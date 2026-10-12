@@ -40,6 +40,28 @@ lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/command-scan-lib.sh"
 # still quote the original $COMMAND.
 SCAN=$(printf '%s\n' "$COMMAND" | strip_heredocs)
 
+# What counts as text handed to a shell, defined once for every guard below
+# (#1539): quoted text is data unless something runs it. A shell with any flags
+# before `-c`, path-qualified or not, `eval`, a pipe or heredoc into a shell,
+# and the commands that hand their argument to one (`xargs`, `watch`,
+# `parallel`, `ssh`, `tmux send-keys`, `python -c`), plus git's own runners
+# (`submodule foreach`, `rebase -x`, a `-c alias.<n>=!...`). Matched in the
+# quote-dropped view, so the word `sh` inside a string is not one. A hit makes
+# the guard read the raw text, which over-blocks and never lets one through;
+# a program that runs its argument under another name is not read, as this
+# guard stops a drifting agent, not a determined one.
+cmd_start='(^|[;&|(`[:space:]])'
+shell_word='([^[:space:];&|(]*/)?(bash|sh|zsh|dash|ksh)'
+shell_runners='eval|xargs|watch|parallel|ssh|tmux[[:space:]]+send-keys|python3?[[:space:]]+-c|git[[:space:]]+submodule[[:space:]]+foreach|git[[:space:]]+([^;&|]*[[:space:]])?rebase[[:space:]]([^;&|]*[[:space:]])?(-x|--exec)'
+shell_handed="$cmd_start(${shell_word}[[:space:]]+(-[^[:space:]]+[[:space:]]+)*-[a-z]*c|${shell_runners})([[:space:]]|\$)|\|[[:space:]]*${shell_word}([[:space:]]|\$)|${shell_word}[[:space:]]*<<|alias\.[^[:space:]=]+="
+# The words a shell runs, from one lexer pass over the whole command: CMD_BARE
+# drops quoted text, CMD_EXPANDS keeps what `$(...)` and backticks still run.
+quote_views "$SCAN"
+CMD_BARE=$BARE
+CMD_EXPANDS=$EXPANDS
+cmd_handed=0
+printf '%s\n' "$CMD_BARE" | grep -qE "$shell_handed" && cmd_handed=1
+
 # --- Always-blocked: history/worktree destroyers. ---
 DANGEROUS_PATTERNS=(
   "git ctm"
@@ -111,6 +133,14 @@ is_scratch_worktree() {
 discards_worktree() {
   has_dot_pathspec "$1" || return 1
   git_verb checkout "$1" || { git_verb restore "$1" && ! restore_is_unstage_only "$1"; } || return 1
+  # `git commit -m "... git checkout -- . ..."` names a discard without
+  # running one (#1539): the verb and the dot must both be words the shell
+  # runs, unless a shell is handed the text. The unquoted words are only a
+  # gate, so a quoted `-C` path cannot hide the target from the check above.
+  if [ "$cmd_handed" != 1 ]; then
+    quote_views "$1"
+    has_dot_pathspec "$BARE" && echo "$BARE" | grep -qwE 'checkout|restore' || return 1
+  fi
   ! is_scratch_worktree "$1"
 }
 # The two segment loops fork several greps per segment, so each is fed only the
@@ -125,25 +155,18 @@ done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -e checko
 
 # A destroyer is matched in the command run, not in text an argument carries
 # (#1539): `rg -n 'reset --hard' docs` and a commit message naming one are
-# data. The cheap raw grep gates the lexer; only a raw hit pays for
-# quote_views. A hit is then confirmed in BARE, the words the shell runs. Text
-# a shell is handed (`sh -c`, `eval`, a pipe or heredoc into a shell) or a
-# command substitution can run quoted text, so those are confirmed in the raw
-# $SCAN instead: the guard over-blocks there and never lets one through.
-shell_handed='((bash|sh|zsh)[[:space:]]+-[a-z]*c|eval)([[:space:]]|$)|\|[[:space:]]*(bash|sh|zsh)([[:space:]]|$)|(bash|sh|zsh)[[:space:]]*<<'
-cmd_start_any='(^|[;&|(`[:space:]])'
-destroyer_runs() { # <pattern>
-  echo "$SCAN" | grep -qE "$1" || return 1
-  if [ -z "${DESTROYER_VIEWS:-}" ]; then
-    quote_views "$SCAN"
-    DESTROYER_VIEWS=1
-  fi
-  echo "$BARE" | grep -qE "$1" && return 0
-  echo "$BARE" | grep -qE "$cmd_start_any($shell_handed)" && return 0
-  echo "$EXPANDS" | grep -qE '\$\(|`' && echo "$EXPANDS" | grep -qE "$1"
-}
+# data. A pattern must be in the raw command (heredoc bodies included) before
+# anything else is read, which keeps the lexer's views off the common path.
+# It then blocks when it is a word the shell runs (CMD_BARE), when a shell is
+# handed the text (`cmd_handed`, above: the raw text is read, heredoc body
+# included), or when it sits inside a `$(...)` or backtick body, the only
+# quoted text that still runs. A `$(...)` elsewhere in the command does not
+# make the rest of it code.
+cmd_substitutions=$(printf '%s' "$CMD_EXPANDS" | tr '\n' ' ' | grep -oE '\$\(.*\)|`[^`]*`')
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
-  if destroyer_runs "$pattern"; then
+  printf '%s\n' "$COMMAND" | grep -qE "$pattern" || continue
+  if printf '%s\n' "$CMD_BARE" | grep -qE "$pattern" || [ "$cmd_handed" = 1 ] \
+     || printf '%s\n' "$cmd_substitutions" | grep -qE "$pattern"; then
     hint=""
     [ "$pattern" = "git branch -D" ] && hint=" FIRST try 'git branch -d' (lowercase), which is allowed: git itself refuses it on an unmerged branch, so it deletes the safe ones and needs no hand-off. Hand off only what -d refuses."
     echo "BLOCKED: '$COMMAND' matches protected pattern '$pattern'. That part is the user's, not yours.${hint} HAND OFF: re-run the command without it, then give the user the exact '! $pattern ...' line to run themselves. Do not attempt it yourself." >&2
@@ -289,7 +312,6 @@ repo_is_owned() {
 # `pr_settle.py ... --merge` is a `gh pr merge` run in a process this hook does
 # not see (#1526), so its command line is read as one.
 merge_re='(gh[[:space:]]+pr[[:space:]]+merge|[^[:space:];&|]*pr_settle\.py[^;&|]*[[:space:]]--merge)([[:space:]]|$)'
-cmd_start='(^|[;&|(`[:space:]])'
 runs_pr_merge() {
   # Cheap gate on the raw command (heredoc bodies included) before the lexer.
   printf '%s\n' "$COMMAND" | grep -qE "$merge_re" || return 1
@@ -297,7 +319,7 @@ runs_pr_merge() {
   printf '%s\n' "$BARE" | grep -qE "$cmd_start$merge_re" && return 0
   printf '%s\n' "$EXPANDS" | grep -qE "(\\\$\\(|\`)[[:space:]]*$merge_re" && return 0
   # A shell handed text: `sh -c`, `eval`, a pipe or a heredoc into a shell.
-  printf '%s\n' "$BARE" | grep -qE "$cmd_start((bash|sh|zsh)[[:space:]]+-[a-z]*c|eval)([[:space:]]|$)|\|[[:space:]]*(bash|sh|zsh)([[:space:]]|$)|(bash|sh|zsh)[[:space:]]*<<"
+  printf '%s\n' "$BARE" | grep -qE "$shell_handed"
 }
 # Owners the line names: `--repo`/`-R` values ([HOST/]OWNER/REPO), GH_REPO=,
 # and PR URLs, read from the raw text so a quoted value counts. A value led by

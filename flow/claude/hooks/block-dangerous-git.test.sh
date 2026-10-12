@@ -327,9 +327,10 @@ export STUB_LOGIN=caneff STUB_OWNER=caneff
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
 
-# The dot-pathspec discard (#1387): blocked everywhere, except a linked
-# worktree under .scratch/mutation-*, a disposable copy where discarding every
-# change is the point. The target is `git -C <path>` or the cwd, resolved.
+# The dot-pathspec discard (#1387, #1539): blocked everywhere, except a linked
+# worktree under .scratch/, a disposable copy where discarding every change is
+# the point. The target is `git -C <path>` or the cwd, resolved. The mutation-*
+# cases below are the original ones; the wider rule has its own block after.
 mkdir -p "$repo/.scratch" "$repo/.claude/worktrees"
 git -C "$repo" worktree add -q --detach "$repo/.scratch/mutation-m1"
 git -C "$repo" worktree add -q --detach "$repo/.claude/worktrees/implement-9"
@@ -387,6 +388,18 @@ run "dot discard: .scratch dir that is no worktree blocked" 2 \
 run "dot discard: .scratch worktree chained to a primary discard blocked" 2 \
   "git -C $repo/.scratch/spike-s1 checkout -- . && git checkout -- ." "$blocked"
 
+# A standalone repository under .scratch/ is no linked worktree: only the
+# linked check keeps a discard there blocked (C3).
+git init -q "$repo/.scratch/standalone"
+run "dot discard: standalone repo under .scratch blocked" 2 \
+  "git -C $repo/.scratch/standalone checkout -- ." "$blocked"
+run "dot discard: quoted text naming a discard allowed" 0 \
+  "git commit -m \"docs: use git checkout -- . to discard\""
+run "dot discard: quoted text then a real discard blocked" 2 \
+  "git commit -m \"git checkout -- .\" && git checkout -- ." "$blocked"
+run "dot discard: quoted -C path to the primary still blocked" 2 \
+  "git -C \"$repo\" checkout -- ." "$blocked"
+
 # The destroyer patterns match the git command run, not text in an argument
 # (#1539): quoted text is data, as in the stash and PR-merge guards.
 run "destroyer text: single-quoted rg pattern allowed" 0 \
@@ -406,6 +419,37 @@ run "destroyer text: destroyer in a command substitution blocked" 2 \
   "echo \"\$(git reset --hard)\"" "protected pattern"
 run "destroyer text: destroyer piped into a shell blocked" 2 \
   "echo 'git branch -D x' | bash" "protected pattern"
+# Commands that hand their quoted argument to a shell (C1), shells named by
+# path or with flags before -c (C2), a heredoc into a shell (P1).
+run "destroyer text: submodule foreach blocked" 2 \
+  "git submodule foreach --recursive 'git clean -fd'" "protected pattern"
+run "destroyer text: rebase -x blocked" 2 \
+  "git rebase -x 'git reset --hard HEAD' main" "protected pattern"
+run "destroyer text: git alias with a shell body blocked" 2 \
+  "git -c alias.nuke='!git reset --hard' nuke" "protected pattern"
+run "destroyer text: /bin/sh -c blocked" 2 "/bin/sh -c 'git reset --hard'" "protected pattern"
+run "destroyer text: bash -e -c blocked" 2 "bash -e -c 'git reset --hard'" "protected pattern"
+run "destroyer text: bash --login -c blocked" 2 "bash --login -c 'git branch -D x'" "protected pattern"
+run "destroyer text: dash -c blocked" 2 "dash -c 'git reset --hard'" "protected pattern"
+run "destroyer text: pipe into /bin/bash blocked" 2 "echo 'git branch -D x' | /bin/bash" "protected pattern"
+run "destroyer text: xargs sh -c blocked" 2 "echo x | xargs sh -c 'git reset --hard'" "protected pattern"
+run "destroyer text: heredoc into bash blocked" 2 \
+  "bash <<EOF
+git reset --hard
+EOF" "protected pattern"
+run "destroyer text: heredoc into cat naming a destroyer allowed" 0 \
+  "cat > notes.md <<EOF
+never run git reset --hard here
+EOF"
+# A command substitution elsewhere in the line does not make the rest code (P2).
+run "destroyer text: pattern beside a substitution allowed" 0 \
+  "rg \"reset --hard\" \$(git ls-files docs)"
+run "destroyer text: message with a substitution allowed" 0 \
+  "git commit -m \"fix \$(date): reset --hard text\""
+run "destroyer text: multi-line substitution body blocked" 2 \
+  "echo \"\$(
+git reset --hard
+)\"" "protected pattern"
 
 # `git stash` in a linked worker worktree (#1529): the stash stack is shared
 # with the primary checkout and every other worktree, so a worker's push or pop
