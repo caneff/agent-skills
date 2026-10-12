@@ -208,17 +208,34 @@ def test_the_comment_never_changes_the_script_status(w):
     assert "selector: miss zeta/z.test.sh" in r.stdout
 
 
-def test_base_swaps_the_changed_argument_so_a_later_merge_is_listed_against_its_parent(w):
-    w.write("tests/all.sh", '#!/bin/sh\necho "args: $*" >&2\ncat "$LISTING"\n')
-    w.list("--base", "abc123^1")
-    state = json.load(open(w.state))
-    assert state["command"] == "bash tests/all.sh --changed 'abc123^1' --list"
+def test_suites_are_whole_lines_so_a_multi_word_command_is_not_matched_by_its_first_word(tmp_path):
+    """The pilot runner labels a suite with its command line and prints
+    `FAIL <that line>`; reading the first word turned every miss into a hit."""
+    w = World(tmp_path, listing="node examples/alpha/a.test.mjs\nuvx ruff check finders\n")
+    w.list()
+    assert verdict(w.comment(1, "FAIL node examples/zeta/z.test.mjs\n")) == "selector: miss node examples/zeta/z.test.mjs"
+    assert verdict(w.comment(1, "FAIL uvx ruff check finders\n")) == "selector: hit uvx ruff check finders"
 
 
-def test_a_base_with_no_changed_argument_to_swap_is_not_checked(tmp_path):
-    w = World(tmp_path, narrowed=False)
-    w.write("AGENTS.md", "## End-to-end seam\n\n- **Narrowed**: `bash tests/narrow.sh`\n")
-    w.list("--base", "abc123^1")
+def test_a_state_file_that_is_not_json_is_unreadable_not_a_step_that_never_ran(w):
+    with open(w.state, "w") as f:
+        f.write("{not json")
     out = verdict(w.comment(0))
-    assert out.startswith("selector: not checked: ")
-    assert "no `--changed <base>`" in out
+    assert out.startswith("selector: not checked: the listing record could not be read")
+    assert "did not run" not in out
+
+
+def test_list_removes_the_state_an_earlier_run_left_before_it_runs_anything(w):
+    with open(w.state, "w") as f:
+        json.dump({"command": "x", "status": 0, "listing": ["zeta/z.test.sh"], "error": None}, f)
+    w.list(env={"PATH": "/nonexistent"})  # `sh` cannot start: the stale listing, which holds the suite, must be gone
+    out = verdict(w.comment(1, "FAIL zeta/z.test.sh\n"))
+    assert out.startswith("selector: not checked: the listing command could not run")
+
+
+def test_a_repo_with_no_line_leaves_no_state_even_when_an_earlier_run_wrote_one(tmp_path):
+    w = World(tmp_path, narrowed=False)
+    with open(w.state, "w") as f:
+        f.write("{}")
+    assert w.list().returncode == 3
+    assert not os.path.exists(w.state)

@@ -891,9 +891,10 @@ closed.
    **Selector evidence** (#1537). When `AGENTS.md` § End-to-end seam also
    declares a `**Narrowed**` line, the same run records whether that narrowed
    command would have selected what the seam failed on, as one comment on the
-   PR. The listing runs in the merged worktree before the seam, the comment
-   after it, green or red; both files live under `.scratch/`, outside the
-   worktree the seam reads:
+   PR. These three lines replace the single seam line above for such a repo:
+   the listing runs in the merged worktree before the seam, the comment after
+   it, green or red; both files live under `.scratch/`, outside the worktree
+   the seam reads:
 
    ```
    python3 ~/.agents/skills/implement/selector_check.py list --root <worktree> --state <.scratch>/selector-<n>.json
@@ -901,8 +902,10 @@ closed.
    python3 ~/.agents/skills/implement/selector_check.py comment --root <worktree> --state <.scratch>/selector-<n>.json --seam-exit "$seam" --seam-log <.scratch>/seam-<n>.log --pr <pr> --repo <owner/name>
    ```
 
-   `list` exiting 3 means the repo declares no narrowed line: skip the rest,
-   no listing and no comment are owed. The comment reads `selector: clean`,
+   `list` exiting 3 means the repo declares no narrowed line: skip the
+   `comment` line, no listing and no comment are owed, and the seam still runs
+   as above. A PR whose seam is run again (a fix, a moved `<default>`) gets
+   another comment; the last one is the run it merged on. The comment reads `selector: clean`,
    `selector: miss <suite>` (a failing suite the listing did not hold),
    `selector: hit <suite>` or `selector: not checked: <why>` (no listing, an
    empty one, or a log with no `FAIL <suite>` line), so an absent answer is

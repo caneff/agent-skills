@@ -51,12 +51,12 @@ Then it checks (the PR is not draft, CLEAN once `implement/pr_settle.py` has
 waited out UNKNOWN and running checks (#1526), closes the anchor within the
 bundle cap, and the repo's seam passes on the PR merged into current main,
 narrowed to what the PR touched; the check is skipped when main has not moved
-past the PR's base, because the worker ran the same suite on that exact tree;
-a repo whose `AGENTS.md` declares a `Narrowed` line gets the full seam on every
-merge instead, with one `selector:` comment on the PR saying whether the
-narrowed command would have selected what it failed on, #1537),
+past the PR's base, because the worker ran the same suite on that exact tree),
 squash-merges, runs `merge-cleanup` (which closes the worker's pane), and
 returns any ticket the worker claimed but the PR did not close to the queue.
+A repo whose `AGENTS.md` declares a `Narrowed` line (#1537) gets the full seam
+on every merge instead of the narrowed one, with no skip, and each run leaves
+one `selector:` comment on the PR (`implement/selector_check.py`).
 A bundle that fails is given one more try by prompting the same worker with
 the reason (waiting for it to start working before it looks again); a second
 failure closes the worker's pane, labels the anchor and every claimed ticket
@@ -656,12 +656,19 @@ SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", 
 
 def declares_narrowed(ctx):
     """Whether `AGENTS.md` on the base the seam runs on declares a `Narrowed`
-    line (#1537): read from the git tree the scratch worktree is made from, so
-    a stale primary checkout cannot answer for it. A tree that cannot be read
-    declares nothing: the scratch run then asks the same question of the merged
-    tree itself, and records `not checked` where it finds a line."""
+    line (#1537), read from the git tree the scratch worktree is made from, so
+    a stale primary checkout cannot answer for it. A tree git cannot read
+    answers yes: the scratch run then asks the merged tree itself, where
+    `selector_check.py list` finds no line (nothing is posted) or records the
+    failure as `not checked`. Only a tree that holds no `AGENTS.md` answers no."""
+    listed = subprocess.run(["git", "ls-tree", "--name-only", ctx.default, "AGENTS.md"], cwd=ctx.root,
+                            capture_output=True, text=True)
+    if listed.returncode:
+        return True
+    if not listed.stdout.strip():
+        return False
     shown = subprocess.run(["git", "show", f"{ctx.default}:AGENTS.md"], cwd=ctx.root, capture_output=True, text=True)
-    return shown.returncode == 0 and selector_check.narrowed_in(shown.stdout) is not None
+    return shown.returncode != 0 or selector_check.narrowed_in(shown.stdout) is not None
 
 
 def seam(ctx, head, log, pr=None):
@@ -685,9 +692,10 @@ def seam(ctx, head, log, pr=None):
     if not moved and not checked:
         return
     if checked:
+        log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
         state = os.path.splitext(log)[0] + "-selector.json"
         tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
-        cmd = (f"{tool} list --root . --state {shlex.quote(state)}; {{ {cmd}; }}; code=$?; "
+        cmd = (f"{tool} list --root . --state {shlex.quote(state)}; sh -c {shlex.quote(cmd)}; code=$?; "
                f"{tool} comment --root . --state {shlex.quote(state)} --seam-exit $code "
                f"--seam-log {shlex.quote(log)} --pr {pr} --repo {shlex.quote(ctx.repo)}; exit $code")
     elif cmd == FULL_SEAM:

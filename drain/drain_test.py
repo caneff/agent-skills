@@ -1555,3 +1555,34 @@ def test_a_comment_that_cannot_be_posted_does_not_stop_a_green_merge(sb):
     r = sb.drain("--once", env={"PR_COMMENT_FAIL": "1"})
     assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
     assert pr_comments(sb) == []
+
+
+def test_a_seam_command_with_a_trailing_semicolon_and_a_comment_still_runs_and_is_commented_on(sb):
+    sb.write_state({1: {}})
+    narrowed_repo(sb, ["alpha/a.test.sh"])
+    sb.git(sb.repo, "config", "land.testcmd", "true; # the repo's own seam")
+    sb.drain("--once")
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+    assert pr_comments(sb) == ["selector: clean"]
+
+
+def test_the_selector_files_are_named_by_absolute_path_whatever_the_log_dir_is(sb, monkeypatch):
+    sys.path.insert(0, HERE)
+    import drain as drain_module
+    ctx = drain_module.Ctx(sb.repo, "me/repo", "main", "logs", 1, None)
+    seen = []
+    monkeypatch.setattr(drain_module, "declares_narrowed", lambda c: True)
+    monkeypatch.setattr(drain_module, "run_in_scratch_tree", lambda c, cmd, log, head=None, rev=None: seen.append(cmd))
+    drain_module.seam(ctx, "main", os.path.join("rel", "dir", "pr-seam.log"), 7)
+    cmd = seen[0]
+    assert os.path.abspath(os.path.join("rel", "dir", "pr-seam-selector.json")) in cmd
+    assert "--seam-log " + os.path.abspath(os.path.join("rel", "dir", "pr-seam.log")) in cmd
+
+
+def test_a_base_tree_git_cannot_read_is_asked_again_of_the_merged_tree_not_read_as_no_line(sb):
+    sys.path.insert(0, HERE)
+    import drain as drain_module
+    ctx = drain_module.Ctx(sb.repo, "me/repo", "no-such-ref", os.path.join(sb.tmp, "logs"), 1, None)
+    assert drain_module.declares_narrowed(ctx) is True
+    ctx = ctx._replace(default="main")  # a readable tree with no AGENTS.md declares nothing
+    assert drain_module.declares_narrowed(ctx) is False

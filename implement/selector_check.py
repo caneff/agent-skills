@@ -15,29 +15,32 @@ on. The merge step runs the narrowed command with `--list` before the seam
     selector: not checked: <why>    no readable listing, or no readable verdict
 
 The count of `selector: miss` comments over merged PRs is the evidence for
-dropping the full run at merge. The comment is evidence only: both subcommands
+dropping the full run at merge. A seam run that is repeated for one PR (the
+worker's fix and drain's second attempt, or a merger's re-run) posts again: the
+last `selector:` comment of a PR is the run it landed on, and the one that counts. The comment is evidence only: both subcommands
 exit 0 whatever the verdict, and a failed post is said on stdout, so no caller
 has a status to read as a reason to hold or allow a merge. A repo with no
 `Narrowed` line gets no listing run (`list` exits 3 and writes no state) and
 no comment.
 
-`list --root <dir> --state <file> [--base <rev>]` runs the declared command
-with `--list` appended in `<dir>` and records its exit status and output in
-`<file>`. `--base` swaps the argument of the command's `--changed` for `<rev>`,
-so a merge made earlier is listed against its own parent (drain).
-`comment --root <dir> --state <file> --seam-exit <n> --seam-log <file>
+`list --root <dir> --state <file>` runs the declared command with `--list`
+appended in `<dir>` and records its exit status and output in `<file>`, after
+removing whatever an earlier run left there. `comment --root <dir> --state <file> --seam-exit <n> --seam-log <file>
 [--pr <n> --repo <owner/name>]` prints the verdict and, given a PR, posts it.
 
 Absent answers are `not checked`, never `clean` (`AGENTS.md` § Recurring
 defect classes, class 1): a listing that exited non-zero, printed nothing, was
 never run or whose state file is gone; a seam exit that was not recorded; a
-red log with no `FAIL <suite>` line at the start of a line.
+red log with no `FAIL <suite>` line at the start of a line. A suite is a whole
+line: the runner labels a suite with its command (`node examples/z.test.mjs`),
+so the listing is read one suite per line and a `FAIL ` line names the rest of
+the line, never its first word.
 """
 import argparse
+import collections
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 
@@ -48,16 +51,12 @@ sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
 from closing_ticket import declaration  # noqa: E402
 
 LISTING_SECONDS = 600
-_FAIL = re.compile(r"^FAIL (\S+)")
-_CHANGED = re.compile(r"--changed(?:=|\s+)\S+")
+_FAIL = re.compile(r"^FAIL (\S.*?)\s*$")
 
 
-class Narrowed:
-    """`command` is the declared command, or `None` with `error` saying why a
-    present line names none."""
-
-    def __init__(self, command, error=None):
-        self.command, self.error = command, error
+# `command` is the declared command, or `None` with `error` saying why a
+# present line names none.
+Narrowed = collections.namedtuple("Narrowed", "command error", defaults=(None,))
 
 
 def narrowed_in(text):
@@ -84,38 +83,24 @@ def read_narrowed(root):
         return None
 
 
-def with_base(command, base):
-    """`command` with its `--changed` argument swapped for `base`, or `None`
-    when it has none to swap."""
-    if not _CHANGED.search(command):
-        return None
-    return _CHANGED.sub(lambda _: "--changed " + shlex.quote(base), command, count=1)
-
-
-def record_listing(root, state_path, base=None):
+def record_listing(root, state_path):
     """Run the listing and write the state file. Returns False when the repo
-    declares no narrowed line: nothing is written and any state left by an
-    earlier run is removed, so a stale one is never read for this merge."""
+    declares no narrowed line: nothing is written. Any state an earlier run
+    left is removed first, so a run that dies before writing is read as
+    "no listing record", never as the previous merge's listing."""
+    if os.path.exists(state_path):
+        os.remove(state_path)
     narrowed = read_narrowed(root)
     if narrowed is None:
-        if os.path.exists(state_path):
-            os.remove(state_path)
         return False
     state = {"command": narrowed.command, "status": None, "listing": [], "error": narrowed.error}
-    if narrowed.command and base:
-        swapped = with_base(narrowed.command, base)
-        if swapped is None:
-            state["error"] = f"the narrowed command has no `--changed <base>` to point at {base}"
-        else:
-            state["command"] = swapped
-    if narrowed.command and not state["error"]:
+    if narrowed.command:
         state["command"] += " --list"
         try:
             out = subprocess.run(["sh", "-c", state["command"]], cwd=root, capture_output=True, text=True,
                                  timeout=LISTING_SECONDS)
             state["status"] = out.returncode
-            state["listing"] = out.stdout.split()
-            state["stderr"] = " ".join(out.stderr.split())[:200]
+            state["listing"] = [x.strip() for x in out.stdout.splitlines() if x.strip()]
         except (OSError, subprocess.TimeoutExpired) as exc:
             state["error"] = f"the listing command could not run ({' '.join(str(exc).split())[:150]})"
     with open(state_path, "w") as f:
@@ -145,9 +130,14 @@ def verdict(state_path, seam_exit, seam_log):
     try:
         with open(state_path) as f:
             state = json.load(f)
-        listing = set(state["listing"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except FileNotFoundError:
         return unchecked("no listing record (the narrowed listing step did not run)")
+    except (OSError, ValueError) as exc:
+        return unchecked(f"the listing record could not be read ({' '.join(str(exc).split())[:100]})")
+    try:
+        listing = set(state["listing"])
+    except (KeyError, TypeError):
+        return unchecked("the listing record has no listing")
     if state.get("error"):
         return unchecked(state["error"])
     if state.get("status") != 0:
@@ -187,14 +177,13 @@ def main(argv=None):
     for p in (lst, cmt):
         p.add_argument("--root", required=True)
         p.add_argument("--state", required=True)
-    lst.add_argument("--base")
     cmt.add_argument("--seam-exit", required=True)
     cmt.add_argument("--seam-log", required=True)
     cmt.add_argument("--pr")
     cmt.add_argument("--repo")
     args = parser.parse_args(argv)
     if args.cmd == "list":
-        return 0 if record_listing(args.root, args.state, args.base) else 3
+        return 0 if record_listing(args.root, args.state) else 3
     if read_narrowed(args.root) is None:
         return 0  # no narrowed line: no comment is owed, and none is the answer
     try:
