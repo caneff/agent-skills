@@ -894,8 +894,8 @@ closed.
    head the seam ran on (step 2's `headRefOid`), and GitHub refuses it
    atomically if the head moved since. It refuses a repo whose owner is not
    the `gh` login, as the ownership hook does for a bare `gh pr merge`. The
-   `ready-for-human` merge line, in § The PR's `--chris-merges` report block
-   above, is a bare `gh pr merge` with the same flag, which Chris runs.
+   `ready-for-human` merge line, in the `--chris-merges` report block of
+   § The PR above, is a bare `gh pr merge` with the same flag, which Chris runs.
 
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
