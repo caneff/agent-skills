@@ -16,10 +16,15 @@ for label in \
   "crap-audit/audit_test.py" \
   "mutation-audit/audit.py --selfcheck" \
   "flow/lane/Cargo.toml" \
-  "flow/mods/agent-model"
+  "flow/mods/agent-model" \
+  "exa-search-hook"
 do
   grep -qxF "$label" <<<"$listed" || { echo "FAIL: $label not discovered"; fail=1; }
 done
+
+# A plugin outside flow/mods runs only once it holds a test: a skill plugin with
+# a plugin.json and no test.ts is not a failing suite.
+! grep -qxF "humanizer" <<<"$listed" || { echo "FAIL: humanizer (no test.ts) was discovered"; fail=1; }
 
 bash tests/all.sh --bogus >/dev/null 2>&1; [ $? = 2 ] || { echo "FAIL: unknown flag did not exit 2"; fail=1; }
 
