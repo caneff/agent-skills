@@ -1,11 +1,12 @@
 // WebFetch goes to crawl4ai first and, when crawl4ai has no markdown to give,
-// hands the call to the built-in fetch with `next(e)` instead of throwing (#1543).
+// hands the call to the built-in fetch with `next(e)` instead of throwing
+// (#1543).
 //
 // The handler is called directly rather than through the engine: the engine
-// already skips a hook that throws and runs the built-in fetch, so an engine
-// level test passes for the throwing handler too (it only logs the notice
-// "tool.call hook skipped: threw HooksError: crawl4ai 500"). Whether the
-// handler itself threw is what these tests pin.
+// skips a hook that throws and runs the built-in fetch anyway, so an
+// engine-level test passes for the throwing handler too (it only logs the
+// notice "tool.call hook skipped: threw HooksError: crawl4ai 500"). Whether
+// the handler itself threw is what these tests pin.
 import { test, expect } from 'claude-code/testing'
 import { register } from './exa-search'
 
@@ -37,7 +38,8 @@ test('crawl4ai markdown is returned without calling next', async () => {
 })
 
 test('a non-OK crawl4ai answer calls next(e) and returns its result', async () => {
-  const { answer, nexted } = await run(() => ({ ok: false, status: 500, text: 'boom' }))
+  // A body that would otherwise be used, so only the status check can send it to next.
+  const { answer, nexted } = await run(() => ({ ok: false, status: 500, text: JSON.stringify({ markdown: '# stale' }) }))
   expect(nexted).toEqual([EVENT])
   expect(answer).toEqual(NEXT_RESULT)
 })
@@ -56,6 +58,12 @@ test('an unparseable crawl4ai body calls next(e) and returns its result', async 
 
 test('an unreachable crawl4ai service calls next(e) and returns its result', async () => {
   const { answer, nexted } = await run(() => { throw new Error('ECONNREFUSED') })
+  expect(nexted).toEqual([EVENT])
+  expect(answer).toEqual(NEXT_RESULT)
+})
+
+test('a non-string markdown value calls next(e) and returns its result', async () => {
+  const { answer, nexted } = await run(() => ({ ok: true, status: 200, text: JSON.stringify({ markdown: { not: 'text' } }) }))
   expect(nexted).toEqual([EVENT])
   expect(answer).toEqual(NEXT_RESULT)
 })

@@ -1,8 +1,8 @@
 import type { Register } from "claude-code";
-// Experimental function hooks (need CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1). Both fail-open:
-// if the replacement errors, the hook is skipped and the built-in tool runs. WebFetch
-// does this explicitly (it calls `next` when crawl4ai gives no markdown); WebSearch
-// still relies on a thrown error.
+// Experimental function hooks (need CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1). Both
+// fail-open: if the replacement errors, the hook is skipped and the built-in
+// tool runs. WebFetch also calls `next` itself when crawl4ai gives no markdown;
+// WebSearch still relies on the thrown error.
 export const register: Register = (on, options) => {
   // WebSearch -> exa MCP search. The exa result has to be reshaped into WebSearch's
   // own output schema ({ query, results, durationSeconds, searchCount }) — returning
@@ -32,10 +32,12 @@ export const register: Register = (on, options) => {
     };
   });
 
-  // WebFetch -> local crawl4ai container (docker: crawl4ai, port 11235), readability-fit markdown.
-  // Anything but usable markdown (a non-OK answer, an empty page, the service down or
-  // answering something unparseable) hands the call to the built-in fetch via `next`:
-  // a throw here surfaces to the caller as a failed WebFetch, it does not fall through.
+  // WebFetch -> local crawl4ai container (docker: crawl4ai, port 11235),
+  // readability-fit markdown. Anything but usable markdown (a non-OK answer,
+  // an empty page, the service down or answering something unparseable) hands
+  // the call to the built-in fetch with `next`. A throw would also end in the
+  // built-in fetch (the engine skips the hook) but logs "tool.call hook
+  // skipped: threw HooksError: crawl4ai 500" on every such call.
   on("tool.call", { tool: "WebFetch" }, async ($, e, next) => {
     const { url, prompt } = e as any;
     let md: string | undefined;

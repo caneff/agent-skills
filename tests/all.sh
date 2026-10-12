@@ -53,14 +53,18 @@ suites() { # prints "<label>\t<command>" per discovered suite
     done
   git ls-files -- '*Cargo.toml' |
     while IFS= read -r f; do printf '%s\tcargo test --manifest-path %s\n' "$f" "$f"; done
-  # Every mod under flow/mods/ (#1368). Scoped to that folder, not every
-  # plugin: `humanizer/` (a skill plugin) and `exa-search-hook/` (a mod with
-  # no test yet) also hold a plugin.json, and `claude plugin test` fails a
-  # plugin that has no `*.test.ts`. A mod under flow/mods/ with no test fails
-  # the same way, which is the point.
-  git ls-files -- 'flow/mods/*/.claude-plugin/plugin.json' |
+  # Every mod under flow/mods/ (#1368). A plugin elsewhere (`humanizer/`, a
+  # skill plugin; `exa-search-hook/`, a mod outside flow/) runs only when it
+  # holds a tracked `*.test.ts`, since `claude plugin test` fails a plugin that
+  # has none. A mod under flow/mods/ with no test fails the same way, which is
+  # the point.
+  git ls-files -- '*/.claude-plugin/plugin.json' |
     while IFS= read -r f; do
       dir=$(dirname "$(dirname "$f")")
+      case "$dir" in
+        flow/mods/*) ;;
+        *) git ls-files -- "$dir/*.test.ts" "$dir/*.test.tsx" | grep -q . || continue ;;
+      esac
       printf '%s\tclaude plugin test %s\n' "$dir" "$dir"
     done
 }
