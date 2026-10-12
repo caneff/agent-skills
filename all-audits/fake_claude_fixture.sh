@@ -24,7 +24,7 @@ echo "ceiling=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
 # The mutation prepass (#1567) asks for no manifest: it prints a ranking.
 if [ -n "${FAKE_CLAUDE_PREPASS:-}" ] && ! printf '%s' "$prompt" | grep -q 'write a manifest to'; then
   printf '%s\n' "$FAKE_CLAUDE_PREPASS"
-  exit 0
+  exit "${FAKE_CLAUDE_PREPASS_EXIT:-0}"
 fi
 
 manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true)"

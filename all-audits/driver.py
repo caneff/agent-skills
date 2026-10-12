@@ -18,6 +18,7 @@ import dataclasses
 import datetime as _dt
 import hashlib
 import html
+import importlib.util
 import json
 import os
 import re
@@ -160,12 +161,19 @@ def head_sha(repo):
     return _run(["git", "-C", repo, "rev-parse", "HEAD"]).stdout.strip()
 
 
-def age_days(timestamp):
+def parse_utc(timestamp):
+    """An ISO timestamp as an aware datetime; a naive one is read as UTC."""
     then = _dt.datetime.fromisoformat(timestamp)
+    return then if then.tzinfo else then.replace(tzinfo=_dt.timezone.utc)
+
+
+def now_iso():
+    return _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+
+def age_days(timestamp):
     now = _dt.datetime.now(_dt.timezone.utc)
-    if then.tzinfo is None:
-        then = then.replace(tzinfo=_dt.timezone.utc)
-    return (now - then).total_seconds() / 86400.0
+    return (now - parse_utc(timestamp)).total_seconds() / 86400.0
 
 
 @dataclasses.dataclass
@@ -202,7 +210,7 @@ def update_cache(repo, name, report_dir, base=None):
     record = load_record(path)
     record[name] = {
         "last_sha": head_sha(repo),
-        "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "timestamp": now_iso(),
         "report_dir": report_dir,
     }
     save_record(path, record)
@@ -211,30 +219,51 @@ def update_cache(repo, name, report_dir, base=None):
 # --- mutation recency: what each module's last mutation run covered (#1567) --
 
 MUTATION_KEY = "mutation_modules"
+_EPOCH = _dt.datetime.min.replace(tzinfo=_dt.timezone.utc)
+
+
+def mutation_runs(record):
+    """The {module: {sha, date}} part of a cache record; a missing or
+    non-dict value is no recorded runs."""
+    runs = record.get(MUTATION_KEY)
+    return runs if isinstance(runs, dict) else {}
 
 
 def record_mutation(repo, module, base=None):
     """Stamp `module` as mutation-run at HEAD now, beside the audit records
-    in the same per-repo cache file."""
+    in the same per-repo cache file. The key is the repo-relative path, so
+    `./a.py` and `a.py` are one module."""
     path = _record_file(repo, base)
     record = load_record(path)
-    modules = record.get(MUTATION_KEY)
-    if not isinstance(modules, dict):
-        modules = record[MUTATION_KEY] = {}
-    modules[module] = {"sha": head_sha(repo), "date": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+    runs = mutation_runs(record)
+    runs[os.path.normpath(module)] = {"sha": head_sha(repo), "date": now_iso()}
+    record[MUTATION_KEY] = runs
     save_record(path, record)
 
 
-def mutation_changed(repo, record):
-    """The modules in `record` ({module: {sha, date}}) whose file differs
-    between their recorded sha and HEAD. A sha git cannot resolve proves
-    nothing, so it reads as changed, never as unchanged."""
+def _load_audit(here):
+    """`mutation-audit/audit.py` as a module, for its sibling-test rule."""
+    spec = importlib.util.spec_from_file_location(
+        "mutation_audit_probe", os.path.join(here, "..", "mutation-audit", "audit.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def mutation_changed(repo, runs, here=None):
+    """The modules in `runs` ({module: {sha, date}}) whose file or sibling
+    test differs between their recorded sha and HEAD. A sha git cannot
+    resolve, or no recorded sha, proves nothing, so it reads as changed,
+    never as unchanged."""
+    sibling_tests = _load_audit(here or os.path.dirname(os.path.abspath(__file__)))._sibling_tests
     changed = set()
-    for module, entry in record.items():
+    for module, entry in runs.items():
         sha = entry.get("sha") if isinstance(entry, dict) else None
         if not sha:
+            changed.add(module)
             continue
-        r = _run(["git", "-C", repo, "diff", "--quiet", f"{sha}..HEAD", "--", module])
+        paths = [module, *sorted(sibling_tests(module) or ())]
+        r = _run(["git", "-C", repo, "diff", "--quiet", f"{sha}..HEAD", "--", *paths])
         if r.returncode != 0:
             changed.add(module)
     return changed
@@ -244,10 +273,9 @@ def _run_date(entry):
     """The run date of a record entry as an aware datetime, or None for an
     entry with no readable date — which orders as never run."""
     try:
-        when = _dt.datetime.fromisoformat(entry["date"])
+        return parse_utc(entry["date"])
     except (KeyError, TypeError, ValueError):
         return None
-    return when if when.tzinfo else when.replace(tzinfo=_dt.timezone.utc)
 
 
 def order_mutation_targets(candidates, rank, record, changed):
@@ -265,9 +293,9 @@ def order_mutation_targets(candidates, rank, record, changed):
     def key(m):
         tie = (position.get(m, len(position)), m)
         if dates[m] is None:
-            return (0, _dt.datetime.min.replace(tzinfo=_dt.timezone.utc), *tie)
+            return (0, _EPOCH, *tie)
         if m in changed:
-            return (1, _dt.datetime.min.replace(tzinfo=_dt.timezone.utc), *tie)
+            return (1, _EPOCH, *tie)
         return (2, dates[m], *tie)
 
     return sorted(candidates, key=key)
@@ -277,12 +305,8 @@ def parse_mutation_rank(stdout, candidates):
     """The prepass's printed lines kept only when they name a candidate, each
     once, in printed order. A line outside the list is dropped."""
     allowed = set(candidates)
-    seen = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if line in allowed and line not in seen:
-            seen.append(line)
-    return seen
+    return list(dict.fromkeys(
+        line for line in map(str.strip, stdout.splitlines()) if line in allowed))
 
 
 def suggest_mutation_candidates(repo, here):
@@ -831,9 +855,11 @@ def mutation_mode(repo, modules, out):
         if candidates and os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
             result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo, candidates)], env=claude_env())
             rank = parse_mutation_rank(result.stdout, candidates)
-        record = load_record(_record_file(repo)).get(MUTATION_KEY)
-        record = record if isinstance(record, dict) else {}
-        ordered = order_mutation_targets(candidates, rank, record, mutation_changed(repo, record))
+            if result.returncode != 0 or not rank:
+                print(f"mutation prepass gave no ranking (exit {result.returncode}); "
+                      "ordering by recency alone", file=sys.stderr)
+        runs = mutation_runs(load_record(_record_file(repo)))
+        ordered = order_mutation_targets(candidates, rank, runs, mutation_changed(repo, runs, here))
         max_n = int(os.environ.get("MUTATION_MAX", "10"))
         final_targets = ordered[:max_n]
         skipped = max(0, len(ordered) - max_n)
