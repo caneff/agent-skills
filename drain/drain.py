@@ -47,7 +47,8 @@ landed with no PR, its own PR check never having run.
 `--max` stops the loop after that many tickets (a bundle counts all of its
 tickets); `--once` stops after one bundle.
 
-Then it checks (the PR is not draft, CLEAN, closes the anchor within the
+Then it checks (the PR is not draft, CLEAN once `implement/pr_settle.py` has
+waited out UNKNOWN and running checks (#1526), closes the anchor within the
 bundle cap, and the repo's seam passes on the PR merged into current main,
 narrowed to what the PR touched; the check is skipped when main has not moved
 past the PR's base, because the worker ran the same suite on that exact tree),
@@ -97,9 +98,11 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "burndown"))
+for _dir in ("burndown", "implement"):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", _dir))
 
 import frontier  # noqa: E402
+import pr_settle  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
 ANCHOR_NOTE, BUNDLE_NOTE, HANDED_NOTE = "drain anchor:", "drain bundle:", "drain could not land"
@@ -755,12 +758,14 @@ def full_run(ctx, merged):
 
 
 def verify_pr(ctx, branch, anchor, kind):
-    view = gh_json("pr", "view", branch, "--repo", ctx.repo, "--json",
-                   "isDraft,mergeStateStatus,headRefOid,number,url,closingIssuesReferences")
-    if view["isDraft"]:
-        raise DrainError(f"{view['url']} is still a draft")
-    if view["mergeStateStatus"] != "CLEAN":
-        raise DrainError(f"{view['url']} is {view['mergeStateStatus']}, not CLEAN")
+    """The PR's settled view: not draft and CLEAN, waited for rather than
+    refused on UNKNOWN or a check still running (#1526; `pr_settle.py` has the
+    limits), then its closures and the seam."""
+    try:
+        view = pr_settle.settle(pr_settle.gh_reader(branch, ctx.repo, "number,url,closingIssuesReferences"))
+    except pr_settle.SettleError as exc:
+        url = (exc.view or {}).get("url")
+        raise DrainError(f"{url} {exc}" if url else str(exc)) from exc
     closed = {r["number"] for r in view["closingIssuesReferences"]}
     if anchor not in closed:
         raise DrainError(f"{view['url']} does not close the anchor #{anchor}")
@@ -899,8 +904,11 @@ def work(ctx, anchor, others, resumed, started, kind):
             if wait_for_worker(ctx, branch, agent, tickets, spec=anchor if kind == SPEC else None) == "landed":
                 return finish_landed(ctx, branch, tickets), None
             view = verify_pr(ctx, branch, anchor, kind)
-            gh("pr", "merge", str(view["number"]), "--squash", "--match-head-commit", view["headRefOid"],
-               "--repo", ctx.repo)
+            try:
+                pr_settle.merge(pr_settle.gh_reader(view["number"], ctx.repo),
+                                pr_settle.gh_merger(view["number"], ctx.repo), view["headRefOid"])
+            except pr_settle.SettleError as exc:
+                raise DrainError(f"{view['url']} {exc}") from exc
         except DrainError as exc:
             reason = one_line(exc)
             if not started:  # a failure before the announce (a dispatch that failed after the claim): the bundle was still worked

@@ -91,7 +91,15 @@ elif args[:2] == ["pr", "list"]:
     out([dict(number=pr["number"], url=pr["url"])] if pr and not pr.get("merged") else [])
 elif args[:2] == ["pr", "view"]:
     pr = next(p for b, p in state["prs"].items() if args[2] in (b, str(p["number"])))
-    out({"isDraft": pr["draft"], "mergeStateStatus": pr["status"],
+    # `STATUS_SEQ` ("UNKNOWN UNKNOWN CLEAN"): one state per `pr view`, the last repeating.
+    seq = os.environ.get("STATUS_SEQ", "").split()
+    if seq:
+        pr["status"] = seq[min(pr.get("reads", 0), len(seq) - 1)]
+        pr["reads"] = pr.get("reads", 0) + 1
+        save()
+    out({"isDraft": pr["draft"], "mergeStateStatus": pr["status"], "state": "OPEN",
+         "statusCheckRollup": [dict(__typename="CheckRun", name="gate", status="COMPLETED",
+                                    conclusion=os.environ.get("CHECK_CONCLUSION", "SUCCESS"))],
          "headRefOid": pr["head"], "url": pr["url"], "number": pr["number"],
          "closingIssuesReferences": [dict(number=n) for n in pr["closes"]],
          "mergeCommit": {"oid": "m" + pr["head"]}})
@@ -99,6 +107,11 @@ elif args[:2] == ["pr", "merge"]:
     branch = next(b for b, p in state["prs"].items() if str(p["number"]) == args[2])
     pr = state["prs"][branch]
     assert opt("--match-head-commit") == pr["head"], "head moved"
+    refused = pr.get("base_refusals", 0)
+    if refused < int(os.environ.get("BASE_MODIFIED", 0)):
+        pr["base_refusals"] = refused + 1
+        save()
+        sys.stderr.write("GraphQL: Base branch was modified. Review and try the merge again.\n"); sys.exit(1)
     pr["merged"] = True
     for n in pr["closes"]:
         state["issues"][str(n)]["state"] = "closed"
@@ -546,6 +559,25 @@ def test_a_pr_that_is_not_clean_is_a_failed_build(sb):
     sb.drain("--once", env={"STATUS": "BLOCKED"})
     assert "merged" not in sb.state()
     assert "BLOCKED, not CLEAN" in sb.handed_comment(1)[0]
+
+
+def test_an_unknown_pr_is_waited_on_until_clean(sb):
+    sb.write_state({1: {}})
+    sb.drain("--once", env={"STATUS_SEQ": "UNKNOWN UNKNOWN CLEAN", "PR_SETTLE_POLL": "0"})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+
+
+def test_a_failed_check_is_a_failed_build_without_a_wait(sb):
+    sb.write_state({1: {}})
+    sb.drain("--once", env={"STATUS": "UNSTABLE", "CHECK_CONCLUSION": "FAILURE"})
+    assert "merged" not in sb.state()
+    assert "has a failed check: gate" in sb.handed_comment(1)[0]
+
+
+def test_a_base_branch_modified_refusal_is_retried(sb):
+    sb.write_state({1: {}})
+    sb.drain("--once", env={"BASE_MODIFIED": "2", "PR_SETTLE_POLL": "0"})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
 
 
 def test_a_red_seam_is_a_failed_build(sb):
