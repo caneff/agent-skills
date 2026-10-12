@@ -888,6 +888,32 @@ closed.
    read and re-run like any other commit. Remove the worktree afterwards with
    `git worktree remove --force`, since a conflicted merge leaves it dirty.
 
+   **Selector evidence** (#1537). When `AGENTS.md`'s § End-to-end seam
+   declares a `**Narrowed**` line, the same run records whether that narrowed
+   command would have selected what the seam failed on, as one comment on the
+   PR. These three lines replace the single seam line above for such a repo:
+   the listing runs in the merged worktree before the seam, the comment after
+   it, green or red; both files live under `.scratch/`, outside the worktree
+   the seam reads:
+
+   ```
+   python3 ~/.agents/skills/implement/selector_check.py list --root <worktree> --state <.scratch>/selector-<n>.json
+   <the repo's seam> 2>&1 | tee <.scratch>/seam-<n>.log; seam=${PIPESTATUS[0]}
+   python3 ~/.agents/skills/implement/selector_check.py comment --root <worktree> --state <.scratch>/selector-<n>.json --seam-exit "$seam" --seam-log <.scratch>/seam-<n>.log --pr <pr> --repo <owner/name>
+   ```
+
+   `list` exiting 3 means the repo declares no narrowed line: skip the
+   `comment` line, no listing and no comment are owed, and the seam still runs
+   as above. A PR whose seam is run again (a fix, a moved `<default>`) gets
+   another comment; the last one is the run it merged on. The comment reads `selector: clean`,
+   `selector: miss <suite>` (a failing suite the listing did not hold),
+   `selector: hit <suite>` or `selector: not checked: <why>` (no listing, an
+   empty one, or a log with no `FAIL <suite>` line), so an absent answer is
+   never a clean one. The count of `miss` comments over merged PRs is what
+   the full run at merge is weighed against. It is evidence only: the script
+   exits 0 whatever it found, a red seam blocks the merge above whatever the
+   comment says, and a green seam with a `miss` or `not checked` merges.
+
    Immediately before the merge, `git fetch origin` again: when
    `origin/<default>` is no longer the sha the seam's worktree was created
    from, re-run this step.

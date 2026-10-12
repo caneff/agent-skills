@@ -29,6 +29,12 @@ past these would pad it with text the author never wrote there.
 
 Both keys are required, and a value of nothing but emphasis markers is
 refused as naming nothing: `- **Seam**:**` reads as the value `**` (#1104).
+A third key, `- **Narrowed**: \`bash tests/all.sh --changed origin/main\``,
+is optional and is not part of the closing check: it names the narrowed
+command a merge's full seam run is compared against (#1537). The first
+backtick span of the value is the command; `implement/selector_check.py`
+reads it with this same reader, so the wrapping and fence rules above apply.
+A repo with no `Narrowed` line gets no selector comment on its merges.
 A repo that declares nothing is not a repo with no seam: the exploration pass supplies both halves instead (`--seam`,
 `--blind-to`), and a spec run that can supply neither has found something
 worth telling the controller before it writes the closing check at all.

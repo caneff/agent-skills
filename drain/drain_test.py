@@ -86,6 +86,11 @@ elif args[:2] == ["issue", "view"]:
         issue = dict(issue, state="open", labels=issue["labels"] + ["in-progress"])
     out({"state": issue["state"], "labels": names(issue), "title": issue["title"], "body": issue["body"],
          "comments": [dict(body=b) for n, b in state.get("comments", []) if n == args[2]]})
+elif args[:2] == ["pr", "comment"]:
+    if os.environ.get("PR_COMMENT_FAIL"):
+        sys.stderr.write("fake gh: pr comment refused\n"); sys.exit(1)
+    state.setdefault("pr_comments", []).append([args[2], opt("--body")])
+    save()
 elif args[:2] == ["pr", "list"]:
     pr = state["prs"].get(opt("--head"))
     out([dict(number=pr["number"], url=pr["url"])] if pr and not pr.get("merged") else [])
@@ -1065,7 +1070,7 @@ def gate_repo(sb, listed, message="gate"):
     arguments to `$SEAM_LOG`; otherwise it fails the suite `SEAM_RED` names."""
     os.makedirs(os.path.join(sb.repo, "tests"), exist_ok=True)
     write(os.path.join(sb.repo, "tests", "all.sh"),
-          '#!/bin/sh\ncase "$1" in --list) echo "$*" >> "$SEAM_LOG"; printf "%s\\n" ' + " ".join(listed) + '; exit 0;; esac\n'
+          '#!/bin/sh\ncase " $* " in *" --list "*) echo "$*" >> "$SEAM_LOG"; printf "%s\\n" ' + " ".join(listed) + '; exit 0;; esac\n'
           'test -z "$SEAM_RED" && exit 0\necho "FAIL $SEAM_RED"; exit 1\n', 0o755)
     sb.git(sb.repo, "add", ".")
     sb.git(sb.repo, "commit", "-q", "--allow-empty", "-m", message)
@@ -1480,3 +1485,104 @@ def test_run_group_kills_what_a_command_started(d, tmp_path):
             return
         time.sleep(0.1)
     pytest.fail("the command's grandchild survived the wall clock")
+
+
+# --- #1537: selector evidence on every merge of a repo that declares a narrowed command ---
+
+
+def narrowed_repo(sb, listed, declared=True):
+    """`gate_repo`'s stub runner, plus an `AGENTS.md` whose § End-to-end seam
+    declares a `Narrowed` line when `declared`."""
+    if declared:
+        write(os.path.join(sb.repo, "AGENTS.md"),
+              "## End-to-end seam\n\n- **Seam**: `bash tests/all.sh`\n- **Blind to**: the live editor\n"
+              "- **Narrowed**: `bash tests/all.sh --changed origin/main`\n")
+    gate_repo(sb, listed)
+
+
+def pr_comments(sb):
+    return [b for _, b in sb.state().get("pr_comments", [])]
+
+
+def test_a_green_seam_leaves_a_clean_selector_comment_and_the_merge_lands(sb):
+    sb.write_state({1: {}})
+    narrowed_repo(sb, ["alpha/a.test.sh"])
+    r = sb.drain("--once")  # main has not moved past the PR: a repo that declares a narrowed line still gets its run
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert pr_comments(sb) == ["selector: clean"]
+
+
+def test_a_red_seam_outside_the_listing_leaves_a_miss_and_still_blocks_the_merge(sb):
+    sb.write_state({1: {}})
+    narrowed_repo(sb, ["alpha/a.test.sh"])
+    sb.drain("--once", env={"SEAM_RED": "zeta/z.test.sh"})
+    assert "merged" not in sb.state()
+    assert pr_comments(sb) and set(pr_comments(sb)) == {"selector: miss zeta/z.test.sh"}
+    assert "seam" in sb.handed_comment(1)[0]
+
+
+def test_a_red_seam_inside_the_listing_leaves_a_hit_and_still_blocks_the_merge(sb):
+    sb.write_state({1: {}})
+    narrowed_repo(sb, ["alpha/a.test.sh"])
+    sb.drain("--once", env={"SEAM_RED": "alpha/a.test.sh"})
+    assert "merged" not in sb.state()
+    assert pr_comments(sb) and set(pr_comments(sb)) == {"selector: hit alpha/a.test.sh"}
+
+
+def test_a_listing_that_prints_nothing_is_not_checked_and_a_green_seam_still_merges(sb):
+    sb.write_state({1: {}})
+    narrowed_repo(sb, [])
+    sb.drain("--once")
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+    assert len(pr_comments(sb)) == 1
+    assert pr_comments(sb)[0].startswith("selector: not checked: ")
+    assert "printed nothing" in pr_comments(sb)[0]
+
+
+def test_a_repo_with_no_narrowed_line_gets_no_selector_comment_green_or_red(sb):
+    sb.write_state({1: {}})
+    narrowed_repo(sb, ["alpha/a.test.sh"], declared=False)
+    sb.drain("--once", env={"RESET_TO_OLD": "1"})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+    sb.write_state({1: {}})
+    sb.drain("--once", env={"RESET_TO_OLD": "1", "SEAM_RED": "zeta/z.test.sh"})
+    assert pr_comments(sb) == []
+
+
+def test_a_comment_that_cannot_be_posted_does_not_stop_a_green_merge(sb):
+    sb.write_state({1: {}})
+    narrowed_repo(sb, ["alpha/a.test.sh"])
+    r = sb.drain("--once", env={"PR_COMMENT_FAIL": "1"})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert pr_comments(sb) == []
+
+
+def test_a_seam_command_with_a_trailing_semicolon_and_a_comment_still_runs_and_is_commented_on(sb):
+    sb.write_state({1: {}})
+    narrowed_repo(sb, ["alpha/a.test.sh"])
+    sb.git(sb.repo, "config", "land.testcmd", "true; # the repo's own seam")
+    sb.drain("--once")
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+    assert pr_comments(sb) == ["selector: clean"]
+
+
+def test_the_selector_files_are_named_by_absolute_path_whatever_the_log_dir_is(sb, monkeypatch):
+    sys.path.insert(0, HERE)
+    import drain as drain_module
+    ctx = drain_module.Ctx(sb.repo, "me/repo", "main", "logs", 1, None)
+    seen = []
+    monkeypatch.setattr(drain_module, "declares_narrowed", lambda c: True)
+    monkeypatch.setattr(drain_module, "run_in_scratch_tree", lambda c, cmd, log, head=None, rev=None: seen.append(cmd))
+    drain_module.seam(ctx, "main", os.path.join("rel", "dir", "pr-seam.log"), 7)
+    cmd = seen[0]
+    assert os.path.abspath(os.path.join("rel", "dir", "pr-seam-selector.json")) in cmd
+    assert "--seam-log " + os.path.abspath(os.path.join("rel", "dir", "pr-seam.log")) in cmd
+
+
+def test_a_base_tree_git_cannot_read_is_asked_again_of_the_merged_tree_not_read_as_no_line(sb):
+    sys.path.insert(0, HERE)
+    import drain as drain_module
+    ctx = drain_module.Ctx(sb.repo, "me/repo", "no-such-ref", os.path.join(sb.tmp, "logs"), 1, None)
+    assert drain_module.declares_narrowed(ctx) is True
+    ctx = ctx._replace(default="main")  # a readable tree with no AGENTS.md declares nothing
+    assert drain_module.declares_narrowed(ctx) is False

@@ -54,6 +54,9 @@ narrowed to what the PR touched; the check is skipped when main has not moved
 past the PR's base, because the worker ran the same suite on that exact tree),
 squash-merges, runs `merge-cleanup` (which closes the worker's pane), and
 returns any ticket the worker claimed but the PR did not close to the queue.
+A repo whose `AGENTS.md` declares a `Narrowed` line (#1537) gets the full seam
+on every merge instead of the narrowed one, with no skip, and each run leaves
+one `selector:` comment on the PR (`implement/selector_check.py`).
 A bundle that fails is given one more try by prompting the same worker with
 the reason (waiting for it to start working before it looks again); a second
 failure closes the worker's pane, labels the anchor and every claimed ticket
@@ -103,6 +106,7 @@ for _dir in ("burndown", "implement"):
 
 import frontier  # noqa: E402
 import pr_settle  # noqa: E402
+import selector_check  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
 ANCHOR_NOTE, BUNDLE_NOTE, HANDED_NOTE = "drain anchor:", "drain bundle:", "drain could not land"
@@ -647,19 +651,54 @@ def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
         run(["git", "worktree", "remove", "--force", scratch], cwd=ctx.root, check=False)
 
 
-def seam(ctx, head, log):
+SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "implement", "selector_check.py")
+
+
+def declares_narrowed(ctx):
+    """Whether `AGENTS.md` on the base the seam runs on declares a `Narrowed`
+    line (#1537), read from the git tree the scratch worktree is made from, so
+    a stale primary checkout cannot answer for it. A tree git cannot read
+    answers yes: the scratch run then asks the merged tree itself, where
+    `selector_check.py list` finds no line (nothing is posted) or records the
+    failure as `not checked`. Only a tree that holds no `AGENTS.md` answers no."""
+    listed = subprocess.run(["git", "ls-tree", "--name-only", ctx.default, "AGENTS.md"], cwd=ctx.root,
+                            capture_output=True, text=True)
+    if listed.returncode:
+        return True
+    if not listed.stdout.strip():
+        return False
+    shown = subprocess.run(["git", "show", f"{ctx.default}:AGENTS.md"], cwd=ctx.root, capture_output=True, text=True)
+    return shown.returncode != 0 or selector_check.narrowed_in(shown.stdout) is not None
+
+
+def seam(ctx, head, log, pr=None):
     """The repo's seam (`land.testcmd`, else `bash tests/all.sh`) on the PR head
     merged into current main, in a throwaway worktree. The default seam is
     narrowed with `--changed <default>`: the PR's own diff is what it touched.
     Skipped when main is an ancestor of `head`: the worker ran the suite on that
     exact tree after merging main in, and only a main that has moved since can
-    make two PRs break each other (#1415)."""
+    make two PRs break each other (#1415).
+
+    A repo whose `AGENTS.md` declares a `Narrowed` line (#1537) gets the seam
+    in full instead, on every merge and with no skip: the point is to compare
+    its narrowed selection with what the full run fails on, which a narrowed
+    run could only agree with. `selector_check.py` lists the narrowed
+    selection before the seam and posts its verdict on PR `pr` after it, red or
+    green; the seam's own exit status is what comes out, never the comment's."""
     cmd = seam_cmd(ctx)
     run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+    checked = pr is not None and declares_narrowed(ctx)
     moved = subprocess.run(["git", "merge-base", "--is-ancestor", ctx.default, head], cwd=ctx.root).returncode != 0
-    if not moved:
+    if not moved and not checked:
         return
-    if cmd == FULL_SEAM:
+    if checked:
+        log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
+        state = os.path.splitext(log)[0] + "-selector.json"
+        tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
+        cmd = (f"{tool} list --root . --state {shlex.quote(state)}; sh -c {shlex.quote(cmd)}; code=$?; "
+               f"{tool} comment --root . --state {shlex.quote(state)} --seam-exit $code "
+               f"--seam-log {shlex.quote(log)} --pr {pr} --repo {shlex.quote(ctx.repo)}; exit $code")
+    elif cmd == FULL_SEAM:
         cmd = f"{FULL_SEAM} --changed {shlex.quote(ctx.default)}"
     try:
         run_in_scratch_tree(ctx, cmd, log, head)
@@ -781,7 +820,7 @@ def verify_pr(ctx, branch, anchor, kind):
                              + f" which no {BUNDLE_NOTE} comment on #{anchor} names")
         if len(closed) > ctx.bundle_max:
             raise DrainError(f"{view['url']} closes {len(closed)} tickets, over --bundle-max {ctx.bundle_max}")
-    seam(ctx, view["headRefOid"], os.path.join(ctx.log_dir, f"{branch}-seam.log"))
+    seam(ctx, view["headRefOid"], os.path.join(ctx.log_dir, f"{branch}-seam.log"), view["number"])
     view["closes"] = sorted(closed)
     return view
 
