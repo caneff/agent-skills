@@ -56,11 +56,19 @@ shell_runners='eval|xargs|watch|parallel|ssh|tmux[[:space:]]+send-keys|python3?[
 shell_handed="$cmd_start(${shell_word}[[:space:]]+(-[^[:space:]]+[[:space:]]+)*-[a-z]*c|${shell_runners})([[:space:]]|\$)|\|[[:space:]]*${shell_word}([[:space:]]|\$)|${shell_word}[[:space:]]*<<|alias\.[^[:space:]=]+="
 # The words a shell runs, from one lexer pass over the whole command: CMD_BARE
 # drops quoted text, CMD_EXPANDS keeps what `$(...)` and backticks still run.
-quote_views "$SCAN"
-CMD_BARE=$BARE
-CMD_EXPANDS=$EXPANDS
-cmd_handed=0
-printf '%s\n' "$CMD_BARE" | grep -qE "$shell_handed" && cmd_handed=1
+# The pass costs two awk forks, so it runs on first need (#1566): a command
+# that no raw gate below matches never pays for it.
+command_views() {
+  [ -n "${CMD_VIEWS_DONE:-}" ] && return 0
+  CMD_VIEWS_DONE=1
+  quote_views "$SCAN"
+  CMD_BARE=$BARE
+  CMD_EXPANDS=$EXPANDS
+  cmd_handed=0
+  printf '%s\n' "$CMD_BARE" | grep -qE "$shell_handed" && cmd_handed=1
+  cmd_substitutions=$(printf '%s' "$CMD_EXPANDS" | tr '\n' ' ' | grep -oE '\$\(.*\)|`[^`]*`')
+  return 0
+}
 
 # --- Always-blocked: history/worktree destroyers. ---
 DANGEROUS_PATTERNS=(
@@ -137,6 +145,7 @@ discards_worktree() {
   # running one (#1539): the verb and the dot must both be words the shell
   # runs, unless a shell is handed the text. The unquoted words are only a
   # gate, so a quoted `-C` path cannot hide the target from the check above.
+  command_views
   if [ "$cmd_handed" != 1 ]; then
     quote_views "$1"
     has_dot_pathspec "$BARE" && echo "$BARE" | grep -qwE 'checkout|restore' || return 1
@@ -162,9 +171,9 @@ done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -e checko
 # included), or when it sits inside a `$(...)` or backtick body, the only
 # quoted text that still runs. A `$(...)` elsewhere in the command does not
 # make the rest of it code.
-cmd_substitutions=$(printf '%s' "$CMD_EXPANDS" | tr '\n' ' ' | grep -oE '\$\(.*\)|`[^`]*`')
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   printf '%s\n' "$COMMAND" | grep -qE "$pattern" || continue
+  command_views
   if printf '%s\n' "$CMD_BARE" | grep -qE "$pattern" || [ "$cmd_handed" = 1 ] \
      || printf '%s\n' "$cmd_substitutions" | grep -qE "$pattern"; then
     hint=""

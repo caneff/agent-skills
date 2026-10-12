@@ -542,6 +542,27 @@ stubdir_saved=$stubdir; stubdir="$tmp/noawk:$stubdir"
 run "foreign merge blocked when the lexer's awk fails" 2 \
   "bash -c 'gh pr merge 5 --repo someone-else/x'" "BLOCKED"
 stubdir=$stubdir_saved
+# A command that names no destroyer, merge, checkout or stash runs no lexer pass:
+# the quote views cost two awk forks and are read only once a raw gate matches
+# (#1566). The stub logs each lexer call and leaves its answer alone.
+mkdir -p "$tmp/countawk"
+cat > "$tmp/countawk/awk" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = "-v" ] && [[ "$2" == view=* ]] && echo lexed >> "$LEXER_LOG"
+exec /usr/bin/awk "$@"
+STUB
+chmod +x "$tmp/countawk/awk"
+export LEXER_LOG="$tmp/lexer.log"
+for plain in "git status" "ls -la" "git log --oneline -5"; do
+  : > "$LEXER_LOG"
+  printf '%s' "$plain" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+    | (cd "$repo" && PATH="$tmp/countawk:$stubdir:$PATH" bash "$hook") >/dev/null 2>&1
+  if [ -s "$LEXER_LOG" ]; then
+    echo "FAIL: '$plain' ran the lexer ($(wc -l < "$LEXER_LOG") passes)"; fails=1
+  else
+    echo "PASS: '$plain' runs no lexer pass"
+  fi
+done
 # The guard reads commands through command-scan-lib.sh beside its real path.
 # Without the lib no pattern can match, so it blocks every command rather than
 # letting each one through unscanned.
