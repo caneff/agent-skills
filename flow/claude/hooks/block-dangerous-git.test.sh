@@ -125,6 +125,12 @@ run "gh pr merge naming someone else's repo blocked from an owned checkout" 2 \
   "gh pr merge 12 --repo someone-else/agent-skills --squash" "BLOCKED"
 run "gh pr merge -R naming someone else's repo blocked" 2 \
   "gh pr merge 12 -R someone-else/agent-skills" "BLOCKED"
+run "pr_settle.py --merge allowed on owned repo" 0 \
+  "python3 ~/.agents/skills/implement/pr_settle.py 12 --repo caneff/agent-skills --head abc --merge"
+run "pr_settle.py --merge naming someone else's repo blocked" 2 \
+  "python3 ~/.agents/skills/implement/pr_settle.py 12 --repo someone-else/agent-skills --head abc --merge" "BLOCKED"
+run "pr_settle.py without --merge is a read, allowed on someone else's repo" 0 \
+  "python3 ~/.agents/skills/implement/pr_settle.py 12 --repo someone-else/agent-skills"
 run "gh pr merge on someone else's PR URL blocked" 2 \
   "gh pr merge https://github.com/someone-else/agent-skills/pull/12 --squash" "BLOCKED"
 # A --repo that is a filesystem path names no repo owner (#803). The controller's

@@ -600,13 +600,17 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    a slice the merge check passes with no review files (§ Review). The
    Codex lane runs no review wave and runs the gate with
    `PRE_REPORT_NO_FIX_CHECK="<why>"`, named in the PR-up report.
-6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
-   prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
-   draft or a conflict fails the controller's merge. `headRefOid` is the sha
-   GitHub computed that reading against, and it is the one the report's
-   "CLEAN observed at" carries (§ The PR) — never `git rev-parse HEAD`, which
-   is your local tip and may be a commit GitHub has not read yet. `UNKNOWN`
-   means GitHub is still computing; poll a few seconds.
+6. **`python3 ~/.agents/skills/implement/pr_settle.py <pr> --repo <owner/name>`**
+   exits 0 and prints `draft=false state=CLEAN head=<headRefOid>` before "PR up"
+   goes out — a PR reported on a draft or a conflict fails the controller's
+   merge. It waits itself for what resolves (`UNKNOWN`, a running check; its
+   docstring holds the limits, #1526) and exits non-zero, naming the last
+   state, on a failed check, a draft or a limit: that is not a "CLEAN" to
+   report, so fix the cause. `head` is the sha GitHub computed that
+   reading against, and it is the one the report's "CLEAN observed at" carries
+   (§ The PR) — never `git rev-parse HEAD`, which is your local tip and may be
+   a commit GitHub has not read yet. Then
+   `gh pr view <pr> --repo <owner/name> --json closingIssuesReferences`:
    `closingIssuesReferences` must list the ticket this PR was dispatched for
    (`<n>`) and any other ticket
    its body names with a closing keyword, each in this repo — an entry's
@@ -827,7 +831,8 @@ closed.
    disagreement.
 2. **The PR is still not-draft, CLEAN, closes what it should, and every
    finding is disposed** — the
-   same check as § Before the PR: step 6, rerun because `main` may have
+   same check as § Before the PR: step 6 (`pr_settle.py` with no `--merge`
+   waits out `UNKNOWN` and running checks), rerun because `main` may have
    moved since "PR up". `closingIssuesReferences` empty or missing the
    ticket blocks the merge same as a draft or a conflict does — a PR that
    closes nothing does not merge. So does a heavy Claude-lane PR whose
@@ -879,13 +884,18 @@ closed.
    from, re-run this step.
 
    ```
-   gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>
+   python3 ~/.agents/skills/implement/pr_settle.py <pr> --repo <owner/name> --head <headRefOid> --merge
    ```
 
-   `--match-head-commit` binds the merge to the head the seam ran on (step
-   2's `headRefOid`): GitHub refuses it atomically if the
-   head moved since. The `ready-for-human` merge line, in § The PR's
-   `--chris-merges` report block above, carries the same flag.
+   It settles the PR to CLEAN again, then runs `gh pr merge --squash
+   --match-head-commit <headRefOid>`, retrying GitHub's "Base branch was
+   modified" refusal (#1526), and exits non-zero naming the last state on any
+   limit. `--head` is required: the match binds the merge to the
+   head the seam ran on (step 2's `headRefOid`), and GitHub refuses it
+   atomically if the head moved since. It refuses a repo whose owner is not
+   the `gh` login, as the ownership hook does for a bare `gh pr merge`. The
+   `ready-for-human` merge line, in the `--chris-merges` report block of
+   § The PR, is a bare `gh pr merge` with the same flag, which Chris runs.
 
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
