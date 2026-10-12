@@ -71,6 +71,10 @@ case "$preamble" in
   *'publish_capture()'*) ;;
   *) echo "FAIL: could not extract the report-directory preamble from $skill" >&2; exit 1 ;;
 esac
+# The preamble names the installed script and HOME is scratched below: run this
+# checkout's own `review_ledger.py cache-dir`, the one the branch ships.
+installed='~/.agents/skills/multi-axis-code-review'
+preamble="${preamble//"$installed"/$here}"
 mkdir -p "$scratch/home"
 scratch_dir="$scratch/home/.cache/agent-reviews/repo"
 run_block() { # <shas...> -> the block's output; exit status is the block's

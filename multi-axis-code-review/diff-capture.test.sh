@@ -36,7 +36,12 @@ fenced() { # <needle> -> every fenced block of § 4 containing the needle, fence
     inb { buf = buf $0 "\n" }
   ' <<<"$spawn"
 }
-preamble="$(fenced 'rev-parse --path-format=absolute')"
+preamble="$(fenced 'review_ledger.py cache-dir')"
+# The preamble names the installed script (`~/.agents/skills/...`), and HOME is
+# scratched below: run this checkout's own copy, so the test witnesses the
+# `cache-dir` the branch ships, not whichever one is installed.
+installed='~/.agents/skills/multi-axis-code-review'
+preamble="${preamble//"$installed"/$here}"
 block="$(fenced 'diff "$fixed_point"...HEAD')"
 case "$preamble" in
   *'publish_capture()'*) ;;
