@@ -107,9 +107,10 @@ def test_a_failed_status_context_fails():
 
 
 def test_a_completed_check_with_an_unrecognised_conclusion_is_not_a_pass():
-    odd = view("UNSTABLE", checks=[run_check("COMPLETED", "MYSTERY")])
+    odd = view("UNSTABLE", checks=[run_check("COMPLETED", "MYSTERY", "odd")])
     exc, _, _ = settle_seq([odd])
     assert isinstance(exc, pr_settle.SettleError)
+    assert "failed check: odd" in str(exc)  # not the generic "is UNSTABLE, not CLEAN"
 
 
 def test_a_settled_non_clean_state_fails_at_once():
