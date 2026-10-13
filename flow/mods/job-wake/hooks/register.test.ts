@@ -325,3 +325,27 @@ test('after a reload the session is woken for an end it was never told, and not 
   expect(w.wakes.length).toBe(1)
   expect(w.wakes[0]).toContain('finished untold')
 })
+
+test('a run replaced by a rerun before its end was seen is forgotten, and the rerun wakes once', async ($, on) => {
+  const w = world(on)
+  await bash($, w, START, () => {
+    w.jobs.hunt = job('100', ALIVE)
+  })
+  w.jobs.hunt = job('200', [0, 'finished hunt rc=0 cause=exit ended=second'])
+  await w.clock.advance(POLL * 3)
+  expect(w.wakes.length).toBe(1)
+  expect(w.wakes[0]).toContain('ended=second')
+  expect(w.at('hunt').markers['woken-end']).toBe('200')
+})
+
+test('a watched run whose directory is gone is dropped without a wake or a log', async ($, on) => {
+  const w = world(on)
+  await bash($, w, START, () => {
+    w.jobs.hunt = job('100', ALIVE)
+  })
+  // The pid file still answers; `job-run --status` says the run is unknown.
+  w.at('hunt').status = [12, 'unknown hunt: no run directory']
+  await w.clock.advance(POLL * 3)
+  expect(w.wakes).toEqual([])
+  expect(w.logs).toEqual([])
+})
