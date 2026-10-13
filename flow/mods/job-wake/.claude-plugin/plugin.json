@@ -1,0 +1,5 @@
+{
+  "name": "job-wake",
+  "version": "0.1.0",
+  "description": "Wakes the session when a job-run job it launched ends, is killed, or prints a failure line."
+}

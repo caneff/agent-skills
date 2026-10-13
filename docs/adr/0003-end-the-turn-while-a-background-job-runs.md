@@ -1,6 +1,7 @@
 # End the turn while a background job runs; a mod wakes the session
 
-Status: accepted (ruled by Chris 2026-10-03); the doc change waits on the mod
+Status: accepted (ruled by Chris 2026-10-03); complete 2026-10-13, when the
+`job-wake` mod shipped (#1371)
 
 ## Context
 
@@ -26,8 +27,14 @@ when a job exits or its output matches a failure signature
 ## Consequences
 
 - The sentence in `flow/claude/OPERATIONS.md` § Wait, which this ADR retires,
-  is rewritten in the same change that ships the wake mod, not before: removing it first would reopen the lost-wake
-  failure with nothing behind it.
+  was to be rewritten in the same change that ships the wake mod, not before:
+  removing it first would reopen the lost-wake failure with nothing behind
+  it. That is not what happened. The section was rewritten on 2026-10-04, nine
+  days before the mod. `job-run --wait` (#1223) was the only thing behind it
+  from 2026-10-11, and nothing was before that.
+- The mod is `flow/mods/job-wake/` (#1371). The section now names it, and keeps
+  `job-run --wait` for a session the mod is not loaded in.
 - Unverified when ruled: whether a mod's `$.prompt.submit` wakes an idle
-  session. The mod's ticket probes this first; if it cannot, this ADR
-  reopens.
+  session. It does: `docs/research/2026-10-12-mod-wakes-idle-session.md`
+  (#1367), and in a herdr pane
+  `docs/research/2026-10-13-job-wake-live-check.md`.
