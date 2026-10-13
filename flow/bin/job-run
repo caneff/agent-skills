@@ -16,6 +16,10 @@
 #            stderr is merged into stdout on the way, as it is for any job whose
 #            output is read back as one stream
 #   pid      the wrapper's pid, so a later reader can ask whether it is still alive
+#   session  the id of the Claude Code session that started the run
+#            ($CLAUDE_CODE_SESSION_ID), empty when none did; the job-wake mod
+#            (flow/mods/job-wake/) finds a session's own jobs by it, and keeps
+#            its own `woken-*` markers beside it
 #   exit     written only when the wrapper observes the job end: rc, cause, ended
 #
 # The wrapper traps EXIT, TERM and INT. SIGKILL cannot be trapped, so a killed
@@ -189,12 +193,15 @@ mkdir -p "$dir" || die "cannot create $dir"
 # The previous run's pid and exit record go together, then the new pid lands: a
 # `--wait` racing this start sees `starting`, never the old run's verdict.
 rm -f "$dir/exit" "$dir/pid"
+# Everything a reader pairs with the pid lands before it, so a new pid never
+# sits beside the previous run's output or owner.
+: > "$dir/progress"
+printf '%s\n' "${CLAUDE_CODE_SESSION_ID:-}" > "$dir/session"
 printf '%s\n' "$$" > "$dir/pid"
 printf '%s\n' "$*" > "$dir/cmd"
 # Pruned only now that this run is recorded alive, so the directory a waiter is
 # looking at is complete before the sweep's time is spent.
 prune >/dev/null 2>&1 || true
-: > "$dir/progress"
 export JOB_PROGRESS="$dir/progress"
 
 # Tee, not capture: every line goes on to the caller unchanged — a wrapped job

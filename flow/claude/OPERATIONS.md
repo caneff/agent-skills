@@ -234,13 +234,22 @@ defines them.
   stays installed, and re-adding its `Stop` entry restores it.
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
-  killed. Right after starting it, launch `job-run --wait <n>` as a
-  `run_in_background` Bash call: it blocks until the run ends, prints the
-  `--status` line and wakes the session. Exit 13 means the wait was
-  interrupted, not that the run ended. Why: a plain background run loses its
-  output and exit code when its shell is killed, and a Monitor expires and
-  needs re-arming (#1223 reports 30 minutes and about 15 re-arms over one
-  multi-hour hunt).
+  killed. `job-run` records the session that started it, and the `job-wake`
+  mod (`flow/mods/job-wake/`) watches each run its own session started,
+  however the command was spelled. When the Bash result carries a
+  `job-wake: watching <n>` line, end the turn: the mod submits a prompt when
+  the job ends, is killed or prints a failure line, naming the job, its
+  `--status` line and the matched line. When the result carries no such
+  line, the mod is not loaded or has not seen the run yet: launch
+  `job-run --wait <n>` as a `run_in_background` Bash call right after
+  starting the job. It blocks until the run ends, prints the `--status` line
+  and wakes the session; exit 13 means the wait was interrupted, not that
+  the run ended. A `run_in_background` call also raises the harness's own
+  completion notice, so one job's end can start two turns: they are the same
+  event. Why: a plain background run loses its output and exit code when its
+  shell is killed, a lost completion notice leaves an idle session asleep
+  (ADR 0003), and a Monitor expires and needs re-arming (#1223 reports 30
+  minutes and about 15 re-arms over one multi-hour hunt).
 - Append a completion line to a progress file (e.g. `PROGRESS.md`) after
   every step and read it on wake; never stage or commit it. Ending the turn
   instead of blocking (`CLAUDE.md` § Work) was ruled 2026-10-04, superseding
@@ -250,7 +259,9 @@ defines them.
   invisible; every liveness signal reads healthy while it burns.
 - A watch on a background job matches failure signatures
   (`Traceback|Error|REJECTED|bad_alloc|Killed`) and process exit, not only
-  the success line — and never a per-item line inside a sweep. Report a
+  the success line — and never a per-item line inside a sweep. The
+  `job-wake` mod is that watch for a `job-run` job; one written by hand
+  follows the same rule. Report a
   crash, zero yield, UNKNOWN or failed verification to Chris before another
   attempt; never retry the same configuration silently. Why: a per-item
   match fires on the first item and reads as finishing; a success-only
