@@ -1,157 +1,176 @@
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 // The failure signatures ADR 0003 rules a watch on a background job matches.
 const SIGNATURE = 'Traceback|Error|REJECTED|bad_alloc|Killed'
 const POLL_MS = 5000
-// How long a launch may go without `job-run` recording its pid before the
-// watch gives up and says so.
-const START_GRACE_MS = 60000
+// How long after a Bash call the mod keeps looking for a run that call
+// started: a job launched behind a slow step records itself late.
+const SCAN_WINDOW_MS = 120000
+// The post-call look for a new run, so the Bash result can say it is watched:
+// a background launch returns before `job-run` has written its pid.
+const ANNOUNCE_TRIES = 4
+const ANNOUNCE_GAP_MS = 250
 
-// One job this session launched. `pidBefore` is the pid file as it stood before
-// the launch: `job-run` reuses a name's directory, so until the file changes
-// everything in it belongs to the previous run.
-// `key` is where the store holds it, fixed at launch: a `/clear` changes the
-// session id under a running watch.
-type Watch = { name: string; key: string; pidBefore?: string; since: number; isStarted: boolean; isSignalled: boolean }
+// `job-run --status` exit codes (flow/bin/job-run).
+const FINISHED = 0
+const ALIVE = 10
+const KILLED = 11
+const NO_RUN = 12
 
-// The names a command starts runs under: `job-run --name <n> --` where a
-// command can start (the head, or after a separator), as
-// `wrap-background-jobs.sh` reads it. `--status` and `--wait` start nothing.
-const startedNames = (command: string): string[] =>
-  [...command.matchAll(/(?:^|[;&|\n])\s*job-run\s+--name\s+([A-Za-z0-9._-]+)\s+--(?=\s)/g)].map(m => m[1])
+// One run of a job this session started: `job-run` wrote this session's id to
+// the run directory's `session` file. A rerun under the same name has another
+// pid, so it is another run.
+type Run = { name: string; pid: string }
 
-// Module state: a reload starts it over, and `session.start` refills the
-// watches from the store. Launches are those seen at PreToolUse, waiting for
-// their Bash call to return.
-const launches = new Map<string, { watches: Watch[]; isBackground: boolean }>()
-const watches = new Map<string, Watch>()
+// Module state: a reload starts it over, and the next scan refills it from
+// the job directories, where the `woken-*` markers say what was already sent.
+const runs = new Map<string, Run>()
+const logged = new Set<string>()
 let timer: { cancel: () => void } | undefined
+let scanUntil = 0
 let isTicking = false
 
-const jobDir = async ($: any, name: string) => `${(await $.env.get('HOME')) ?? ''}/.cache/agent-jobs/${name}`
-const pidOf = async ($: any, name: string): Promise<string | undefined> => {
-  const text = await $.fs.read(`${await jobDir($, name)}/pid`).catch(() => undefined)
-  return typeof text === 'string' && text.trim() !== '' ? text.trim() : undefined
-}
-// `job-run --status`: 0 finished, 10 alive or starting, 11 killed, 12 no run.
-const statusOf = async ($: any, name: string): Promise<{ code: number; line: string }> => {
-  const run = await $.process.run(['job-run', '--status', name]).catch((err: unknown) => ({ exitCode: -1, stdout: String(err), stderr: '' }))
-  return { code: run.exitCode, line: (run.stdout || run.stderr).trim() }
-}
-const failureLine = async ($: any, name: string): Promise<string | undefined> => {
-  const run = await $.process.run(['grep', '-m1', '-E', SIGNATURE, `${await jobDir($, name)}/progress`]).catch(() => undefined)
-  return run !== undefined && run.exitCode === 0 ? run.stdout.trim() : undefined
+const jobsDir = async ($: EngineInterface) => `${(await $.env.get('HOME')) ?? ''}/.cache/agent-jobs`
+
+// Says a failure once: a tick repeats every few seconds.
+const logOnce = async ($: EngineInterface, text: string) => {
+  if (logged.has(text)) return
+  logged.add(text)
+  await $.ui.log(`job-wake: ${text}`)
 }
 
-const keep = async ($: any, w: Watch) => {
-  watches.set(w.name, w)
-  await $.store.set(w.key, w)
+const firstLine = async ($: EngineInterface, path: string): Promise<string | undefined> => {
+  const text = await $.fs.read(path).catch(() => undefined)
+  return typeof text === 'string' && text.trim() !== '' ? text.trim().split('\n')[0] : undefined
 }
-const drop = async ($: any, w: Watch) => {
-  watches.delete(w.name)
-  await $.store.delete(w.key)
-  if (watches.size === 0) {
-    timer?.cancel()
-    timer = undefined
+
+// A marker holds the pid of the run it was written for, so one left by an
+// earlier run under the same name does not count.
+const isMarked = async ($: EngineInterface, run: Run, marker: string) =>
+  (await firstLine($, `${await jobsDir($)}/${run.name}/${marker}`)) === run.pid
+const mark = async ($: EngineInterface, run: Run, marker: string) =>
+  $.fs.write(`${await jobsDir($)}/${run.name}/${marker}`, `${run.pid}\n`)
+
+// Finds this session's runs that have not had their end reported, and returns
+// the ones it had not seen before.
+const scan = async ($: EngineInterface): Promise<Run[]> => {
+  const dir = await jobsDir($)
+  const found = await $.process.run(['grep', '-rlx', '--include=session', '-e', await $.session.id(), dir])
+  // grep answers 1 for no match; anything else is a search that did not run.
+  if (found.exitCode !== 0 && found.exitCode !== 1) throw new Error(`could not list ${dir}: ${found.stderr.trim()}`)
+  const fresh: Run[] = []
+  for (const path of found.stdout.split('\n')) {
+    const name = /\/([^/]+)\/session$/.exec(path)?.[1]
+    if (name === undefined) continue
+    const pid = await firstLine($, `${dir}/${name}/pid`)
+    if (pid === undefined || runs.has(`${name}:${pid}`)) continue
+    const run = { name, pid }
+    if (await isMarked($, run, 'woken-end')) continue
+    runs.set(`${name}:${pid}`, run)
+    fresh.push(run)
   }
+  return fresh
 }
-const wake = async ($: any, w: Watch, status: string, matched?: string) => {
-  const lines = [`job-wake: job ${w.name}: ${status}`]
+
+const statusOf = async ($: EngineInterface, run: Run): Promise<{ code: number; line: string }> => {
+  const out = await $.process.run(['job-run', '--status', run.name])
+  return { code: out.exitCode, line: (out.stdout || out.stderr).trim() }
+}
+
+const failureLine = async ($: EngineInterface, run: Run): Promise<string | undefined> => {
+  const out = await $.process.run(['grep', '-m1', '-E', SIGNATURE, `${await jobsDir($)}/${run.name}/progress`])
+  if (out.exitCode === 0) return out.stdout.trim()
+  if (out.exitCode === 1) return undefined
+  throw new Error(`could not search ${run.name}'s progress: ${out.stderr.trim()}`)
+}
+
+// True when the prompt entered the session. A wake that did not is left
+// unmarked, so the next tick sends it again.
+const wake = async ($: EngineInterface, run: Run, status: string, matched?: string): Promise<boolean> => {
+  const lines = [`job-wake: job ${run.name}: ${status}`]
   if (matched !== undefined) lines.push(`matched line: ${matched}`)
-  lines.push(`progress: ${await jobDir($, w.name)}/progress`)
-  await $.prompt.submit({ text: lines.join('\n') })
+  lines.push(`progress: ${await jobsDir($)}/${run.name}/progress`)
+  const sent = await $.prompt.submit({ text: lines.join('\n') })
+  if (sent.drop === undefined) return true
+  await logOnce($, `the wake for ${run.name} did not enter the session (${sent.drop}); it will be sent again`)
+  return false
 }
 
-const check = async ($: any, w: Watch) => {
-  if (!w.isStarted) {
-    const pid = await pidOf($, w.name)
-    if (pid === undefined || pid === w.pidBefore) {
-      if ((await $.clock.now()) - w.since < START_GRACE_MS) return
-      await drop($, w)
-      return wake($, w, `never recorded a start within ${START_GRACE_MS / 1000} s of its launch; no longer watched`)
+const check = async ($: EngineInterface, run: Run) => {
+  const key = `${run.name}:${run.pid}`
+  // A rerun under this name replaced the run: its end can no longer be read.
+  if ((await firstLine($, `${await jobsDir($)}/${run.name}/pid`)) !== run.pid) return runs.delete(key)
+  const { code, line } = await statusOf($, run)
+  const hasEnded = code === FINISHED || code === KILLED
+  if (code === NO_RUN) return runs.delete(key)
+  if (!hasEnded && code !== ALIVE) throw new Error(`job-run --status ${run.name} exited ${code}: ${line}`)
+  const matched = (await isMarked($, run, 'woken-line')) ? undefined : await failureLine($, run)
+  if (!hasEnded && matched === undefined) return
+  const status = hasEnded ? line : 'still running, and its output matched a failure signature'
+  if (!(await wake($, run, status, matched))) return
+  if (matched !== undefined) await mark($, run, 'woken-line')
+  if (!hasEnded) return
+  await mark($, run, 'woken-end')
+  runs.delete(key)
+}
+
+const tick = async ($: EngineInterface) => {
+  if (isTicking) return
+  isTicking = true
+  try {
+    const now = await $.clock.now()
+    if (now < scanUntil) await scan($).catch(err => logOnce($, String((err as Error)?.message ?? err)))
+    for (const run of [...runs.values()]) await check($, run).catch(err => logOnce($, String((err as Error)?.message ?? err)))
+    if (runs.size === 0 && now >= scanUntil) {
+      timer?.cancel()
+      timer = undefined
     }
-    await keep($, { ...w, isStarted: true })
-    w = watches.get(w.name) as Watch
+  } finally {
+    isTicking = false
   }
-  const { code, line } = await statusOf($, w.name)
-  if (code === 10) {
-    if (w.isSignalled) return
-    const matched = await failureLine($, w.name)
-    if (matched === undefined) return
-    await keep($, { ...w, isSignalled: true })
-    return wake($, w, 'still running, and its output matched a failure signature', matched)
-  }
-  await drop($, w)
-  const matched = w.isSignalled ? undefined : await failureLine($, w.name)
-  if (code === 0 || code === 11) return wake($, w, line, matched)
-  return wake($, w, `its status could not be read (job-run --status exited ${code}: ${line}); no longer watched`, matched)
 }
 
-const arm = ($: any) => {
-  if (timer !== undefined || watches.size === 0) return
-  timer = $.clock.every(POLL_MS, () => {
-    if (isTicking) return
-    isTicking = true
-    void (async () => {
-      try {
-        for (const w of [...watches.values()]) await check($, w).catch(() => undefined)
-      } finally {
-        isTicking = false
-      }
-    })()
-  })
+const arm = ($: EngineInterface) => {
+  if (timer === undefined) timer = $.clock.every(POLL_MS, () => void tick($))
 }
 
 export const register: Register = on => {
-  // A reload drops the module's timers and variables; the store keeps the
-  // watches, so this session's are picked up again here.
+  // A reload, or a session picked up again, finds its unreported runs here.
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    const prefix = `watch:${await $.session.id()}:`
-    for (const key of await $.store.keys()) {
-      if (!key.startsWith(prefix)) continue
-      const w = (await $.store.get(key)) as Watch | undefined
-      if (w !== undefined && typeof w.name === 'string') watches.set(w.name, { ...w, key })
-    }
+    scanUntil = (await $.clock.now()) + SCAN_WINDOW_MS
     arm($)
-    return result
-  })
-
-  // The settings hooks run beneath this one, so `next(e)` answers with the
-  // rewrite `wrap-background-jobs.sh` made: the only place its job name shows.
-  on('classic.PreToolUse', { tool: 'Bash' }, async ($, e, next) => {
-    const result = await next(e)
-    if (result.deny !== undefined) return result
-    const input: any = result.updatedInput ?? e
-    const names = typeof input.command === 'string' ? startedNames(input.command) : []
-    if (names.length > 0) {
-      const since = await $.clock.now()
-      const session = await $.session.id()
-      const found: Watch[] = []
-      for (const name of names)
-        found.push({ name, key: `watch:${session}:${name}`, pidBefore: await pidOf($, name), since, isStarted: false, isSignalled: false })
-      launches.set(e.tool_use_id, { watches: found, isBackground: input.run_in_background === true })
-    }
     return result
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e)
-    const launch = launches.get(e.tool_use_id)
-    launches.delete(e.tool_use_id)
-    if (launch === undefined || result.deny !== undefined) return result
-    for (const w of launch.watches) {
-      const pid = await pidOf($, w.name)
-      const hasStarted = pid !== undefined && pid !== w.pidBefore
-      // A call that failed before `job-run` recorded a pid (a permission
-      // refusal, a settings hook's deny) started nothing to watch.
-      if (result.isError === true && !hasStarted) continue
+    if (result.deny !== undefined) return result
+    scanUntil = (await $.clock.now()) + SCAN_WINDOW_MS
+    arm($)
+    // Only a call that can have started a run is worth the short wait.
+    const mayLaunch = e.run_in_background === true || /job-run/.test(e.command)
+    let fresh: Run[] = []
+    for (let i = 0; i < (mayLaunch ? ANNOUNCE_TRIES : 1) && fresh.length === 0; i++) {
+      if (i > 0) await $.clock.sleep(ANNOUNCE_GAP_MS)
+      fresh = await scan($).catch(async err => {
+        await logOnce($, String((err as Error)?.message ?? err))
+        return []
+      })
+    }
+    const watched: string[] = []
+    for (const run of fresh) {
       // A foreground run that ended inside this call is in the result the
       // model is about to read; waking it again would say nothing new.
-      if (!launch.isBackground && hasStarted && (await statusOf($, w.name)).code === 0) continue
-      await keep($, w)
+      const hasEndedHere =
+        e.run_in_background !== true && [FINISHED, KILLED].includes((await statusOf($, run).catch(() => ({ code: ALIVE }))).code)
+      if (hasEndedHere) {
+        await mark($, run, 'woken-end')
+        runs.delete(`${run.name}:${run.pid}`)
+      } else watched.push(run.name)
     }
-    arm($)
-    return result
+    if (watched.length === 0) return result
+    const note = `job-wake: watching ${watched.join(', ')}; end the turn, and a prompt arrives when it ends or prints a failure line.`
+    return { ...result, context: [...(result.context ?? []), note] }
   })
 }

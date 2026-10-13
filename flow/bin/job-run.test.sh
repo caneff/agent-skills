@@ -39,6 +39,28 @@ grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z err$' "$prog" \
   && ok "stderr lands in progress, timestamped" \
   || no "stderr lands in progress, timestamped" "$(cat "$prog" 2>&1)"
 
+# --- a run records the session that started it -------------------------------
+# The job-wake mod finds a session's own jobs by this file, so a run started
+# outside any session leaves it empty rather than absent.
+CLAUDE_CODE_SESSION_ID=sess-1 "$job_run" --name owned -- true >/dev/null 2>&1
+[ "$(cat "$jobs_dir/owned/session" 2>&1)" = "sess-1" ] \
+  && ok "session records the launching session's id" \
+  || no "session records the launching session's id" "$(cat "$jobs_dir/owned/session" 2>&1)"
+env -u CLAUDE_CODE_SESSION_ID "$job_run" --name owned -- true >/dev/null 2>&1
+[ -e "$jobs_dir/owned/session" ] && [ -z "$(cat "$jobs_dir/owned/session")" ] \
+  && ok "a rerun outside a session empties the previous run's session" \
+  || no "a rerun outside a session empties the previous run's session" "$(cat "$jobs_dir/owned/session" 2>&1)"
+
+# A reused name starts over: the job finds its own session and none of the
+# previous run's output.
+mkdir -p "$jobs_dir/order"; echo "old line" > "$jobs_dir/order/progress"; echo "old-sess" > "$jobs_dir/order/session"
+CLAUDE_CODE_SESSION_ID=sess-2 "$job_run" --name order -- sh -c '
+  d="$HOME/.cache/agent-jobs/order"
+  printf "pid=%s session=%s progress=%s\n" "$(cat "$d/pid")" "$(cat "$d/session")" "$(grep -c "old line" "$d/progress")"' > "$tmp/order.out" 2>&1
+grep -qE '^pid=[0-9]+ session=sess-2 progress=0$' "$tmp/order.out" \
+  && ok "the job sees its own session and an emptied progress" \
+  || no "the job sees its own session and an emptied progress" "$(cat "$tmp/order.out")"
+
 # --- a missing --name is an error and creates nothing ------------------------
 rm -rf "$jobs_dir"
 out=$("$job_run" -- true 2>&1); rc=$?

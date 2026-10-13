@@ -52,20 +52,61 @@ The pane, second job:
 
 The debug log stamps that `$.prompt.submit` at `14:57:23.899Z`.
 
+## Second check, after the review round
+
+The review wave found that reading the launch out of the command missed
+ordinary spellings (`nohup`, a quoted or computed name, a path-qualified
+`job-run`). The mod was rebuilt: `job-run` writes `$CLAUDE_CODE_SESSION_ID`
+to the run directory's `session` file, and the mod watches the runs whose
+file holds its own `$.session.id()`. The first check above ran the older
+build. This one ran the rebuilt mod, in a new herdr tab whose `PATH` put the
+worktree's `flow/bin` first, in manual permission mode.
+
+**The two ids are the same value.** The run directory's `session` file read
+`937b303e-a0f7-4333-891e-9a18ff26d15c`, and the mod found the run by its own
+session id.
+
+| Job | How it was started | What happened |
+|---|---|---|
+| `live2-1927686`: `sleep 8; echo Traceback demo; sleep 20; exit 3` | foreground, `nohup job-run --name "live2-$$" -- … &` | the Bash result carried `job-wake: watching live2-1927686`; one prompt on the failure line while it ran; one prompt on its end, with no matched line repeated |
+| `sleep 12`, renamed `sleep-wk5X8D9r` by the guard | `run_in_background: true`, in a third session in auto mode | the Bash result carried `job-wake: watching sleep-wk5X8D9r`; the harness notice came first, then the mod's prompt with `finished sleep-wk5X8D9r rc=0` |
+| `live2-dialog`: `sleep 6; exit 0` | the same form, followed at once by a second command that raised a permission dialog | the job ended while the session sat on the dialog; the mod's `$.prompt.submit` is stamped `15:20:03.862Z` in the debug log, the same second the job ended; the prompt ran as its own turn after the dialog was answered and the turn ended, once |
+
+The pane, first job:
+
+```
+● The job launched with no error output. The only job-wake line in the tool context is:
+  job-wake: watching live2-1927686; end the turn, and a prompt arrives when it ends or prints a failure line.
+› Prompt from the job-wake plugin
+❯ The job-wake plugin sent a message:
+  job-wake: job live2-1927686: still running, and its output matched a failure signature
+  matched line: 2026-10-13T15:19:23Z Traceback demo
+  progress: /home/caneff/.cache/agent-jobs/live2-1927686/progress
+› Prompt from the job-wake plugin
+❯ job-wake: job live2-1927686: finished live2-1927686 rc=3 cause=exit ended=2026-10-13T15:19:43Z
+  progress: /home/caneff/.cache/agent-jobs/live2-1927686/progress
+```
+
+Afterwards the `live2-*` run directories each held a `woken-end` file with
+the run's pid, and the first a `woken-line` file as well.
+
+One thing the dialog case showed: `$.prompt.submit` does not resolve until
+its turn starts, so the mod's poll waits on it. While a wake is queued behind
+a running turn, no other job of that session is polled. They are polled
+again once the turn ends.
+
 ## Not covered
 
-- A session parked on a permission dialog when the job ends.
 - A session idle for hours; the longest wait here was 25 s.
 - `claude -p` and SDK hosts.
-- A failure line while the job is still running. The second job printed its
-  line and exited within one poll, so the line arrived with the exit. The
-  mid-run case is covered by the mod's tests only.
-- A reload or a restart between the launch and the job's end. The mod keeps
-  its watches in `$.store`; only its tests exercise picking them up.
+- A reload or a restart between the launch and the job's end. The mod
+  rebuilds its list from the run directories; only its tests exercise that.
+- Whether a resumed session keeps its session id. If it does not, the
+  resumed session does not find the runs the earlier one started.
 
 ## Cleanup
 
-`/exit` ended the session and `herdr tab close` closed the tab. A process
-listing afterwards showed no `claude --plugin-dir` process. The two job
+`/exit` ended each session and `herdr tab close` closed each tab. A process
+listing afterwards showed no `claude --plugin-dir` process. The five job
 directories under `~/.cache/agent-jobs/` are left for `job-run`'s 14-day
 prune.

@@ -34,7 +34,11 @@ when a job exits or its output matches a failure signature
   from 2026-10-11, and nothing was before that.
 - The mod is `flow/mods/job-wake/` (#1371). The section now names it, and keeps
   `job-run --wait` for a session the mod is not loaded in.
+- The rule the Context quotes from `Memory/RULES.md` has since moved to
+  `flow/claude/CLAUDE.md` § Work.
+- `job-run` records the session that started each run, in the run
+  directory's `session` file, which is how the mod knows a job is its own.
 - Unverified when ruled: whether a mod's `$.prompt.submit` wakes an idle
   session. It does: `docs/research/2026-10-12-mod-wakes-idle-session.md`
-  (#1367), and in a herdr pane
-  `docs/research/2026-10-13-job-wake-live-check.md`.
+  (#1367), and in a herdr pane, including a session parked on a permission
+  dialog, `docs/research/2026-10-13-job-wake-live-check.md`.
