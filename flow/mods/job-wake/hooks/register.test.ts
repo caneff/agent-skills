@@ -27,7 +27,7 @@ const world = (on: any) => {
   const wakes: string[] = []
   const logs: string[] = []
   const faults = { statusThrows: false, progressGrepCode: undefined as number | undefined, drop: undefined as string | undefined }
-  const tool: { run: () => void } = { run: () => {} }
+  const tool: { run: () => void; deny?: string } = { run: () => {} }
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/home/test' })
   on('session.id', () => ({ value: ME }))
@@ -78,7 +78,7 @@ const world = (on: any) => {
   })
   on('tool.call', { tool: 'Bash' }, () => {
     tool.run()
-    return { result: 'ran' }
+    return tool.deny === undefined ? { result: 'ran' } : { deny: tool.deny }
   })
   return { jobs, at, wakes, logs, faults, clock, tool }
 }
@@ -348,4 +348,16 @@ test('a watched run whose directory is gone is dropped without a wake or a log',
   await w.clock.advance(POLL * 3)
   expect(w.wakes).toEqual([])
   expect(w.logs).toEqual([])
+})
+
+test('a refused Bash call is handed back as refused, and a run found beside it is still watched', async ($, on) => {
+  const w = world(on)
+  w.tool.deny = 'withheld'
+  const answer = await bash($, w, START, () => {
+    w.jobs.hunt = job('100', DONE)
+  })
+  expect(answer.deny).toBe('withheld')
+  expect(answer.context).toBe(undefined)
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
 })

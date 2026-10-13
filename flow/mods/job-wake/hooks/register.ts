@@ -145,7 +145,6 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e)
-    if (result.deny !== undefined) return result
     scanUntil = (await $.clock.now()) + SCAN_WINDOW_MS
     arm($)
     // Only a call that can have started a run is worth the short wait.
@@ -169,7 +168,8 @@ export const register: Register = on => {
         runs.delete(`${run.name}:${run.pid}`)
       } else watched.push(run.name)
     }
-    if (watched.length === 0) return result
+    // A refused call has no result to add the note to; its runs are watched all the same.
+    if (watched.length === 0 || result.deny !== undefined) return result
     const note = `job-wake: watching ${watched.join(', ')}; end the turn, and a prompt arrives when it ends or prints a failure line.`
     return { ...result, context: [...(result.context ?? []), note] }
   })
