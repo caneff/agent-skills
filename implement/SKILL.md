@@ -277,6 +277,20 @@ No PR and no reviewer; Chris reads the log after.
   report it as a follow-up. Why: an unasked fix widens the diff past what the
   reviewers check against the ticket. A finding of the review wave is not one: the
   review step (§ Review) fixes every valid finding in this PR, whatever its size.
+- **Fanning out parallel sub-workers into this workspace** (#1550): render each
+  worker's brief, never hand-type one:
+
+  ```
+  python3 ~/.agents/skills/implement/fanout-brief.py --repo <repo> --worktree <this workspace> \
+    --ticket <n> --for <worker> --test-command "<covering test>" \
+    --assign <worker>=<file>,<file> --assign <other>=<file> ...
+  ```
+
+  Every worker's `--assign` is passed on every render, so each brief names the
+  whole split. It prints one line; send that line to `Agent` unedited, with
+  `model`. It refuses a file owned by two workers and a worker owning none. The
+  skeleton it reads (`briefs/fanout-worker.md`) holds the no-git-write,
+  no-subagent, scratch-copy mutation and report rules once.
 - Typecheck and run only the tests for the files you touch as you go; no
   suite run at the end of the build. A ticket's one suite run is § Review
   step 3's, after the fix round. Why: a failure caught at the file it came
