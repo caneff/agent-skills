@@ -18,12 +18,13 @@ The no-git-write, no-subagent and mutation rules and the report shape live in
 `briefs/fanout-worker.md`, read here, never retyped.
 
 Exit 0 and the dispatch line on stdout; 2 on a bad input, with nothing written
-and nothing on stdout: a worktree that is not a directory, a worker with no
-files, a file owned by two workers, a `--for` worker that was not assigned, a
+and nothing on stdout: a worktree that is not a directory, an empty test command, fewer than two
+workers, a worker with no files, a file (or a directory holding it) owned by two workers, a `--for` worker that was not assigned, a
 malformed `--assign`.
 """
 import argparse
 import os
+import posixpath
 import re
 import sys
 
@@ -36,9 +37,15 @@ class BadInput(Exception):
     pass
 
 
+def overlaps(p, q):
+    """Whether paths `p` and `q` name one file: equal, or one a directory holding the other."""
+    return p == q or q.startswith(p + "/") or p.startswith(q + "/")
+
+
 def parse_assignments(specs):
-    """{worker: [files]} in the order given; refuses a malformed, empty or overlapping split."""
-    owners, owner_of = {}, {}
+    """{worker: [files]} in the order given, each path normalized; refuses a malformed, empty,
+    overlapping or one-worker split."""
+    owners = {}
     for spec in specs:
         name, sep, rest = spec.partition("=")
         name = name.strip()
@@ -46,20 +53,25 @@ def parse_assignments(specs):
             raise BadInput(f"--assign {spec!r} is not <worker>=<file>[,<file>...]")
         if name in owners:
             raise BadInput(f"worker {name} is assigned twice")
-        files = [f.strip() for f in rest.split(",") if f.strip()]
+        files = list(dict.fromkeys(posixpath.normpath(f.strip()) for f in rest.split(",") if f.strip()))
         if not files:
             raise BadInput(f"worker {name} owns no files")
-        for f in files:
-            if f in owner_of:
-                raise BadInput(f"{f} is owned by both {owner_of[f]} and {name}")
-            owner_of[f] = name
+        for other, theirs in owners.items():
+            for f in files:
+                for g in theirs:
+                    if overlaps(f, g):
+                        raise BadInput(f"{f} is owned by both {other} and {name}" + ("" if f == g else f" (as {g})"))
         owners[name] = files
+    if len(owners) < 2:
+        raise BadInput("a fan-out needs at least two workers: pass every worker's --assign, not only this one's")
     return owners
 
 
 def render(a, owners):
     if not os.path.isdir(a.worktree):
         raise BadInput(f"worktree {a.worktree} is not a directory")
+    if not a.test_command.strip():
+        raise BadInput("the test command is empty")
     if a.worker not in owners:
         raise BadInput(f"--for {a.worker}: not among the assigned workers ({', '.join(owners)})")
     with open(os.path.join(HERE, "briefs", "fanout-worker.md")) as fh:
@@ -71,30 +83,16 @@ def render(a, owners):
         f"# Sub-worker `{a.worker}` for #{a.ticket} in {a.repo}",
         f"You are one of {len(owners)} workers editing one shared worktree in parallel. You own the files below and nothing else.",
         f"- Worktree: {a.worktree}\n- Ticket: #{a.ticket}",
-        "Your files:\n" + bullets(mine, "- none"),
-        "## Off limits (owned by the other workers)\n" + bullets(others, "- none: you are the only worker"),
+        "Your files:\n" + bullets(mine, ""),
+        "## Off limits (owned by the other workers)\n" + bullets(others, ""),
         f"## Covering test\n`{a.test_command}`",
-        skeleton,
+        skeleton.replace("{worktree}", a.worktree),
     ]) + "\n"
 
 
 def write_brief(text, repo, ticket, worker):
-    """Write `text` to a file of `repo`'s (folded) review cache no earlier render holds and return its
-    path. `O_EXCL` is the never-overwrite: a taken name moves on to `-2`, `-3`."""
-    directory = review_ledger.REVIEWS_ROOT / repo
-    directory.mkdir(parents=True, exist_ok=True)
-    safe = lambda s: re.sub(r"[^A-Za-z0-9._-]", "-", s)  # noqa: E731
-    stem, k = f"fanout-{safe(ticket)}-{safe(worker)}", 1
-    while True:
-        path = directory / (f"{stem}.md" if k == 1 else f"{stem}-{k}.md")
-        try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-        except FileExistsError:
-            k += 1
-            continue
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-        return path
+    """Write `text` to the review cache's `fanout-<ticket>-<worker>[-<n>].md`, never over an earlier render."""
+    return review_ledger.write_cache_file(repo, f"fanout-{ticket}-{worker}", text)
 
 
 def main(argv):
@@ -107,6 +105,10 @@ def main(argv):
     p.add_argument("--assign", action="append", default=[], required=True)
     a = p.parse_args(argv)
     a.repo = review_ledger.fold_repo(a.repo)
+    a.worktree = os.path.abspath(a.worktree)
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", a.repo):
+        print(f"fanout-brief: repo {a.repo!r} is not a plain name", file=sys.stderr)
+        return 2
     try:
         text = render(a, parse_assignments(a.assign))
         path = write_brief(text, a.repo, a.ticket, a.worker)

@@ -288,7 +288,8 @@ No PR and no reviewer; Chris reads the log after.
 
   Every worker's `--assign` is passed on every render, so each brief names the
   whole split. It prints one line; send that line to `Agent` unedited, with
-  `model`. It refuses a file owned by two workers and a worker owning none. The
+  `model`. It refuses a file owned by two workers (a directory counts for the files
+  under it), a worker owning none, and a split of fewer than two workers. The
   skeleton it reads (`briefs/fanout-worker.md`) holds the no-git-write,
   no-subagent, scratch-copy mutation and report rules once.
 - Typecheck and run only the tests for the files you touch as you go; no

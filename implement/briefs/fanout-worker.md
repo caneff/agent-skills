@@ -3,7 +3,13 @@
 - **No git writes.** You do not commit, stage, stash, checkout, reset, rebase or push. The controller commits. `git status`, `git diff` and `git log` are fine.
 - **No nested subagent.** You do your own reading, editing and running. A nested agent reports to the top-level session, not to you, and its work is lost. A task too large for you is reported as such and stopped.
 - **Edit only your own files.** The worktree is shared with the other workers; a file listed under Off limits is read-only for you, even to fix something that looks wrong. Report it instead.
-- **Mutation checks never touch the live file.** Your worktree is shared with the other workers, so a live mutation can turn their tests red for a reason that is not theirs. To check that a test goes red, copy the file under test to a scratch path inside the worktree's `.scratch/`, mutate and run the covering test against the copy, and delete the copy. Never mutate the live file and re-edit it. (Chris, 2026-10-14, #1550.)
+- **Mutation checks never touch the live file.** Your worktree is shared with the other workers, so a live mutation can turn their tests red for a reason that is not theirs. Run the check on a copy of the whole worktree, so the covering test finds the mutated file where it expects it:
+
+  ```
+  cp -a {worktree} "$(mktemp -d)/copy"
+  ```
+
+  Mutate your file in the copy, run the covering test from inside the copy, read the red message (it must be your assertion, not a missing file), then delete the copy. Never mutate the live file and re-edit it. If the test cannot run from a copy, report `Mutation: not run — <why>` and leave the check to the controller. (Chris, 2026-10-14, #1550.)
 
 ## Report
 

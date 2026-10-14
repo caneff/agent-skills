@@ -28,8 +28,8 @@ def wt(tmp_path):
     return str(path)
 
 
-def run(wt, *assigns, worker="alpha", ticket="1550", test_command=TEST_COMMAND):
-    args = ["python3", RENDER, "--repo", "skills", "--worktree", wt, "--ticket", ticket,
+def run(wt, *assigns, worker="alpha", ticket="1550", test_command=TEST_COMMAND, repo="skills"):
+    args = ["python3", RENDER, "--repo", repo, "--worktree", wt, "--ticket", ticket,
             "--for", worker, "--test-command", test_command]
     for a in assigns:
         args += ["--assign", a]
@@ -76,7 +76,7 @@ def test_a_worker_with_no_files_is_refused(wt):
 
 
 def test_the_worker_must_be_one_of_the_assigned(wt):
-    code, out, err = run(wt, "alpha=a.py", worker="gamma")
+    code, out, err = run(wt, "alpha=a.py", "beta=c.py", worker="gamma")
     assert code == 2 and out == "", (code, out)
     assert "gamma" in err, err
 
@@ -88,3 +88,57 @@ def test_a_second_render_for_the_same_ticket_and_worker_does_not_overwrite_the_f
     t2, p2 = brief_at(second)
     assert p1 != p2, (p1, p2)
     assert "z.py" not in open(p1).read() and "z.py" in t2
+
+
+def refused(wt, *assigns, **kw):
+    code, out, err = run(wt, *assigns, **kw)
+    assert code == 2 and out == "", (code, out, err)
+    return err
+
+
+def test_a_split_with_one_worker_is_refused(wt):
+    assert "two workers" in refused(wt, "alpha=a.py")
+
+
+def test_an_empty_test_command_is_refused(wt):
+    assert "test command" in refused(wt, "alpha=a.py", "beta=c.py", test_command="  ")
+
+
+def test_the_mutation_rule_names_how_to_point_the_test_at_the_copy(wt):
+    _, out, _ = run(wt, "alpha=a.py", "beta=c.py")
+    text, _ = brief_at(out)
+    assert f'cp -a {wt} "$(mktemp -d)/copy"' in text, text
+    assert "not run" in text, text
+
+
+def test_a_dot_slash_spelling_of_a_file_is_the_same_file(wt):
+    err = refused(wt, "alpha=./a.py", "beta=a.py")
+    assert "a.py" in err and "alpha" in err and "beta" in err, err
+
+
+def test_a_directory_owner_overlaps_a_file_beneath_it(wt):
+    err = refused(wt, "alpha=implement/", "beta=implement/x.py")
+    assert "implement" in err and "alpha" in err and "beta" in err, err
+
+
+def test_a_file_listed_twice_by_one_worker_is_listed_once(wt):
+    code, out, err = run(wt, "alpha=a.py,a.py", "beta=c.py")
+    assert code == 0, err
+    text, _ = brief_at(out)
+    assert text.count("- `a.py`") == 1, text
+
+
+def test_a_worktree_that_is_not_a_directory_is_refused(wt):
+    assert "not a directory" in refused(wt + "/missing", "alpha=a.py", "beta=c.py")
+
+
+def test_a_worker_assigned_twice_is_refused(wt):
+    assert "assigned twice" in refused(wt, "alpha=a.py", "alpha=b.py", "beta=c.py")
+
+
+def test_a_malformed_assign_is_refused(wt):
+    assert "<worker>=<file>" in refused(wt, "alpha", "beta=c.py")
+
+
+def test_a_repo_that_would_leave_the_cache_is_refused(wt):
+    assert "repo" in refused(wt, "alpha=a.py", "beta=c.py", repo="/abs/outside")
