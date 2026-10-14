@@ -2443,6 +2443,23 @@ fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
 }
 
 #[test]
+fn a_slice_is_heavy_even_when_it_carries_the_documentation_label() {
+    // #1542 (a): light tier pushes to the default branch with no PR, the
+    // wrong shape for a slice whatever its label says.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_spec_branch(&repo, "spec-500");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500"), ("GH_LABELS", "documentation,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let prompt = prompt_line(&f);
+    assert!(prompt.contains("/implement 395 --tier heavy "), "{prompt}");
+    assert!(!prompt.contains("--tier light"), "{prompt}");
+    assert!(out_text(&out).contains("heavy tier"), "{}", out_text(&out));
+}
+
+#[test]
 fn a_lone_ticket_dispatches_from_origin_default_even_with_a_spec_branch_on_origin() {
     let f = Fixture::new();
     f.reset_home(true);

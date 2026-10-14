@@ -154,6 +154,46 @@ def test_counts_names_a_closed_clump_as_skipped_rather_than_refusing_it(root, re
             "#1262 (nested spec run)") in got.stdout, got.stdout
 
 
+def test_spec_counts_read_the_specs_one_sidecar_and_need_none_per_slice(root, reviews):
+    # #1542 (c): a slice runs no review wave, so it has no sidecar; the
+    # spec's own `dispositions-<spec>.jsonl` is the only record.
+    runfile.start("burn-s", slots=2, root=root, repo=REPO)
+    runfile.clump("burn-s", [901], "/w/a", "agent-a", root=root)
+    runfile.clump("burn-s", [902], "/w/b", "agent-b", root=root)
+    runfile.land("burn-s", 901, "abc1234", root=root)
+    runfile.land("burn-s", 902, "def5678", root=root)
+    write_sidecar(reviews, 500, [
+        {"id": "S1", "outcome": "fixed", "sha": "a"},
+        {"id": "C1", "outcome": "moved", "ticket": 5},
+        {"id": "P1", "outcome": "disputed", "reason": "x"},
+    ])
+    got = cli(root, "burn-s", "--reviews-dir", reviews, "--spec", "500")
+    assert got.returncode == 0, got.stderr
+    assert "fixed: 1  moved: 1" in got.stdout, got.stdout
+
+
+def test_spec_counts_still_refuse_when_the_specs_own_sidecar_is_missing(root, reviews):
+    runfile.start("burn-t", slots=1, root=root, repo=REPO)
+    runfile.clump("burn-t", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-t", 901, "abc1234", root=root)
+    # A slice's own sidecar must not stand in for the spec's.
+    write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
+    got = cli(root, "burn-t", "--reviews-dir", reviews, "--spec", "500")
+    assert got.returncode == 1, got
+    assert "#500" in got.stderr and "refused" in got.stderr, got.stderr
+
+
+def test_spec_counts_do_not_double_count_a_slices_stray_sidecar(root, reviews):
+    runfile.start("burn-u", slots=1, root=root, repo=REPO)
+    runfile.clump("burn-u", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-u", 901, "abc1234", root=root)
+    write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
+    write_sidecar(reviews, 500, [])
+    got = cli(root, "burn-u", "--reviews-dir", reviews, "--spec", "500")
+    assert got.returncode == 0, got.stderr
+    assert "fixed: 0  moved: 0" in got.stdout, got.stdout
+
+
 def test_cli_counts_prints_fixed_and_moved(root, reviews):
     runfile.start("burn-f", slots=1, root=root, repo=REPO)
     runfile.clump("burn-f", [901], "/w/a", "agent-a", root=root)

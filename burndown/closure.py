@@ -420,6 +420,11 @@ ANNOUNCEMENTS = {
 }
 
 
+# Appended to the announcement under `--one-each`, so the opening report
+# cannot read a per-ticket clumping as the mode's own.
+ONE_EACH_NOTE = "; one clump per ticket (--one-each: a spec run's slices)"
+
+
 def mode(decl):
     """Which of the three answers this repo gave: a declared directive, a
     stated `None`, or silence."""
@@ -498,7 +503,7 @@ def split(family, closures):
             any(len(g) > MAX_CLUMP for g in same.values()))
 
 
-def clumps(root, candidates, decl=None):
+def clumps(root, candidates, decl=None, one_each=False):
     """`(candidates) -> families`: one family per connected component of the
     collision graph over the candidates' closures, and inside each family its
     clumps.
@@ -516,6 +521,11 @@ def clumps(root, candidates, decl=None):
 
     The whole queue is resolved against one repo scan, not one per
     candidate: that scan is the entire reason the declaration exists.
+
+    `one_each` makes every candidate its own clump, in every mode, with the
+    files and closure it resolved to (#1542): a spec run's slices are ordered
+    by their blocked-by edges, and `loop.py dispatch`'s file hold stays the
+    guard between two that touch one file.
     """
     decl = decl if decl is not None else declaration(root)
     how = mode(decl)
@@ -546,13 +556,18 @@ def clumps(root, candidates, decl=None):
 
     families = []
     for family in components(list(candidates), collides):
-        parts, capped = (([family], False) if how == "subtree"
-                         else split(family, closures))
+        if one_each:
+            parts, capped = [[n] for n in sorted(family)], False
+        else:
+            parts, capped = (([family], False) if how == "subtree"
+                             else split(family, closures))
         families.append({"tickets": family,
                          "clumps": [clump(p) for p in parts],
                          "capped": capped})
-    return {"mode": how, "announcement": announcement(decl),
-            "families": families}
+    line = announcement(decl)
+    if one_each:
+        line += ONE_EACH_NOTE
+    return {"mode": how, "announcement": line, "families": families}
 
 
 def clump_list(clumping):
@@ -598,14 +613,16 @@ def main(argv):
     # and the announcement to stderr, so a redirect to the candidates file
     # does not take the line the opening report carries with it.
     as_json = "--json" in argv[1:]
-    argv = [a for a in argv if a != "--json"]
+    one_each = "--one-each" in argv[1:]
+    argv = [a for a in argv if a not in ("--json", "--one-each")]
     if len(argv) < 3:
-        print("usage: closure.py [--json] <repo-root> <n>=<path>[,<path>]...",
+        print("usage: closure.py [--json] [--one-each] <repo-root> "
+              "<n>=<path>[,<path>]...",
               file=sys.stderr)
         return 2
     try:
         candidates = [parse_candidate(spec) for spec in argv[2:]]
-        clumping = clumps(argv[1], candidates)
+        clumping = clumps(argv[1], candidates, one_each=one_each)
         if as_json:
             print(clumping["announcement"], file=sys.stderr)
             print(json.dumps(clump_list(clumping), indent=2))

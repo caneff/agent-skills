@@ -8,6 +8,7 @@ Every case is a fixture repo written under pytest's `tmp_path`: a declaration
 in `AGENTS.md` and a few files that include each other. Nothing here runs a
 generator, because nothing in the resolver may.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -281,6 +282,41 @@ def test_a_repo_declaring_nothing_clumps_by_directory_subtree(repo):
                           candidate(3, "b/three.js")])
     assert got["mode"] == "subtree", got
     assert numbers(got) == [[1, 2], [3]], got
+
+
+def test_one_each_makes_every_candidate_its_own_clump_in_every_mode(repo):
+    # #1542 (d): a spec's slices are ordered by blocked-by edges, so two that
+    # share a directory are still two clumps, each with its own files.
+    root = repo({"a/one.js": "x\n", "a/two.js": "x\n"}, agents=None)
+    got = C.clumps(root, [candidate(1, "a/one.js"), candidate(2, "a/two.js")],
+                   one_each=True)
+    assert numbers(got) == [[1], [2]], got
+    assert [c["files"] for c in C.clump_list(got)] == [["a/one.js"], ["a/two.js"]]
+
+
+def test_one_each_splits_identical_closures_too(repo):
+    root = repo(SHARED)
+    both = [candidate(451, "examples/_shared/line-kind.js"),
+            candidate(452, "examples/_shared/line-kind.js")]
+    assert numbers(C.clumps(root, both)) == [[451, 452]]
+    assert numbers(C.clumps(root, both, one_each=True)) == [[451], [452]]
+
+
+def test_one_each_is_announced_so_the_report_says_the_clumping_was_not_closure(repo):
+    root = repo({"a/one.js": "x\n"}, agents=None)
+    got = C.clumps(root, [candidate(1, "a/one.js")], one_each=True)
+    assert "one clump per ticket" in got["announcement"], got
+    plain = C.clumps(root, [candidate(1, "a/one.js")])
+    assert "one clump per ticket" not in plain["announcement"], plain
+
+
+def test_the_cli_takes_one_each_and_prints_one_clump_per_candidate(repo):
+    root = repo({"a/one.js": "x\n", "a/two.js": "x\n"}, agents=None)
+    out = subprocess.run(
+        [sys.executable, CLOSURE, "--json", "--one-each", root,
+         "1=a/one.js", "2=a/two.js"], capture_output=True, text=True, check=True)
+    assert [c["tickets"] for c in json.loads(out.stdout)] == [[1], [2]], out.stdout
+    assert "one clump per ticket" in out.stderr, out.stderr
 
 
 def test_a_parent_directory_contains_its_subtree(repo):
