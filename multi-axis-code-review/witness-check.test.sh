@@ -710,23 +710,51 @@ unset target
 # days, deregistering its linked worktrees with `git worktree remove`, not `rm`.
 # A younger one (maybe a live run) and a non-witness entry stay.
 prune_home="$home/.cache/agent-reviews/skills"
-mkdir -p "$prune_home/witness.OLD001/worktrees" "$prune_home/witness.NEW001/worktrees" "$prune_home/keep.OLD001"
+mkdir -p "$prune_home/witness.OLD001/worktrees" "$prune_home/witness.MID001/worktrees" \
+  "$prune_home/witness.NEW001/worktrees" "$prune_home/witness.GONE01/worktrees/orphan" "$prune_home/keep.OLD001"
 git -C "$repo" worktree add --detach -q "$prune_home/witness.OLD001/worktrees/stale" HEAD
+git -C "$repo" worktree add --detach -q "$prune_home/witness.MID001/worktrees/mid" HEAD
 git -C "$repo" worktree add --detach -q "$prune_home/witness.NEW001/worktrees/live" HEAD
-touch -d '8 days ago' "$prune_home/witness.OLD001" "$prune_home/keep.OLD001"
+touch -d '8 days ago' "$prune_home/witness.OLD001" "$prune_home/keep.OLD001" "$prune_home/witness.GONE01"
+touch -d '180 hours ago' "$prune_home/witness.MID001"
 touch -d '6 days ago' "$prune_home/witness.NEW001"
 substitute 'pr1' ': >"$3"; exit 1' >"$scratch/launcher-prune.sh"
 ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-prune.sh" ) >"$scratch/prune.out" 2>&1 || true
-[ ! -e "$prune_home/witness.OLD001" ] ||
-  { echo "FAIL: a witness.* directory older than 7 days was not pruned" >&2; cat "$scratch/prune.out" >&2; fail=1; }
-git -C "$repo" worktree list --porcelain | grep -q "witness.OLD001" &&
-  { echo "FAIL: the pruned witness's worktree is still registered" >&2; fail=1; }
+for d in OLD001 MID001 GONE01; do
+  [ ! -e "$prune_home/witness.$d" ] ||
+    { echo "FAIL: witness.$d (older than 7 days; GONE01 holds a directory git does not list) was not pruned" >&2; cat "$scratch/prune.out" >&2; fail=1; }
+done
+git -C "$repo" worktree list --porcelain | grep -q 'witness\.\(OLD001\|MID001\)' &&
+  { echo "FAIL: a pruned witness's worktree is still registered" >&2; fail=1; }
 [ -d "$prune_home/witness.NEW001" ] ||
   { echo "FAIL: a witness.* directory under 7 days old was pruned" >&2; fail=1; }
 [ -d "$prune_home/keep.OLD001" ] ||
   { echo "FAIL: the prune removed an entry that is not a witness.* directory" >&2; fail=1; }
 git -C "$repo" worktree remove --force "$prune_home/witness.NEW001/worktrees/live" 2>/dev/null
 rm -rf "$prune_home/witness.NEW001" "$prune_home/keep.OLD001"
+
+# A prune that cannot remove a worktree keeps its directory, says so, and still
+# runs the review: a git shim refuses `worktree remove` on the stale root.
+mkdir -p "$prune_home/witness.STUCK1/worktrees"
+git -C "$repo" worktree add --detach -q "$prune_home/witness.STUCK1/worktrees/stuck" HEAD
+touch -d '8 days ago' "$prune_home/witness.STUCK1"
+mkdir -p "$scratch/bin-gitfail"
+cat >"$scratch/bin-gitfail/git" <<GITSHIM
+#!/usr/bin/env bash
+case "\$*" in *"worktree remove"*witness.STUCK1*) echo "git: refused (stub)" >&2; exit 1;; esac
+exec "$real_git" "\$@"
+GITSHIM
+chmod +x "$scratch/bin-gitfail/git"
+substitute 'pr2' ': >"$3"; exit 1' >"$scratch/launcher-stuck.sh"
+( cd "$repo" && HOME="$home" PATH="$scratch/bin-gitfail:$scratch/bin:$PATH" bash "$scratch/launcher-stuck.sh" ) >"$scratch/stuck.out" 2>&1 || true
+[ -d "$prune_home/witness.STUCK1" ] ||
+  { echo "FAIL: a prune whose worktree removal failed deleted the directory anyway" >&2; fail=1; }
+grep -q 'could not prune .*witness.STUCK1' "$scratch/stuck.out" ||
+  { echo "FAIL: a failed prune was not reported" >&2; cat "$scratch/stuck.out" >&2; fail=1; }
+grep -q 'pr2: red' "$scratch/stuck.out" ||
+  { echo "FAIL: a failed prune stopped the review" >&2; cat "$scratch/stuck.out" >&2; fail=1; }
+git -C "$repo" worktree remove --force "$prune_home/witness.STUCK1/worktrees/stuck" 2>/dev/null
+rm -rf "$prune_home/witness.STUCK1"
 
 # The two argument guards are refused by name before any worktree exists.
 mf="$scratch/mutate-def-guards.sh"; printf 'mutate() { :; }\n' >"$mf"
