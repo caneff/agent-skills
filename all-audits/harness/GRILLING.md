@@ -56,13 +56,13 @@ When the walk is done, send **one reply** carrying:
 1. the contested questions, numbered, each with a recommendation;
 2. **Calls I applied without asking** — a short list of the close calls the
    agent decided that were reversible, so the user can overrule any one;
-3. the spec and ticket draft (§ Land one spec for the whole sweep, step 1),
+3. the specs and ticket drafts (§ Land one spec per area, step 1),
    written as if every recommendation in item 1 were taken.
 
-That reply is the single confirmation gate of § Land one spec for the whole
-sweep, step 2, unchanged. An answer that differs from a recommendation, or
+That reply is the single confirmation gate of § Land one spec per area,
+step 2, unchanged. An answer that differs from a recommendation, or
 an overrule of an applied call, is a change to the draft: apply it, then show
-the redrafted spec and tickets again before anything is filed. An answer
+the redrafted specs and tickets again before anything is filed. An answer
 that makes a finding a DROP writes its ignore entry right then. An overrule
 that turns a written DROP into an ACT deletes that entry, and its ADR if it
 got one (`IGNORE-FILE.md` § Reversing a rejection) — otherwise every later
@@ -122,7 +122,7 @@ opt-in step outside this workflow.
 decided DROP, append it to the audited repo's `.audit-ignore.md` right then —
 don't wait for the sweep to finish grilling. One entry per rejection, in the
 format `harness/IGNORE-FILE.md` defines (finding, reason, date, audit). This
-is independent of whether the spec below ever gets approved: a rejection is
+is independent of whether any spec below ever gets approved: a rejection is
 real the moment it's decided, and a session that ends mid-sweep must not lose
 the DROPs it already made. A DROP that is a standing architectural decision —
 not just "not now" but "not ever, and here's why" — also gets an ADR written
@@ -131,43 +131,74 @@ in the audited repo (its `docs/adr/` convention if it has one, else a new
 rejections are too small for this; reserve it for the ones worth prose on
 their own.
 
-## Land one spec for the whole sweep
+## Land one spec per area
 
 Once every report in the run is grilled, land the sweep's ACT decisions as
-**one spec, sliced into tickets** — never one spec per audit, and never a map.
-Per-audit structure survives as a section per audit inside that one spec, so a
-later audit's amendment or overrule of an earlier one stays readable in the
-same document — call out each amendment or overrule explicitly in the section
-of the audit that made it, naming the decision it changes.
+**one spec per area, each sliced into tickets** — never one spec per audit,
+and never a map. An area cuts across audits, so the per-audit structure
+survives as a section per audit inside each area's spec. A later audit's
+amendment or overrule of an earlier one stays readable in the same document —
+call out each amendment or overrule explicitly in the section of the audit
+that made it, naming the decision it changes. When the decision it changes
+sits in another area's spec, name it in both.
 
-1. **Draft the spec and its slices, together.** Write the spec directly using
-   `/to-spec`'s template — skip its interview and its seam-check-with-the-user
-   step, since every decision the template needs is already settled from
-   grilling. Each ACT item becomes an implementation decision, grouped under
-   its audit's section; write it as a user story only where a real actor and
-   benefit exist — most audit findings are internal code-quality fixes with
-   neither, and forcing "as a developer, I want fewer unused functions" onto
-   one is padding, not a story. DROPs stay out of the spec;
-   they already went to the ignore file above. Then, still in this same
-   drafting pass and before showing the user anything, break it into vertical
-   slices using `/to-tickets`'s own rules — title, blocking edges, what it
-   delivers, seams under test per ticket. One confirmation has to cover the
-   whole shape, so the shape has to exist before that confirmation, not after.
-2. **One confirmation, then file — and only one.** Show the user the drafted
-   spec and the full ticket breakdown (not just titles — blocking edges and
-   seams too), and wait for one approval covering both. Nothing is written to
-   the tracker until it lands; asked for changes, redraft and show again;
-   declined outright, stop — the draft stays in this session only. A
-   thirteen-audit sweep can propose twenty-plus tickets in one go, so this is
-   the one point in the whole run the agent writes something the user would
-   otherwise delete by hand.
-3. **On approval, publish — spec first, unlabelled, then tickets, then both
-   labels on the parent last.** File the approved draft as the spec issue
-   with no `spec` label yet. Publish the approved tickets as its children,
-   each labelled `ready-for-agent`, using `/to-tickets`'s publish step and
-   its blocking-edge and parent-linking conventions — its own quiz-and-iterate
-   step is skipped, since the breakdown was already approved in step 2. Only
-   once the children are linked, label the parent `spec` **and**
-   `ready-for-agent` — plain `implement-dispatch` refuses a `spec`-labelled
-   issue, so that pair sends it to `/implement-spec` instead of an ordinary
-   agent building it unsliced.
+Why areas: with one spec for the whole sweep, the parent stays open until the
+slowest area finishes and its closing live check covers every area at once.
+An area closes on its own.
+
+**Grouping** (ruled by Chris, 2026-10-13):
+
+- **An area is your judgement of which accepted findings touch the same
+  code.** It is not a mechanical grouping by include closure or by directory:
+  a flat repo would put nearly everything in one area.
+- **The floor.** An area with fewer than three tickets folds into its nearest
+  neighbour. A sweep with fewer than about ten tickets in all stays one spec.
+- **A ticket that crosses areas** goes in the spec of the area whose code it
+  changes most, with a native blocker edge to the other area's ticket. The two
+  areas do not merge.
+  The edge holds the dependent slice until the other spec's integration PR
+  merges, since a blocker frees early only when it landed on the dependent
+  ticket's own spec branch. Keep the edges between any two areas pointing one
+  way: edges in both directions deadlock both specs. When drafting produces
+  opposite edges, move one ticket to the other area to break the cycle.
+- **No parent over the specs.** Each spec carries one line naming the sweep
+  run, as `Sweep run: <the run folder holding index.html>`, and nothing else
+  ties them together.
+
+1. **Draft the specs and their slices, together.** Group the ACT decisions
+   into areas first. Then write each spec directly using `/to-spec`'s
+   template — skip its interview and its seam-check-with-the-user step, since
+   every decision the template needs is already settled from grilling. Each
+   ACT item becomes an implementation decision, grouped under its audit's
+   section; write it as a user story only where a real actor and benefit
+   exist — most audit findings are internal code-quality fixes with neither,
+   and forcing "as a developer, I want fewer unused functions" onto one is
+   padding, not a story. DROPs stay out of the specs; they already went to
+   the ignore file above. Then, still in this same drafting pass and before
+   showing the user anything, break each spec into vertical slices using
+   `/to-tickets`'s own rules — title, blocking edges, what it delivers, seams
+   under test per ticket — including the cross-area edges above. One
+   confirmation has to cover the whole shape, so the shape has to exist before
+   that confirmation, not after.
+2. **One confirmation, then file — and only one.** Show the user every
+   drafted spec and the full ticket breakdown (not just titles — blocking
+   edges and seams too, the cross-area edges marked with their direction), and wait for one
+   approval covering all of it. Nothing is written to the tracker until it
+   lands; asked for changes, redraft and show again; declined outright, stop —
+   the draft stays in this session only. A thirteen-audit sweep can propose
+   twenty-plus tickets in one go, so this is the one point in the whole run
+   the agent writes something the user would otherwise delete by hand.
+3. **On approval, publish — specs first, unlabelled, then tickets, then
+   cross-area edges, then both labels on each parent last.** File each
+   approved spec as an issue with no `spec` label yet. Publish the approved
+   tickets as their spec's children, each labelled `ready-for-agent`, using
+   `/to-tickets`'s publish step and its blocking-edge and parent-linking
+   conventions — its own quiz-and-iterate step is skipped, since the breakdown
+   was already approved in step 2. A cross-area blocker edge needs both
+   tickets to exist, so add those edges only after every spec's children are
+   filed, and then add the blocker to the dependent ticket's `## Blocked by`
+   section too, so the written section and the native edge agree. Only once every child is linked and every edge is in place, label
+   each parent `spec` **and** `ready-for-agent` — plain `implement-dispatch`
+   refuses a `spec`-labelled issue, so that pair sends it to `/implement-spec`
+   instead of an ordinary agent building it unsliced, and a parent labelled
+   early could be dispatched before its blockers exist.
