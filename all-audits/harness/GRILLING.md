@@ -122,7 +122,7 @@ opt-in step outside this workflow.
 decided DROP, append it to the audited repo's `.audit-ignore.md` right then —
 don't wait for the sweep to finish grilling. One entry per rejection, in the
 format `harness/IGNORE-FILE.md` defines (finding, reason, date, audit). This
-is independent of whether the spec below ever gets approved: a rejection is
+is independent of whether any spec below ever gets approved: a rejection is
 real the moment it's decided, and a session that ends mid-sweep must not lose
 the DROPs it already made. A DROP that is a standing architectural decision —
 not just "not now" but "not ever, and here's why" — also gets an ADR written
@@ -156,6 +156,11 @@ An area closes on its own.
 - **A ticket that crosses areas** goes in the spec of the area whose code it
   changes most, with a native blocker edge to the other area's ticket. The two
   areas do not merge.
+  The edge holds the dependent slice until the other spec's integration PR
+  merges, since a blocker frees early only when it landed on the dependent
+  ticket's own spec branch. Keep the edges between any two areas pointing one
+  way: edges in both directions deadlock both specs. When drafting produces
+  opposite edges, move one ticket to the other area to break the cycle.
 - **No parent over the specs.** Each spec carries one line naming the sweep
   run, as `Sweep run: <the run folder holding index.html>`, and nothing else
   ties them together.
@@ -177,7 +182,7 @@ An area closes on its own.
    that confirmation, not after.
 2. **One confirmation, then file — and only one.** Show the user every
    drafted spec and the full ticket breakdown (not just titles — blocking
-   edges and seams too, the cross-area edges marked), and wait for one
+   edges and seams too, the cross-area edges marked with their direction), and wait for one
    approval covering all of it. Nothing is written to the tracker until it
    lands; asked for changes, redraft and show again; declined outright, stop —
    the draft stays in this session only. A thirteen-audit sweep can propose
@@ -191,7 +196,8 @@ An area closes on its own.
    conventions — its own quiz-and-iterate step is skipped, since the breakdown
    was already approved in step 2. A cross-area blocker edge needs both
    tickets to exist, so add those edges only after every spec's children are
-   filed. Only once every child is linked and every edge is in place, label
+   filed, and then add the blocker to the dependent ticket's `## Blocked by`
+   section too, so the written section and the native edge agree. Only once every child is linked and every edge is in place, label
    each parent `spec` **and** `ready-for-agent` — plain `implement-dispatch`
    refuses a `spec`-labelled issue, so that pair sends it to `/implement-spec`
    instead of an ordinary agent building it unsliced, and a parent labelled
