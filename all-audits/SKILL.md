@@ -1,6 +1,6 @@
 ---
 name: all-audits
-description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time and land the sweep as one spec.
+description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time and land the sweep as one spec per area.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
@@ -9,11 +9,11 @@ Run the whole audit set over one repo in a single sweep. Thirteen audit skills f
 out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep runs to completion on its own: past the index, it grills every report
-widest-first and lands the run as one spec. Grilling itself still questions
+widest-first and lands the run as one spec per area. Grilling itself still questions
 the user on each fresh finding, unless the user takes the batch mode and is
 asked only the contested ones, and writes each rejection to the audited
 repo's ignore file as it's decided; the single confirmation gate is only
-about the tracker — nothing goes to the spec issue or its tickets before that
+about the tracker — nothing goes to a spec issue or its tickets before that
 one approval. It **reports and files only** — no edit is applied, no PR is
 opened.
 
@@ -127,6 +127,6 @@ When you are invoked in-session as `/all-audits [path]`:
 
 The sweep never stops at the index waiting to be told to grill — it continues
 on its own. For the grill's walk of every report — order, per-report grilling,
-the auto-carry rule, and how the run lands as one spec with its rejections
+the auto-carry rule, and how the run lands as one spec per area with its rejections
 written to `.audit-ignore.md` as they're decided — see
 [`harness/GRILLING.md`](harness/GRILLING.md).
