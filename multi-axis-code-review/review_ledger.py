@@ -91,6 +91,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -346,6 +347,12 @@ def _merge_cost(runs: list[dict]) -> tuple[dict, str | None]:
                            "seconds": round(sum(r[field]["seconds"] for r in runs), 3)}
     models = sorted({r["model"] for r in runs if r["model"]})
     return cost, (models[0] if len(models) == 1 else None)
+
+
+def sidecar_digest(path: Path | str) -> str:
+    """The sha256 of a findings sidecar's bytes: what an appended axis row records as
+    `sidecar_sha256` (#1555), and what `implement/fix_check.py` matches against the file on disk."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _norm_repo(name: str) -> str:
@@ -1048,6 +1055,10 @@ def _keep_known(old: dict, new: dict) -> dict:
     kept_cost = {k: v for k, v in (old.get("cost") or {}).items()
                  if _known(v) and not (complete and _known(new["cost"].get(k)))}
     row = {**new, "origin": "append", "status": status, "findings": findings, "cost": {**new["cost"], **kept_cost}}
+    # The hash dates the row to the sidecar `append` read; a rebuild must not re-date it to a rewritten one.
+    row.pop("sidecar_sha256", None)
+    if old.get("sidecar_sha256"):
+        row["sidecar_sha256"] = old["sidecar_sha256"]
     if old.get("model") and not (complete and new.get("model")):
         row["model"], status["fields"]["model"] = old["model"], old["status"]["fields"]["model"]
     return row
@@ -1397,6 +1408,15 @@ def cmd_append(args) -> int:
         if (why := _unknown_cost_why(r)):
             print(f"review_ledger append: {r['row_id']}: {why}", file=sys.stderr)
             return 2
+        # Date the row to the sidecar it was appended for (#1555), so a later dispatch's gate can
+        # tell this wave's row from an earlier one's.
+        source = next((x for x in r["status"]["sources"] if Path(x).name.startswith("findings-")), None)
+        if source:
+            try:
+                r["sidecar_sha256"] = sidecar_digest(args.cache / source)
+            except OSError as e:
+                print(f"review_ledger append: {source} is unreadable: {e}", file=sys.stderr)
+                return 2
     refresh = [r for r in rows if args.type == "verification" and r["round"] == args.round
                and r["type"] in REVIEWER_TYPES and r["type"] != "verification"]
     return _write_appended(args, mine, refresh)

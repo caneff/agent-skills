@@ -11,6 +11,7 @@ for the one under test (`AGENTS.md` § Recurring defect classes, class 3).
 
 Each case builds its own throwaway world under pytest's temp dir.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -101,20 +102,21 @@ class World:
         """Write the three sidecars (axis -> ids), each beside its completion marker, and
         (unless `ledger` is False) the ledger row `append --type <axis>` writes for each run."""
         for axis in ("standards", "spec", "correctness"):
-            if ledger:
-                self.ledger_ran(axis)
             ids = by_axis.get(axis, [])
             self.put(f"findings-{axis}-{self.n}.jsonl",
                      "".join(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t",
                                          **({"rating": "CONFIRMED"} if axis == "correctness" else {})}) + "\n"
                              for i in ids))
             self.put(f"findings-{axis}-{self.n}.done", "")
+            if ledger:
+                self.ledger_ran(axis)
 
-    def ledger_row(self, rtype, status, ticket=None, repo=None, **fields):
+    def ledger_row(self, rtype, status, ticket=None, repo=None, top=None, **fields):
         """One ledger row: review `rtype` of `ticket` in `repo` (the checkout's key by default)."""
         ticket = self.n if ticket is None else ticket
+        top = top or {}
         row = {"repo": repo or self.key, "ticket": ticket, "tickets": [ticket], "type": rtype,
-               "status": {"fields": {"findings": {"status": status, **fields}}}}
+               "status": {"fields": {"findings": {"status": status, **fields}}}, **top}
         path = os.path.join(self.home, ".cache", "agent-reviews", "ledger.jsonl")
         with open(path, "a") as fh:
             fh.write(json.dumps(row) + "\n")
@@ -123,9 +125,14 @@ class World:
         """A row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
         self.ledger_row(rtype, "skipped", ticket, reason="test")
 
-    def ledger_ran(self, rtype, ticket=None, repo=None):
-        """A row for review `rtype` that ran (what `append --type <axis>` writes)."""
-        self.ledger_row(rtype, "known", ticket, repo)
+    def ledger_ran(self, rtype, ticket=None, repo=None, digest="on-disk"):
+        """A row for review `rtype` that ran (what `append --type <axis>` writes): it carries the
+        sha256 of the sidecar as it is on disk now (#1555), or `digest` when given, None for none."""
+        if digest == "on-disk":
+            path = os.path.join(self.reviews, f"findings-{rtype}-{self.n if ticket is None else ticket}.jsonl")
+            digest = hashlib.sha256(open(path, "rb").read()).hexdigest() if os.path.exists(path) else None
+        self.ledger_row(rtype, "known", ticket, repo,
+                        top={} if digest is None else {"sidecar_sha256": digest})
 
     def dispositions(self, *lines):
         self.put(f"dispositions-{self.n}.jsonl", "".join(json.dumps(line) + "\n" for line in lines))
@@ -552,6 +559,48 @@ def test_a_ledger_row_of_another_ticket_is_no_row_for_this_one(make_world):
         w.ledger_ran(axis, ticket=6)
     w.dispositions()
     assert_fix_check(w, 1, "no ledger row for the standards review")
+
+
+# #1555: the row must date to this wave. Rows carry the sha256 of the sidecar `append` read, and the
+# gate wants one matching the sidecar on disk, so an earlier dispatch's row cannot satisfy it.
+def test_a_second_wave_that_rewrote_the_sidecar_without_appending_is_refused(make_world):
+    w = make_world()
+    w.findings()  # the first wave's rows
+    w.put(f"findings-spec-{w.n}.jsonl", json.dumps({"id": "P1", "axis": "spec", "severity": "hard",
+                                                     "file": "f", "title": "t"}) + "\n")
+    w.dispositions(disputed("P1"))
+    assert_fix_check(w, 1, "carries no row for this wave's findings-spec-5.jsonl")
+
+
+def test_the_second_wave_appending_again_passes(make_world):
+    w = make_world()
+    w.findings()
+    w.put(f"findings-spec-{w.n}.jsonl", json.dumps({"id": "P1", "axis": "spec", "severity": "hard",
+                                                     "file": "f", "title": "t"}) + "\n")
+    w.ledger_ran("spec")
+    w.dispositions(disputed("P1"))
+    assert_fix_check(w, 0, "1 findings")
+
+
+def test_a_row_written_before_the_hash_existed_is_refused_naming_the_re_append(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    for axis in ("standards", "spec", "correctness"):
+        w.ledger_ran(axis, digest=None)
+    w.dispositions()
+    assert_fix_check(w, 1, "review_ledger.py append")
+
+
+def test_a_skip_row_needs_no_hash_and_no_sidecar(make_world):
+    w = make_world()
+    w.findings(ledger=False)
+    w.ledger_ran("standards")
+    w.ledger_ran("correctness")
+    w.ledger_skip("spec")
+    os.remove(os.path.join(w.reviews, f"findings-spec-{w.n}.jsonl"))
+    os.remove(os.path.join(w.reviews, f"findings-spec-{w.n}.done"))
+    w.dispositions()
+    assert_fix_check(w, 0, "0 findings")
 
 
 # Codex: its findings are `codex-gate-<k>`, the id `review_ledger.py` harvests under.
