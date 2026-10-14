@@ -10,9 +10,9 @@ out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep runs to completion on its own: past the index, it grills every report
 widest-first and lands the run as one spec per area. Grilling itself still
-questions the user on each fresh finding, unless the user takes the batch mode and is
-asked only the contested ones, and writes each rejection to the audited
-repo's ignore file as it's decided; the single confirmation gate is only
+questions the user on each fresh finding, unless the user takes the batch
+mode and is asked only the contested ones, and writes each rejection to the
+audited repo's ignore file as it's decided; the single confirmation gate is only
 about the tracker — nothing goes to a spec issue or its tickets before that
 one approval. It **reports and files only** — no edit is applied, no PR is
 opened.
