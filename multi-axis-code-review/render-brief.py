@@ -5,6 +5,7 @@
                     --ticket <n> --base <fixed point> --diff <capture> --diff-command <cmd>
                     (--commit "<sha subject>")... [--spec <path or pointer> | --no-spec]
                     [--ruling <text>]... [--choice <text>]... [--claim "<id>: <text>"]...
+                    [--round <K> [--first-id <ordinal>]]
                     [--workers <k>] [--ceiling <seconds>] [--test-command <cmd>] [--capture-stat <line>]
 
 Writes the whole prompt for a `diff-reviewer` of that axis to
@@ -27,13 +28,19 @@ that drifted have one home each:
   outcome of its own, since a verdict written into a brief is the verdict that
   comes back (#1400);
 - one report filename per axis and ticket, `review-<axis>-<n>.md`, and the
-  sidecar and marker names beside it;
+  sidecar and marker names beside it. `--round K` (K >= 2, #1549) gives all three
+  and the brief file the `-rK` suffix `review_ledger.py` reads, adds `--round K`
+  to the ledger line, and tells the reviewer the id to start from: the ids of
+  every earlier round's sidecar continue, so round 1 ending at S11 starts round 2
+  at S12. An earlier round with no sidecar is refused, never read as "start at 1";
+  `--first-id <ordinal>` states the number then, for the axis's main series;
 - the worker count and wall-clock ceiling any test run is held to, and that a
   reviewer spawns no nested subagent (#1400).
 
 Exit 0 and the dispatch line on stdout; 2 on a bad input, with nothing written
 and nothing on stdout: a missing or empty diff capture, a worktree that is not
-a directory, an unknown axis, a claim with no finding id.
+a directory, an unknown axis, a claim with no finding id, a round below 1, a round K >= 2 with no earlier
+round's sidecar and no `--first-id`.
 """
 import argparse
 import os
@@ -52,6 +59,10 @@ SIDECAR = {
     "spec": '{"id": "P<n>", "axis": "spec", "severity": "hard" or "judgement", "file": "<path>", "title": "<short title>"}',
     "correctness": '{"id": "C<n>", "axis": "correctness", "severity": "hard" or "judgement", "rating": "CONFIRMED" or "PLAUSIBLE", "file": "<path>", "title": "<short title>"}',
 }
+
+
+ID_RE = re.compile(r"^(?:r\d+-)?([A-Z]+)(\d+)$")
+SERIES = {"standards": ("S", "OE"), "spec": ("P",), "correctness": ("C",)}
 
 
 class BadInput(Exception):
@@ -76,6 +87,37 @@ def check_claims(claims):
             raise BadInput(f"claim '{claim}' is not '<finding id>: <text>'")
 
 
+def sidecar_name(axis, ticket, rnd, ext="jsonl"):
+    return f"findings-{axis}-{ticket}" + (f"-r{rnd}" if rnd > 1 else "") + f".{ext}"
+
+
+def next_ids(directory, axis, ticket, rnd, first_id):
+    """{series: first ordinal} for round `rnd`: one past the highest id any earlier round's sidecar holds."""
+    top = {}
+    missing = []
+    for earlier in range(1, rnd):
+        path = directory / sidecar_name(axis, ticket, earlier)
+        try:
+            text = path.read_text()
+        except OSError:
+            missing.append(path.name)
+            continue
+        for line in text.splitlines():
+            m = re.search(r'"id":\s*"([^"]+)"', line)
+            idm = ID_RE.match(m.group(1)) if m else None
+            if idm:
+                top[idm.group(1)] = max(top.get(idm.group(1), 0), int(idm.group(2)))
+    main = SERIES[axis][0]
+    if missing and first_id is None:
+        raise BadInput(f"round {rnd} continues the ids of round {', '.join(str(r) for r in range(1, rnd))}, "
+                       f"and {', '.join(missing)} cannot be read in {directory}; pass --first-id <ordinal> "
+                       "to state where this round's ids start")
+    ids = {s: top.get(s, 0) + 1 for s in SERIES[axis]}
+    if first_id is not None:
+        ids[main] = first_id
+    return ids
+
+
 def bullets(items, empty):
     return "\n".join(f"- {i}" for i in items) if items else empty
 
@@ -83,6 +125,10 @@ def bullets(items, empty):
 def render(a):
     if not os.path.isdir(a.worktree):
         raise BadInput(f"worktree {a.worktree} is not a directory")
+    if a.round < 1:
+        raise BadInput(f"round {a.round}: a round is at least 1")
+    if a.first_id is not None and (a.round == 1 or a.first_id < 1):
+        raise BadInput("--first-id is a positive ordinal and belongs to a round of 2 or more")
     check_claims(a.claim)
     claims = a.claim
     if a.spec and a.no_spec:
@@ -103,7 +149,9 @@ def render(a):
                    + "\n".join(f"{n}. {s}" for n, s in enumerate(filter(None, shapes), 1)))
     spec = "no spec available" if a.no_spec else a.spec
     out_dir = f"~/.cache/agent-reviews/{a.repo}"  # a.repo is folded in main
-    n, axis = a.ticket, a.axis
+    n, axis, rnd = a.ticket, a.axis, a.round
+    suffix = f"-r{rnd}" if rnd > 1 else ""
+    ids = next_ids(review_ledger.REVIEWS_ROOT / a.repo, axis, n, rnd, a.first_id) if rnd > 1 else None
     inputs = [
         f"- Worktree: {a.worktree}",
         f"- Fixed point: {a.base}",
@@ -117,7 +165,7 @@ def render(a):
     if axis == "correctness" and a.test_command:
         inputs.append(f"- Test command: `{a.test_command}`")
     parts = [
-        f"# {axis.capitalize()} review of #{n} in {a.repo}",
+        f"# {axis.capitalize()} review of #{n} in {a.repo}" + (f" (round {rnd})" if rnd > 1 else ""),
         f"You review this one axis only: {axis}. Another reviewer holds each other axis.",
         "## Inputs",
         "\n".join(inputs),
@@ -140,16 +188,23 @@ def render(a):
                   "Verify each against the code and re-run any check yourself; the verdict is yours, "
                   "and nothing here is settled.",
                   bullets(claims, "")]
+    id_lines = []
+    if ids:
+        first = ", ".join(f"{s}{k}" for s, k in ids.items())
+        id_lines = [f"- This is round {rnd}. Finding ids continue the earlier rounds' on this ticket: number yours "
+                    f"from {first} (each series from its own number), never restart at 1."]
     parts += [
         "## Brief",
         brief,
         "## Output",
         "\n".join([
-            f"- Full report: `{out_dir}/review-{axis}-{n}.md`",
-            f"- Findings sidecar: `{out_dir}/findings-{axis}-{n}.jsonl`, one line per finding: `{SIDECAR[axis]}`. "
+            f"- Full report: `{out_dir}/review-{axis}-{n}{suffix}.md`",
+            f"- Findings sidecar: `{out_dir}/{sidecar_name(axis, n, rnd)}`, one line per finding: `{SIDECAR[axis]}`. "
             "Empty file when you found nothing.",
-            f"- Then the empty completion marker `{out_dir}/findings-{axis}-{n}.done`, last, once the sidecar is complete.",
-            f"- Then `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo {a.repo} --ticket {n} --type {axis}`."]),
+            *id_lines,
+            f"- Then the empty completion marker `{out_dir}/{sidecar_name(axis, n, rnd, 'done')}`, last, once the sidecar is complete.",
+            f"- Then `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo {a.repo} "
+            f"--ticket {n} --type {axis}" + (f" --round {rnd}" if rnd > 1 else "") + "`."]),
         "## Limits",
         "\n".join([
             "- You do your own reading and running and spawn no nested subagent: a nested agent reports to the "
@@ -162,13 +217,13 @@ def render(a):
     return "\n\n".join(p for p in parts if p) + "\n"
 
 
-def write_brief(text, repo, ticket, axis):
+def write_brief(text, repo, ticket, axis, rnd=1):
     """Write `text` to a ticket-numbered file of `repo`'s (folded) review cache directory that no
     earlier wave holds, and return its path. `O_EXCL` is the never-overwrite: a taken name moves on to `-2`, `-3`."""
     directory = review_ledger.REVIEWS_ROOT / repo
     directory.mkdir(parents=True, exist_ok=True)
     # SKILL.md allows a branch name for `--ticket`; a `/` in it must not name a directory.
-    stem, k = f"brief-{re.sub(r'[^A-Za-z0-9._-]', '-', ticket)}-{axis}", 1
+    stem, k = f"brief-{re.sub(r'[^A-Za-z0-9._-]', '-', ticket)}-{axis}" + (f"-r{rnd}" if rnd > 1 else ""), 1
     while True:
         path = directory / (f"{stem}.md" if k == 1 else f"{stem}-{k}.md")
         try:
@@ -196,6 +251,8 @@ def main(argv):
     p.add_argument("--ruling", action="append", default=[])
     p.add_argument("--choice", action="append", default=[])
     p.add_argument("--claim", action="append", default=[])
+    p.add_argument("--round", type=int, default=1)
+    p.add_argument("--first-id", type=int)
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--ceiling", type=int, default=600)
     p.add_argument("--test-command")
@@ -203,11 +260,13 @@ def main(argv):
     a = p.parse_args(argv)
     a.repo = review_ledger.fold_repo(a.repo)  # once: every path and the ledger line below read it folded
     try:
-        path = write_brief(render(a), a.repo, a.ticket, a.axis)
+        path = write_brief(render(a), a.repo, a.ticket, a.axis, a.round)
     except BadInput as exc:
         print(f"render-brief: {exc}", file=sys.stderr)
         return 2
-    print(f"Read {path} and carry out the {a.axis} review of #{a.ticket} it describes: that file is your whole brief.")
+    # `review_ledger.attribute` reads "round K" from the first 120 characters of this line.
+    lead = f"Round {a.round}: " if a.round > 1 else ""
+    print(f"{lead}Read {path} and carry out the {a.axis} review of #{a.ticket} it describes: that file is your whole brief.")
     return 0
 
 
