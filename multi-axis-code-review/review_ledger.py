@@ -1056,7 +1056,6 @@ def _keep_known(old: dict, new: dict) -> dict:
                  if _known(v) and not (complete and _known(new["cost"].get(k)))}
     row = {**new, "origin": "append", "status": status, "findings": findings, "cost": {**new["cost"], **kept_cost}}
     # The hash dates the row to the sidecar `append` read; a rebuild must not re-date it to a rewritten one.
-    row.pop("sidecar_sha256", None)
     if old.get("sidecar_sha256"):
         row["sidecar_sha256"] = old["sidecar_sha256"]
     if old.get("model") and not (complete and new.get("model")):

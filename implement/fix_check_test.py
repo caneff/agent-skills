@@ -130,7 +130,8 @@ class World:
         sha256 of the sidecar as it is on disk now (#1555), or `digest` when given, None for none."""
         if digest == "on-disk":
             path = os.path.join(self.reviews, f"findings-{rtype}-{self.n if ticket is None else ticket}.jsonl")
-            digest = hashlib.sha256(open(path, "rb").read()).hexdigest() if os.path.exists(path) else None
+            assert os.path.exists(path), f"write {path} first, or pass digest=None for a hashless row"
+            digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
         self.ledger_row(rtype, "known", ticket, repo,
                         top={} if digest is None else {"sidecar_sha256": digest})
 
@@ -556,27 +557,29 @@ def test_a_ledger_row_of_another_ticket_is_no_row_for_this_one(make_world):
     w = make_world()
     w.findings(ledger=False)
     for axis in ("standards", "spec", "correctness"):
-        w.ledger_ran(axis, ticket=6)
+        w.ledger_ran(axis, ticket=6, digest=None)
     w.dispositions()
     assert_fix_check(w, 1, "no ledger row for the standards review")
 
 
 # #1555: the row must date to this wave. Rows carry the sha256 of the sidecar `append` read, and the
 # gate wants one matching the sidecar on disk, so an earlier dispatch's row cannot satisfy it.
-def test_a_second_wave_that_rewrote_the_sidecar_without_appending_is_refused(make_world):
-    w = make_world()
-    w.findings()  # the first wave's rows
+def second_wave(w):
+    """A world whose first wave appended its rows, then rewrote the spec sidecar with one finding."""
+    w.findings()
     w.put(f"findings-spec-{w.n}.jsonl", json.dumps({"id": "P1", "axis": "spec", "severity": "hard",
                                                      "file": "f", "title": "t"}) + "\n")
+    return w
+
+
+def test_a_second_wave_that_rewrote_the_sidecar_without_appending_is_refused(make_world):
+    w = second_wave(make_world())
     w.dispositions(disputed("P1"))
     assert_fix_check(w, 1, "carries no row for this wave's findings-spec-5.jsonl")
 
 
 def test_the_second_wave_appending_again_passes(make_world):
-    w = make_world()
-    w.findings()
-    w.put(f"findings-spec-{w.n}.jsonl", json.dumps({"id": "P1", "axis": "spec", "severity": "hard",
-                                                     "file": "f", "title": "t"}) + "\n")
+    w = second_wave(make_world())
     w.ledger_ran("spec")
     w.dispositions(disputed("P1"))
     assert_fix_check(w, 0, "1 findings")
@@ -588,7 +591,9 @@ def test_a_row_written_before_the_hash_existed_is_refused_naming_the_re_append(m
     for axis in ("standards", "spec", "correctness"):
         w.ledger_ran(axis, digest=None)
     w.dispositions()
-    assert_fix_check(w, 1, "review_ledger.py append")
+    code, out = w.run()
+    assert code == 1 and "holds its sha256" in out and "re-append: review_ledger.py append" in out, out
+    assert "no ledger row for the" not in out, out
 
 
 def test_a_skip_row_needs_no_hash_and_no_sidecar(make_world):

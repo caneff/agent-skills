@@ -54,7 +54,8 @@ ledger blind to it. The row must be this wave's (#1555): `append` records the
 sha256 of the sidecar it read as `sidecar_sha256`, and the check wants a row
 whose hash matches the sidecar on disk, so a row left by an earlier dispatch,
 or by a version of `append` before the field, is refused with the line to
-re-run.
+re-run. A second wave whose sidecar is byte-identical to the first's (an
+empty one both times) still matches: the hash cannot tell the two waves apart.
 A review the ledger records as skipped (`review_ledger.py append --type
 <axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
 record, or a `codex-gate` ledger row saying why it did not run (size gate,
@@ -221,8 +222,8 @@ def axis_findings(reviews, n, branch, rowed, skipped, problems):
                             f"{append}")
         elif review_ledger.sidecar_digest(path) not in rowed[axis]:
             problems.append(f"the ledger carries no row for this wave's {name}: no {axis} row of #{n} holds "
-                            "its sha256 — a row from an earlier dispatch, or written before rows carried "
-                            f"one, so re-append: {append}")
+                            "its sha256 — the row is an earlier dispatch's or predates the field, or the "
+                            f"sidecar changed after its append; re-append: {append}")
         if not os.path.exists(os.path.join(reviews, marker)):
             problems.append(f"{name} has no completion marker {marker} — a reviewer that crashed or "
                             "was cut off leaves an empty or truncated sidecar too")

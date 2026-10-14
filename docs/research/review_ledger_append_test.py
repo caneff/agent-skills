@@ -74,7 +74,10 @@ class TestAppendRow:
         assert len(got) == 4  # standards, over-engineering, spec, correctness
         for row_id, row in got.items():
             assert row["origin"] == "append"
-            assert {**row, "origin": "harvest"} == want[row_id], row_id
+            # `sidecar_sha256` is the one field only `append` writes (#1555).
+            assert row.get("sidecar_sha256"), row_id
+            assert {**{k: v for k, v in row.items() if k != "sidecar_sha256"},
+                    "origin": "harvest"} == want[row_id], row_id
 
     def test_a_standards_append_writes_the_over_engineering_row_with_cost_inside_standards(self, ap):
         ap.ok(400, "standards")
