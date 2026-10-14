@@ -833,7 +833,7 @@ fn help_states_the_cache_exemption_as_a_conjunction() {
     // The name list is built from CACHE_DIRS, so this pins the sentence to
     // the const: a name added or dropped there changes it and reddens this.
     assert!(!flat.contains("{cache_names}"), "{flat}");
-    let sentence = "named node_modules, __pycache__, target, .venv, .pytest_cache, .ruff_cache, .mypy_cache or .hypothesis and,";
+    let sentence = "named node_modules, __pycache__, target, .venv, .pytest_cache, .ruff_cache, .mypy_cache, .hypothesis or .pants.d and,";
     assert!(flat.contains(sentence), "{flat}");
     assert!(flat.contains("Both are required"), "{flat}");
     assert!(flat.contains("a `*` .gitignore alone makes nothing a cache"), "{flat}");
@@ -1965,6 +1965,22 @@ fn a_worktree_holding_only_caches_is_removed_and_they_are_listed() {
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
     assert!(run.has(&format!("discarding 7 cache file(s) in {}: {names}", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn a_worktree_holding_only_pants_workdir_logs_is_removed_without_discard() {
+    // #1583: Pants's workdir `.pants.d/` held the only ignored files in two
+    // drains and each worktree came out only on `--discard`.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r33", "implement-33");
+    std::fs::write(r.join(".git/info/exclude"), ".pants.d/\n").unwrap();
+    std::fs::create_dir_all(wt.join(".pants.d/workdir/run-tracker/pants_run_1/logs")).unwrap();
+    for f in [".pants.d/workdir/exceptions.log", ".pants.d/workdir/pants.log", ".pants.d/workdir/run-tracker/pants_run_1/logs/x"] {
+        std::fs::write(wt.join(f), "log\n").unwrap();
+    }
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(run.has(&format!("discarding 1 cache file(s) in {}: .pants.d/", wt.display())), "{}", run.text());
 }
 
 #[test]
