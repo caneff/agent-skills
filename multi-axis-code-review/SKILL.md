@@ -481,8 +481,14 @@ every throwaway worktree under `~/.cache/agent-reviews/<repo>/witness.XXXXXX/`,
 beside the reports the same review writes, and removes it before exiting
 (`--no-ledger`, which has no repo, outside a review, keeps `mktemp -d`). Not a
 `/tmp` directory nothing names. The 14-day sweep above removes files, not
-directories, so a root kept after exit 3 stays until its worktrees are
-removed by hand. A hook or classifier may refuse `git worktree remove --force`
+directories, so a root kept after exit 3 is removed by the prune described next.
+Each run first prunes any `witness.*` directory in that repo's cache home
+older than 7 days: what a killed run leaves behind (#1547). A reviewer or
+worker never makes a copy of a repo in the cache by hand, whether `cp`,
+`rsync` or a `mut*` or `scratch-*` directory: a witness lives where
+`witness-check.sh` puts it, and nothing else sweeps a hand-made copy. A prune
+that fails keeps the directory and says so. A hook or classifier may refuse
+`git worktree remove --force`
 on that path: `flow/claude/settings.json` has an autoMode allow entry added for
 it, written without reproducing the original denial (#1324 could not be
 reproduced from a worker session), so a reviewer that is still refused reports

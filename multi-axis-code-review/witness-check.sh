@@ -29,6 +29,9 @@
 # install would import the reviewed tree's code. With no `uv.lock` at HEAD the
 # `.venv` stays unset and the run says so. `vendor` is not set up.
 #
+# Each run with `--repo` first prunes the repo's cache-home `witness.*`
+# directories older than 7 days (#1547); the code below says how.
+#
 # Exit: 0 every mutation was run and reported (red, HOLLOW or unknown — read
 # the output); 1 setup failed before any mutation; 2 bad arguments; 3 a
 # throwaway worktree could not be removed and is still registered; 4 a ledger
@@ -104,12 +107,38 @@ for id in $call_site_ids; do
 done
 # One home (#1324): the review cache's `<repo>` directory, where every other
 # file of a review lives, rather than a /tmp directory nothing names. The
-# 14-day sweep removes files only, so a root kept after exit 3 stays until
-# its worktrees are removed by hand. `--no-ledger` runs have no repo and keep `mktemp -d`.
+# 14-day sweep removes files only; a root kept after exit 3 is pruned by a
+# later run once it is 7 days old. `--no-ledger` runs have no repo and keep `mktemp -d`.
 if [ -n "$repo_name" ]; then
   # The ledger's own fold of the name (#1527), so `--repo agent-skills` lands in `skills/`.
   home_dir=$(python3 "$here/review_ledger.py" cache-dir --repo "$repo_name") || exit 1
-  mkdir -p "$home_dir" && root=$(mktemp -d "$home_dir/witness.XXXXXX") || exit 1
+  mkdir -p "$home_dir" || exit 1
+  # Prune first (#1547): a killed run is the case the exit sweep misses. A
+  # worktree git still lists goes through `git worktree remove`; a directory it
+  # does not list (a gitdir already gone) has no registration to leave behind,
+  # so `rm` is safe. A failure keeps the directory and says so, and never stops
+  # the review. `-mmin +10080` is exactly 7 days; `-mtime +7` would be 8.
+  if stale_list=$(find "$home_dir" -mindepth 1 -maxdepth 1 -type d -name 'witness.*' -mmin +10080 2>&1); then
+    while IFS= read -r stale; do
+      [ -n "$stale" ] || continue
+      stale_ok=1
+      for w in "$stale"/worktrees/*/; do
+        [ -d "$w" ] || continue
+        if git -C "$worktree" worktree list --porcelain | grep -qxF "worktree ${w%/}"; then
+          git -C "$worktree" worktree remove --force "${w%/}" || stale_ok=0
+        else
+          rm -rf "$w" || stale_ok=0
+        fi
+      done
+      if [ "$stale_ok" -eq 1 ] && rm -rf "$stale"; then :
+      elif [ -d "$stale" ]; then
+        echo "witness check: could not prune $stale - kept, remove its worktrees by hand" >&2
+      fi
+    done <<<"$stale_list"
+  else
+    echo "witness check: could not list $home_dir for stale witness directories: $stale_list" >&2
+  fi
+  root=$(mktemp -d "$home_dir/witness.XXXXXX") || exit 1
 else
   root=$(mktemp -d) || exit 1
 fi
