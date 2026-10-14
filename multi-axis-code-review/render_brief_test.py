@@ -310,3 +310,106 @@ def test_a_branch_name_given_as_the_ticket_cannot_name_a_directory(wt, diff, hom
     done = subprocess.run(args, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
     assert (home / "skills" / "brief-feature-x-standards.md").is_file()
+
+
+# #1549: a second review round names its own files and continues the first round's finding ids.
+def cache_dir(home, repo="skills"):
+    path = home / repo
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def write_sidecar(directory, name, ids, axis="standards"):
+    import json
+    open(directory / name.replace(".jsonl", ".done"), "w").close()
+    with open(directory / name, "w") as fh:
+        for i in ids:
+            fh.write(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t"}) + "\n")
+
+
+def test_round_one_names_are_unchanged_and_carry_no_round_flag(wt, diff):
+    _, out, _ = render(wt, diff, "--round", "1", repo="agent-skills")
+    assert "review-standards-1395.md" in out and "-r1" not in out and "--round" not in out, out
+
+
+def test_round_two_pins_the_r2_report_sidecar_and_marker(wt, diff, home):
+    write_sidecar(cache_dir(home), "findings-standards-1395.jsonl", ["S1", "S2"])
+    code, out, err = render(wt, diff, "--round", "2", repo="agent-skills")
+    assert code == 0, err
+    for name in ("review-standards-1395-r2.md", "findings-standards-1395-r2.jsonl", "findings-standards-1395-r2.done"):
+        assert out.count(name) == 1, (name, out)
+    assert "review-standards-1395.md" not in out and "findings-standards-1395.jsonl" not in out, out
+
+
+def test_round_two_ledger_append_line_carries_the_round(wt, diff, home):
+    write_sidecar(cache_dir(home), "findings-standards-1395.jsonl", ["S1"])
+    _, out, _ = render(wt, diff, "--round", "2", repo="agent-skills")
+    assert "--type standards --round 2" in out, out
+
+
+def test_round_two_ids_continue_from_the_first_rounds_last_id_per_series(wt, diff, home):
+    write_sidecar(cache_dir(home), "findings-standards-1395.jsonl", ["S1", "S2", "S11", "OE1"])
+    _, out, _ = render(wt, diff, "--round", "2", repo="agent-skills")
+    section_out = section(out, "Output") or ""
+    assert "S12" in section_out and "OE2" in section_out and "restart" in section_out.lower(), section_out
+
+
+def test_round_three_continues_past_the_second_rounds_ids(wt, diff, home):
+    d = cache_dir(home)
+    write_sidecar(d, "findings-spec-1395.jsonl", ["P1", "P2"], "spec")
+    write_sidecar(d, "findings-spec-1395-r2.jsonl", ["P3", "P7"], "spec")
+    _, out, _ = render(wt, diff, "--round", "3", repo="agent-skills", axis="spec")
+    assert "P8" in (section(out, "Output") or ""), out
+
+
+def test_round_two_with_no_earlier_sidecar_is_refused_and_writes_nothing(wt, diff, home):
+    code, out, err = render_line(wt, diff, "--round", "2", repo="agent-skills")
+    assert code == 2 and out == "" and "findings-standards-1395.jsonl cannot be read" in err, (code, out, err)
+    assert not (home / "skills").exists() or not list((home / "skills").glob("brief-*")), err
+
+
+def test_first_id_states_the_number_when_the_earlier_sidecar_is_gone(wt, diff):
+    _, out, _ = render(wt, diff, "--round", "2", "--first-id", "S12", "--first-id", "OE3",
+                       repo="agent-skills")
+    assert "S12" in (section(out, "Output") or "") and "OE3" in out, out
+
+
+def test_the_dispatch_line_names_the_round_early_for_transcript_attribution(wt, diff, home):
+    write_sidecar(cache_dir(home), "findings-standards-1395.jsonl", ["S1"])
+    _, line, _ = render_line(wt, diff, "--round", "2", repo="agent-skills")
+    assert "round 2" in line[:120].lower() and "-r2.md" in line, line
+
+
+def test_a_round_below_one_is_refused(wt, diff):
+    code, _, err = render_line(wt, diff, "--round", "0", repo="agent-skills")
+    assert code == 2 and "at least 1" in err, err
+
+
+def test_first_id_leaving_a_series_out_is_refused_when_the_earlier_sidecar_is_gone(wt, diff):
+    code, out, err = render_line(wt, diff, "--round", "2", "--first-id", "S12", repo="agent-skills")
+    assert code == 2 and out == "" and "OE" in err and "--first-id" in err, (code, out, err)
+
+
+def test_an_empty_round_two_sidecar_does_not_reset_round_three_to_one(wt, diff, home):
+    d = cache_dir(home)
+    write_sidecar(d, "findings-spec-1395.jsonl", ["P1", "P5"], "spec")
+    write_sidecar(d, "findings-spec-1395-r2.jsonl", [], "spec")
+    _, out, _ = render(wt, diff, "--round", "3", repo="agent-skills", axis="spec")
+    assert "P6" in (section(out, "Output") or ""), out
+
+
+def test_an_earlier_sidecar_with_a_line_that_has_no_id_is_refused(wt, diff, home):
+    d = cache_dir(home)
+    write_sidecar(d, "findings-spec-1395.jsonl", ["P1"], "spec")
+    with open(d / "findings-spec-1395.jsonl", "a") as fh:
+        fh.write('{"axis": "spec", "tit\n')
+    code, out, err = render_line(wt, diff, "--round", "2", repo="agent-skills", axis="spec")
+    assert code == 2 and "no readable id" in err, (code, err)
+
+
+def test_an_earlier_sidecar_without_its_marker_is_refused(wt, diff, home):
+    d = cache_dir(home)
+    write_sidecar(d, "findings-spec-1395.jsonl", ["P1"], "spec")
+    (d / "findings-spec-1395.done").unlink()
+    code, _, err = render_line(wt, diff, "--round", "2", repo="agent-skills", axis="spec")
+    assert code == 2 and "findings-spec-1395.done is missing" in err, (code, err)
