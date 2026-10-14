@@ -51,7 +51,8 @@ branch (`references/loop.md` says why).
    wave's worth, and clump **only its `unblocked` tickets** (§ Clumping):
    `closure.py --json` into the candidates file, never built by hand.
    `loop.py dispatch` reads no blocked-by edge, so a blocked ticket in the
-   candidates file is dispatched as if clear (#1542). That exploration is the run's
+   candidates file is dispatched as if clear (#1542). That exploration is
+   the run's
    **frozen** candidate set: a ticket filed while the run is going waits for
    the next run. The one exception is a ticket filed *during* the run
    **because the run is stuck on what it fixes** — `loop.admit` takes it only
@@ -78,7 +79,10 @@ branch (`references/loop.md` says why).
 
 4. **Recompute the frontier at each landing** and dispatch into every free
    slot. Refill is **continuous**: no waves, because a wave holds slots
-   empty waiting for its slowest clump.
+   empty waiting for its slowest clump. A ticket of the frozen set that the
+   landing newly unblocks is clumped then (`closure.py --json` over it, as
+   step 2) and added to the candidates file; it was explored, so it is no
+   ticket filed since (#1542).
 5. **At each dispatch, re-resolve the closures** — the clump's own and
    every **in-flight** clump's, through `closure.py` against current `main`,
    **one hop**; an in-flight clump's tickets and workspace come from the run
@@ -193,10 +197,12 @@ python3 burndown/counts.py <run-id> --repo <primary checkout>
 ```
 
 read from each landed clump's dispositions sidecar, which the worker writes
-(`implement/SKILL.md` § Review), naming each closed clump as skipped. A spec run's
-form is `--spec <n>`: its slices run no review wave and have no sidecar, so it
-reads the spec's one `dispositions-<n>.jsonl` and requires none per slice,
-refusing when that one is missing. The
+(`implement/SKILL.md` § Review), naming each closed clump as skipped. A
+spec run with an integration branch passes `--spec <n>` (#1542): its slices
+run no review wave and have no sidecar, so it reads the spec's one
+`dispositions-<n>.jsonl` and requires none per slice, refusing when that one
+is missing. A one-slice spec has no integration branch, so its slice's own
+sidecar is the record and the form is the plain one. The
 sidecars are found under the `--repo` checkout's cache directory, never the
 cwd's, which is not always the target; `--repo` is refused unless it is the
 run's recorded target. A landed clump with no dispositions sidecar is refused

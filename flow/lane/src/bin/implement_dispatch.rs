@@ -52,10 +52,12 @@ Plain mode: the brief is `/implement <n>... --tier light|heavy --controller
 "<name>"`, light when one issue is named and it carries the documentation
 label and its body names no code path (a SKILL.md, or a code or config file
 by extension — otherwise the label is stripped at claim and the report says
-so; an unreadable body goes heavy and keeps the label), heavy otherwise — a clump is always heavy, as is a slice of a spec, because light tier lands
-without a PR and a merged PR's closingIssuesReferences is the only record
-merge-cleanup can clear a clump's claims from. A ready-for-human issue among
-them puts --chris-merges in the brief: the worker builds the clump and
+so; an unreadable body goes heavy and keeps the label), heavy otherwise;
+a clump is always heavy, because light tier lands without a PR and a merged
+PR's closingIssuesReferences is the only record merge-cleanup can clear a
+clump's claims from. A slice of a spec is heavy too, whatever its label: it
+merges by PR into its spec's integration branch. A ready-for-human issue
+among them puts --chris-merges in the brief: the worker builds the clump and
 Chris merges its PR. --model defaults to sonnet.
 
 --run <run-id> puts `--run <run-id>` in the brief. A burn's controller, a
@@ -1110,23 +1112,7 @@ fn run() -> Result<(), ExitCode> {
             body_unreadable,
         });
     }
-    // The clump lands as one diff. Light is the docs-only tier, so one
-    // ticket that is not docs-only makes the whole diff code — the same
-    // reading as a worker raising light to heavy the moment its diff turns
-    // out to hold code.
     let chris_merges = tickets.iter().any(|t| t.chris_merges);
-    // A clump is always heavy, whatever its labels say. Light tier pushes
-    // straight to the default branch with no PR, and the merged PR's
-    // closingIssuesReferences is the only authoritative record of which
-    // tickets a landing closed — so a light clump lands with nothing for
-    // merge-cleanup to read, and every ticket but the branch's own keeps its
-    // claim. That is the state #889 exists to end, so the tier that cannot
-    // carry a clump does not get one. The cost is real and small: a
-    // docs-only clump gets a PR it would not have had alone. One ticket is
-    // unchanged — its documentation label still decides its tier.
-    // The tier itself is chosen once the base is known (below): a slice is
-    // never light either (#1542).
-
     let home = env::var("HOME").unwrap_or_default();
     // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a
     // literal empty name, so it still falls through to the session lookup.
@@ -1251,9 +1237,22 @@ fn run() -> Result<(), ExitCode> {
         }
         Mode::Plain => slice_base(&primary, &slug, &ns).map_err(die)?,
     };
-    // A slice is never light, whatever its label says (#1542): light tier
-    // lands with no PR, the wrong shape for a slice, which merges into its
-    // spec's integration branch by PR.
+    // The clump lands as one diff. Light is the docs-only tier, so one
+    // ticket that is not docs-only makes the whole diff code — the same
+    // reading as a worker raising light to heavy the moment its diff turns
+    // out to hold code.
+    // A clump is always heavy, whatever its labels say. Light tier pushes
+    // straight to the default branch with no PR, and the merged PR's
+    // closingIssuesReferences is the only authoritative record of which
+    // tickets a landing closed — so a light clump lands with nothing for
+    // merge-cleanup to read, and every ticket but the branch's own keeps its
+    // claim. That is the state #889 exists to end, so the tier that cannot
+    // carry a clump does not get one. The cost is real and small: a
+    // docs-only clump gets a PR it would not have had alone. One ticket is
+    // unchanged — its documentation label still decides its tier.
+    // A slice of a spec is never light either, whatever its label says
+    // (#1542): light tier lands with no PR, the wrong shape for a slice,
+    // which merges into its spec's integration branch by PR.
     let tier = if tickets.len() == 1 && tickets[0].documentation && !matches!(base, Base::Slice { .. }) { "light" } else { "heavy" };
 
     // Past here the clump is claimed; a failure says how to release it. A

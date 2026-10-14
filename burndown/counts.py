@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The closing report's counts:
 
-    python3 burndown/counts.py <run-id> --repo <checkout> | --reviews-dir <dir> [--spec <n>]
+    python3 burndown/counts.py <run-id> (--repo <checkout> | --reviews-dir <dir>)
+                                [--spec <n>]
 
 prints the closing report's two counts, fixed and moved, read from each
 landed clump's dispositions sidecar (`implement/SKILL.md` § Review's
@@ -62,17 +63,14 @@ def counts(run, reviews_dir, spec=None):
 
     With `spec` (a spec run, #1542) the one sidecar read is the spec's own,
     `dispositions-<spec>.jsonl`: slices have none, and a slice's sidecar is
-    never read. The spec's own missing is refused the same way."""
+    never read. The spec's own, missing, is refused the same way."""
     fixed = moved = carried = 0
     missing, closed = [], []
-    sidecars = []
     for entry in run["clumps"]:
         if entry.get("closed"):
             closed.append((entry["tickets"][0], entry["closed"]))
-        if spec is None and entry["landed"]:
-            sidecars.append(entry["tickets"][0])
-    if spec is not None:
-        sidecars = [spec]
+    sidecars = [spec] if spec is not None else [
+        entry["tickets"][0] for entry in run["clumps"] if entry["landed"]]
     for lowest in sidecars:
         path = runfile.dispositions_path(reviews_dir, lowest)
         if not os.path.exists(path):
