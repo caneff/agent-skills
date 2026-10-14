@@ -45,8 +45,9 @@ same count.
 under <repo>/.claude/worktrees/ holding a branch named implement-*, and
 nothing else on the machine: the --repo path, else the repo holding the cwd.
 Each goes through the single-branch form above unchanged, so a branch the
-tracker does not report merged, a worktree holding work and a live session
-each refuse exactly as they do there. It prints one line per workspace with
+tracker does not report merged (bar the closed-ticket, no-commit-ahead branch
+described below), a worktree holding work and a live session each refuse
+exactly as they do there. It prints one line per workspace with
 its disposition, and a summary count. Unlike the two forms above, it is a
 dry run by default: it removes nothing without --yes, and it has
 no --discard and no --force to override a refusal with — a workspace those
@@ -67,6 +68,8 @@ from the ignored file(s) count above: the two never share a label, so a name
 Chris approved losing under one count is never misread as counted by the
 other. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
+The single-branch refusal over an ignored name outside .scratch/ names the
+standing fix: the `**Discardable**:` line below.
 
 A repo may declare more ignored paths discardable (#1326): a line of its
 primary checkout's AGENTS.md starting `**Discardable**:` whose backtick spans
@@ -78,6 +81,13 @@ ignores, so a modified or untracked file never counts, nothing at or beneath
 `.git` or `.scratch` is ever matched, and a bare `*` is never honoured. A
 registered worktree found beneath a declared path is removed as one, and its
 uncommitted work refuses. Anything outside the list still refuses.
+
+A branch the merged check refuses is deleted unasked, by the single-branch
+form and by --reap, when its ticket implement-<n> is closed and neither the
+local branch nor its fetched origin copy holds a commit past its base (#1545):
+origin/<default>, or the recorded spec base. A closed ticket whose branch holds
+a commit ahead keeps the refusal and --force. The worktree guards above still
+apply. --sweep, which lists merged branches only, does not take this path.
 
 A linked worktree registered with any repo and nested beneath the one being
 removed — a timing or verification checkout under .scratch/ — is removed
@@ -418,7 +428,7 @@ const NAMES_SHOWN: usize = 5;
 /// The ignored directory names a removal may discard unasked. Deny by
 /// default (#801): an unknown ignored name is kept, because a wrongly kept
 /// cache costs a --discard and a wrongly discarded note cannot be undone.
-const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"];
+const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".hypothesis"];
 
 /// `HELP` with its cache-name list filled from `CACHE_DIRS`, so the help
 /// cannot name a set of caches the guard does not use (#875).
@@ -703,6 +713,18 @@ impl WorktreeFiles {
             self.ignored.len(),
             self.caches.len()
         )
+    }
+
+    /// The standing fix for a regenerable ignored name that stopped the run
+    /// (#1545): declare it on the repo's `**Discardable**:` line. Empty when
+    /// nothing ignored sits outside `.scratch/`, which is evidence and is
+    /// never offered for declaring.
+    fn declare_hint(&self) -> &'static str {
+        if self.ignored.iter().any(|n| n.split('/').next() != Some(".scratch")) {
+            "; if it is regenerable, a `**Discardable**:` line in the repo's AGENTS.md naming it stops this for good"
+        } else {
+            ""
+        }
     }
 
     /// "1 modified, 2 untracked file(s) would be lost: f, a, b" — the kinds
@@ -1051,7 +1073,7 @@ impl Cleanup {
         };
         if files.is_dirty() {
             if !self.discard {
-                eprintln!("merge-cleanup: refusing to remove {wt} — {} (--discard overrides)", files.dirty_text());
+                eprintln!("merge-cleanup: refusing to remove {wt} — {} (--discard overrides){}", files.dirty_text(), files.declare_hint());
                 return None;
             }
             safe_println!("--discard: {wt} — {}", files.dirty_text());
@@ -1427,7 +1449,7 @@ impl Cleanup {
         if in_tree(&cwd_path(), &resolved(wt)) {
             return Some("this run's own directory, not removed".into());
         }
-        if self.is_merged(anchor, b).is_none() {
+        if self.is_merged(anchor, b).is_none() && self.moot_without_commits(anchor, b).is_none() {
             return Some("not merged, not removed".into());
         }
         match WorktreeFiles::read(wt) {
@@ -1520,6 +1542,37 @@ impl Cleanup {
         None
     }
 
+    /// A branch `is_merged` refused that has nothing to lose (#1545): its
+    /// ticket, `implement-<n>`'s, is closed, and neither `refs/heads/<b>` nor
+    /// a fetched `origin/<b>` holds a commit past `origin/<base>`, the
+    /// recorded spec base else the default branch. The remote tip counts
+    /// because step 5 deletes it and only the local tip is recorded under
+    /// `refs/deleted`. The sentence naming those facts, or `None` when any
+    /// does not read as true: an unreadable ticket, count or ref is never
+    /// "moot". A branch with a commit ahead keeps the refusal and `--force`.
+    fn moot_without_commits(&self, path: &str, b: &str) -> Option<String> {
+        let n = ticket_number(b)?;
+        if !on_path("gh") {
+            return None;
+        }
+        let slug = origin_slug(Path::new(path))?;
+        if lane::issue_state::read(&slug, n)?.state != "CLOSED" {
+            return None;
+        }
+        let base = recorded_spec_base(path, b).unwrap_or_else(|| default_branch(Path::new(path)));
+        let none_ahead = |tip: &str| {
+            quiet_stdout("git", &["-C", path, "rev-list", "--count", &format!("origin/{base}..{tip}")]).is_some_and(|c| c.trim() == "0")
+        };
+        if !none_ahead(&format!("refs/heads/{b}")) {
+            return None;
+        }
+        let remote = format!("refs/remotes/origin/{b}");
+        if quiet_ok("git", &["-C", path, "rev-parse", "--verify", "-q", &remote]) && !none_ahead(&remote) {
+            return None;
+        }
+        Some(format!("#{n} is closed and {b} has no commits ahead of {base}"))
+    }
+
     /// Step 4's delete. `-d` first: it is the honest question, and it
     /// succeeds on a real merge. A squash merge leaves the branch unmerged in
     /// git's eyes, so fall back to `-D` — step 2 has already proved the merge.
@@ -1577,10 +1630,18 @@ impl Cleanup {
             None
         } else {
             match self.is_merged(path, b) {
-                None => {
-                    eprintln!("merge-cleanup: {b} is not merged — nothing cleaned up (--force overrides)");
-                    return false;
-                }
+                None => match self.moot_without_commits(path, b) {
+                    // Nothing on the branch to lose (#1545); the file guards
+                    // below still run.
+                    Some(why) => {
+                        safe_println!("{why}: deleting it unasked");
+                        None
+                    }
+                    None => {
+                        eprintln!("merge-cleanup: {b} is not merged — nothing cleaned up (--force overrides)");
+                        return false;
+                    }
+                },
                 Some(m) => Some(m),
             }
         };

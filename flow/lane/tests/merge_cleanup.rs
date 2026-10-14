@@ -833,7 +833,7 @@ fn help_states_the_cache_exemption_as_a_conjunction() {
     // The name list is built from CACHE_DIRS, so this pins the sentence to
     // the const: a name added or dropped there changes it and reddens this.
     assert!(!flat.contains("{cache_names}"), "{flat}");
-    let sentence = "named node_modules, __pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache and,";
+    let sentence = "named node_modules, __pycache__, target, .venv, .pytest_cache, .ruff_cache, .mypy_cache or .hypothesis and,";
     assert!(flat.contains(sentence), "{flat}");
     assert!(flat.contains("Both are required"), "{flat}");
     assert!(flat.contains("a `*` .gitignore alone makes nothing a cache"), "{flat}");
@@ -3333,4 +3333,135 @@ fn a_committed_branch_whose_reflog_is_gone_is_refused() {
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-96"], &[]);
     assert_refused(&c, &r, &wt, "96", &run);
     assert!(run.stderr.contains("no commit entry could be read in the reflog of implement-96"), "{}", run.text());
+}
+
+// --- #1545: moot branches, .hypothesis, the Discardable hint ----------------
+
+/// `implement-<n>` cut from main at once and pushed, with `commits` commits
+/// of its own and no merged PR recorded for it.
+fn mk_unmerged_branch(c: &Cleanup, r: &std::path::Path, n: &str, commits: usize) {
+    let d = s(r);
+    let b = format!("implement-{n}");
+    c.git_ok(&["-C", d, "checkout", "-q", "-b", &b, "main"]);
+    for i in 0..commits {
+        std::fs::write(r.join(format!("moot-{n}-{i}")), "x\n").unwrap();
+        c.git_ok(&["-C", d, "add", "."]);
+        c.git_ok(&["-C", d, "commit", "-qm", &format!("work {i}")]);
+    }
+    c.git_ok(&["-C", d, "push", "-q", "-u", "origin", &b]);
+    c.git_ok(&["-C", d, "checkout", "-q", "main"]);
+}
+
+const CLOSED_CLAIMED: &[(&str, &str)] = &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "")];
+
+#[test]
+fn a_moot_branch_with_no_commits_ahead_is_deleted_unasked() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1545a");
+    mk_unmerged_branch(&c, &r, "1545", 0);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-1545"], CLOSED_CLAIMED);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("#1545 is closed and implement-1545 has no commits ahead of main"), "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-1545"), "{}", run.text());
+}
+
+#[test]
+fn a_moot_branch_with_a_commit_ahead_is_still_refused() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1545b");
+    mk_unmerged_branch(&c, &r, "1546", 1);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-1546"], CLOSED_CLAIMED);
+    assert!(!run.ok && run.stderr.contains("implement-1546 is not merged"), "{}", run.text());
+    assert!(c.has_branch(&r, "implement-1546"), "{}", run.text());
+}
+
+#[test]
+fn an_open_ticket_with_no_commits_ahead_is_still_refused() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1545c");
+    mk_unmerged_branch(&c, &r, "1547", 0);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-1547"], &[("GH_STATE", "OPEN"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "")]);
+    assert!(!run.ok && run.stderr.contains("implement-1547 is not merged"), "{}", run.text());
+    assert!(c.has_branch(&r, "implement-1547"), "{}", run.text());
+}
+
+#[test]
+fn a_slice_moot_branch_is_judged_against_its_spec_base() {
+    // One commit lands on spec-9, and the slice sits on it: ahead of main by
+    // that commit, ahead of its recorded base by none.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1545d");
+    let d = s(&r);
+    c.git_ok(&["-C", d, "checkout", "-q", "-b", "spec-9", "main"]);
+    std::fs::write(r.join("spec-work"), "x\n").unwrap();
+    c.git_ok(&["-C", d, "add", "."]);
+    c.git_ok(&["-C", d, "commit", "-qm", "spec work"]);
+    c.git_ok(&["-C", d, "push", "-q", "origin", "spec-9"]);
+    c.git_ok(&["-C", d, "branch", "implement-1548", "spec-9"]);
+    c.git_ok(&["-C", d, "config", "branch.implement-1548.base", "spec-9"]);
+    c.git_ok(&["-C", d, "checkout", "-q", "main"]);
+    let run = c.mc(Tools::Full, &["--repo", d, "implement-1548"], CLOSED_CLAIMED);
+    assert!(run.ok && run.has("no commits ahead of spec-9"), "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-1548"), "{}", run.text());
+}
+
+#[test]
+fn a_moot_branch_whose_pushed_copy_holds_commits_is_refused() {
+    // Local branch reset to main, origin still holds the work: deleting the
+    // remote would lose commits no refs/deleted record covers.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1545h");
+    let d = s(&r);
+    mk_unmerged_branch(&c, &r, "1549", 1);
+    c.git_ok(&["-C", d, "branch", "-f", "implement-1549", "main"]);
+    let run = c.mc(Tools::Full, &["--repo", d, "implement-1549"], CLOSED_CLAIMED);
+    assert!(!run.ok && run.stderr.contains("implement-1549 is not merged"), "{}", run.text());
+    assert!(c.has_branch(&r, "implement-1549"), "{}", run.text());
+    assert!(c.git_out(&["-C", d, "ls-remote", "origin", "implement-1549"]).contains("refs/heads/implement-1549"));
+}
+
+#[test]
+fn reap_removes_a_moot_workspace_and_keeps_one_with_a_commit() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1545i");
+    let d = s(&r);
+    mk_unmerged_branch(&c, &r, "1550", 0);
+    mk_unmerged_branch(&c, &r, "1551", 1);
+    let wt0 = r.join(".claude/worktrees/implement-1550");
+    let wt1 = r.join(".claude/worktrees/implement-1551");
+    c.worktree_add(&r, &[s(&wt0), "implement-1550"]);
+    c.worktree_add(&r, &[s(&wt1), "implement-1551"]);
+    let run = c.mc(Tools::Full, &["--repo", d, "--reap", "--yes"], CLOSED_CLAIMED);
+    assert!(!wt0.exists() && !c.has_branch(&r, "implement-1550"), "{}", run.text());
+    assert!(wt1.exists() && c.has_branch(&r, "implement-1551"), "{}", run.text());
+}
+
+#[test]
+fn hypothesis_is_a_cache_removed_with_the_worktree() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1545e", "implement-1545");
+    ignored_dirs(&r, &wt, &[".hypothesis"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(run.has(&format!("discarding 1 cache file(s) in {}: .hypothesis/", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn an_ignored_name_refusal_names_the_discardable_line_as_the_fix() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1545f", "implement-1546");
+    ignored_dirs(&r, &wt, &["graph-cache"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains("(--discard overrides)"), "{}", run.text());
+    assert!(run.stderr.contains("**Discardable**:"), "{}", run.text());
+}
+
+#[test]
+fn a_scratch_refusal_does_not_offer_the_discardable_line() {
+    // .scratch/ is evidence, never something to declare discardable.
+    let c = Cleanup::new();
+    let (r2, wt2) = lane_workspace(&c, "r1545g", "implement-1547");
+    ignored_dirs(&r2, &wt2, &[".scratch"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r2), "caneff/merged-one"], &[]);
+    assert!(!run.ok && !run.stderr.contains("**Discardable**:"), "{}", run.text());
 }
