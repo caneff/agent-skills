@@ -230,21 +230,9 @@ def render(a):
 
 def write_brief(text, repo, ticket, axis, rnd=1):
     """Write `text` to a ticket-numbered file of `repo`'s (folded) review cache directory that no
-    earlier wave holds, and return its path. `O_EXCL` is the never-overwrite: a taken name moves on to `-2`, `-3`."""
-    directory = review_ledger.REVIEWS_ROOT / repo
-    directory.mkdir(parents=True, exist_ok=True)
-    # SKILL.md allows a branch name for `--ticket`; a `/` in it must not name a directory.
-    stem, k = f"brief-{re.sub(r'[^A-Za-z0-9._-]', '-', ticket)}-{axis}" + (f"-r{rnd}" if rnd > 1 else ""), 1
-    while True:
-        path = directory / (f"{stem}.md" if k == 1 else f"{stem}-{k}.md")
-        try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-        except FileExistsError:
-            k += 1
-            continue
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-        return path
+    earlier wave holds, and return its path (`-2`, `-3` when the name is taken)."""
+    # SKILL.md allows a branch name for `--ticket`; `write_cache_file` keeps a `/` in it from naming a directory.
+    return review_ledger.write_cache_file(repo, f"brief-{ticket}-{axis}" + (f"-r{rnd}" if rnd > 1 else ""), text)
 
 
 def main(argv):
