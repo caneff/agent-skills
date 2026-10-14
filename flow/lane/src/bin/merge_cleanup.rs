@@ -45,8 +45,9 @@ same count.
 under <repo>/.claude/worktrees/ holding a branch named implement-*, and
 nothing else on the machine: the --repo path, else the repo holding the cwd.
 Each goes through the single-branch form above unchanged, so a branch the
-tracker does not report merged, a worktree holding work and a live session
-each refuse exactly as they do there. It prints one line per workspace with
+tracker does not report merged (bar the closed-ticket, no-commit-ahead branch
+described below), a worktree holding work and a live session each refuse
+exactly as they do there. It prints one line per workspace with
 its disposition, and a summary count. Unlike the two forms above, it is a
 dry run by default: it removes nothing without --yes, and it has
 no --discard and no --force to override a refusal with — a workspace those
@@ -67,8 +68,8 @@ from the ignored file(s) count above: the two never share a label, so a name
 Chris approved losing under one count is never misread as counted by the
 other. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
-A refusal over an ignored name outside .scratch/ says the standing fix: the
-`**Discardable**:` line below.
+The single-branch refusal over an ignored name outside .scratch/ names the
+standing fix: the `**Discardable**:` line below.
 
 A repo may declare more ignored paths discardable (#1326): a line of its
 primary checkout's AGENTS.md starting `**Discardable**:` whose backtick spans
@@ -81,12 +82,12 @@ ignores, so a modified or untracked file never counts, nothing at or beneath
 registered worktree found beneath a declared path is removed as one, and its
 uncommitted work refuses. Anything outside the list still refuses.
 
-A branch the merged check refuses is deleted unasked when its ticket,
-implement-<n>, is closed with no merged PR at the tip and the branch holds no
-commit past its base (#1545): origin/<default>, or the recorded spec base. A
-closed ticket whose branch holds a commit ahead keeps the refusal and --force.
-The worktree guards above still apply. --sweep, which lists merged branches
-only, does not take this path.
+A branch the merged check refuses is deleted unasked, by the single-branch
+form and by --reap, when its ticket implement-<n> is closed and neither the
+local branch nor its fetched origin copy holds a commit past its base (#1545):
+origin/<default>, or the recorded spec base. A closed ticket whose branch holds
+a commit ahead keeps the refusal and --force. The worktree guards above still
+apply. --sweep, which lists merged branches only, does not take this path.
 
 A linked worktree registered with any repo and nested beneath the one being
 removed — a timing or verification checkout under .scratch/ — is removed
@@ -720,7 +721,7 @@ impl WorktreeFiles {
     /// never offered for declaring.
     fn declare_hint(&self) -> &'static str {
         if self.ignored.iter().any(|n| n.split('/').next() != Some(".scratch")) {
-            "; a regenerable ignored name stops the next run too unless the repo's AGENTS.md has a `**Discardable**:` line naming it"
+            "; if it is regenerable, a `**Discardable**:` line in the repo's AGENTS.md naming it stops this for good"
         } else {
             ""
         }
@@ -1542,12 +1543,13 @@ impl Cleanup {
     }
 
     /// A branch `is_merged` refused that has nothing to lose (#1545): its
-    /// ticket, `implement-<n>`'s, is closed — with no merged PR at the tip,
-    /// or `is_merged` would have answered — and `refs/heads/<b>` holds no
-    /// commit past `origin/<base>`, the recorded spec base else the default
-    /// branch. The sentence naming both facts, or `None` when either does not
-    /// read as true: an unreadable ticket, count or ref is never "moot". A
-    /// moot branch with a commit ahead keeps the refusal and `--force`.
+    /// ticket, `implement-<n>`'s, is closed, and neither `refs/heads/<b>` nor
+    /// a fetched `origin/<b>` holds a commit past `origin/<base>`, the
+    /// recorded spec base else the default branch. The remote tip counts
+    /// because step 5 deletes it and only the local tip is recorded under
+    /// `refs/deleted`. The sentence naming those facts, or `None` when any
+    /// does not read as true: an unreadable ticket, count or ref is never
+    /// "moot". A branch with a commit ahead keeps the refusal and `--force`.
     fn moot_without_commits(&self, path: &str, b: &str) -> Option<String> {
         let n = ticket_number(b)?;
         if !on_path("gh") {
@@ -1558,8 +1560,17 @@ impl Cleanup {
             return None;
         }
         let base = recorded_spec_base(path, b).unwrap_or_else(|| default_branch(Path::new(path)));
-        let ahead = quiet_stdout("git", &["-C", path, "rev-list", "--count", &format!("origin/{base}..refs/heads/{b}")])?;
-        (ahead.trim() == "0").then(|| format!("#{n} is closed with no merged PR and {b} has no commits ahead of {base}"))
+        let none_ahead = |tip: &str| {
+            quiet_stdout("git", &["-C", path, "rev-list", "--count", &format!("origin/{base}..{tip}")]).is_some_and(|c| c.trim() == "0")
+        };
+        if !none_ahead(&format!("refs/heads/{b}")) {
+            return None;
+        }
+        let remote = format!("refs/remotes/origin/{b}");
+        if quiet_ok("git", &["-C", path, "rev-parse", "--verify", "-q", &remote]) && !none_ahead(&remote) {
+            return None;
+        }
+        Some(format!("#{n} is closed and {b} has no commits ahead of {base}"))
     }
 
     /// Step 4's delete. `-d` first: it is the honest question, and it
@@ -1620,10 +1631,8 @@ impl Cleanup {
         } else {
             match self.is_merged(path, b) {
                 None => match self.moot_without_commits(path, b) {
-                    // Nothing on the branch to lose: the ticket is closed
-                    // with no PR behind it and the branch holds no commit of
-                    // its own past its base (#1545). The file guards below
-                    // still run.
+                    // Nothing on the branch to lose (#1545); the file guards
+                    // below still run.
                     Some(why) => {
                         safe_println!("{why}: deleting it unasked");
                         None
