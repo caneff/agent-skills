@@ -378,9 +378,11 @@ round follows steps 2–3 below keyed on the spec number:
    `fixed` dispositions name), and run
    `bash tests/all.sh --changed origin/<default>` (`AGENTS.md` § End-to-end
    seam, narrowed to what the PR touched): green is the exit, red is fixed and
-   rerun. This is the ticket's one suite run, just before "PR up"; the merger
-   reruns the full seam itself before it merges
-   (§ The merge step 3).
+   rerun. When the repo's `AGENTS.md` § End-to-end seam scopes the run for this
+   kind of change, that scope governs instead of this default; the default
+   applies only when the section names none (Chris's ruling 2026-10-14,
+   #1581). This is the ticket's one suite run, just before "PR up"; the merger
+   reruns the seam itself before it merges (§ The merge step 3).
    `fix-check.sh <n>` (and the pre-report gate that runs it) checks the
    rest mechanically: every finding id in the three findings sidecars and the
    Codex output has exactly one disposition, every `fixed` sha is a commit on
@@ -812,7 +814,8 @@ substitutions:
   PR too. It goes back to the worker for
   `gh pr edit <pr> --repo <owner/name> --base spec-<p>`.
 - **The seam rerun starts from `origin/spec-<p>`**: step 3's worktree start
-  point and its merge of the head name it, and the run is the full seam too.
+  point and its merge of the head name it, and the run is the full seam too
+  (or the scope the repo's `AGENTS.md` names, step 3).
 - **`closingIssuesReferences` is not required.** GitHub fills it only for a
   PR into the default branch, so a slice PR's reads empty and blocks nothing.
   The slice ticket stays open until the spec's integration PR closes it, so
@@ -871,7 +874,13 @@ closed.
    the merge, re-run the **full** seam on the PR as it will land, every time
    (#1496, Chris's ruling 6a): this is the only full run a merge made outside
    `drain` gets, so it is never skipped, not even when `<default>` has not
-   moved. From the primary checkout, after `git fetch origin`:
+   moved. That default yields to one thing: when the repo's `AGENTS.md`
+   § End-to-end seam scopes the run for this kind of change, that scope is the
+   run, and the full seam applies only when the section names none (Chris's
+   ruling 2026-10-14, #1581, which bounds ruling 6a to the repos that scope
+   nothing). The worktree, merge, status line and selector evidence below are
+   unchanged; only the command run in it is. From the primary checkout, after
+   `git fetch origin`:
 
    ```
    git worktree add --detach <absolute path under .scratch/> origin/<default>

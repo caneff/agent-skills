@@ -70,3 +70,35 @@ def test_step3_says_the_selector_comment_never_changes_the_merge_decision():
     assert "evidence only" in text
     assert "a red seam blocks the merge above whatever the" in text.replace("\n   ", " ")
     assert "no listing and no comment are owed" in text.replace("\n   ", " ")
+
+
+def flat(text):
+    return " ".join(text.split())
+
+
+def review_step3():
+    text = skill()
+    start = text.index("3. **Write the dispositions, then run the seam.**")
+    return text[start:text.index("#### The Codex pass")]
+
+
+def test_review_step3_defers_to_the_repos_seam_scope_for_the_change():
+    text = flat(review_step3())
+    assert "scopes the run for this kind of change" in text
+    assert "that scope governs" in text
+    assert "names none" in text
+
+
+def test_merge_step3_defers_to_the_repos_seam_scope_for_the_change():
+    text = flat(step3())
+    assert "scopes the run for this kind of change" in text
+    assert "that scope is the run" in text
+    assert "names none" in text
+
+
+def test_merge_step3_no_longer_reads_ruling_6a_as_unconditional():
+    text = flat(step3())
+    assert "#1581" in text
+    assert "never skipped, not even when `<default>` has not moved" in text
+    # the default stays unconditional; only a repo-named scope displaces it
+    assert "`<default>` has not moved" in text
