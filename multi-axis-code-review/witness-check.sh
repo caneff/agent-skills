@@ -29,6 +29,9 @@
 # install would import the reviewed tree's code. With no `uv.lock` at HEAD the
 # `.venv` stays unset and the run says so. `vendor` is not set up.
 #
+# Each run with `--repo` first prunes `witness.*` directories in that repo's
+# cache home older than 7 days (#1547): what a killed run left behind.
+#
 # Exit: 0 every mutation was run and reported (red, HOLLOW or unknown — read
 # the output); 1 setup failed before any mutation; 2 bad arguments; 3 a
 # throwaway worktree could not be removed and is still registered; 4 a ledger
@@ -109,7 +112,22 @@ done
 if [ -n "$repo_name" ]; then
   # The ledger's own fold of the name (#1527), so `--repo agent-skills` lands in `skills/`.
   home_dir=$(python3 "$here/review_ledger.py" cache-dir --repo "$repo_name") || exit 1
-  mkdir -p "$home_dir" && root=$(mktemp -d "$home_dir/witness.XXXXXX") || exit 1
+  mkdir -p "$home_dir" || exit 1
+  # Prune first (#1547): a killed run is the case the exit sweep misses, so any
+  # `witness.*` here older than 7 days is a run that is not coming back. Its
+  # worktrees go through `git worktree remove`, never a bare `rm`, which would
+  # leave them registered. A failed removal keeps the directory and says so; a
+  # prune never stops the review that triggered it.
+  while IFS= read -r stale; do
+    stale_ok=1
+    for w in "$stale"/worktrees/*/; do
+      [ -d "$w" ] || continue
+      git -C "$worktree" worktree remove --force "${w%/}" || stale_ok=0
+    done
+    if [ "$stale_ok" -eq 1 ]; then rm -rf "$stale"
+    else echo "witness check: could not prune $stale - kept, remove its worktrees by hand" >&2; fi
+  done < <(find "$home_dir" -mindepth 1 -maxdepth 1 -type d -name 'witness.*' -mtime +7 2>/dev/null)
+  root=$(mktemp -d "$home_dir/witness.XXXXXX") || exit 1
 else
   root=$(mktemp -d) || exit 1
 fi

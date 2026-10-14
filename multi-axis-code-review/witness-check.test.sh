@@ -705,6 +705,29 @@ grep -q 'uv3: unknown' "$scratch/uvfail.out" ||
   { echo "FAIL: a failed uv sync was not reported unknown" >&2; cat "$scratch/uvfail.out" >&2; fail=1; }
 unset target
 
+# A killed run is the case the exit sweep misses (#1547, Chris's ruling): each run
+# first prunes any `witness.*` directory in this repo's cache home older than 7
+# days, deregistering its linked worktrees with `git worktree remove`, not `rm`.
+# A younger one (maybe a live run) and a non-witness entry stay.
+prune_home="$home/.cache/agent-reviews/skills"
+mkdir -p "$prune_home/witness.OLD001/worktrees" "$prune_home/witness.NEW001/worktrees" "$prune_home/keep.OLD001"
+git -C "$repo" worktree add --detach -q "$prune_home/witness.OLD001/worktrees/stale" HEAD
+git -C "$repo" worktree add --detach -q "$prune_home/witness.NEW001/worktrees/live" HEAD
+touch -d '8 days ago' "$prune_home/witness.OLD001" "$prune_home/keep.OLD001"
+touch -d '6 days ago' "$prune_home/witness.NEW001"
+substitute 'pr1' ': >"$3"; exit 1' >"$scratch/launcher-prune.sh"
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-prune.sh" ) >"$scratch/prune.out" 2>&1 || true
+[ ! -e "$prune_home/witness.OLD001" ] ||
+  { echo "FAIL: a witness.* directory older than 7 days was not pruned" >&2; cat "$scratch/prune.out" >&2; fail=1; }
+git -C "$repo" worktree list --porcelain | grep -q "witness.OLD001" &&
+  { echo "FAIL: the pruned witness's worktree is still registered" >&2; fail=1; }
+[ -d "$prune_home/witness.NEW001" ] ||
+  { echo "FAIL: a witness.* directory under 7 days old was pruned" >&2; fail=1; }
+[ -d "$prune_home/keep.OLD001" ] ||
+  { echo "FAIL: the prune removed an entry that is not a witness.* directory" >&2; fail=1; }
+git -C "$repo" worktree remove --force "$prune_home/witness.NEW001/worktrees/live" 2>/dev/null
+rm -rf "$prune_home/witness.NEW001" "$prune_home/keep.OLD001"
+
 # The two argument guards are refused by name before any worktree exists.
 mf="$scratch/mutate-def-guards.sh"; printf 'mutate() { :; }\n' >"$mf"
 refuses() { # <why> <expected message> <checker args...>
