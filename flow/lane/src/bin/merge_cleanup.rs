@@ -428,7 +428,7 @@ const NAMES_SHOWN: usize = 5;
 /// The ignored directory names a removal may discard unasked. Deny by
 /// default (#801): an unknown ignored name is kept, because a wrongly kept
 /// cache costs a --discard and a wrongly discarded note cannot be undone.
-const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".hypothesis"];
+const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".hypothesis", ".pants.d"];
 
 /// `HELP` with its cache-name list filled from `CACHE_DIRS`, so the help
 /// cannot name a set of caches the guard does not use (#875).
