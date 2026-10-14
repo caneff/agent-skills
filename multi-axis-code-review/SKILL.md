@@ -231,9 +231,14 @@ show the reviewer finished: an empty one is what a reviewer that crashed
 before writing leaves behind, and a truncated one reads as a shorter list.
 The marker is written by the reviewer once the sidecar is complete. The same
 check refuses a review whose sidecar has no ledger row for the ticket (#1527):
-the `append` below is what writes it, and a skip row does not count. The safe
-direction stays: an absent sidecar is refused, because it cannot be told from
-a reviewer that never ran, unless the ledger records that review as skipped.
+the `append` below is what writes it, and a skip row does not count. The row
+records the sha256 of the sidecar it read (`sidecar_sha256`, #1555), and the
+check wants one matching the sidecar on disk: a wave that rewrote the sidecar
+re-runs `append`, and a row from an earlier dispatch does not pass for it,
+except when the new sidecar is byte-identical to the old (an empty one both
+times). The safe direction stays: an absent sidecar is refused, because it
+cannot be told from a reviewer that never ran, unless the ledger records
+that review as skipped.
 
 **Every review ends with `append`** (#1268; this is the one home for the rule,
 and the `diff-reviewer` definition points here). Once its sidecar is

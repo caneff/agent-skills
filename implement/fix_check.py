@@ -50,8 +50,12 @@ integration PR closes is refused like any other closed-by-this-PR ticket.
 A review that ran also has its ledger row (#1527): a sidecar with no
 `review_ledger.py append --type <axis>` row for this ticket and repo (a skip
 row does not count) is refused, since a wave that never appended leaves the
-ledger blind to it. Rows carry no timestamp, so a row left by an earlier
-dispatch of the ticket satisfies the check.
+ledger blind to it. The row must be this wave's (#1555): `append` records the
+sha256 of the sidecar it read as `sidecar_sha256`, and the check wants a row
+whose hash matches the sidecar on disk, so a row left by an earlier dispatch,
+or by a version of `append` before the field, is refused with the line to
+re-run. A second wave whose sidecar is byte-identical to the first's (an
+empty one both times) still matches: the hash cannot tell the two waves apart.
 A review the ledger records as skipped (`review_ledger.py append --type
 <axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
 record, or a `codex-gate` ledger row saying why it did not run (size gate,
@@ -148,18 +152,26 @@ def json_object(line):
 
 
 def ledger_types(reviews, n):
-    """The review types the ledger holds a row for on ticket `n` of this repo that ran, and the
-    types it records as not run: `(ran, skipped)`. A skip row is no evidence a review ran."""
+    """What the ledger holds for ticket `n` of this repo: `(ran, skipped)`. `ran` maps each review
+    type with a row that ran to the set of `sidecar_sha256` its rows carry (a row written before
+    #1555 carries none, so adds none); `skipped` is the types it records as not run. A skip row is
+    no evidence a review ran."""
     repo = review_ledger.fold_repo(os.path.basename(reviews))
     try:
         rows = review_ledger.read_ledger(review_ledger.DEFAULT_LEDGER)
     except FileNotFoundError:
-        return set(), set()
+        return {}, set()
     except ValueError as exc:
         raise Unanswerable(str(exc))
     mine = [r for r in rows if r.get("repo") == repo and n in (r.get("tickets") or [r.get("ticket")])]
     skipped = {r["type"] for r in mine if r["status"]["fields"]["findings"]["status"] == "skipped"}
-    return {r["type"] for r in mine} - skipped, skipped
+    ran = {}
+    for r in mine:
+        if r["type"] not in skipped:
+            digests = ran.setdefault(r["type"], set())
+            if isinstance(r.get("sidecar_sha256"), str):
+                digests.add(r["sidecar_sha256"])
+    return ran, skipped
 
 
 class Branch:
@@ -202,11 +214,16 @@ def axis_findings(reviews, n, branch, rowed, skipped, problems):
             problems.append(f"{name} is missing — that reviewer never ran, and the ledger "
                             "records no skip for it")
             continue
+        append = (f"review_ledger.py append --repo {os.path.basename(reviews)} --ticket {n} "
+                  f"--type {axis}")
         if axis not in rowed:
             problems.append(f"no ledger row for the {axis} review of #{n} under repo "
                             f"{os.path.basename(reviews)}, though {name} exists — a skip row is not one: "
-                            f"review_ledger.py append --repo {os.path.basename(reviews)} --ticket {n} "
-                            f"--type {axis}")
+                            f"{append}")
+        elif review_ledger.sidecar_digest(path) not in rowed[axis]:
+            problems.append(f"the ledger carries no row for this wave's {name}: no {axis} row of #{n} holds "
+                            "its sha256 — the row is an earlier dispatch's or predates the field, or the "
+                            f"sidecar changed after its append; re-append: {append}")
         if not os.path.exists(os.path.join(reviews, marker)):
             problems.append(f"{name} has no completion marker {marker} — a reviewer that crashed or "
                             "was cut off leaves an empty or truncated sidecar too")

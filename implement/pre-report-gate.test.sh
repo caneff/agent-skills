@@ -146,18 +146,20 @@ git -C "$repo" worktree add -q -b implement-7 "$tmp/implement-7" main
 echo fix > "$tmp/implement-7/fix.txt"; git -C "$tmp/implement-7" add -A; git -C "$tmp/implement-7" commit -qm fix
 wt_tip=$(git -C "$tmp/implement-7" rev-parse HEAD)
 wt() { (cd "$tmp/implement-7" && HOME="$cache_home" "$@" bash "$gate" "$wt_tip" 2>&1); }
-# fix-check also wants the row `review_ledger.py append` writes for each review that ran (#1527).
+# fix-check also wants the row `review_ledger.py append` writes for each review that ran (#1527),
+# carrying the sha256 of the sidecar as it is now (#1555): call this after the sidecars are final.
 ran_rows() { # <ticket>
   for a in standards spec correctness; do
-    printf '{"repo": "repo", "ticket": %s, "tickets": [%s], "type": "%s", "status": {"fields": {"findings": {"status": "known"}}}}\n' "$1" "$1" "$a"
+    printf '{"repo": "repo", "ticket": %s, "tickets": [%s], "type": "%s", "sidecar_sha256": "%s", "status": {"fields": {"findings": {"status": "known"}}}}\n' \
+      "$1" "$1" "$a" "$(sha256sum <"$reviews/findings-$a-$1.jsonl" | cut -d' ' -f1)"
   done
 }
 for a in standards spec correctness; do : >"$reviews/findings-$a-7.jsonl"; : >"$reviews/findings-$a-7.done"; done
 # No Codex record, so the ledger must say why (the size gate skipped it).
 printf '%s\n' '{"repo": "repo", "ticket": 7, "tickets": [7], "type": "codex-gate", "status": {"fields": {"findings": {"status": "skipped"}}}}' \
   >"$cache_home/.cache/agent-reviews/ledger.jsonl"
-ran_rows 7 >>"$cache_home/.cache/agent-reviews/ledger.jsonl"
 printf '%s\n' '{"id": "S1", "axis": "standards", "severity": "hard", "file": "f", "title": "t"}' >"$reviews/findings-standards-7.jsonl"
+ran_rows 7 >>"$cache_home/.cache/agent-reviews/ledger.jsonl"
 
 out=$(wt env); rc=$?
 if [ "$rc" = 1 ] && [[ "$out" == *"no disposition for S1"* ]]; then
@@ -264,8 +266,8 @@ spec_tip=$(git -C "$tmp/spec-6" rev-parse HEAD)
 for a in standards spec correctness; do : >"$reviews/findings-$a-6.jsonl"; : >"$reviews/findings-$a-6.done"; done
 printf '%s\n' '{"repo": "repo", "ticket": 6, "tickets": [6], "type": "codex-gate", "status": {"fields": {"findings": {"status": "skipped"}}}}' \
   >>"$cache_home/.cache/agent-reviews/ledger.jsonl"
-ran_rows 6 >>"$cache_home/.cache/agent-reviews/ledger.jsonl"
 printf '%s\n' '{"id": "P1", "axis": "spec", "severity": "hard", "file": "f", "title": "t"}' >"$reviews/findings-spec-6.jsonl"
+ran_rows 6 >>"$cache_home/.cache/agent-reviews/ledger.jsonl"
 out=$(cd "$tmp/spec-6" && HOME="$cache_home" bash "$gate" HEAD 2>&1); rc=$?
 if [ "$rc" = 1 ] && [[ "$out" == *"no disposition for P1"* ]]; then
   echo "PASS: a spec-<n> branch with an undisposed finding of the spec review fails"
