@@ -5,7 +5,7 @@
                     --ticket <n> --base <fixed point> --diff <capture> --diff-command <cmd>
                     (--commit "<sha subject>")... [--spec <path or pointer> | --no-spec]
                     [--ruling <text>]... [--choice <text>]... [--claim "<id>: <text>"]...
-                    [--round <K> [--first-id <ordinal>]]
+                    [--round <K> [--first-id <series><ordinal>]...]
                     [--workers <k>] [--ceiling <seconds>] [--test-command <cmd>] [--capture-stat <line>]
 
 Writes the whole prompt for a `diff-reviewer` of that axis to
@@ -30,17 +30,18 @@ that drifted have one home each:
 - one report filename per axis and ticket, `review-<axis>-<n>.md`, and the
   sidecar and marker names beside it. `--round K` (K >= 2, #1549) gives all three
   and the brief file the `-rK` suffix `review_ledger.py` reads, adds `--round K`
-  to the ledger line, and tells the reviewer the id to start from: the ids of
-  every earlier round's sidecar continue, so round 1 ending at S11 starts round 2
-  at S12. An earlier round with no sidecar is refused, never read as "start at 1";
-  `--first-id <ordinal>` states the number then, for the axis's main series;
+  to the ledger line, and gives the reviewer the id each series starts from
+  (SKILL.md § Running a second round). An earlier round whose sidecar or
+  marker is missing, or holds a line with no id, is refused, never read as
+  "start at 1"; `--first-id S12 --first-id OE3` states every series then;
 - the worker count and wall-clock ceiling any test run is held to, and that a
   reviewer spawns no nested subagent (#1400).
 
 Exit 0 and the dispatch line on stdout; 2 on a bad input, with nothing written
 and nothing on stdout: a missing or empty diff capture, a worktree that is not
-a directory, an unknown axis, a claim with no finding id, a round below 1, a round K >= 2 with no earlier
-round's sidecar and no `--first-id`.
+a directory, an unknown axis, a claim with no finding id, a round below 1, a
+round K >= 2 whose earlier round is missing or unreadable and not covered by
+`--first-id`.
 """
 import argparse
 import os
@@ -92,30 +93,34 @@ def sidecar_name(axis, ticket, rnd, ext="jsonl"):
 
 
 def next_ids(directory, axis, ticket, rnd, first_id):
-    """{series: first ordinal} for round `rnd`: one past the highest id any earlier round's sidecar holds."""
-    top = {}
-    missing = []
+    """{series: first ordinal} for round `rnd`: one past the highest id any earlier round's
+    sidecar holds. `first_id` ({series: ordinal}) states a series outright; a series it
+    leaves out is refused when an earlier round cannot be read."""
+    top, unread = {}, []
     for earlier in range(1, rnd):
         path = directory / sidecar_name(axis, ticket, earlier)
+        marker = directory / sidecar_name(axis, ticket, earlier, "done")
         try:
             text = path.read_text()
         except OSError:
-            missing.append(path.name)
+            unread.append(f"{path.name} cannot be read")
             continue
-        for line in text.splitlines():
+        if not marker.exists():
+            unread.append(f"{marker.name} is missing, so {path.name} may be truncated")
+        for line in filter(str.strip, text.splitlines()):
             m = re.search(r'"id":\s*"([^"]+)"', line)
             idm = ID_RE.match(m.group(1)) if m else None
-            if idm:
-                top[idm.group(1)] = max(top.get(idm.group(1), 0), int(idm.group(2)))
-    main = SERIES[axis][0]
-    if missing and first_id is None:
-        raise BadInput(f"round {rnd} continues the ids of round {', '.join(str(r) for r in range(1, rnd))}, "
-                       f"and {', '.join(missing)} cannot be read in {directory}; pass --first-id <ordinal> "
-                       "to state where this round's ids start")
-    ids = {s: top.get(s, 0) + 1 for s in SERIES[axis]}
-    if first_id is not None:
-        ids[main] = first_id
-    return ids
+            if not idm:
+                unread.append(f"{path.name} holds a line with no readable id")
+                break
+            top[idm.group(1)] = max(top.get(idm.group(1), 0), int(idm.group(2)))
+    stated = {s: k for s, k in first_id.items() if s in SERIES[axis]}
+    open_series = [s for s in SERIES[axis] if s not in first_id]
+    if unread and open_series:
+        raise BadInput(f"round {rnd} continues earlier rounds' ids in {directory}, and {'; '.join(unread)}; "
+                       f"pass --first-id for {', '.join(open_series)} (e.g. "
+                       f"{' '.join(f'--first-id {s}<n>' for s in open_series)})")
+    return {s: stated.get(s, top.get(s, 0) + 1) for s in SERIES[axis]}
 
 
 def bullets(items, empty):
@@ -127,8 +132,13 @@ def render(a):
         raise BadInput(f"worktree {a.worktree} is not a directory")
     if a.round < 1:
         raise BadInput(f"round {a.round}: a round is at least 1")
-    if a.first_id is not None and (a.round == 1 or a.first_id < 1):
-        raise BadInput("--first-id is a positive ordinal and belongs to a round of 2 or more")
+    first_id = {}
+    for spec in a.first_id:
+        m = re.fullmatch(r"([A-Z]+)([1-9]\d*)", spec)
+        if not m or m.group(1) not in SERIES[a.axis] or a.round == 1:
+            raise BadInput(f"--first-id {spec!r} is not <series><ordinal> of the {a.axis} axis "
+                           f"({', '.join(SERIES[a.axis])}) in a round of 2 or more")
+        first_id[m.group(1)] = int(m.group(2))
     check_claims(a.claim)
     claims = a.claim
     if a.spec and a.no_spec:
@@ -151,7 +161,7 @@ def render(a):
     out_dir = f"~/.cache/agent-reviews/{a.repo}"  # a.repo is folded in main
     n, axis, rnd = a.ticket, a.axis, a.round
     suffix = f"-r{rnd}" if rnd > 1 else ""
-    ids = next_ids(review_ledger.REVIEWS_ROOT / a.repo, axis, n, rnd, a.first_id) if rnd > 1 else None
+    ids = next_ids(review_ledger.REVIEWS_ROOT / a.repo, axis, n, rnd, first_id) if rnd > 1 else None
     inputs = [
         f"- Worktree: {a.worktree}",
         f"- Fixed point: {a.base}",
@@ -191,8 +201,9 @@ def render(a):
     id_lines = []
     if ids:
         first = ", ".join(f"{s}{k}" for s, k in ids.items())
-        id_lines = [f"- This is round {rnd}. Finding ids continue the earlier rounds' on this ticket: number yours "
-                    f"from {first} (each series from its own number), never restart at 1."]
+        id_lines = [f"- This is round {rnd}. Finding ids continue the earlier rounds' on this "
+                    f"ticket: number yours from {first} (each series from its own number), "
+                    "never restart at 1."]
     parts += [
         "## Brief",
         brief,
@@ -252,7 +263,7 @@ def main(argv):
     p.add_argument("--choice", action="append", default=[])
     p.add_argument("--claim", action="append", default=[])
     p.add_argument("--round", type=int, default=1)
-    p.add_argument("--first-id", type=int)
+    p.add_argument("--first-id", action="append", default=[])
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--ceiling", type=int, default=600)
     p.add_argument("--test-command")

@@ -213,7 +213,8 @@ correctness line without one; the other axes have no rating field. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
 correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`; an
 over-engineering cut instead takes its own `OE1`, `OE2`, … series, still
-under `axis: "standards"`. A wave's ids are bare; a second round continues them (§ Running a second round).
+under `axis: "standards"`. A wave's ids are bare; a second round continues them
+(§ Running a second round).
 Cite the same id in the prose report next to each finding, so a reader can join the
 two. A partial write costs one line, not the file — readers of this
 sidecar must tolerate and skip a malformed line rather than fail the whole
@@ -640,17 +641,18 @@ its round. Name nothing by hand:
   `review-<axis>-<n>-r2.md`, `findings-<axis>-<n>-r2.jsonl`,
   `findings-<axis>-<n>-r2.done`. The ledger line in the brief is
   `review_ledger.py append ... --type <axis> --round 2`, so run it as printed.
-- **Ids continue** (Chris, #1549). Round 1 ending at `S11` starts round 2 at
-  `S12`; it never restarts at `S1`, since a disposition or a ledger row finds
-  its finding by id and two findings with one id on one ticket are confused.
-  The renderer reads the earlier rounds' sidecars and puts each series' first id
-  (`S`, `OE`, `P`, `C`) in the brief. An earlier sidecar it cannot read is
-  refused, never read as "start at 1"; `--first-id <ordinal>` states the number
-  for the axis's main series.
+- **Ids continue** (Chris, #1549). Round 1 ending at `S11` starts round 2
+  at `S12`; it never restarts at `S1`, since a disposition or a ledger row
+  finds its finding by id and two findings with one id on one ticket are
+  confused. The renderer reads the earlier rounds' sidecars and puts each
+  series' first id (`S` and `OE`, `P`, `C`) in the brief. It refuses an earlier
+  round whose sidecar or marker is missing or holds a line with no id, never
+  reading it as "start at 1"; `--first-id S12 --first-id OE3` states every
+  series then.
 - **Dispositions** go in the same `dispositions-<n>.jsonl`, one line per id,
   the ids being unique across rounds.
 - **The ledger needs nothing else.** A `-r2` sidecar with continued ids lands as
-  a `round: 2` row (tested for the #1448 case, #1549), so `harvest` and
+  a `round: 2` row (`review_ledger_round_test.py`, the #1448 case), so `harvest` and
   `append --round 2` both join it to the dispositions file.
 
 `implement/fix_check.py` reads only the round-1 sidecars, so a round-2 finding
