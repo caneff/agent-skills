@@ -52,7 +52,7 @@ Plain mode: the brief is `/implement <n>... --tier light|heavy --controller
 "<name>"`, light when one issue is named and it carries the documentation
 label and its body names no code path (a SKILL.md, or a code or config file
 by extension — otherwise the label is stripped at claim and the report says
-so; an unreadable body goes heavy and keeps the label), heavy otherwise — a clump is always heavy, because light tier lands
+so; an unreadable body goes heavy and keeps the label), heavy otherwise — a clump is always heavy, as is a slice of a spec, because light tier lands
 without a PR and a merged PR's closingIssuesReferences is the only record
 merge-cleanup can clear a clump's claims from. A ready-for-human issue among
 them puts --chris-merges in the brief: the worker builds the clump and
@@ -1124,7 +1124,8 @@ fn run() -> Result<(), ExitCode> {
     // carry a clump does not get one. The cost is real and small: a
     // docs-only clump gets a PR it would not have had alone. One ticket is
     // unchanged — its documentation label still decides its tier.
-    let tier = if tickets.len() == 1 && tickets[0].documentation { "light" } else { "heavy" };
+    // The tier itself is chosen once the base is known (below): a slice is
+    // never light either (#1542).
 
     let home = env::var("HOME").unwrap_or_default();
     // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a
@@ -1250,6 +1251,10 @@ fn run() -> Result<(), ExitCode> {
         }
         Mode::Plain => slice_base(&primary, &slug, &ns).map_err(die)?,
     };
+    // A slice is never light, whatever its label says (#1542): light tier
+    // lands with no PR, the wrong shape for a slice, which merges into its
+    // spec's integration branch by PR.
+    let tier = if tickets.len() == 1 && tickets[0].documentation && !matches!(base, Base::Slice { .. }) { "light" } else { "heavy" };
 
     // Past here the clump is claimed; a failure says how to release it. A
     // ready-for-human ticket keeps its ready label through the build, so the

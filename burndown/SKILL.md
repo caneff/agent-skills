@@ -48,8 +48,10 @@ branch (`references/loop.md` says why).
    **send time** (#923), and never write a resolved address into the run
    file.
 2. Read the frontier (§ The frontier) over the **whole queue**, not the first
-   wave's worth, and clump it (§ Clumping): `closure.py --json` into the
-   candidates file, never built by hand. That exploration is the run's
+   wave's worth, and clump **only its `unblocked` tickets** (§ Clumping):
+   `closure.py --json` into the candidates file, never built by hand.
+   `loop.py dispatch` reads no blocked-by edge, so a blocked ticket in the
+   candidates file is dispatched as if clear (#1542). That exploration is the run's
    **frozen** candidate set: a ticket filed while the run is going waits for
    the next run. The one exception is a ticket filed *during* the run
    **because the run is stuck on what it fixes** — `loop.admit` takes it only
@@ -191,7 +193,10 @@ python3 burndown/counts.py <run-id> --repo <primary checkout>
 ```
 
 read from each landed clump's dispositions sidecar, which the worker writes
-(`implement/SKILL.md` § Review), naming each closed clump as skipped. The
+(`implement/SKILL.md` § Review), naming each closed clump as skipped. A spec run's
+form is `--spec <n>`: its slices run no review wave and have no sidecar, so it
+reads the spec's one `dispositions-<n>.jsonl` and requires none per slice,
+refusing when that one is missing. The
 sidecars are found under the `--repo` checkout's cache directory, never the
 cwd's, which is not always the target; `--repo` is refused unless it is the
 run's recorded target. A landed clump with no dispositions sidecar is refused

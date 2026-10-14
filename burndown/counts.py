@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """The closing report's counts:
 
-    python3 burndown/counts.py <run-id> --repo <checkout> | --reviews-dir <dir>
+    python3 burndown/counts.py <run-id> --repo <checkout> | --reviews-dir <dir> [--spec <n>]
 
 prints the closing report's two counts, fixed and moved, read from each
 landed clump's dispositions sidecar (`implement/SKILL.md` § Review's
 `dispositions-<lowest ticket>.jsonl`, the one the worker writes and
 `implement/fix-check.sh` checks), and names every clump closed with
 no landing as skipped. Nothing here writes one.
+
+`--spec <n>` is a spec run's form (#1542): a slice runs no review wave and has
+no sidecar, so the counts are read from the spec's one
+`dispositions-<n>.jsonl`, which `implement-spec/SKILL.md` keys on the spec
+number, and no per-slice sidecar is read or required.
 """
 import os
 import subprocess
@@ -34,7 +39,7 @@ def default_reviews_dir(checkout):
     return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 
 
-def counts(run, reviews_dir):
+def counts(run, reviews_dir, spec=None):
     """The closing report's counts, read from each **landed** clump's
     dispositions sidecar: **fixed** is every `fixed` line, **moved** is every
     `moved` line (a finding added to the open ticket for its component).
@@ -53,15 +58,22 @@ def counts(run, reviews_dir):
     A landed clump with no sidecar on disk is refused by clump number, never
     counted as zero: the merge check refuses a PR with no sidecar, empty when
     its reviewers found nothing, so a missing one means this run's own
-    bookkeeping is missing (defect class 1)."""
+    bookkeeping is missing (defect class 1).
+
+    With `spec` (a spec run, #1542) the one sidecar read is the spec's own,
+    `dispositions-<spec>.jsonl`: slices have none, and a slice's sidecar is
+    never read. The spec's own missing is refused the same way."""
     fixed = moved = carried = 0
     missing, closed = [], []
+    sidecars = []
     for entry in run["clumps"]:
         if entry.get("closed"):
             closed.append((entry["tickets"][0], entry["closed"]))
-        if not entry["landed"]:
-            continue
-        lowest = entry["tickets"][0]
+        if spec is None and entry["landed"]:
+            sidecars.append(entry["tickets"][0])
+    if spec is not None:
+        sidecars = [spec]
+    for lowest in sidecars:
         path = runfile.dispositions_path(reviews_dir, lowest)
         if not os.path.exists(path):
             missing.append(lowest)
@@ -75,10 +87,11 @@ def counts(run, reviews_dir):
             elif outcome in ("leftover", "handed-back"):
                 carried += 1
     if missing:
+        who = ", ".join(f"#{n}" for n in missing)
         raise runfile.RunFileError(
-            "landed clump(s) " +
-            ", ".join(f"#{n}" for n in missing) +
-            " have no dispositions sidecar under " + reviews_dir +
+            (f"spec #{spec} has" if spec is not None
+             else f"landed clump(s) {who} have") +
+            " no dispositions sidecar under " + reviews_dir +
             " — counts refused rather than read as zero")
     return {"fixed": fixed, "moved": moved, "carried": carried, "closed": closed}
 
@@ -100,6 +113,9 @@ def main(argv):
     parser = argparse.ArgumentParser(
         prog="counts.py", description="A run's closing-report counts")
     parser.add_argument("run_id")
+    parser.add_argument("--spec", type=int,
+                        help="a spec run: read the spec's one sidecar, "
+                             "dispositions-<spec>.jsonl, and none per slice")
     where = parser.add_mutually_exclusive_group()
     where.add_argument("--repo",
                        help="the target repo's primary checkout; its name keys "
@@ -147,7 +163,7 @@ def main(argv):
               file=sys.stderr)
         return 1
     try:
-        c = counts(run, reviews_dir)
+        c = counts(run, reviews_dir, args.spec)
     except runfile.RunFileError as exc:
         print(f"counts.py: {exc}", file=sys.stderr)
         return 1
