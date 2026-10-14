@@ -296,7 +296,8 @@ so. The spec is reviewed once on `spec-<p>` after its last slice lands, so a
 slice keeps § Build: TDD with mutation and reuse before writing. Then it does
 three things. It merges `origin/spec-<p>` in with
 `git fetch origin && git merge --no-edit origin/spec-<p>`. It runs
-`bash tests/all.sh --changed origin/spec-<p>` as its one suite run. It passes
+`bash tests/all.sh --changed origin/spec-<p>` as its one suite run, or the
+scope the repo's seam section names for the change (§ Review step 3). It passes
 § Before the PR step 5's pre-report gate. No review wave, no Codex pass, no
 `dispositions-<n>.jsonl`, and no review-ledger row, not even a skip row: a
 skip row would read as an ablated review in the escape count. The merge check
@@ -378,9 +379,14 @@ round follows steps 2–3 below keyed on the spec number:
    `fixed` dispositions name), and run
    `bash tests/all.sh --changed origin/<default>` (`AGENTS.md` § End-to-end
    seam, narrowed to what the PR touched): green is the exit, red is fixed and
-   rerun. This is the ticket's one suite run, just before "PR up"; the merger
-   reruns the full seam itself before it merges
-   (§ The merge step 3).
+   rerun. When, per the repo's `AGENTS.md` § End-to-end seam, the repo scopes the
+   run for this kind of change, that scope governs instead of this default, and the
+   default applies only when the section names none (Chris's ruling
+   2026-10-14, #1581). A scope is a sentence there that names the command or
+   tests to run for a class of change, as sudokupad-art's "a puzzle update
+   runs only that puzzle's tests"; a `**Narrowed**` line is the selector
+   evidence's listing (§ The merge step 3), never a scope. This is the ticket's one suite run, just before "PR up"; the merger
+   reruns the seam itself before it merges (§ The merge step 3).
    `fix-check.sh <n>` (and the pre-report gate that runs it) checks the
    rest mechanically: every finding id in the three findings sidecars and the
    Codex output has exactly one disposition, every `fixed` sha is a commit on
@@ -812,7 +818,8 @@ substitutions:
   PR too. It goes back to the worker for
   `gh pr edit <pr> --repo <owner/name> --base spec-<p>`.
 - **The seam rerun starts from `origin/spec-<p>`**: step 3's worktree start
-  point and its merge of the head name it, and the run is the full seam too.
+  point and its merge of the head name it, and the run is the full seam too
+  (or the scope the repo's `AGENTS.md` names, step 3).
 - **`closingIssuesReferences` is not required.** GitHub fills it only for a
   PR into the default branch, so a slice PR's reads empty and blocks nothing.
   The slice ticket stays open until the spec's integration PR closes it, so
@@ -871,15 +878,20 @@ closed.
    the merge, re-run the **full** seam on the PR as it will land, every time
    (#1496, Chris's ruling 6a): this is the only full run a merge made outside
    `drain` gets, so it is never skipped, not even when `<default>` has not
-   moved. From the primary checkout, after `git fetch origin`:
+   moved. The one exception is the scope rule of § Review step 3 (Chris's
+   ruling 2026-10-14, #1581): a scope the repo's `AGENTS.md` names for this
+   kind of change is the run here too, and ruling 6a's full seam applies only
+   when the section names none. From the primary checkout, after
+   `git fetch origin`:
 
    ```
    git worktree add --detach <absolute path under .scratch/> origin/<default>
    cd <that path> && git merge --no-edit <headRefOid> && <the repo's seam>
    ```
 
-   `<the repo's seam>` is the command declared in `AGENTS.md` § End-to-end seam,
-   which is `bash tests/all.sh` here, run whole from the merged worktree, not
+   `<the repo's seam>` is the scope that section names for this kind of change,
+   when it names one; otherwise the command it declares, which is
+   `bash tests/all.sh` here, run whole from the merged worktree, not
    narrowed; a
    repo declaring none: tell Chris and merge nothing on this step's say-so.
    State the run's worker and core count in your status line before you launch
@@ -904,7 +916,9 @@ closed.
 
    `list` exiting 3 means the repo declares no narrowed line: skip the
    `comment` line, no listing and no comment are owed, and the seam still runs
-   as above. A PR whose seam is run again (a fix, a moved `<default>`) gets
+   as above. A run scoped by the repo's own rule (above) is no full run, so
+   none of the three lines is owed for it either: a miss it could not have
+   seen would read as clean. A PR whose seam is run again (a fix, a moved `<default>`) gets
    another comment; the last one is the run it merged on. The comment reads `selector: clean`,
    `selector: miss <suite>` (a failing suite the listing did not hold),
    `selector: hit <suite>` or `selector: not checked: <why>` (no listing, an
