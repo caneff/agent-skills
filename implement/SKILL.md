@@ -297,7 +297,7 @@ slice keeps § Build: TDD with mutation and reuse before writing. Then it does
 three things. It merges `origin/spec-<p>` in with
 `git fetch origin && git merge --no-edit origin/spec-<p>`. It runs
 `bash tests/all.sh --changed origin/spec-<p>` as its one suite run, or the
-scope the repo's `AGENTS.md` names for the change (§ Review step 3). It passes
+scope the repo's seam section names for the change (§ Review step 3). It passes
 § Before the PR step 5's pre-report gate. No review wave, no Codex pass, no
 `dispositions-<n>.jsonl`, and no review-ledger row, not even a skip row: a
 skip row would read as an ablated review in the escape count. The merge check
@@ -379,8 +379,8 @@ round follows steps 2–3 below keyed on the spec number:
    `fixed` dispositions name), and run
    `bash tests/all.sh --changed origin/<default>` (`AGENTS.md` § End-to-end
    seam, narrowed to what the PR touched): green is the exit, red is fixed and
-   rerun. When the repo's `AGENTS.md` § End-to-end seam scopes the run for this
-   kind of change, that scope governs instead of this default, and the
+   rerun. When, per the repo's `AGENTS.md` § End-to-end seam, the repo scopes the
+   run for this kind of change, that scope governs instead of this default, and the
    default applies only when the section names none (Chris's ruling
    2026-10-14, #1581). A scope is a sentence there that names the command or
    tests to run for a class of change, as sudokupad-art's "a puzzle update

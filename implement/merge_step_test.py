@@ -115,5 +115,5 @@ def test_merge_step3_owes_no_selector_evidence_for_a_scoped_run():
 
 def test_slice_one_suite_run_defers_to_the_repos_scope():
     text = flat(skill())
-    start = text.index("as its one suite run, or the scope the repo's `AGENTS.md` names")
+    start = text.index("as its one suite run, or the scope the repo's seam section names")
     assert "§ Review step 3" in text[start:start + 200]
