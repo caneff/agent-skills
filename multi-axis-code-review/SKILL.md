@@ -660,9 +660,6 @@ its round. Name nothing by hand:
   a `round: 2` row (`review_ledger_round_test.py`, the #1448 case), so `harvest` and
   `append --round 2` both join it to the dispositions file.
 
-`implement/fix_check.py` reads only the round-1 sidecars, so a round-2 finding
-is not demanded a disposition by the merge check (#1576): write them anyway.
-
 ### 5. Aggregate
 
 Present the reports under `## Standards`, `## Spec` and `## Correctness` headings, verbatim or lightly cleaned. Every finding every axis returned is in the aggregate — none is dropped as minor, duplicate, or already known; the caller disposes of findings, this skill only collects them. Do **not** merge or rerank findings — the axes are deliberately separate (see _Why separate axes_).
