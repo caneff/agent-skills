@@ -54,11 +54,13 @@ ledger blind to it. The row must be this wave's (#1555): `append` records the
 sha256 of the sidecar it read as `sidecar_sha256`, and the check wants a row
 whose hash matches the sidecar on disk, so a row left by an earlier dispatch,
 or by a version of `append` before the field, is refused with the line to
-re-run. Each later round (#1576) is read the same way: `findings-<axis>-<n>-rK.jsonl` with its
-`-rK.done` marker and a row of `round: K` holding its hash, found by listing the cache. A
-`-rK` marker with no sidecar is refused, as is a sidecar with no marker. A second wave of one
-round whose sidecar is byte-identical to the first's (an empty one both times) still matches:
-the hash cannot tell the two waves apart.
+re-run. Each later round (#1576) is read the same way:
+`findings-<axis>-<n>-rK.jsonl` with its `-rK.done` marker and a row of
+`round: K` holding its hash, found by listing the cache. A `-rK` marker with
+no sidecar is refused, as is a sidecar with no marker. A skip row excuses
+round 1 only. A second wave of one round whose sidecar is byte-identical to
+the first's (an empty one both times) still matches: the hash cannot tell
+the two waves apart.
 A review the ledger records as skipped (`review_ledger.py append --type
 <axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
 record, or a `codex-gate` ledger row saying why it did not run (size gate,
@@ -157,8 +159,9 @@ def json_object(line):
 def ledger_types(reviews, n):
     """What the ledger holds for ticket `n` of this repo: `(ran, skipped)`. `ran` maps each review
     `(type, round)` with a row that ran to the set of `sidecar_sha256` its rows carry (a row written
-    before #1555 carries none, so adds none; a row with no `round` is round 1); `skipped` is the
-    types it records as not run. A skip row is no evidence a review ran."""
+    before #1555 carries none, so adds none; a row with no `round` is round 1, one with a
+    malformed `round` counts for none); `skipped` is the types it records as not run, which
+    excuses round 1 only. A skip row is no evidence a review ran."""
     repo = review_ledger.fold_repo(os.path.basename(reviews))
     try:
         rows = review_ledger.read_ledger(review_ledger.DEFAULT_LEDGER)
@@ -170,8 +173,13 @@ def ledger_types(reviews, n):
     skipped = {r["type"] for r in mine if r["status"]["fields"]["findings"]["status"] == "skipped"}
     ran = {}
     for r in mine:
-        if r["type"] not in skipped:
-            digests = ran.setdefault((r["type"], r.get("round") or 1), set())
+        rnd = r.get("round", 1)  # a row from before the field is round 1
+        if not isinstance(rnd, int) or isinstance(rnd, bool) or rnd < 1:
+            continue  # a malformed round vouches for no sidecar
+        # A skip row records round 1 not run (`append --skip-reason` is round 1 only): it
+        # discards round 1's ran rows, never a later round's.
+        if r["type"] not in skipped or rnd > 1:
+            digests = ran.setdefault((r["type"], rnd), set())
             if isinstance(r.get("sidecar_sha256"), str):
                 digests.add(r["sidecar_sha256"])
     return ran, skipped
@@ -205,10 +213,11 @@ class Branch:
 
 
 def axis_rounds(reviews, n, axis):
-    """Each review round of `axis` present in the cache as `{round: file stem}`: round 1 always
+    """Each review round of `axis` present in the cache as `{round: [file stems]}`: round 1 always
     (its absence is the check's to report), and every later round that left a sidecar or a marker,
-    read through `review_ledger.findings_name`, the one parser of the `-rK` names (#1576)."""
-    rounds = {1: f"findings-{axis}-{n}"}
+    read through `review_ledger.findings_name`, the one parser of the `-rK` names (#1576). A round
+    spelled two ways (`-r2` and `-round2`) lists both, so neither is left unread."""
+    rounds = {1: [f"findings-{axis}-{n}"]}
     try:
         names = os.listdir(reviews)
     except OSError as exc:
@@ -219,15 +228,18 @@ def axis_rounds(reviews, n, axis):
             continue
         parsed = review_ledger.findings_name(stem + ".jsonl")
         if parsed and parsed[0] == axis and parsed[1] == str(n) and parsed[2] > 1:
-            rounds.setdefault(parsed[2], stem)
+            stems = rounds.setdefault(parsed[2], [])
+            if stem not in stems:
+                stems.append(stem)
     return dict(sorted(rounds.items()))
 
 
 def axis_findings(reviews, n, branch, rowed, skipped, problems):
     ids = []
     for axis in AXES:
-        for rnd, stem in axis_rounds(reviews, n, axis).items():
-            ids += round_findings(reviews, n, branch, axis, rnd, stem, rowed, skipped, problems)
+        for rnd, stems in axis_rounds(reviews, n, axis).items():
+            for stem in stems:
+                ids += round_findings(reviews, n, branch, axis, rnd, stem, rowed, skipped, problems)
     return ids
 
 

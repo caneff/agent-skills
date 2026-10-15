@@ -592,15 +592,10 @@ def mark_overlap(rows: list[dict], matches: list[dict], restatements: list[dict]
                 f["overlap"], f["k"] = ("shared" if k > 1 else "unique"), k
 
 
-def _findings_name(name: str):
+def findings_name(name: str):
     """(axis, ticket group, round from the name) or None."""
     m = _FINDINGS_NAME_RE.match(name)
     return (m.group(1), m.group(2), int(m.group(3) or 1)) if m else None
-
-
-def findings_name(name: str):
-    """`_findings_name`, for a caller outside this module: (axis, ticket group, round) or None."""
-    return _findings_name(name)
 
 
 def _dispositions_group(name: str) -> str | None:
@@ -610,7 +605,7 @@ def _dispositions_group(name: str) -> str | None:
 
 def _name_tickets(name: str) -> list[int]:
     """The tickets a findings or dispositions file name covers; none when the name is off-pattern."""
-    found = _findings_name(name)
+    found = findings_name(name)
     group = found[1] if found else _dispositions_group(name)
     return [int(t) for t in group.split("-")] if group else []
 
@@ -888,7 +883,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
         for name in sorted(by_repo[repo_dir]):
             if not name.startswith("findings-"):
                 continue
-            parsed = _findings_name(name)
+            parsed = findings_name(name)
             if parsed is None:
                 facts.unharvested.append(f"{repo_dir}/{name}")
                 continue

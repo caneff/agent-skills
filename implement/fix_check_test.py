@@ -125,30 +125,33 @@ class World:
         """A row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
         self.ledger_row(rtype, "skipped", ticket, reason="test")
 
-    def ledger_ran(self, rtype, ticket=None, repo=None, digest="on-disk", round=1):
+    def ledger_ran(self, rtype, ticket=None, repo=None, digest="on-disk", round=1, suffix=None):
         """A row for review `rtype` that ran (what `append --type <axis>` writes): it carries the
         sha256 of the sidecar as it is on disk now (#1555), or `digest` when given, None for none.
-        `round` 2 or more is `append --round K`: the row's `round` and the sidecar's `-rK` name."""
+        `round` 2 or more is `append --round K`: the row's `round` and the sidecar's `-rK` name;
+        `round=None` writes a row with no `round` key, as before the field."""
         if digest == "on-disk":
-            suffix = f"-r{round}" if round > 1 else ""
+            if suffix is None:
+                suffix = f"-r{round}" if round and round > 1 else ""
             path = os.path.join(self.reviews,
                                 f"findings-{rtype}-{self.n if ticket is None else ticket}{suffix}.jsonl")
             assert os.path.exists(path), f"write {path} first, or pass digest=None for a hashless row"
             digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
         top = {} if digest is None else {"sidecar_sha256": digest}
-        self.ledger_row(rtype, "known", ticket, repo, top={**top, "round": round})
+        self.ledger_row(rtype, "known", ticket, repo,
+                        top={**top, **({} if round is None else {"round": round})})
 
-    def round_two(self, axis, ids, marker=True, ledger=True, k=2):
-        """A later review round of `axis` (`render-brief.py --round K`): the `-rK` sidecar, its
-        marker and its ledger row, each unless switched off."""
-        self.put(f"findings-{axis}-{self.n}-r{k}.jsonl",
+    def round_two(self, axis, ids, marker=True, ledger=True, name="r2"):
+        """Round 2 of `axis` (`render-brief.py --round 2`): the `-r2` sidecar (or `-round2` when
+        `name` says), its marker and its ledger row, each unless switched off."""
+        self.put(f"findings-{axis}-{self.n}-{name}.jsonl",
                  "".join(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t",
                                      **({"rating": "CONFIRMED"} if axis == "correctness" else {})}) + "\n"
                          for i in ids))
         if marker:
-            self.put(f"findings-{axis}-{self.n}-r{k}.done", "")
+            self.put(f"findings-{axis}-{self.n}-{name}.done", "")
         if ledger:
-            self.ledger_ran(axis, round=k)
+            self.ledger_ran(axis, round=2, suffix=f"-{name}")
 
     def dispositions(self, *lines):
         self.put(f"dispositions-{self.n}.jsonl", "".join(json.dumps(line) + "\n" for line in lines))
@@ -756,3 +759,48 @@ def test_a_disposed_rowed_and_marked_round_one_plus_round_two_passes(world):
     world.round_two("standards", ["S2"])
     world.dispositions(fixed("S1", world.fix_sha), disputed("S2"))
     assert_fix_check(world, 0, "2 findings, each disposed once")
+
+
+def test_a_skipped_round_one_excuses_round_one_and_not_a_round_two_that_ran(world):
+    world.findings(standards=["S1"], spec=[], correctness=[])
+    os.remove(os.path.join(world.reviews, "findings-spec-5.jsonl"))
+    os.remove(os.path.join(world.reviews, "findings-spec-5.done"))
+    world.ledger_skip("spec")
+    world.round_two("spec", ["P1"])
+    world.dispositions(fixed("S1", world.fix_sha), disputed("P1"))
+    assert_fix_check(world, 0, "2 findings, each disposed once")
+
+
+def test_a_skipped_round_one_leaves_a_round_two_with_no_row_refused(world):
+    world.findings()
+    os.remove(os.path.join(world.reviews, "findings-spec-5.jsonl"))
+    os.remove(os.path.join(world.reviews, "findings-spec-5.done"))
+    world.ledger_skip("spec")
+    world.round_two("spec", [], ledger=False)
+    world.dispositions()
+    assert_fix_check(world, 1, "no ledger row for the spec review of #5 round 2")
+
+
+def test_a_round_spelled_two_ways_is_read_in_both(world):
+    world.findings()
+    world.round_two("spec", [])
+    world.round_two("spec", ["P9"], name="round2")
+    world.dispositions()
+    assert_fix_check(world, 1, "no disposition for P9")
+
+
+def test_a_ledger_row_with_no_round_is_round_one(world):
+    world.findings(ledger=False)
+    for axis in ("standards", "spec", "correctness"):
+        world.ledger_ran(axis, round=None)
+    world.dispositions()
+    assert_fix_check(world, 0, "0 findings")
+
+
+def test_a_ledger_row_with_a_malformed_round_vouches_for_nothing(world):
+    world.findings(ledger=False)
+    for axis in ("standards", "spec"):
+        world.ledger_ran(axis)
+    world.ledger_ran("correctness", round=0)
+    world.dispositions()
+    assert_fix_check(world, 1, "no ledger row for the correctness review of #5")
