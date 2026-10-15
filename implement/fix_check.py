@@ -54,8 +54,11 @@ ledger blind to it. The row must be this wave's (#1555): `append` records the
 sha256 of the sidecar it read as `sidecar_sha256`, and the check wants a row
 whose hash matches the sidecar on disk, so a row left by an earlier dispatch,
 or by a version of `append` before the field, is refused with the line to
-re-run. A second wave whose sidecar is byte-identical to the first's (an
-empty one both times) still matches: the hash cannot tell the two waves apart.
+re-run. Each later round (#1576) is read the same way: `findings-<axis>-<n>-rK.jsonl` with its
+`-rK.done` marker and a row of `round: K` holding its hash, found by listing the cache. A
+`-rK` marker with no sidecar is refused, as is a sidecar with no marker. A second wave of one
+round whose sidecar is byte-identical to the first's (an empty one both times) still matches:
+the hash cannot tell the two waves apart.
 A review the ledger records as skipped (`review_ledger.py append --type
 <axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
 record, or a `codex-gate` ledger row saying why it did not run (size gate,
@@ -153,9 +156,9 @@ def json_object(line):
 
 def ledger_types(reviews, n):
     """What the ledger holds for ticket `n` of this repo: `(ran, skipped)`. `ran` maps each review
-    type with a row that ran to the set of `sidecar_sha256` its rows carry (a row written before
-    #1555 carries none, so adds none); `skipped` is the types it records as not run. A skip row is
-    no evidence a review ran."""
+    `(type, round)` with a row that ran to the set of `sidecar_sha256` its rows carry (a row written
+    before #1555 carries none, so adds none; a row with no `round` is round 1); `skipped` is the
+    types it records as not run. A skip row is no evidence a review ran."""
     repo = review_ledger.fold_repo(os.path.basename(reviews))
     try:
         rows = review_ledger.read_ledger(review_ledger.DEFAULT_LEDGER)
@@ -168,7 +171,7 @@ def ledger_types(reviews, n):
     ran = {}
     for r in mine:
         if r["type"] not in skipped:
-            digests = ran.setdefault(r["type"], set())
+            digests = ran.setdefault((r["type"], r.get("round") or 1), set())
             if isinstance(r.get("sidecar_sha256"), str):
                 digests.add(r["sidecar_sha256"])
     return ran, skipped
@@ -201,47 +204,80 @@ class Branch:
                 "an earlier dispatch of this ticket, not this review")
 
 
+def axis_rounds(reviews, n, axis):
+    """Each review round of `axis` present in the cache as `{round: file stem}`: round 1 always
+    (its absence is the check's to report), and every later round that left a sidecar or a marker,
+    read through `review_ledger.findings_name`, the one parser of the `-rK` names (#1576)."""
+    rounds = {1: f"findings-{axis}-{n}"}
+    try:
+        names = os.listdir(reviews)
+    except OSError as exc:
+        raise Unanswerable(f"{reviews} is unreadable: {exc}")
+    for name in sorted(names):
+        stem, ext = os.path.splitext(name)
+        if ext not in (".jsonl", ".done"):
+            continue
+        parsed = review_ledger.findings_name(stem + ".jsonl")
+        if parsed and parsed[0] == axis and parsed[1] == str(n) and parsed[2] > 1:
+            rounds.setdefault(parsed[2], stem)
+    return dict(sorted(rounds.items()))
+
+
 def axis_findings(reviews, n, branch, rowed, skipped, problems):
     ids = []
     for axis in AXES:
-        name = f"findings-{axis}-{n}.jsonl"
-        marker = f"findings-{axis}-{n}.done"
-        path = os.path.join(reviews, name)
-        lines = read_lines(path)
-        if lines is None and axis in skipped:
-            continue
-        if lines is None:
-            problems.append(f"{name} is missing — that reviewer never ran, and the ledger "
-                            "records no skip for it")
-            continue
-        append = (f"review_ledger.py append --repo {os.path.basename(reviews)} --ticket {n} "
-                  f"--type {axis}")
-        if axis not in rowed:
-            problems.append(f"no ledger row for the {axis} review of #{n} under repo "
-                            f"{os.path.basename(reviews)}, though {name} exists — a skip row is not one: "
-                            f"{append}")
-        elif review_ledger.sidecar_digest(path) not in rowed[axis]:
-            problems.append(f"the ledger carries no row for this wave's {name}: no {axis} row of #{n} holds "
-                            "its sha256 — the row is an earlier dispatch's or predates the field, or the "
-                            f"sidecar changed after its append; re-append: {append}")
-        if not os.path.exists(os.path.join(reviews, marker)):
-            problems.append(f"{name} has no completion marker {marker} — a reviewer that crashed or "
-                            "was cut off leaves an empty or truncated sidecar too")
-            continue
-        for fresh in (branch.fresh(path), branch.fresh(os.path.join(reviews, marker))):
-            if fresh:
-                problems.append(fresh)
-        for num, line in lines:
-            obj = json_object(line)
-            if obj is None or not isinstance(obj.get("id"), str) or not obj["id"].strip():
-                problems.append(f"{name}:{num} is not a finding line with an id")
-            elif axis == "correctness" and "rating" not in obj:
-                problems.append(f"{name}:{num} has no rating, which a correctness finding carries in its "
-                                "sidecar (#1230)")
-            elif axis == "correctness" and obj["rating"] not in RATINGS:
-                problems.append(f"{name}:{num} rating {obj['rating']!r} is not CONFIRMED or PLAUSIBLE")
-            else:
-                ids.append(obj["id"])
+        for rnd, stem in axis_rounds(reviews, n, axis).items():
+            ids += round_findings(reviews, n, branch, axis, rnd, stem, rowed, skipped, problems)
+    return ids
+
+
+def round_findings(reviews, n, branch, axis, rnd, stem, rowed, skipped, problems):
+    """The finding ids of one round of one axis, its problems appended. Round 1 of a skipped axis
+    needs no sidecar; a later round is never excused by that skip row."""
+    name, marker = f"{stem}.jsonl", f"{stem}.done"
+    path = os.path.join(reviews, name)
+    lines = read_lines(path)
+    if lines is None and rnd == 1 and axis in skipped:
+        return []
+    if lines is None and rnd > 1:
+        if os.path.exists(os.path.join(reviews, marker)):
+            problems.append(f"{marker} has no sidecar {name} — round {rnd} of the {axis} review left a "
+                            "marker and no findings")
+        return []
+    if lines is None:
+        problems.append(f"{name} is missing — that reviewer never ran, and the ledger "
+                        "records no skip for it")
+        return []
+    append = (f"review_ledger.py append --repo {os.path.basename(reviews)} --ticket {n} "
+              f"--type {axis}" + (f" --round {rnd}" if rnd > 1 else ""))
+    digests = rowed.get((axis, rnd))
+    if digests is None:
+        problems.append(f"no ledger row for the {axis} review of #{n}{f' round {rnd}' if rnd > 1 else ''} "
+                        f"under repo {os.path.basename(reviews)}, though {name} exists — a skip row is "
+                        f"not one: {append}")
+    elif review_ledger.sidecar_digest(path) not in digests:
+        problems.append(f"the ledger carries no row for this wave's {name}: no {axis} row of #{n} holds "
+                        "its sha256 — the row is an earlier dispatch's or predates the field, or the "
+                        f"sidecar changed after its append; re-append: {append}")
+    if not os.path.exists(os.path.join(reviews, marker)):
+        problems.append(f"{name} has no completion marker {marker} — a reviewer that crashed or "
+                        "was cut off leaves an empty or truncated sidecar too")
+        return []
+    ids = []
+    for fresh in (branch.fresh(path), branch.fresh(os.path.join(reviews, marker))):
+        if fresh:
+            problems.append(fresh)
+    for num, line in lines:
+        obj = json_object(line)
+        if obj is None or not isinstance(obj.get("id"), str) or not obj["id"].strip():
+            problems.append(f"{name}:{num} is not a finding line with an id")
+        elif axis == "correctness" and "rating" not in obj:
+            problems.append(f"{name}:{num} has no rating, which a correctness finding carries in its "
+                            "sidecar (#1230)")
+        elif axis == "correctness" and obj["rating"] not in RATINGS:
+            problems.append(f"{name}:{num} rating {obj['rating']!r} is not CONFIRMED or PLAUSIBLE")
+        else:
+            ids.append(obj["id"])
     return ids
 
 

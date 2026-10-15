@@ -598,6 +598,11 @@ def _findings_name(name: str):
     return (m.group(1), m.group(2), int(m.group(3) or 1)) if m else None
 
 
+def findings_name(name: str):
+    """`_findings_name`, for a caller outside this module: (axis, ticket group, round) or None."""
+    return _findings_name(name)
+
+
 def _dispositions_group(name: str) -> str | None:
     m = _DISPOSITIONS_NAME_RE.match(name)
     return m.group(1) if m else None

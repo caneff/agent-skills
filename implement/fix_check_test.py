@@ -125,15 +125,30 @@ class World:
         """A row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
         self.ledger_row(rtype, "skipped", ticket, reason="test")
 
-    def ledger_ran(self, rtype, ticket=None, repo=None, digest="on-disk"):
+    def ledger_ran(self, rtype, ticket=None, repo=None, digest="on-disk", round=1):
         """A row for review `rtype` that ran (what `append --type <axis>` writes): it carries the
-        sha256 of the sidecar as it is on disk now (#1555), or `digest` when given, None for none."""
+        sha256 of the sidecar as it is on disk now (#1555), or `digest` when given, None for none.
+        `round` 2 or more is `append --round K`: the row's `round` and the sidecar's `-rK` name."""
         if digest == "on-disk":
-            path = os.path.join(self.reviews, f"findings-{rtype}-{self.n if ticket is None else ticket}.jsonl")
+            suffix = f"-r{round}" if round > 1 else ""
+            path = os.path.join(self.reviews,
+                                f"findings-{rtype}-{self.n if ticket is None else ticket}{suffix}.jsonl")
             assert os.path.exists(path), f"write {path} first, or pass digest=None for a hashless row"
             digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
-        self.ledger_row(rtype, "known", ticket, repo,
-                        top={} if digest is None else {"sidecar_sha256": digest})
+        top = {} if digest is None else {"sidecar_sha256": digest}
+        self.ledger_row(rtype, "known", ticket, repo, top={**top, "round": round})
+
+    def round_two(self, axis, ids, marker=True, ledger=True, k=2):
+        """A later review round of `axis` (`render-brief.py --round K`): the `-rK` sidecar, its
+        marker and its ledger row, each unless switched off."""
+        self.put(f"findings-{axis}-{self.n}-r{k}.jsonl",
+                 "".join(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t",
+                                     **({"rating": "CONFIRMED"} if axis == "correctness" else {})}) + "\n"
+                         for i in ids))
+        if marker:
+            self.put(f"findings-{axis}-{self.n}-r{k}.done", "")
+        if ledger:
+            self.ledger_ran(axis, round=k)
 
     def dispositions(self, *lines):
         self.put(f"dispositions-{self.n}.jsonl", "".join(json.dumps(line) + "\n" for line in lines))
@@ -679,3 +694,65 @@ def test_the_pushed_head_named_as_the_controller_names_it_passes(s1_world):
 def test_no_ticket_number_is_a_usage_error(world):
     done = subprocess.run(["bash", CHECK], cwd=world.work, env=world.env, capture_output=True, text=True)
     assert done.returncode == 2 and "usage" in done.stderr, f"got {done.returncode}: {done.stderr}"
+
+
+# #1576: a later round's sidecar is read like round 1's.
+
+def test_a_round_two_finding_with_no_disposition_fails_and_names_its_id(world):
+    world.findings(standards=["S1"])
+    world.round_two("standards", ["S2"])
+    world.dispositions(fixed("S1", world.fix_sha))
+    assert_fix_check(world, 1, "no disposition for S2")
+
+
+def test_a_round_two_sidecar_with_no_marker_fails(world):
+    world.findings()
+    world.round_two("spec", [], marker=False)
+    world.dispositions()
+    assert_fix_check(world, 1, "findings-spec-5-r2.jsonl has no completion marker findings-spec-5-r2.done")
+
+
+def test_a_round_two_marker_with_no_sidecar_fails(world):
+    world.findings()
+    world.put("findings-spec-5-r2.done", "")
+    world.dispositions()
+    assert_fix_check(world, 1, "findings-spec-5-r2.done has no sidecar findings-spec-5-r2.jsonl")
+
+
+def test_a_round_two_sidecar_whose_digest_has_no_ledger_row_fails(world):
+    world.findings()
+    world.round_two("spec", ["P1"], ledger=False)
+    world.dispositions(disputed("P1"))
+    assert_fix_check(world, 1, "no ledger row for the spec review of #5 round 2")
+
+
+def test_a_round_one_row_does_not_vouch_for_a_byte_identical_round_two_sidecar(world):
+    world.findings()  # three empty round-1 sidecars, each rowed
+    world.round_two("spec", [], ledger=False)  # empty too: the same digest as round 1's row
+    world.dispositions()
+    assert_fix_check(world, 1, "no ledger row for the spec review of #5 round 2")
+
+
+def test_a_round_two_correctness_finding_needs_a_rating(world):
+    world.findings()
+    world.put("findings-correctness-5-r2.jsonl", json.dumps({"id": "C1", "axis": "correctness"}) + "\n")
+    world.put("findings-correctness-5-r2.done", "")
+    world.ledger_ran("correctness", round=2)
+    world.dispositions(disputed("C1"))
+    assert_fix_check(world, 1, "findings-correctness-5-r2.jsonl:1 has no rating")
+
+
+def test_a_stale_round_two_sidecar_is_an_earlier_dispatchs(make_world):
+    w = make_world()
+    w.findings()
+    w.round_two("standards", [])
+    w.dispositions()
+    age(w, ("findings-standards-5-r2.jsonl", "findings-standards-5-r2.done"), 10 * 86400)
+    assert_fix_check(w, 1, "findings-standards-5-r2.jsonl is older than the first commit")
+
+
+def test_a_disposed_rowed_and_marked_round_one_plus_round_two_passes(world):
+    world.findings(standards=["S1"])
+    world.round_two("standards", ["S2"])
+    world.dispositions(fixed("S1", world.fix_sha), disputed("S2"))
+    assert_fix_check(world, 0, "2 findings, each disposed once")
