@@ -87,6 +87,16 @@ def test_the_review_is_keyed_on_the_spec_number(repo):
     assert "fix-check.sh 366 origin/spec-366" in got, got
 
 
+def test_the_fix_worker_runs_the_per_change_command_not_the_full_seam(repo):
+    # #1602: the fix round runs what the resolver prints, as
+    # `implement-spec/SKILL.md` step 3 says; the nightly backstop is the only
+    # full run.
+    got = body(repo(), spec=366, surfaces=[])
+    review = got.split("### The spec-level review", 1)[1].split("###", 1)[0]
+    assert "selector_check.py command --root ." in review, review
+    assert "full seam" not in got, got
+
+
 def test_main_is_merged_in_never_rebased(repo):
     got = body(repo(), spec=366, surfaces=[])
     assert "git merge --no-edit origin/main" in got, got
