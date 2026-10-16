@@ -1,6 +1,6 @@
-"""`implement/selector_check.py` (#1537): after a merge's full seam run, one
-`selector:` comment on the PR saying whether the repo's narrowed command would
-have selected what the full seam failed on.
+"""`implement/selector_check.py`: `command` prints the repo's per-change
+command (#1593), and at merge one `selector:` comment on the PR records the
+suites the narrowed command selected, judging nothing (#1537, #1593).
 
 Seam: the real script as a subprocess against a throwaway repo whose
 `AGENTS.md` declares a `Narrowed` line, a fake `tests/all.sh` standing in for
@@ -53,7 +53,6 @@ class World:
         os.chmod(gh, 0o755)
         self.gh_log = os.path.join(self.tmp, "gh.log")
         self.state = os.path.join(self.tmp, "state.json")
-        self.seam_log = os.path.join(self.tmp, "seam.log")
         self.env = {**os.environ, "PATH": self.bin + os.pathsep + os.environ["PATH"], "GH_LOG": self.gh_log,
                     "LISTING": self.listing_file, "LISTING_EXIT": str(listing_exit)}
 
@@ -68,11 +67,8 @@ class World:
     def list(self, *extra, env=None):
         return self.script("list", "--root", self.root, "--state", self.state, *extra, env=env)
 
-    def comment(self, seam_exit, log="", *extra, post=True, env=None):
-        with open(self.seam_log, "w") as f:
-            f.write(log)
-        args = ["comment", "--root", self.root, "--state", self.state, "--seam-exit", str(seam_exit),
-                "--seam-log", self.seam_log, *extra]
+    def comment(self, *extra, post=True, env=None):
+        args = ["comment", "--root", self.root, "--state", self.state, *extra]
         if post:
             args += ["--pr", "42", "--repo", "me/repo"]
         return self.script(*args, env=env)
@@ -94,31 +90,20 @@ def verdict(r):
     return r.stdout.strip()
 
 
-def test_a_green_seam_posts_clean(w):
+def test_the_comment_records_the_listing_and_judges_nothing(w):
     assert w.list().returncode == 0
-    assert verdict(w.comment(0, "7 of 7 suites passed\n")) == "selector: clean"
-    assert w.posted() == ["pr comment 42 --repo me/repo --body selector: clean"]
+    out = verdict(w.comment())
+    assert out == ("selector: listed 2 suites from `bash tests/all.sh --changed origin/main --list`\n\n"
+                   "```\nalpha/a.test.sh\nbeta/b.test.sh\n```")
+    assert w.posted() == ["pr comment 42 --repo me/repo --body " + out.splitlines()[0]] + out.splitlines()[1:]
+    for word in ("clean", "miss", "hit"):
+        assert f"selector: {word}" not in out
 
 
-def test_a_red_seam_whose_failing_suite_is_outside_the_listing_is_a_miss(w):
+def test_one_suite_is_said_in_the_singular(tmp_path):
+    w = World(tmp_path, listing="alpha/a.test.sh\n")
     w.list()
-    assert verdict(w.comment(1, "ok alpha/a.test.sh\nFAIL zeta/z.test.sh\n")) == "selector: miss zeta/z.test.sh"
-    assert w.posted() == ["pr comment 42 --repo me/repo --body selector: miss zeta/z.test.sh"]
-
-
-def test_a_red_seam_whose_failing_suite_is_inside_the_listing_is_a_hit(w):
-    w.list()
-    assert verdict(w.comment(1, "FAIL beta/b.test.sh\n")) == "selector: hit beta/b.test.sh"
-
-
-def test_one_failing_suite_outside_the_listing_makes_the_whole_run_a_miss(w):
-    w.list()
-    assert verdict(w.comment(1, "FAIL beta/b.test.sh\nFAIL zeta/z.test.sh\n")) == "selector: miss zeta/z.test.sh"
-
-
-def test_an_indented_fail_line_a_passing_suite_reprints_is_not_a_failure(w):
-    w.list()
-    assert verdict(w.comment(1, "  FAIL zeta/z.test.sh\nFAIL beta/b.test.sh\n")) == "selector: hit beta/b.test.sh"
+    assert verdict(w.comment(post=False)).startswith("selector: listed 1 suite from ")
 
 
 @pytest.mark.parametrize("listing, exit_code, why", [
@@ -126,49 +111,29 @@ def test_an_indented_fail_line_a_passing_suite_reprints_is_not_a_failure(w):
     ("", 0, "printed nothing"),
     ("   \n\n", 0, "printed nothing"),
 ])
-def test_a_listing_that_failed_or_is_empty_is_not_checked_and_never_clean(tmp_path, listing, exit_code, why):
+def test_a_listing_that_failed_or_is_empty_is_not_checked_never_an_empty_selection(tmp_path, listing, exit_code, why):
     w = World(tmp_path, listing=listing, listing_exit=exit_code)
     w.list()
-    for seam_exit, log in ((0, ""), (1, "FAIL zeta/z.test.sh\n")):
-        out = verdict(w.comment(seam_exit, log))
-        assert out.startswith("selector: not checked: "), out
-        assert why in out
-    assert not any(c.endswith("selector: clean") for c in w.posted())
+    out = verdict(w.comment())
+    assert out.startswith("selector: not checked: "), out
+    assert why in out
+    assert not any("selector: listed" in c for c in w.posted())
 
 
 def test_a_listing_command_that_is_missing_is_not_checked(tmp_path):
     w = World(tmp_path)
     os.remove(os.path.join(w.root, "tests", "all.sh"))
     w.list()
-    out = verdict(w.comment(0))
+    out = verdict(w.comment())
     assert out.startswith("selector: not checked: ")
     assert "exited 127" in out
 
 
 def test_a_listing_step_that_never_ran_is_not_checked(w):
     # No `list` call: the state file is absent, which is not an empty selection.
-    out = verdict(w.comment(0))
+    out = verdict(w.comment())
     assert out.startswith("selector: not checked: ")
     assert "no listing record" in out
-
-
-def test_a_red_seam_log_with_no_fail_line_is_not_checked(w):
-    w.list()
-    out = verdict(w.comment(1, "npm ci failed\n"))
-    assert out == "selector: not checked: the seam's log has no `FAIL <suite>` line"
-
-
-def test_a_seam_log_that_cannot_be_read_is_not_checked(w):
-    w.list()
-    r = w.script("comment", "--root", w.root, "--state", w.state, "--seam-exit", "1",
-                 "--seam-log", os.path.join(w.tmp, "nope.log"))
-    assert verdict(r).startswith("selector: not checked: the seam's log could not be read")
-
-
-def test_a_seam_exit_that_is_not_a_number_is_not_checked(w):
-    w.list()
-    r = w.comment("", "FAIL zeta/z.test.sh\n")
-    assert verdict(r) == "selector: not checked: the seam's exit status was not recorded"
 
 
 def test_a_repo_with_no_narrowed_line_gets_no_listing_and_no_comment(tmp_path):
@@ -176,7 +141,7 @@ def test_a_repo_with_no_narrowed_line_gets_no_listing_and_no_comment(tmp_path):
     r = w.list()
     assert r.returncode == 3
     assert not os.path.exists(w.state)
-    r = w.comment(1, "FAIL zeta/z.test.sh\n")
+    r = w.comment()
     assert r.returncode == 0 and r.stdout == ""
     assert w.posted() == []
 
@@ -191,36 +156,35 @@ def test_a_narrowed_line_with_no_command_is_not_checked_not_silent(tmp_path):
     w = World(tmp_path, narrowed=False)
     w.write("AGENTS.md", "## End-to-end seam\n\n- **Narrowed**:\n")
     assert w.list().returncode == 0
-    out = verdict(w.comment(0))
+    out = verdict(w.comment())
     assert out.startswith("selector: not checked: ")
     assert "names no command" in out
 
 
-def test_the_comment_never_changes_the_script_status(w):
-    """Evidence only: a miss, a hit and a failed post all exit 0, so no caller
-    reads the verdict, or a gh outage, as a reason to hold the merge."""
+def test_a_failed_post_is_said_and_never_changes_the_script_status(w):
+    """Evidence only: a gh outage exits 0, so no caller reads it as a reason
+    to hold the merge."""
     w.list()
-    assert w.comment(1, "FAIL zeta/z.test.sh\n").returncode == 0
-    assert w.comment(1, "FAIL beta/b.test.sh\n").returncode == 0
-    r = w.comment(1, "FAIL zeta/z.test.sh\n", env={"GH_FAIL": "1"})
+    r = w.comment(env={"GH_FAIL": "1"})
     assert r.returncode == 0
-    assert "selector comment not posted: " in r.stdout
-    assert "selector: miss zeta/z.test.sh" in r.stdout
+    assert "selector comment not posted: gh exploded" in r.stdout
+    assert r.stdout.startswith("selector: listed 2 suites")
 
 
-def test_suites_are_whole_lines_so_a_multi_word_command_is_not_matched_by_its_first_word(tmp_path):
-    """The pilot runner labels a suite with its command line and prints
-    `FAIL <that line>`; reading the first word turned every miss into a hit."""
+def test_suites_are_whole_lines_so_a_multi_word_command_is_one_suite(tmp_path):
+    """The pilot runner labels a suite with its command line, so the listing
+    is read one suite per line, never one per word."""
     w = World(tmp_path, listing="node examples/alpha/a.test.mjs\nuvx ruff check finders\n")
     w.list()
-    assert verdict(w.comment(1, "FAIL node examples/zeta/z.test.mjs\n")) == "selector: miss node examples/zeta/z.test.mjs"
-    assert verdict(w.comment(1, "FAIL uvx ruff check finders\n")) == "selector: hit uvx ruff check finders"
+    out = verdict(w.comment(post=False))
+    assert out.splitlines()[0].startswith("selector: listed 2 suites ")
+    assert out.splitlines()[3:5] == ["node examples/alpha/a.test.mjs", "uvx ruff check finders"]
 
 
 def test_a_state_file_that_is_not_json_is_unreadable_not_a_step_that_never_ran(w):
     with open(w.state, "w") as f:
         f.write("{not json")
-    out = verdict(w.comment(0))
+    out = verdict(w.comment())
     assert out.startswith("selector: not checked: the listing record could not be read")
     assert "did not run" not in out
 
@@ -229,7 +193,7 @@ def test_list_removes_the_state_an_earlier_run_left_before_it_runs_anything(w):
     with open(w.state, "w") as f:
         json.dump({"command": "x", "status": 0, "listing": ["zeta/z.test.sh"], "error": None}, f)
     w.list(env={"PATH": "/nonexistent"})  # `sh` cannot start: the stale listing, which holds the suite, must be gone
-    out = verdict(w.comment(1, "FAIL zeta/z.test.sh\n"))
+    out = verdict(w.comment(post=False))
     assert out.startswith("selector: not checked: the listing command could not run")
 
 
@@ -239,3 +203,55 @@ def test_a_repo_with_no_line_leaves_no_state_even_when_an_earlier_run_wrote_one(
         f.write("{}")
     assert w.list().returncode == 3
     assert not os.path.exists(w.state)
+
+
+# --- `command`: the repo's per-change command (#1593) ---
+
+
+def resolve(tmp_path, agents):
+    root = tmp_path / "repo"
+    root.mkdir()
+    if agents is not None:
+        (root / "AGENTS.md").write_text(agents)
+    return subprocess.run([sys.executable, SCRIPT, "command", "--root", str(root)], capture_output=True, text=True)
+
+
+SEAM_ONLY = "## End-to-end seam\n\n- **Seam**: `npm test` — every suite\n- **Blind to**: the live editor\n"
+
+
+def test_command_prints_the_narrowed_command_when_one_is_declared(tmp_path):
+    r = resolve(tmp_path, declared(narrowed=True))
+    assert (r.returncode, r.stdout, r.stderr) == (0, "bash tests/all.sh --changed origin/main\n", "")
+
+
+def test_command_falls_back_to_the_seam_when_no_narrowed_line_is_declared(tmp_path):
+    r = resolve(tmp_path, SEAM_ONLY)
+    assert (r.returncode, r.stdout, r.stderr) == (0, "npm test\n", "")
+
+
+@pytest.mark.parametrize("agents, why", [
+    ("## End-to-end seam\n\n- **Blind to**: everything\n", "declares neither a `Narrowed` nor a `Seam` line"),
+    ("# Notes\n\nno seam here\n", "has no `## End-to-end seam` section"),
+    (None, "no AGENTS.md"),
+    ("## End-to-end seam\n\n- **Seam**: `npm test`\n- **Narrowed**:\n", "the `Narrowed` line names no command"),
+    ("## End-to-end seam\n\n- **Seam**: **\n", "the `Seam` line names no command"),
+])
+def test_command_exits_non_zero_naming_the_gap_and_prints_no_command(tmp_path, agents, why):
+    r = resolve(tmp_path, agents)
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert why in r.stderr
+
+
+# --- `failing_suites`: the seam log's failed suites, which the backstop reads ---
+
+
+def test_failing_suites_reads_whole_unindented_fail_lines_once_each(tmp_path):
+    sys.path.insert(0, HERE)
+    from selector_check import failing_suites
+    log = tmp_path / "seam.log"
+    log.write_text("PASS a/a.test.sh\n  FAIL b/b.test.sh\nFAIL node z/z.test.mjs\nFAIL c/c.test.sh\nFAIL node z/z.test.mjs\n")
+    assert failing_suites(str(log)) == (["node z/z.test.mjs", "c/c.test.sh"], None)
+    log.write_text("npm ci failed\n")
+    assert failing_suites(str(log)) == ([], "the seam's log has no `FAIL <suite>` line")
+    assert failing_suites(str(tmp_path / "nope.log"))[1].startswith("the seam's log could not be read")
