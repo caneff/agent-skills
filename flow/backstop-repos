@@ -1,0 +1,7 @@
+# The repos the nightly backstop runs (#1595): one checkout per line, `~/` is
+# the home directory, `#` starts a comment, blank lines are skipped. Adding or
+# removing a repo is one line here; bin/backstop-nightly reads this file.
+~/.agents/skills
+~/src/sudokumaker-custom-constraints
+~/src/grid-hunts
+~/src/twitch-rules-scroller

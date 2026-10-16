@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# backstop-nightly [<list-file>] — run the backstop (backstop/backstop.py) once
+# per repo named in the list file (#1595); the systemd backstop.service runs it.
+# The list defaults to flow/backstop-repos. A missing, unreadable or empty list
+# is an error, never zero repos run: a night with nothing checked must not look
+# like a green one. Every repo runs even when an earlier one fails; the exit
+# status is non-zero if any run, or the list, failed.
+# Env: BACKSTOP_JOBS (the seam's TESTS_JOBS, default 4), BACKSTOP_PY (test seam).
+set -uo pipefail
+real="$(readlink -f "${BASH_SOURCE[0]}")"
+flow="$(cd "$(dirname "$real")/.." && pwd)"
+list="${1:-$flow/backstop-repos}"
+py="${BACKSTOP_PY:-$flow/../backstop/backstop.py}"
+jobs="${BACKSTOP_JOBS:-4}"
+
+[ -f "$list" ] && [ -r "$list" ] || { echo "backstop-nightly: cannot read the repo list $list" >&2; exit 2; }
+repos=()
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%%#*}"
+  line="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  [ -n "$line" ] || continue
+  case "$line" in "~/"*) line="$HOME/${line#\~/}" ;; esac
+  repos+=("$line")
+done < "$list" || { echo "backstop-nightly: reading $list failed" >&2; exit 2; }
+[ "${#repos[@]}" -gt 0 ] || { echo "backstop-nightly: $list names no repo" >&2; exit 2; }
+
+status=0
+for repo in "${repos[@]}"; do
+  python3 "$py" --repo "$repo" --jobs "$jobs" || { echo "backstop-nightly: $repo exited $?" >&2; status=1; }
+done
+exit "$status"

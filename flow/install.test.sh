@@ -23,7 +23,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 # fixture test.
 stub="$tmp/stub"
 mkdir -p "$stub"
-for x in reg.exe powershell.exe; do
+for x in reg.exe powershell.exe systemctl; do
   cat > "$stub/$x" <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -166,6 +166,25 @@ for r in instruction-files skill-files research-notes; do
     echo "FAIL claude/rules/$r.md not linked under the scratch HOME"; fails=1
   fi
 done
+
+# The nightly backstop (#1595): a user service and a Persistent timer, written
+# under the scratch HOME, in the shape of second-brain-v2's digest.timer. The
+# systemctl stub above keeps the install from touching the live user manager.
+unit_dir="$tmp/home/.config/systemd/user"
+if grep -q '^ExecStart=%h/.local/bin/backstop-nightly$' "$unit_dir/backstop.service" 2>/dev/null \
+   && grep -q '^Type=oneshot$' "$unit_dir/backstop.service" \
+   && [ "$(readlink "$tmp/home/.local/bin/backstop-nightly")" = "$repo/flow/bin/backstop-nightly" ]; then
+  echo "PASS backstop.service runs the linked backstop-nightly"
+else
+  echo "FAIL backstop.service missing or wrong under the scratch HOME: $(cat "$unit_dir/backstop.service" 2>&1)"; fails=1
+fi
+if grep -Eq '^OnCalendar=\*-\*-\* 0[0-5]:[0-9:]+$' "$unit_dir/backstop.timer" 2>/dev/null \
+   && grep -q '^Persistent=true$' "$unit_dir/backstop.timer" \
+   && grep -q '^WantedBy=timers.target$' "$unit_dir/backstop.timer"; then
+  echo "PASS backstop.timer is persistent and fires after midnight"
+else
+  echo "FAIL backstop.timer missing or wrong under the scratch HOME: $(cat "$unit_dir/backstop.timer" 2>&1)"; fails=1
+fi
 
 # herdr-toast-install (#1016) is routed from install.sh, but this scratch repo
 # sits under /tmp, so the toast installer refuses (by design) — the refusal
