@@ -138,11 +138,25 @@ def test_review_step3_makes_the_narrowed_line_the_per_change_scope():
     assert "a `**Narrowed**` line is the per-change command for every change no scope sentence names" in text
 
 
-def test_merge_step3_points_at_the_scope_rule():
+def test_merge_step3_points_at_the_scope_rule_once():
     text = flat(step3())
-    assert "scope rule of § Review step 3" in text
-    assert ("is the scope that section names for this kind of change, when it names one, in place of the last three "
-            "lines; otherwise what `selector_check.py command` prints") in text
+    assert text.count("scope rule of § Review step 3") == 1
+    assert "holds here too" not in text
+    assert ("a scope the repo's `AGENTS.md` names for this kind of change is the run, in place of the last three "
+            "lines; otherwise it is what `selector_check.py command` prints") in text
+
+
+def test_merge_step3_reads_the_command_from_the_base_not_the_pr():
+    # C8: a PR that edits its own seam section must not choose its own gate.
+    calls = [x for x in step3().splitlines() if "selector_check.py" in x and "~/.agents" in x]
+    assert len(calls) == 3, calls
+    for line in calls:
+        assert "--rev origin/<default>" in line, line
+
+
+def test_the_slice_paragraph_states_what_its_verbatim_command_selects():
+    # P6, ruled: the slice runs the command verbatim, and says it is wider, never narrower.
+    assert "never a narrower one" in slice_paragraph()
 
 
 def test_merge_step3_owes_no_selector_evidence_for_a_scoped_run():

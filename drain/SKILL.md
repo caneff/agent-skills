@@ -7,9 +7,6 @@ disable-model-invocation: true
 `/drain [--once] [--max <n>] [--anchor <n>] [--bundle-max <k>] [--repo <path>]`
 starts `drain`. What a run does, picks, merges and refuses is
 the docstring of `drain/drain.py` (#1403); this skill restates none of it.
-What it tests before each merge is the repo's per-change command and nothing
-more: no full seam runs at the end of a run, so the report owes no full-suite
-verdict. The nightly backstop (`backstop/`) is the only full run (#1597).
 
 `/drain status` starts nothing: it is the `## Status` section. So is a `/drain` with
 no flags while `job-run --status drain-<repo-short>` says `alive` (that run's

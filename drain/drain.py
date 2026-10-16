@@ -53,8 +53,9 @@ bundle cap, and the repo's per-change command passes on the PR merged into
 current main), squash-merges, runs `merge-cleanup` (which closes the worker's
 pane), and returns any ticket the worker claimed but the PR did not close to
 the queue. The per-change command is what `implement/selector_check.py
-command` reads from the merged tree's `AGENTS.md` § End-to-end seam: its
-`Narrowed` command, else its `Seam` (#1597). It runs on every merge, and a
+command` reads from current main's `AGENTS.md` § End-to-end seam, never the
+merged tree's, so a PR that edits that section does not choose its own gate:
+its `Narrowed` command, else its `Seam` (#1597). It runs on every merge, and a
 repo that declares a `Narrowed` line gets that run's listing as one
 `selector:` comment on the PR, posted before the command, as the lane's merge
 step does (#1593). A section that declares no command merges nothing. No full
@@ -79,9 +80,10 @@ PR is recorded as what closed it, from its `closed` event: `(landed on main,
 no PR)` with that commit's sha, or with the sha of the main commit whose
 message says `Closes #<n>` when a hand closed it after the trailer did not
 fire; `moot (closed, no PR)` with no sha when neither exists; or an unverified
-close with the reason, never as main's tip. The run's last lines are one `passed over: #<n>
-<why>` per ready ticket it did not build (human-held, claimed, blocked, a kept
-workspace, not started), read fresh when a limit ends the run, and one
+close with the reason, never as main's tip. The run's last lines are one
+`passed over: #<n> <why>` per ready ticket it did not build (human-held,
+claimed, blocked, a kept workspace, not started), read fresh when a limit ends
+the run, and one
 `ended: <cause>`: `queue empty`, `no startable ticket` (every queued ticket has
 a kept workspace), `--once reached`, `--max <n> reached`, or `stopped` beside
 its `stopped:` line. `ended:` is no `stopped:` line and leaves the exit code
@@ -117,6 +119,7 @@ for _dir in ("burndown", "implement"):
 
 import frontier  # noqa: E402
 import pr_settle  # noqa: E402
+from selector_check import UNDECLARED  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
 ANCHOR_NOTE, BUNDLE_NOTE, HANDED_NOTE = "drain anchor:", "drain bundle:", "drain could not land"
@@ -712,31 +715,23 @@ SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", 
 # What the run writes to its log before the per-change command, so a failure
 # names the command that ran, not the shell around it.
 RUNNING = "per-change command: "
-UNDECLARED = "selector_check.py command: "
 
 
 def seam(ctx, head, log, pr):
-    """The repo's per-change command on the PR head merged into current main,
-    in a throwaway worktree, on every merge (#1597): what `selector_check.py
-    command` reads from the merged tree's `AGENTS.md` § End-to-end seam, its
-    `Narrowed` command, else its `Seam`. No full seam runs here: the nightly
-    backstop (`backstop/`) is the only full run (#1592).
-
-    As the lane's merge step does, the run lists the narrowed selection and
-    posts that listing on PR `pr` before the command, judging nothing
-    (#1537, #1593); a repo with no `Narrowed` line gets no listing and no
-    comment. The command's own exit status is what comes out, never the
-    comment's. A section that declares no command fails the merge with the
-    resolver's reason, before anything runs."""
+    """The merge's run, as the module docstring states it, on the PR head
+    merged into current main in a throwaway worktree. The command's own exit
+    status is what comes out, never the `selector:` comment's; a resolver
+    refusal raises with its reason, before anything runs."""
     run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
     log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
     with contextlib.suppress(FileNotFoundError):
         os.remove(log)  # a conflict writes no log, and an earlier run's must not answer for it
     state = shlex.quote(os.path.splitext(log)[0] + "-selector.json")
     tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
-    cmd = (f"cmd=$({tool} command --root .) || exit 1; printf '{RUNNING}%s\\n' \"$cmd\"; "
-           f"if {tool} list --root . --state {state}; then "
-           f"{tool} comment --root . --state {state} --pr {pr} --repo {shlex.quote(ctx.repo)}; fi; "
+    base = f"--root . --rev {shlex.quote(ctx.default)}"
+    cmd = (f"cmd=$({tool} command {base}) || exit 1; printf '{RUNNING}%s\\n' \"$cmd\"; "
+           f"if {tool} list {base} --state {state}; then "
+           f"{tool} comment {base} --state {state} --pr {pr} --repo {shlex.quote(ctx.repo)}; fi; "
            'sh -c "$cmd"')
     try:
         run_in_scratch_tree(ctx, cmd, log, head)

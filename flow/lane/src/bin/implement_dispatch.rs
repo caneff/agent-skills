@@ -88,7 +88,8 @@ cannot be read refuses.
 A plain dispatch whose tickets' spec parent <p> (the sub-issue parent link)
 has origin/spec-<p> is a slice: its workspace branches from origin/spec-<p>,
 git config branch.implement-<n>.base reads spec-<p>, and the brief names
-spec-<p> as its PR base, seam base and merge-in base and says it runs no
+spec-<p> as its PR base and merge-in base, names the per-change command
+selector_check.py prints as its run, as for any ticket, and says it runs no
 review wave. Every dispatch records the sha it branched from as git config
 branch.implement-<n>.forkpoint, which merge-cleanup reads (#1464). A clump split between bases, or a parent that cannot be read
 while some origin/spec-* exists, refuses. Every other ticket branches from
@@ -734,7 +735,8 @@ enum Base {
 fn slice_note(spec: &str) -> String {
     format!(
         " -- Slice of spec #{spec}: your base is spec-{spec}, never the default branch: merge origin/spec-{spec} in, \
-run the seam narrowed with --changed origin/spec-{spec}, open the PR with gh pr create --base spec-{spec}; \
+run what python3 ~/.agents/skills/implement/selector_check.py command --root . prints as your one suite run, \
+as any ticket does, open the PR with gh pr create --base spec-{spec}; \
 a slice runs no review wave, since the spec is reviewed once on spec-{spec}."
     )
 }

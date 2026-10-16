@@ -313,16 +313,19 @@ three things. It merges `origin/spec-<p>` in with
 `git fetch origin && git merge --no-edit origin/spec-<p>`. It runs what
 `python3 ~/.agents/skills/implement/selector_check.py command --root .` prints
 as its one suite run, or the scope the repo's seam section names for the
-change (§ Review step 3), exactly as an ordinary ticket does. It passes
-§ Before the PR step 5's pre-report gate. No review wave, no Codex pass, no
-`dispositions-<n>.jsonl`, and no review-ledger row, not even a skip row: a
-skip row would read as an ablated review in the escape count. The merge check
-reads the same recorded key: `fix-check.sh <n>` exits 0 on a slice branch
-with no review files, saying `slice of spec-<p>, no review wave`, as long as
-`origin/spec-<p>` exists; a key naming an integration branch that is gone is
-refused. It also reads the base of any open PR from `implement-<n>` off
-GitHub and refuses one that does not target `spec-<p>`. The pre-report gate's
-clean-tree, ancestor and `.scratch/` checks still run.
+change (§ Review step 3), exactly as an ordinary ticket does. The command
+runs verbatim, so one that narrows against `origin/<default>` also selects
+what earlier slices changed on `spec-<p>`: a wider run than the slice alone,
+never a narrower one. It passes § Before the PR step 5's pre-report gate.
+No review wave, no Codex pass, no `dispositions-<n>.jsonl`, and no
+review-ledger row, not even a skip row: a skip row would read as an ablated
+review in the escape count. The merge check reads the same recorded key:
+`fix-check.sh <n>` exits 0 on a slice branch with no review files, saying
+`slice of spec-<p>, no review wave`, as long as `origin/spec-<p>` exists; a
+key naming an integration branch that is gone is refused. It also reads the
+base of any open PR from `implement-<n>` off GitHub and refuses one that does
+not target `spec-<p>`. The pre-report gate's clean-tree, ancestor and
+`.scratch/` checks still run.
 A branch with no recorded base is an ordinary ticket, and a missing
 dispositions file still fails it.
 
@@ -398,15 +401,15 @@ round follows steps 2–3 below keyed on the spec number:
    `**Narrowed**` command, else its `**Seam**` (#1593). Green is the exit,
    red is fixed and rerun. A non-zero exit names what the section lacks: send
    it to the controller and run nothing on a guess. When, per the repo's
-   `AGENTS.md` § End-to-end seam, the repo scopes the
-   run for this kind of change, that scope governs instead of this default, and the
-   default applies only when the section names none (Chris's ruling
-   2026-10-14, #1581). A scope is a sentence there that names the command or
-   tests to run for a class of change, as sudokupad-art's "a puzzle update
-   runs only that puzzle's tests"; a `**Narrowed**` line is the per-change
-   command for every change no scope sentence names. This is the ticket's one suite run, just before "PR up"; the merger
-   runs the same command again on the PR merged into current `<default>`
-   before it merges (§ The merge step 3).
+   `AGENTS.md` § End-to-end seam, the repo scopes the run for this kind of
+   change, that scope governs instead of this default, and the default
+   applies only when the section names none (Chris's ruling 2026-10-14,
+   #1581). A scope is a sentence there that names the command or tests to
+   run for a class of change, as sudokupad-art's "a puzzle update runs only
+   that puzzle's tests"; a `**Narrowed**` line is the per-change command for
+   every change no scope sentence names. This is the ticket's one suite run,
+   just before "PR up"; the merger runs the same command again on the PR
+   merged into current `<default>` before it merges (§ The merge step 3).
    `fix-check.sh <n>` (and the pre-report gate that runs it) checks the
    rest mechanically: every finding id in the three findings sidecars and the
    Codex output has exactly one disposition, every `fixed` sha is a commit on
@@ -895,32 +898,33 @@ closed.
    So before the merge, run the worker's per-change command (§ Review step 3)
    again on the PR merged into current `origin/<default>`. The step runs no
    full seam: the nightly backstop is the only full run, and a breakage the
-   narrowing missed surfaces there (#1592). The scope rule of § Review step 3
-   (Chris's ruling 2026-10-14, #1581) holds here too: a scope the repo's
-   `AGENTS.md` names for this kind of change is the run. From the primary
-   checkout, after `git fetch origin`, with `<state>` an absolute path under
-   `.scratch/`, outside the worktree the run reads:
+   narrowing missed surfaces there (#1592). From the primary checkout, after
+   `git fetch origin`, with `<state>` an absolute path under `.scratch/`,
+   outside the worktree the run reads:
 
    ```
    git worktree add --detach <absolute path under .scratch/> origin/<default>
    cd <that path> && git merge --no-edit <headRefOid> \
-     && cmd=$(python3 ~/.agents/skills/implement/selector_check.py command --root .) \
-     && { python3 ~/.agents/skills/implement/selector_check.py list --root . --state <state> \
-          && python3 ~/.agents/skills/implement/selector_check.py comment --root . --state <state> --pr <pr> --repo <owner/name>; true; } \
+     && cmd=$(python3 ~/.agents/skills/implement/selector_check.py command --root . --rev origin/<default>) \
+     && { python3 ~/.agents/skills/implement/selector_check.py list --root . --rev origin/<default> --state <state> \
+          && python3 ~/.agents/skills/implement/selector_check.py comment --root . --rev origin/<default> --state <state> --pr <pr> --repo <owner/name>; true; } \
      && sh -c "$cmd"
    ```
 
-   The run is the scope that section names for this kind of change, when it
-   names one, in place of the last three lines; otherwise what
-   `selector_check.py command` prints, the `**Narrowed**` command, else the
-   `**Seam**`. A non-zero exit from the resolver names what the section
+   Under the scope rule of § Review step 3, a scope the repo's
+   `AGENTS.md` names for this kind of change is the run, in place of the
+   last three lines; otherwise it is what `selector_check.py command`
+   prints. `--rev` reads the section from `origin/<default>`, not the merged
+   tree, so a PR that edits its own seam section does not choose the command
+   that gates it. A non-zero exit from the resolver names what the section
    lacks, and the chain stops there before anything runs: tell Chris and
-   merge nothing on this step's say-so. State the run's worker and core count
-   in your status line before you launch it. The controller merges only on
-   green. A merge conflict or a red run blocks the merge: send the worker
-   the failure to fix, and its next "PR up" restarts at step 2, so the fix is
-   read and re-run like any other commit. Remove the worktree afterwards with
-   `git worktree remove --force`, since a conflicted merge leaves it dirty.
+   merge nothing on this step's say-so. State the run's worker and core
+   count in your status line before you launch it. The controller merges
+   only on green. A merge conflict or a red run blocks the merge: send the
+   worker the failure to fix, and its next "PR up" restarts at step 2, so the
+   fix is read and re-run like any other commit. Remove the worktree
+   afterwards with `git worktree remove --force`, since a conflicted merge
+   leaves it dirty.
 
    **Selector evidence** (#1537, #1593). The `list` and `comment` lines
    record the suites the narrowed command selected as one comment on the PR,

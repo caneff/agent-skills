@@ -163,7 +163,8 @@ print(env.get("CHOOSER_SAY") or "thinking...\ndrain bundle: " + " ".join([anchor
 # NO_ANCHOR / UNCLOSED (what the PR's closing keywords leave out), EXTRA_CLOSE
 # (tickets the PR closes that were never in the bundle), RESET_TO_OLD (build on
 # the commit before main's tip), SPEC_SLICES (what a `--spec` dispatch's run
-# claims and its PR closes beside the spec).
+# claims and its PR closes beside the spec), PR_AGENTS (the `AGENTS.md` the PR
+# commits in place of main's).
 STUB_DISPATCH = r"""#!/usr/bin/env python3
 import json, os, subprocess, sys
 env, argv = os.environ, sys.argv[1:]
@@ -225,6 +226,8 @@ os.chdir(wt)
 if env.get("RESET_TO_OLD"):
     subprocess.run(["git", "reset", "-q", "--hard", "HEAD~1"], check=True)
 open("work-%s.txt" % n, "w").write("built\n")
+if env.get("PR_AGENTS"):
+    open("AGENTS.md", "w").write(env["PR_AGENTS"])
 subprocess.run(["git", "add", "."], check=True)
 subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "build %s" % n], check=True)
 subprocess.run(["git", "push", "-q", "-f", "origin", "HEAD:" + branch], check=True)
@@ -1017,6 +1020,16 @@ def test_a_repo_that_declares_no_per_change_command_merges_nothing_and_says_why(
     assert "AGENTS.md has no `## End-to-end seam` section" in sb.handed_comment(1)[0]
 
 
+def test_a_pr_that_edits_its_own_seam_section_is_gated_by_mains(sb):
+    # C8: the command is read from the base, so a PR cannot choose its own gate.
+    sb.write_state({1: {}})
+    sb.set_seam('echo base >> "$SEAM_LOG"')
+    pr_agents = '## End-to-end seam\n\n- **Seam**: `echo pr >> "$SEAM_LOG"`\n- **Blind to**: the live editor\n'
+    r = sb.drain("--once", env={"PR_AGENTS": pr_agents})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == ["base"]
+
+
 def test_land_testcmd_is_not_what_a_merge_runs(sb):
     sb.write_state({1: {}})
     sb.git(sb.repo, "config", "land.testcmd", "false")  # the fixture's AGENTS.md declares `true`
@@ -1629,9 +1642,6 @@ def test_run_group_kills_what_a_command_started(d, tmp_path):
 # --- #1537: selector evidence on every merge of a repo that declares a narrowed command ---
 
 
-narrowed_repo = gate_repo
-
-
 LISTED = "selector: listed 1 suite from `bash tests/all.sh --changed origin/main --list`\n\n```\nalpha/a.test.sh\n```"
 
 
@@ -1641,7 +1651,7 @@ def pr_comments(sb):
 
 def test_a_green_seam_leaves_its_listing_on_the_pr_and_the_merge_lands(sb):
     sb.write_state({1: {}})
-    narrowed_repo(sb, ["alpha/a.test.sh"])
+    gate_repo(sb, ["alpha/a.test.sh"])
     r = sb.drain("--once")  # main has not moved past the PR: a repo that declares a narrowed line still gets its run
     assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
     assert pr_comments(sb) == [LISTED]
@@ -1649,7 +1659,7 @@ def test_a_green_seam_leaves_its_listing_on_the_pr_and_the_merge_lands(sb):
 
 def test_a_red_seam_leaves_its_listing_judging_nothing_and_still_blocks_the_merge(sb):
     sb.write_state({1: {}})
-    narrowed_repo(sb, ["alpha/a.test.sh"])
+    gate_repo(sb, ["alpha/a.test.sh"])
     sb.drain("--once", env={"SEAM_RED": "zeta/z.test.sh"})
     assert "merged" not in sb.state()
     assert pr_comments(sb) and set(pr_comments(sb)) == {LISTED}
@@ -1658,7 +1668,7 @@ def test_a_red_seam_leaves_its_listing_judging_nothing_and_still_blocks_the_merg
 
 def test_a_listing_that_prints_nothing_is_not_checked_and_a_green_seam_still_merges(sb):
     sb.write_state({1: {}})
-    narrowed_repo(sb, [])
+    gate_repo(sb, [])
     sb.drain("--once")
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
     assert len(pr_comments(sb)) == 1
@@ -1668,7 +1678,7 @@ def test_a_listing_that_prints_nothing_is_not_checked_and_a_green_seam_still_mer
 
 def test_a_repo_with_no_narrowed_line_gets_no_selector_comment_green_or_red(sb):
     sb.write_state({1: {}})
-    narrowed_repo(sb, ["alpha/a.test.sh"], declared=False)
+    gate_repo(sb, ["alpha/a.test.sh"], declared=False)
     sb.drain("--once", env={"RESET_TO_OLD": "1"})
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
     sb.write_state({1: {}})
@@ -1678,7 +1688,7 @@ def test_a_repo_with_no_narrowed_line_gets_no_selector_comment_green_or_red(sb):
 
 def test_a_comment_that_cannot_be_posted_does_not_stop_a_green_merge(sb):
     sb.write_state({1: {}})
-    narrowed_repo(sb, ["alpha/a.test.sh"])
+    gate_repo(sb, ["alpha/a.test.sh"])
     r = sb.drain("--once", env={"PR_COMMENT_FAIL": "1"})
     assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
     assert pr_comments(sb) == []

@@ -243,6 +243,59 @@ def test_command_exits_non_zero_naming_the_gap_and_prints_no_command(tmp_path, a
     assert why in r.stderr
 
 
+def based_repo(tmp_path):
+    """A git repo whose base commit (`HEAD~1`) declares `echo base` as its
+    `Narrowed` command and whose tip, the PR merged in, declares `echo pr`."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.test"}
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True)
+
+    git("init", "-q")
+    for name in ("base", "pr"):
+        (root / "AGENTS.md").write_text(f"## End-to-end seam\n\n- **Seam**: `true`\n- **Narrowed**: `echo {name}`\n")
+        git("add", ".")
+        git("commit", "-qm", name)
+    return root
+
+
+def test_command_at_a_rev_reads_that_revs_section_not_the_working_tree(tmp_path):
+    # A PR that edits its own seam section must not choose the command that gates it (C8).
+    root = based_repo(tmp_path)
+    r = subprocess.run([sys.executable, SCRIPT, "command", "--root", str(root), "--rev", "HEAD~1"],
+                       capture_output=True, text=True)
+    assert (r.returncode, r.stdout, r.stderr) == (0, "echo base\n", "")
+
+
+def test_command_at_a_rev_with_no_agents_file_names_the_rev(tmp_path):
+    root = based_repo(tmp_path)
+    r = subprocess.run([sys.executable, SCRIPT, "command", "--root", str(root), "--rev", "HEAD~2"],
+                       capture_output=True, text=True)
+    assert (r.returncode, r.stdout) == (1, "")
+    assert "no AGENTS.md could be read at HEAD~2" in r.stderr
+
+
+def test_list_and_comment_at_a_rev_record_the_command_the_rev_declares(tmp_path):
+    root = based_repo(tmp_path)
+    state = str(tmp_path / "state.json")
+    listed = subprocess.run([sys.executable, SCRIPT, "list", "--root", str(root), "--state", state, "--rev", "HEAD~1"],
+                            capture_output=True, text=True)
+    assert listed.returncode == 0, listed.stderr
+    r = subprocess.run([sys.executable, SCRIPT, "comment", "--root", str(root), "--state", state, "--rev", "HEAD~1"],
+                       capture_output=True, text=True)
+    assert verdict(r).startswith("selector: listed 1 suite from `echo base --list`"), r.stdout
+
+
+def test_the_resolvers_refusal_prefix_is_the_one_drain_reads(tmp_path):
+    sys.path.insert(0, HERE)
+    from selector_check import UNDECLARED
+    assert resolve(tmp_path, None).stderr.startswith(UNDECLARED)
+
+
 # --- `failing_suites`: the seam log's failed suites, which the backstop reads ---
 
 

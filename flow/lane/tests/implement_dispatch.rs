@@ -2436,7 +2436,10 @@ fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
     let prompt = prompt_line(&f);
     assert!(prompt.contains("/implement 395 --tier heavy --controller \"skills-ctl\" -- Slice of spec #500"), "{prompt}");
     assert!(prompt.contains("gh pr create --base spec-500"), "no PR base in the brief: {prompt}");
-    assert!(prompt.contains("--changed origin/spec-500"), "no seam base in the brief: {prompt}");
+    // #1590, absorbed by #1592: a slice runs the resolver's per-change
+    // command like any ticket, never a hard-coded `--changed` narrowing.
+    assert!(prompt.contains("selector_check.py command --root ."), "no per-change command in the brief: {prompt}");
+    assert!(!prompt.contains("--changed"), "the brief hard-codes a narrowing: {prompt}");
     assert!(prompt.contains("merge origin/spec-500 in"), "no merge-in base in the brief: {prompt}");
     assert!(prompt.contains("no review wave"), "the brief does not say the slice runs no review wave: {prompt}");
     assert!(out_text(&out).contains("slice of #500 on spec-500"), "{}", out_text(&out));
