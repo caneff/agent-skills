@@ -749,8 +749,9 @@ def seam(ctx, head, log, pr=None):
     in full instead, on every merge and with no skip: the point is to compare
     its narrowed selection with what the full run fails on, which a narrowed
     run could only agree with. `selector_check.py` lists the narrowed
-    selection before the seam and posts its verdict on PR `pr` after it, red or
-    green; the seam's own exit status is what comes out, never the comment's."""
+    selection before the seam and posts that listing on PR `pr` after it, red or
+    green, judging nothing (#1593); the seam's own exit status is what comes
+    out, never the comment's."""
     cmd = seam_cmd(ctx)
     run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
     checked = pr is not None and declares_narrowed(ctx)
@@ -762,8 +763,8 @@ def seam(ctx, head, log, pr=None):
         state = os.path.splitext(log)[0] + "-selector.json"
         tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
         cmd = (f"{tool} list --root . --state {shlex.quote(state)}; sh -c {shlex.quote(cmd)}; code=$?; "
-               f"{tool} comment --root . --state {shlex.quote(state)} --seam-exit $code "
-               f"--seam-log {shlex.quote(log)} --pr {pr} --repo {shlex.quote(ctx.repo)}; exit $code")
+               f"{tool} comment --root . --state {shlex.quote(state)} --pr {pr} --repo {shlex.quote(ctx.repo)}; "
+               "exit $code")
     elif cmd == FULL_SEAM:
         cmd = f"{FULL_SEAM} --changed {shlex.quote(ctx.default)}"
     try:

@@ -1726,33 +1726,28 @@ def narrowed_repo(sb, listed, declared=True):
     gate_repo(sb, listed)
 
 
+LISTED = "selector: listed 1 suite from `bash tests/all.sh --changed origin/main --list`\n\n```\nalpha/a.test.sh\n```"
+
+
 def pr_comments(sb):
     return [b for _, b in sb.state().get("pr_comments", [])]
 
 
-def test_a_green_seam_leaves_a_clean_selector_comment_and_the_merge_lands(sb):
+def test_a_green_seam_leaves_its_listing_on_the_pr_and_the_merge_lands(sb):
     sb.write_state({1: {}})
     narrowed_repo(sb, ["alpha/a.test.sh"])
     r = sb.drain("--once")  # main has not moved past the PR: a repo that declares a narrowed line still gets its run
     assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
-    assert pr_comments(sb) == ["selector: clean"]
+    assert pr_comments(sb) == [LISTED]
 
 
-def test_a_red_seam_outside_the_listing_leaves_a_miss_and_still_blocks_the_merge(sb):
+def test_a_red_seam_leaves_its_listing_judging_nothing_and_still_blocks_the_merge(sb):
     sb.write_state({1: {}})
     narrowed_repo(sb, ["alpha/a.test.sh"])
     sb.drain("--once", env={"SEAM_RED": "zeta/z.test.sh"})
     assert "merged" not in sb.state()
-    assert pr_comments(sb) and set(pr_comments(sb)) == {"selector: miss zeta/z.test.sh"}
+    assert pr_comments(sb) and set(pr_comments(sb)) == {LISTED}
     assert "seam" in sb.handed_comment(1)[0]
-
-
-def test_a_red_seam_inside_the_listing_leaves_a_hit_and_still_blocks_the_merge(sb):
-    sb.write_state({1: {}})
-    narrowed_repo(sb, ["alpha/a.test.sh"])
-    sb.drain("--once", env={"SEAM_RED": "alpha/a.test.sh"})
-    assert "merged" not in sb.state()
-    assert pr_comments(sb) and set(pr_comments(sb)) == {"selector: hit alpha/a.test.sh"}
 
 
 def test_a_listing_that_prints_nothing_is_not_checked_and_a_green_seam_still_merges(sb):
@@ -1789,7 +1784,7 @@ def test_a_seam_command_with_a_trailing_semicolon_and_a_comment_still_runs_and_i
     sb.git(sb.repo, "config", "land.testcmd", "true; # the repo's own seam")
     sb.drain("--once")
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
-    assert pr_comments(sb) == ["selector: clean"]
+    assert pr_comments(sb) == [LISTED]
 
 
 def test_the_selector_files_are_named_by_absolute_path_whatever_the_log_dir_is(sb, monkeypatch):
@@ -1802,7 +1797,6 @@ def test_the_selector_files_are_named_by_absolute_path_whatever_the_log_dir_is(s
     drain_module.seam(ctx, "main", os.path.join("rel", "dir", "pr-seam.log"), 7)
     cmd = seen[0]
     assert os.path.abspath(os.path.join("rel", "dir", "pr-seam-selector.json")) in cmd
-    assert "--seam-log " + os.path.abspath(os.path.join("rel", "dir", "pr-seam.log")) in cmd
 
 
 def test_a_base_tree_git_cannot_read_is_asked_again_of_the_merged_tree_not_read_as_no_line(sb):
