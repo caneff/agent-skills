@@ -13,6 +13,7 @@ execute (the only step that spawns audits), collect (assemble the collection
 and render the index). `--index` calls collect alone.
 """
 import argparse
+import collections
 import concurrent.futures
 import concurrent.futures
 import dataclasses
@@ -773,6 +774,49 @@ def execute(repo, plan, run):
     return failed
 
 
+MutationScan = collections.namedtuple(
+    "MutationScan", "modules survivors_sum inconclusive notest_modules notest_total notest_error")
+
+
+def scan_mutation(collection):
+    """What mutation mode left in a collection: its module dirs, their tally and
+    the no-tests probe's answer. `collect` and `mutation_mode` both read it."""
+    mutation_modules = []
+    for entry in sorted(os.listdir(collection)):
+        d = os.path.join(collection, entry)
+        if not os.path.isdir(d) or entry in AUDIT_NAMES:
+            continue
+        if os.path.isfile(os.path.join(d, "findings.jsonl")) or os.path.isfile(inconclusive_path(collection, entry)):
+            mutation_modules.append(entry)
+
+    survivors_sum = 0
+    inconclusive = sum(1 for b in mutation_modules if inconclusive_reason(collection, b) is not None)
+    for base_name in mutation_modules:
+        tally = mutation_tally(os.path.join(collection, base_name, "findings.jsonl"))
+        if tally:
+            _, _, s, n = tally
+            survivors_sum += s + n
+
+    notest_modules, notest_total, notest_error = [], 0, None
+    notest_json = os.path.join(collection, "mutation-no-tests.json")
+    if os.path.exists(notest_json):
+        try:
+            d = json.load(open(notest_json, encoding="utf-8"))
+            if "error" in d:
+                notest_error = d["error"]
+            else:
+                notest_total = int(d.get("total", 0))
+                notest_modules = d.get("no_tests", [])
+        except (json.JSONDecodeError, OSError):
+            notest_error = "no-tests probe wrote unparseable output"
+    return MutationScan(mutation_modules, survivors_sum, inconclusive, notest_modules, notest_total, notest_error)
+
+
+def render_mutation_subindex(collection, repo, mut):
+    if mut.modules or mut.notest_modules or mut.notest_error:
+        build_mutation_subindex(collection, repo, mut.modules, mut.notest_modules, mut.notest_total, mut.notest_error)
+
+
 def collect(run, repo, plan, base=None):
     """Assemble the collection from what is on disk and render the index.
 
@@ -811,34 +855,7 @@ def collect(run, repo, plan, base=None):
             found = htmls[0] if htmls else None
         report_link[name] = f"{name}/{found}" if found else ""
 
-    mutation_modules = []
-    for entry in sorted(os.listdir(collection)):
-        d = os.path.join(collection, entry)
-        if not os.path.isdir(d) or entry in AUDIT_NAMES:
-            continue
-        if os.path.isfile(os.path.join(d, "findings.jsonl")) or os.path.isfile(inconclusive_path(collection, entry)):
-            mutation_modules.append(entry)
-
-    mutation_survivors_sum = 0
-    mutation_inconclusive = sum(1 for b in mutation_modules if inconclusive_reason(collection, b) is not None)
-    for base_name in mutation_modules:
-        tally = mutation_tally(os.path.join(collection, base_name, "findings.jsonl"))
-        if tally:
-            _, _, s, n = tally
-            mutation_survivors_sum += s + n
-
-    notest_modules, notest_total, notest_error = [], 0, None
-    notest_json = os.path.join(collection, "mutation-no-tests.json")
-    if os.path.exists(notest_json):
-        try:
-            d = json.load(open(notest_json, encoding="utf-8"))
-            if "error" in d:
-                notest_error = d["error"]
-            else:
-                notest_total = int(d.get("total", 0))
-                notest_modules = d.get("no_tests", [])
-        except (json.JSONDecodeError, OSError):
-            notest_error = "no-tests probe wrote unparseable output"
+    mut = scan_mutation(collection)
 
     report_files = [os.path.join(collection, report_link[n]) for n in AUDIT_NAMES if report_link[n]]
     synthesis = ""
@@ -860,14 +877,13 @@ def collect(run, repo, plan, base=None):
         report_link=report_link,
         skip_note={**plan.skip_note, **manifest_note},
         synthesis=synthesis,
-        mutation_modules=mutation_modules,
-        mutation_survivors_sum=mutation_survivors_sum,
-        mutation_inconclusive=mutation_inconclusive,
-        notest_count=len(notest_modules),
-        notest_error=notest_error,
+        mutation_modules=mut.modules,
+        mutation_survivors_sum=mut.survivors_sum,
+        mutation_inconclusive=mut.inconclusive,
+        notest_count=len(mut.notest_modules),
+        notest_error=mut.notest_error,
     ))
-    if mutation_modules or notest_modules or notest_error:
-        build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error)
+    render_mutation_subindex(collection, repo, mut)
 
     index_path = os.path.join(collection, "index.html")
     print()
@@ -1003,23 +1019,25 @@ def mutation_mode(repo, modules, out, whole_repo=False):
     if whole_repo:
         print(mutation_cost_estimate(len(final_targets), jobs))
 
-    if not final_targets:
-        print(f"\ncollection: {collection}")
-        return
-
+    failed = []
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-            results = list(pool.map(lambda m: _guarded_mutation_module(repo, m, run), final_targets))
-        failed = [m for m, reason in zip(final_targets, results) if reason]
+        if final_targets:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+                results = list(pool.map(lambda m: _guarded_mutation_module(repo, m, run), final_targets))
+            failed = [m for m, reason in zip(final_targets, results) if reason]
     finally:
         for d in os.listdir(run.worktrees):
             _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(run.worktrees, d)])
         _run(["git", "-C", repo, "worktree", "prune"])
 
     print(f"\ncollection: {collection}")
-    index = collect(run, repo, Plan())
+    # Only the mutation page: `collect` would rebuild the top index and rerun
+    # the synthesis pass over a sweep already sitting in `--out`.
+    render_mutation_subindex(collection, repo, scan_mutation(collection))
     sub_index = os.path.join(collection, "mutation", "index.html")
-    open_index(sub_index if os.path.isfile(sub_index) else index)
+    if os.path.isfile(sub_index):
+        print(f"index: {sub_index}")
+        open_index(sub_index)
     if failed:
         print(f"FAILED modules: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)

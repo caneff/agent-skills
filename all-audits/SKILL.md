@@ -53,8 +53,9 @@ targeted at one module; invoke it by name, or run
 repo is a separate explicit ask, never part of this sweep:
 `driver.py --mutation-all` (`mutation-audit/SKILL.md` § Whole-repo mode).
 Mutation mode runs up to `MUTATION_JOBS` modules at once (default 4). No
-module's run opens its report; the driver opens the mutation index once, when
-the run finishes. A standalone `/mutation-audit <module>` still opens its own.
+module's run opens its report; the driver opens the mutation index
+(`collection/mutation/index.html`, printed as `index:`) once, when the run
+finishes, and nothing when no page exists. A standalone `/mutation-audit <module>` still opens its own.
 With no value, `--mutation` takes its candidates from `mutation-audit/audit.py
 --suggest` (the model's prepass only ranks that list) and orders them never-run
 first, then changed since their recorded sha, then oldest run first, before
