@@ -34,6 +34,7 @@ link() { # link <repo-relative-src> <live-dest>
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/job-run                "$HOME/.local/bin/job-run"
 link bin/drain                  "$HOME/.local/bin/drain"
+link bin/backstop-nightly       "$HOME/.local/bin/backstop-nightly"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 # Symlinked, not copy-only (#1031): a probed harness write rewrote the live
 # file through the link without breaking it (`claude plugin disable --scope
@@ -120,6 +121,43 @@ fi
 mkdir -p "$HOME/.local/bin"
 bash "$here/lane-install.sh"
 
+# The nightly backstop (#1595): a user service and a timer in the shape of
+# second-brain-v2's digest.timer. Persistent=true runs a night the machine
+# slept through at the next boot. The repos it runs over are the one file
+# flow/backstop-repos. Unit files are written fresh each run (nothing of the
+# user's lives in them); systemctl failing — no user manager — is reported and
+# fails the install at the end, since a timer that is not enabled never fires.
+units_failed=""
+unit_dir="$HOME/.config/systemd/user"
+mkdir -p "$unit_dir"
+cat > "$unit_dir/backstop.service" <<'UNIT'
+[Unit]
+Description=Nightly full seam run over the repos in flow/backstop-repos (#1595)
+
+[Service]
+Type=oneshot
+# The backstop shells out to git, gh and python3; systemd's user PATH lacks ~/.local/bin.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/backstop-nightly
+UNIT
+cat > "$unit_dir/backstop.timer" <<'UNIT'
+[Unit]
+Description=Fire the nightly backstop just after midnight
+
+[Timer]
+OnCalendar=*-*-* 00:30:00
+# Machine asleep at 00:30? Run on next boot instead of skipping the night.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+echo "wrote $unit_dir/backstop.service and backstop.timer"
+if ! { systemctl --user daemon-reload && systemctl --user enable --now backstop.timer; }; then
+  echo "systemctl --user could not enable backstop.timer — the nightly backstop will not run" >&2
+  units_failed=1
+fi
+
 echo
 echo "Done. The live flow tooling now points at this repo; commit to back it up."
 
@@ -132,6 +170,10 @@ fi
 # The check names what a link or a settings entry still lacks (#1224).
 if ! bash "$here/install-check.sh"; then
   echo "install-check.sh found problems (see above); the install ran anyway" >&2
+  status=1
+fi
+
+if [ -n "$units_failed" ]; then
   status=1
 fi
 
