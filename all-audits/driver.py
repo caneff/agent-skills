@@ -14,6 +14,7 @@ and render the index). `--index` calls collect alone.
 """
 import argparse
 import concurrent.futures
+import concurrent.futures
 import dataclasses
 import datetime as _dt
 import hashlib
@@ -24,6 +25,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -442,6 +444,50 @@ def collect_from_manifest(manifests_dir, name, collection_dir, dest_name):
     return None
 
 
+INCONCLUSIVE_INSTRUCTION = (
+    "\nAlways write findings.jsonl beside the report, empty when no mutant survived. "
+    'If `audit.py --run` exited 3 with `INCONCLUSIVE: <why>`, still write the report (one line '
+    'naming the module and `<why>`) and the manifest, and add an "inconclusive" key to the '
+    "manifest holding that line's `<why>`; write no finding rows."
+)
+
+
+def inconclusive_path(collection_dir, dest_name):
+    return os.path.join(collection_dir, dest_name, "inconclusive.txt")
+
+
+def clear_inconclusive(collection_dir, dest_name):
+    path = inconclusive_path(collection_dir, dest_name)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def mutation_answer_failure(manifests_dir, name):
+    """Why a mutation module's manifest is no answer, or None. A module is
+    measured (a `findings.jsonl` beside its report, empty for no survivors) or
+    INCONCLUSIVE (an `inconclusive` key); a manifest with neither would read
+    as a clean module that never ran (#1588)."""
+    reason = manifest_failure(manifests_dir, name)
+    if reason:
+        return reason
+    data = read_manifest(manifests_dir, name)
+    if "inconclusive" in data:
+        return None
+    if not os.path.isfile(os.path.join(os.path.dirname(data["report_path"]), "findings.jsonl")):
+        return "manifest has no `inconclusive` key and the report has no findings.jsonl"
+    return None
+
+
+def record_inconclusive(manifests_dir, name, collection_dir):
+    """A manifest carrying `inconclusive` becomes `inconclusive.txt` in the
+    module's collected dir, the file the mutation sub-index reads (#1588): a
+    module that measured nothing is listed as such, never as clean."""
+    data = read_manifest(manifests_dir, name)
+    if "inconclusive" in data:
+        with open(inconclusive_path(collection_dir, name), "w", encoding="utf-8") as f:
+            f.write(str(data["inconclusive"] or "no reason recorded"))
+
+
 def clear_manifest(manifest):
     """`--out` accumulates: an earlier run's manifest would otherwise prove
     this run succeeded (#1278)."""
@@ -499,6 +545,7 @@ class IndexModel:
     synthesis: str = ""
     mutation_modules: list = dataclasses.field(default_factory=list)
     mutation_survivors_sum: int = 0
+    mutation_inconclusive: int = 0
     notest_count: int = 0
     notest_error: str = None
 
@@ -514,7 +561,10 @@ def build_index(model):
         else:
             out.append(f'<tr><td>{name}</td><td style="color:var(--vt-muted)">no report</td><td>{note}</td></tr>\n')
     if model.mutation_modules or model.notest_count > 0 or model.notest_error:
-        verdict = f"{len(model.mutation_modules)} modules run, {model.mutation_survivors_sum} total survivors"
+        measured = len(model.mutation_modules) - model.mutation_inconclusive
+        verdict = f"{measured} modules measured, {model.mutation_survivors_sum} total survivors"
+        if model.mutation_inconclusive:
+            verdict += f", {model.mutation_inconclusive} INCONCLUSIVE (not measured)"
         if model.notest_error:
             verdict += " · no-tests count could not be determined"
         elif model.notest_count > 0:
@@ -530,6 +580,15 @@ def build_index(model):
             body="".join(out),
             extra_css=_INDEX_CSS,
         ))
+
+
+def inconclusive_reason(collection, base):
+    """Why module `base` measured nothing, or None when it was measured."""
+    path = inconclusive_path(collection, base)
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read().strip() or "no reason recorded"
 
 
 def mutation_tally(findings_jsonl):
@@ -561,12 +620,18 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
         lede = f"{notest_count} of {notest_total} source modules have no tests."
     else:
         lede = ""
+    inconclusive = []
     if mutation_modules:
         out.append('<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">\n')
         out.append("<thead><tr><th>Module</th><th>Killed/total</th><th>Weak-assertion</th><th>No-coverage</th><th>Report</th></tr></thead><tbody>\n")
         for base in mutation_modules:
             tally_row = mutation_tally(os.path.join(collection, base, "findings.jsonl"))
-            if tally_row:
+            why = inconclusive_reason(collection, base)
+            if why is not None:
+                inconclusive.append(base)
+                tally = f"INCONCLUSIVE: {html.escape(why)}"
+                weak = nocov = "—"
+            elif tally_row:
                 k, t, s, n = tally_row
                 tally, weak, nocov = f"{k}/{t}", str(s), str(n)
             else:
@@ -575,6 +640,8 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
             link = f'<a href="../{base}/report.html">open report</a>' if os.path.isfile(report) else '<span style="color:var(--vt-muted)">no report</span>'
             out.append(f"<tr><td>{base}</td><td>{tally}</td><td>{weak}</td><td>{nocov}</td><td>{link}</td></tr>\n")
         out.append("</tbody></table></div>\n")
+    if inconclusive:
+        lede = f"{len(inconclusive)} of {len(mutation_modules)} modules INCONCLUSIVE: not measured, not counted as killed or clean. " + lede
     if notest_count > 0:
         out.append("<h2>No tests</h2>\n")
         out.append(
@@ -743,10 +810,11 @@ def collect(run, repo, plan, base=None):
         d = os.path.join(collection, entry)
         if not os.path.isdir(d) or entry in AUDIT_NAMES:
             continue
-        if os.path.isfile(os.path.join(d, "findings.jsonl")):
+        if os.path.isfile(os.path.join(d, "findings.jsonl")) or os.path.isfile(inconclusive_path(collection, entry)):
             mutation_modules.append(entry)
 
     mutation_survivors_sum = 0
+    mutation_inconclusive = sum(1 for b in mutation_modules if inconclusive_reason(collection, b) is not None)
     for base_name in mutation_modules:
         tally = mutation_tally(os.path.join(collection, base_name, "findings.jsonl"))
         if tally:
@@ -788,6 +856,7 @@ def collect(run, repo, plan, base=None):
         synthesis=synthesis,
         mutation_modules=mutation_modules,
         mutation_survivors_sum=mutation_survivors_sum,
+        mutation_inconclusive=mutation_inconclusive,
         notest_count=len(notest_modules),
         notest_error=notest_error,
     ))
@@ -839,7 +908,36 @@ def rebuild_index(repo, out):
 
 # --- mutation mode --------------------------------------------------------
 
-def mutation_mode(repo, modules, out):
+def mutation_jobs():
+    """`MUTATION_JOBS` (#1588): how many modules run at once. A value that is
+    not a positive integer stops the run; it is never rounded to a default."""
+    raw = os.environ.get("MUTATION_JOBS", "4")
+    try:
+        jobs = int(raw)
+    except ValueError:
+        jobs = 0
+    if jobs < 1:
+        print(f"MUTATION_JOBS must be a positive integer, got {raw!r}", file=sys.stderr)
+        sys.exit(2)
+    return jobs
+
+
+def mutation_cost_estimate(n, jobs=1, timeout_s=None):
+    """The line printed before a whole-repo run (#1588): the module count and
+    the worst case. `audit.py` bounds each of its commands by
+    `MUTATION_AUDIT_TIMEOUT` seconds and a mutmut module runs two (`run`, then
+    `results`), so a module is at most twice that; `jobs` modules overlap."""
+    if timeout_s is None:
+        timeout_s = float(os.environ.get("MUTATION_AUDIT_TIMEOUT", "3600"))
+    rounds = -(-n // jobs)
+    hours = rounds * 2 * timeout_s / 3600
+    return (f"mutation-all: {n} module{'s' if n != 1 else ''} to mutate, {jobs} at a time; "
+            f"up to {hours:g}h worst case (2 x {timeout_s:g}s per module), plus one `claude` run per module")
+
+
+def mutation_mode(repo, modules, out, whole_repo=False):
+    """`whole_repo` (#1588): every `--suggest` candidate, no `MUTATION_MAX` cut
+    and no model prepass, so the order is the recency order alone."""
     repo = os.path.abspath(repo)
     here = os.path.dirname(os.path.abspath(__file__))
 
@@ -852,7 +950,7 @@ def mutation_mode(repo, modules, out):
             print(f"mutation-target probe failed: {e}", file=sys.stderr)
             sys.exit(1)
         rank = []
-        if candidates and os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
+        if candidates and not whole_repo and os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
             result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo, candidates)], env=claude_env())
             rank = parse_mutation_rank(result.stdout, candidates)
             if result.returncode != 0 or not rank:
@@ -860,7 +958,7 @@ def mutation_mode(repo, modules, out):
                       "ordering by recency alone", file=sys.stderr)
         runs = mutation_runs(load_record(_record_file(repo)))
         ordered = order_mutation_targets(candidates, rank, runs, mutation_changed(repo, runs, here))
-        max_n = int(os.environ.get("MUTATION_MAX", "10"))
+        max_n = len(ordered) if whole_repo else int(os.environ.get("MUTATION_MAX", "10"))
         final_targets = ordered[:max_n]
         skipped = max(0, len(ordered) - max_n)
 
@@ -868,6 +966,7 @@ def mutation_mode(repo, modules, out):
         print(f"mutation-target: {t}")
     if skipped > 0:
         print(f"… {skipped} more modules skipped (raise MUTATION_MAX to include them)")
+    jobs = mutation_jobs()
 
     run = RunDir.create(out, worktrees=True)
     collection = run.collection
@@ -895,17 +994,17 @@ def mutation_mode(repo, modules, out):
         final_targets = [t for t in final_targets if t not in notest_paths]
         print(f"no-test modules (0% coverage, reported not mutated): {len(notest_paths)}")
 
+    if whole_repo:
+        print(mutation_cost_estimate(len(final_targets), jobs))
+
     if not final_targets:
         print(f"\ncollection: {collection}")
         return
 
     try:
-        failed = []
-        for module in final_targets:
-            if _run_mutation_module(repo, module, run):
-                failed.append(module)
-            else:
-                record_mutation(repo, module)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+            results = list(pool.map(lambda m: _guarded_mutation_module(repo, m, run), final_targets))
+        failed = [m for m, reason in zip(final_targets, results) if reason]
     finally:
         for d in os.listdir(run.worktrees):
             _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(run.worktrees, d)])
@@ -915,6 +1014,21 @@ def mutation_mode(repo, modules, out):
     if failed:
         print(f"FAILED modules: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
+
+
+_GIT_LOCK = threading.Lock()   # `git worktree add` and the cache record are not safe to run at once
+_RECORD_LOCK = threading.Lock()
+
+
+def _guarded_mutation_module(repo, module, run):
+    """One pool task: a crash inside a module is that module's failure, so the
+    other modules still run and it is listed under FAILED modules."""
+    try:
+        return _run_mutation_module(repo, module, run)
+    except Exception as e:  # noqa: BLE001 - reported by name, never swallowed
+        reason = f"crashed: {e!r}"
+        print(f"[mutation:{module}] FAILED: {reason}")
+        return reason
 
 
 def _run_mutation_module(repo, module, run):
@@ -929,11 +1043,14 @@ def _run_mutation_module(repo, module, run):
     manifest = manifest_path_for(run.manifests, slug)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
     clear_manifest(manifest)
+    # `--out` accumulates: an earlier run's INCONCLUSIVE must not label this one.
+    clear_inconclusive(collection, slug)
 
     print(f"[mutation:{module}] creating worktree")
     try:
         with open(log, "w", encoding="utf-8") as f:
-            r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
+            with _GIT_LOCK:
+                r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
         if r.returncode != 0:
             reason = "git worktree add failed"
         elif not (os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml"))):
@@ -946,11 +1063,14 @@ def _run_mutation_module(repo, module, run):
                 reason = "uv sync failed"
             else:
                 print(f"[mutation:{module}] running /mutation-audit {module}")
-                prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}"
+                prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}{INCONCLUSIVE_INSTRUCTION}"
                 with open(log, "a", encoding="utf-8") as f:
                     r = subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False, env=claude_env())
                 reason = audit_failure(
-                    r.returncode, lambda: collect_from_manifest(run.manifests, slug, collection, slug))
+                    r.returncode, lambda: (mutation_answer_failure(run.manifests, slug)
+                                           or collect_from_manifest(run.manifests, slug, collection, slug)))
+                if not reason:
+                    record_inconclusive(run.manifests, slug, collection)
         if reason:
             report_failure(f"mutation:{module}", reason, log)
             write_setup_failure_report(collection, module, reason)
@@ -961,7 +1081,13 @@ def _run_mutation_module(repo, module, run):
         # sweep of `worktrees/` as the backstop for a crash mid-`add`.
         _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
         _run(["git", "-C", repo, "worktree", "prune"])
-    print(f"[mutation:{module}] done")
+    why = inconclusive_reason(collection, slug)
+    if why is None:
+        with _RECORD_LOCK:
+            record_mutation(repo, module)
+    # An INCONCLUSIVE run measured nothing: not recorded, so the recency order
+    # offers it again (#1588).
+    print(f"[mutation:{module}] done" + (f" — INCONCLUSIVE: {why}" if why is not None else ""))
     return None
 
 
@@ -985,10 +1111,17 @@ def main(argv):
     p.add_argument("--mutation", nargs="?", const="", metavar="A.PY,B.PY",
                    help="run mutation-audit on each module, one fresh git worktree at a time "
                         "(no value: pick the modules with a prepass)")
+    p.add_argument("--mutation-all", action="store_true", dest="mutation_all",
+                   help="mutation-audit every module the --suggest list names, no MUTATION_MAX cap "
+                        "(prints the module count and a cost estimate first)")
     args = p.parse_args(argv[1:])
 
     repo = args.repo or os.getcwd()
-    if args.mutation is not None:
+    if args.mutation_all and args.mutation is not None:
+        p.error("--mutation-all is not allowed with --mutation: it takes every candidate, not a list.")
+    if args.mutation_all:
+        mutation_mode(repo, None, args.out, whole_repo=True)
+    elif args.mutation is not None:
         mutation_mode(repo, None if args.mutation == "" else _split(args.mutation), args.out)
     elif args.index:
         if not args.out:
