@@ -1091,6 +1091,75 @@ def test_mutation_all_prompt_asks_for_the_findings_log_and_the_inconclusive_key(
     assert '"inconclusive" key' in log and "findings.jsonl" in log and "still write the report" in log, log
 
 
+def test_sweep_prompt_carries_the_shared_no_open_instruction():
+    assert driver.NO_OPEN_INSTRUCTION in driver.audit_prompt("dead-code", "/some/repo")
+
+
+def test_mutation_module_prompt_forbids_opening_its_report(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = open(os.path.join(tmp, "out", "logs", "mutation-alpha.py.log")).read()
+    assert driver.NO_OPEN_INSTRUCTION in log, log
+
+
+def _fake_openers(tmp):
+    """`xdg-open` and `open` stubs in `tmp` (first on the fake-tools PATH) that
+    append their argument to `opened.txt`; returns its path."""
+    opened = os.path.join(tmp, "opened.txt")
+    for opener in ("xdg-open", "open"):
+        with open(os.path.join(tmp, opener), "w") as f:
+            f.write(f'#!/bin/sh\necho "$1" >> {opened}\n')
+        os.chmod(os.path.join(tmp, opener), 0o755)
+    return opened
+
+
+def _pages_opened(opened):
+    return open(opened).read().split() if os.path.exists(opened) else []
+
+
+def test_mutation_run_opens_one_page_and_it_is_the_index(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    opened = _fake_openers(tmp)
+    out = os.path.join(tmp, "out")
+    r = _mutation_all(repo, tmp, out, AUDITS_NO_OPEN="0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    index = os.path.join(out, "collection", "mutation", "index.html")
+    assert _pages_opened(opened) == [index]
+    assert f"index: {index}" in r.stdout, r.stdout
+
+
+def test_mutation_run_with_no_module_to_mutate_still_opens_the_index(tmp_path):
+    """Every target filtered out as testless: no module runs, but the no-tests
+    page exists and is the one page opened."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_env_manifest(repo)
+    open(os.path.join(repo, "solver.py"), "w").write("def f():\n    return 1\n")
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", repo, "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", repo, "commit", "-q", "-m", "solver"], check=True, env=env)
+    opened = _fake_openers(tmp)
+    out = os.path.join(tmp, "out")
+    r = _mutation_with_fake_claude(repo, tmp, out, AUDITS_NO_OPEN="0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "[mutation:solver.py] done" not in r.stdout, r.stdout
+    assert _pages_opened(opened) == [os.path.join(out, "collection", "mutation", "index.html")], r.stdout
+
+
+def test_mutation_run_does_not_rebuild_the_top_index_of_a_sweep_in_out(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    out = os.path.join(tmp, "out")
+    top = os.path.join(out, "collection", "index.html")
+    os.makedirs(os.path.dirname(top))
+    open(top, "w").write("sweep index")
+    r = _mutation_all(repo, tmp, out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert open(top).read() == "sweep index"
+
+
 def test_mutation_module_answering_neither_findings_nor_inconclusive_is_a_failure(tmp_path):
     """A manifest with no `inconclusive` key and no findings.jsonl is no answer:
     a failure line, never a clean module that went unrecorded."""
