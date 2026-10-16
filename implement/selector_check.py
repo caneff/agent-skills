@@ -54,6 +54,7 @@ sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
 from closing_ticket import declaration  # noqa: E402
 
 LISTING_SECONDS = 600
+_FAIL = re.compile(r"^FAIL (\S.*?)\s*$")
 
 
 # `command` is the declared command, or `None` with `error` saying why a
@@ -131,6 +132,22 @@ def record_listing(root, state_path):
     with open(state_path, "w") as f:
         json.dump(state, f)
     return True
+
+
+def failing_suites(log_path):
+    """`(suites, None)` in first-seen order, or `([], why)`: the suites a seam
+    log names as failed, which the nightly backstop reads (`backstop/`). A
+    `FAIL <suite>` is read only at the start of a line, since a passing suite
+    that reprints a child's failure indents it, and names the rest of the
+    line, since a suite is labelled with its whole command."""
+    try:
+        with open(log_path, errors="replace") as f:
+            found = [m.group(1) for m in (_FAIL.match(x) for x in f) if m]
+    except OSError as exc:
+        return [], f"the seam's log could not be read ({' '.join(str(exc).split())[:100]})"
+    if not found:
+        return [], "the seam's log has no `FAIL <suite>` line"
+    return list(dict.fromkeys(found)), None
 
 
 def record(state_path):

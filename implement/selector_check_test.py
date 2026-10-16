@@ -241,3 +241,17 @@ def test_command_exits_non_zero_naming_the_gap_and_prints_no_command(tmp_path, a
     assert r.returncode == 1
     assert r.stdout == ""
     assert why in r.stderr
+
+
+# --- `failing_suites`: the seam log's failed suites, which the backstop reads ---
+
+
+def test_failing_suites_reads_whole_unindented_fail_lines_once_each(tmp_path):
+    sys.path.insert(0, HERE)
+    from selector_check import failing_suites
+    log = tmp_path / "seam.log"
+    log.write_text("PASS a/a.test.sh\n  FAIL b/b.test.sh\nFAIL node z/z.test.mjs\nFAIL c/c.test.sh\nFAIL node z/z.test.mjs\n")
+    assert failing_suites(str(log)) == (["node z/z.test.mjs", "c/c.test.sh"], None)
+    log.write_text("npm ci failed\n")
+    assert failing_suites(str(log)) == ([], "the seam's log has no `FAIL <suite>` line")
+    assert failing_suites(str(tmp_path / "nope.log"))[1].startswith("the seam's log could not be read")
