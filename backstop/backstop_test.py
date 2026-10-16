@@ -24,7 +24,9 @@ def opt(name):
     return args[args.index(name) + 1] if name in args else None
 if args[:2] == ["issue", os.environ.get("FAIL_VERB")]:
     sys.stderr.write("fake gh: injected failure\n"); sys.exit(1)
-if args[:2] == ["api", "user"]:
+if " ".join(args[:2]) in state.get("raw", {}):
+    print(state["raw"][" ".join(args[:2])])
+elif args[:2] == ["api", "user"]:
     print(state["login"])
 elif args[:2] == ["issue", "list"]:
     assert opt("--repo") == state["repo"], args
@@ -42,6 +44,7 @@ elif args[:2] == ["run", "list"]:
         sys.stderr.write("fake gh: run list failed\n"); sys.exit(1)
     assert opt("--repo") == state["repo"] and opt("--event") == "schedule", args
     runs = [r for r in state.get("runs", []) if r["headBranch"] == opt("--branch")
+            and (not opt("--workflow") or r["workflow"] == opt("--workflow"))
             and (not opt("--status") or r["status"] == opt("--status"))]
     print(json.dumps(runs[::-1][:int(opt("--limit"))]))
 elif args[:2] == ["run", "view"]:
@@ -140,11 +143,11 @@ class Sandbox:
     def gh_state(self):
         return json.loads(read(self.state_path))
 
-    def run(self, seam, jobs="3", extra=None):
+    def run(self, seam, jobs="3", extra=None, flags=(), script=BACKSTOP):
         env = {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
                "FAKE_SEAM": seam, "NOTIFY_LOG": self.notify_log, "JOBS_LOG": self.jobs_log,
                "BACKSTOP_DIR": self.state_dir, **(extra or {})}
-        args = ["python3", BACKSTOP, "--repo", self.repo, "--notify", self.notify]
+        args = ["python3", script, "--repo", self.repo, "--notify", self.notify, *flags]
         if jobs is not None:
             args += ["--jobs", jobs]
         return subprocess.run(args, capture_output=True, text=True, env=env, timeout=120)
@@ -254,8 +257,8 @@ def assert_inconclusive(sb, out, green, why):
 
 @pytest.mark.parametrize("files, why", [
     ({"AGENTS.md": AGENTS.format(seam="sh missing-seam.sh")}, "names no `FAIL <suite>` line"),
-    ({"AGENTS.md": "# Repo\n\n## End-to-end seam\n\n- **Blind to**: nothing\n"}, "declares no `Seam` command"),
-    ({"AGENTS.md": "# Repo\n"}, "declares no `Seam` command"),
+    ({"AGENTS.md": "# Repo\n\n## End-to-end seam\n\n- **Blind to**: nothing\n"}, "declares no `Seam` line"),
+    ({"AGENTS.md": "# Repo\n"}, "has no `## End-to-end seam` section"),
 ])
 def test_seam_that_could_not_start_is_inconclusive(sb, files, why):
     assert sb.run("green").returncode == 0
@@ -365,8 +368,85 @@ def test_no_green_on_record_makes_every_suite_unknown(sb):
     assert line.startswith("- `b/b.test.sh`: unknown") and "no green run on record" in line, line
 
 
-# A repo with CI: its tree carries a workflow with a `schedule:` trigger.
+def test_silent_seam_after_npm_ci_output_is_inconclusive(sb):
+    """`npm ci` writes to the same log before the seam runs; its output is not
+    the seam's, so a seam that exits 0 and prints nothing stays inconclusive."""
+    assert sb.run("green").returncode == 0
+    green = sb.last_green()
+    write(os.path.join(sb.bin, "npm"), "#!/bin/sh\necho 'added 3 packages in 1s'\n", 0o755)
+    sb.commit("lock (#9)", {"package-lock.json": "{}\n"})
+    assert_inconclusive(sb, sb.run("silent"), green, "printed nothing")
+
+
+def test_repo_owned_by_someone_else_is_refused_before_anything_runs(sb):
+    sb.set(login="someone-else")
+    out = sb.run("red")
+    assert out.returncode == 2, out.stderr
+    assert sb.tickets() == [] and sb.last_green() is None
+    assert not os.path.exists(sb.jobs_log), "no seam runs on a repo the caller does not own"
+    (note,) = sb.notes()
+    assert "inconclusive" in note and "is not owned by someone-else" in note, note
+    assert "seam could not start" not in note, note
+
+
+def test_missing_origin_head_is_reported_as_itself(sb):
+    sb.git(sb.repo, "remote", "set-head", "origin", "-d")
+    out = sb.run("green")
+    assert out.returncode == 2, out.stderr
+    (note,) = sb.notes()
+    assert "origin/HEAD" in note and "seam could not start" not in note, note
+
+
+def test_an_unexpected_crash_is_an_inconclusive_night_not_a_red_one(sb):
+    """A malformed `gh issue list` row (no `number`) raises in the red path."""
+    red_night(sb)
+    green = sb.last_green()
+    sb.set(raw={"issue list": json.dumps([{"body": '<!-- backstop suites: ["b/b.test.sh"] -->'}])})
+    out = sb.run("red")
+    assert out.returncode == 2, out.stderr
+    assert sb.last_green() == green and sb.tickets() == []
+    (note,) = sb.notes()
+    assert "inconclusive" in note and "KeyError" in note, note
+
+
+def test_a_backstop_that_cannot_import_its_neighbours_is_inconclusive(sb):
+    """A copy of backstop.py with no drain/ beside it: the import fails."""
+    lone = os.path.join(sb.tmp, "lone", "backstop", "backstop.py")
+    write(lone, read(BACKSTOP))
+    out = sb.run("green", script=lone)
+    assert out.returncode == 2, out.stderr
+    assert sb.last_green() is None and not os.path.exists(sb.jobs_log)
+    (note,) = sb.notes()
+    assert "inconclusive" in note and "could not import" in note, note
+
+
+def test_direct_commits_do_not_make_a_suite_unknown_and_are_listed(sb):
+    """A commit naming no PR is the non-code lane (Gate 2): it ran no
+    narrowed command and owes no listing."""
+    green, merges = red_night(sb)
+    direct = sb.commit("friction: a note", {"n.md": "x\n"})
+    sb.set(prs={"7": [listed("a/a_test.py")], "8": [listed("a/a_test.py")]})
+    assert sb.run("red").returncode == 1
+    (ticket,) = sb.tickets()
+    assert verdict_lines(ticket["body"]) == ["- `b/b.test.sh`: miss, selected by none of #7, #8"]
+    direct_section = ticket["body"].split("## Direct commits", 1)[1].split("##", 1)[0]
+    assert direct in direct_section and "friction: a note" in direct_section
+    assert merges[0] not in direct_section
+    assert sb.misses() == ["b/b.test.sh"]
+
+
+def test_only_direct_commits_since_green_make_the_suite_unknown(sb):
+    assert sb.run("green").returncode == 0
+    sb.commit("friction: a note", {"n.md": "x\n"})
+    assert sb.run("red").returncode == 1
+    (line,) = verdict_lines(sb.tickets()[0]["body"])
+    assert line.startswith("- `b/b.test.sh`: unknown") and "no PR merge" in line, line
+    assert sb.misses() == []
+
+
+# A repo with CI: the caller names its full-gate workflow with `--workflow`.
 WORKFLOW = "on:\n  pull_request:\n  schedule:\n    - cron: '17 3 * * *'\njobs: {}\n"
+GATE = ("--workflow", "ci.yml")
 
 
 def gh_log(*lines):
@@ -374,12 +454,12 @@ def gh_log(*lines):
     return "\n".join(f"check\tGate (check)\t2026-10-16T03:20:0{i}.1234567Z {x}" for i, x in enumerate(lines))
 
 
-def ci_run(sb, sha, conclusion, run_id=None, age_hours=2, status="completed", branch="main"):
+def ci_run(sb, sha, conclusion, run_id=None, age_hours=2, status="completed", branch="main", workflow="ci.yml"):
     import datetime
     created = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=age_hours)
     runs = sb.gh_state().get("runs", [])
     runs.append(dict(databaseId=run_id or len(runs) + 100, status=status, conclusion=conclusion, headSha=sha,
-                     headBranch=branch, createdAt=created.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                     headBranch=branch, workflow=workflow, createdAt=created.strftime("%Y-%m-%dT%H:%M:%SZ"),
                      url=f"https://github.com/me/repo/actions/runs/{run_id or len(runs) + 100}"))
     sb.set(runs=runs)
     return runs[-1]["databaseId"]
@@ -395,23 +475,39 @@ def ci(sb):
 def test_ci_repo_green_comes_from_its_scheduled_run_and_no_seam_runs(ci):
     ci_run(ci, ci.ci_sha, "success")
     later = ci.commit("feature (#7)", {"f": "x\n"})
-    out = ci.run("red")  # the local seam would go red; it must not run
+    out = ci.run("red", flags=GATE)  # the local seam would go red; it must not run
     assert out.returncode == 0, out.stderr
     assert ci.last_green() == ci.ci_sha, "the record is the sha the scheduled run read, not the tip"
     assert later != ci.ci_sha
     assert not os.path.exists(ci.jobs_log), "no local seam runs for a CI repo"
 
 
+def test_a_scheduled_workflow_without_the_flag_runs_the_seam_locally(ci):
+    ci_run(ci, ci.ci_sha, "success")
+    out = ci.run("green")
+    assert out.returncode == 0, out.stderr
+    assert read(ci.jobs_log).split() == ["jobs=3"], "no named workflow: the seam runs here"
+
+
+def test_an_unrelated_scheduled_success_cannot_certify_the_gate(ci):
+    run_id = ci_run(ci, ci.ci_sha, "failure")
+    ci.set(logs={str(run_id): gh_log("FAIL b/b.test.sh")})
+    ci_run(ci, ci.ci_sha, "success", workflow="stale.yml")
+    out = ci.run("green", flags=GATE)
+    assert out.returncode == 1, out.stderr
+    assert ci.last_green() is None
+
+
 def test_ci_repo_red_names_the_runs_failed_suites_with_verdicts(ci):
     ci_run(ci, ci.ci_sha, "success")
-    assert ci.run("green").returncode == 0
+    assert ci.run("green", flags=GATE).returncode == 0
     m7 = ci.commit("feature (#7)", {"f": "x\n"})
     ci.commit("fix (#8)", {"g": "y\n"})
     run_id = ci_run(ci, m7, "failure")
     ci.set(logs={str(run_id): gh_log("PASS a/a_test.py", "FAIL b/b.test.sh", "  FAIL nested/child",
                                      "FAIL c/c_test.py")},
            prs={"7": [listed("c/c_test.py")]})
-    out = ci.run("green")
+    out = ci.run("green", flags=GATE)
     assert out.returncode == 1, out.stderr
     assert ci.last_green() == ci.ci_sha
     (ticket,) = ci.tickets()
@@ -423,11 +519,31 @@ def test_ci_repo_red_names_the_runs_failed_suites_with_verdicts(ci):
     assert ci.misses() == ["b/b.test.sh"]
 
 
+def test_a_red_run_already_reported_is_not_reported_again(ci):
+    """The ticket is closed and no newer run exists: the same red run read on
+    a later night files nothing and counts no second miss."""
+    ci_run(ci, ci.ci_sha, "success")
+    assert ci.run("green", flags=GATE).returncode == 0
+    m7 = ci.commit("feature (#7)", {"f": "x\n"})
+    run_id = ci_run(ci, m7, "failure")
+    ci.set(logs={str(run_id): gh_log("FAIL b/b.test.sh")}, prs={"7": [listed("a/a_test.py")]})
+    assert ci.run("green", flags=GATE).returncode == 1
+    state = ci.gh_state()
+    state["issues"][0]["state"] = "closed"
+    ci.save(state)
+    out = ci.run("green", flags=GATE)
+    assert out.returncode == 2, out.stderr
+    assert len(ci.tickets()) == 1 and ci.misses() == ["b/b.test.sh"]
+    assert "already reported" in ci.notes()[-1], ci.notes()
+
+
 @pytest.mark.parametrize("setup, why", [
-    (lambda sb: None, "no completed scheduled run"),
-    (lambda sb: ci_run(sb, sb.ci_sha, "success", branch="other"), "no completed scheduled run"),
-    (lambda sb: ci_run(sb, sb.ci_sha, "success", status="in_progress"), "no completed scheduled run"),
-    (lambda sb: ci_run(sb, sb.ci_sha, "success", age_hours=60), "is from"),
+    (lambda sb: None, "no scheduled run"),
+    (lambda sb: ci_run(sb, sb.ci_sha, "success", branch="other"), "no scheduled run"),
+    (lambda sb: ci_run(sb, sb.ci_sha, None, status="in_progress"), "is `in_progress`"),
+    (lambda sb: (ci_run(sb, sb.ci_sha, "success", age_hours=25), ci_run(sb, sb.ci_sha, None, status="queued")),
+     "is `queued`"),
+    (lambda sb: ci_run(sb, sb.ci_sha, "success", age_hours=30), "is from"),
     (lambda sb: ci_run(sb, sb.ci_sha, "cancelled"), "concluded `cancelled`"),
     (lambda sb: ci_run(sb, sb.ci_sha, "failure"), "its failed log could not be read"),
     (lambda sb: sb.set(logs={str(ci_run(sb, sb.ci_sha, "failure")): gh_log("Segmentation fault")}),
@@ -436,7 +552,7 @@ def test_ci_repo_red_names_the_runs_failed_suites_with_verdicts(ci):
 ])
 def test_ci_repo_missing_or_unreadable_scheduled_run_is_inconclusive(ci, setup, why):
     setup(ci)
-    out = ci.run("green")
+    out = ci.run("green", flags=GATE)
     assert out.returncode == 2, out.stderr
     assert ci.last_green() is None, "an inconclusive night is never recorded green"
     assert ci.tickets() == [] and not os.path.exists(ci.jobs_log)
@@ -446,7 +562,7 @@ def test_ci_repo_missing_or_unreadable_scheduled_run_is_inconclusive(ci, setup, 
 
 def test_ci_run_list_that_fails_is_inconclusive(ci):
     ci_run(ci, ci.ci_sha, "success")
-    out = ci.run("green", extra={"FAIL_RUN_LIST": "1"})
+    out = ci.run("green", flags=GATE, extra={"FAIL_RUN_LIST": "1"})
     assert out.returncode == 2 and ci.last_green() is None
     (note,) = ci.notes()
     assert "inconclusive" in note and "run list" in note, note
