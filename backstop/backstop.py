@@ -3,10 +3,14 @@
 full run of one repo's seam (#1594, spec #1592).
 
 Per change the lane runs only the repo's narrowed command; this is the one
-full run, once a night, for a repo with no CI. It fetches origin, runs the
-`**Seam**` command that `AGENTS.md` § End-to-end seam declares on the tip of
-`origin/<default>`, in a throwaway worktree, and reads the night as one of
-three outcomes:
+full run, once a night. It fetches origin and reads the tip of
+`origin/<default>`. A repo with CI, one whose tree there carries a
+`.github/workflows/` file with a `schedule:` trigger, already ran its full gate
+on GitHub (#1596): the night is its latest completed scheduled run on
+`<default>` (`gh run list --event schedule`), and no seam runs locally. Any
+other repo has its `**Seam**` command, as `AGENTS.md` § End-to-end seam
+declares it, run on the tip in a throwaway worktree. Either way the night is
+one of three outcomes:
 
     green          the seam exited 0, printed something, and no line starts
                    `FAIL `: the tip is recorded as the last green sha
@@ -14,12 +18,34 @@ three outcomes:
                    `FAIL <suite>` lines
     inconclusive   anything else: no seam declared, the worktree or the
                    command could not start, a non-zero exit with no `FAIL`
-                   line, an exit 0 that printed nothing or printed a `FAIL`
+                   line, an exit 0 that printed nothing or printed a `FAIL`;
+                   for a CI repo, no completed scheduled run, one over
+                   `MAX_RUN_HOURS` old or on a sha not on `<default>`, a
+                   conclusion other than success or failure, or a failure
+                   whose failed log cannot be read or names no `FAIL` line
+
+A CI run's sha, not the tip, is what a green night records and what a red
+night lists the merges up to.
 
 A red night files one `bug` + `ready-for-agent` ticket in the repo, naming the
 failing suites and the merges since the last green sha (the first-parent
 commits on `<default>` since it, each carrying its PR number as a squash merge
-does), and notifies. A failing suite already named by an open backstop ticket
+does), and notifies. Each failing suite carries its selector verdict, read
+from the last `selector:` comment that `implement/selector_check.py comment`
+left on each of those merges' PRs:
+
+    hit       the suite is in at least one merge's listing
+    miss      every merge has a listing and the suite is in none of them
+    unknown   it is in no listing, but a merge has none (no comment, a
+              `not checked` one, the old pre-#1593 verdict format, comments
+              that could not be read, a commit naming no PR), there is no
+              green sha to list merges from, or no merge landed since it
+
+An unknown is never a miss: a merge whose listing is absent may have selected
+the suite (class 1). The verdict of each suite a ticket is filed for is
+appended to `selector-verdicts-<owner>__<name>.jsonl` under `$BACKSTOP_DIR`,
+once per filing so a repeat red night does not count its miss again; its
+`miss` rows are the running count the notification states. A failing suite already named by an open backstop ticket
 (one whose body carries the `<!-- backstop suites: [...] -->` marker) is not
 filed again: a red night whose every failing suite is named by one files
 nothing and notifies that it is still red, naming those tickets. An
@@ -40,6 +66,7 @@ Exit 0 green, 1 red, 2 inconclusive, 3 when a red or inconclusive night's
 ticket or notification could not be sent.
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -57,6 +84,9 @@ from selector_check import failing_suites  # noqa: E402
 
 NOTIFY_SEND = os.path.join(_HERE, os.pardir, "flow", "bin", "notify-send")
 GREEN, RED, INCONCLUSIVE, UNSENT = 0, 1, 2, 3
+# A daily schedule's run is under a day old; past two, the schedule has stopped
+# (GitHub disables one after 60 days without a push) and the run is old news.
+MAX_RUN_HOURS = 48
 
 
 def positive(text):
@@ -81,17 +111,83 @@ def seam_command(root, tip):
     return command
 
 
+def has_ci(ctx, tip):
+    """Whether a workflow file at `tip` carries a `schedule:` trigger."""
+    try:
+        names = run(["git", "ls-tree", "--name-only", f"{tip}:.github/workflows"], cwd=ctx.root).splitlines()
+    except DrainError:
+        return False
+    for name in names:
+        if name.endswith((".yml", ".yaml")):
+            text = run(["git", "show", f"{tip}:.github/workflows/{name}"], cwd=ctx.root)
+            if re.search(r"^\s*schedule\s*:", text, re.M):
+                return True
+    return False
+
+
+_GH_LOG_PREFIX = re.compile(r"^[^\t]*\t[^\t]*\t(\d{4}-\d\d-\d\dT[\d:.]+Z ?)?")
+
+
+def ci_night(ctx):
+    """`night` for a repo with CI, read from its latest completed scheduled
+    run; the log ref is the run's URL."""
+    branch = ctx.default.split("/", 1)[-1]
+    try:
+        runs = json.loads(run(["gh", "run", "list", "--repo", ctx.repo, "--event", "schedule", "--branch", branch,
+                               "--status", "completed", "--limit", "1",
+                               "--json", "databaseId,conclusion,headSha,createdAt,url"]))
+    except (DrainError, ValueError) as exc:
+        return INCONCLUSIVE, None, f"the scheduled run could not be read: {one_line(exc, 200)}", None
+    if not runs:
+        return INCONCLUSIVE, None, f"no completed scheduled run on {branch}", None
+    latest = runs[0]
+    sha, url = latest.get("headSha"), latest.get("url")
+    try:
+        created = datetime.datetime.fromisoformat(latest["createdAt"].replace("Z", "+00:00"))
+        age = datetime.datetime.now(datetime.timezone.utc) - created
+    except (KeyError, AttributeError, ValueError):
+        return INCONCLUSIVE, sha, f"the scheduled run {url} carries no readable `createdAt`", url
+    if age > datetime.timedelta(hours=MAX_RUN_HOURS):
+        return INCONCLUSIVE, sha, (f"the latest scheduled run {url} is from {latest['createdAt']}, "
+                                   f"over {MAX_RUN_HOURS} hours ago"), url
+    try:
+        run(["git", "merge-base", "--is-ancestor", str(sha), ctx.default], cwd=ctx.root)
+    except DrainError:
+        return INCONCLUSIVE, None, f"the scheduled run {url} read {sha}, which is not on {ctx.default}", url
+    conclusion = latest.get("conclusion")
+    if conclusion == "success":
+        return GREEN, sha, None, url
+    if conclusion != "failure":
+        return INCONCLUSIVE, sha, f"the scheduled run {url} concluded `{conclusion}`", url
+    log = os.path.join(ctx.log_dir, f"full-seam-{slug(ctx)}.log")
+    try:
+        text = run(["gh", "run", "view", str(latest["databaseId"]), "--repo", ctx.repo, "--log-failed"])
+    except (DrainError, KeyError) as exc:
+        return INCONCLUSIVE, sha, f"the scheduled run {url} failed, but its failed log could not be read: " \
+                                  f"{one_line(exc, 150)}", url
+    with open(log, "w") as f:
+        f.writelines(_GH_LOG_PREFIX.sub("", x) + "\n" for x in text.splitlines())
+    failed, _ = failing_suites(log)
+    if not failed:
+        return INCONCLUSIVE, sha, f"the scheduled run {url} failed, but its log names no `FAIL <suite>` line", url
+    return RED, sha, failed, url
+
+
 def night(ctx, jobs):
-    """`(outcome, tip, detail)`: `detail` is the failing suites on red, else
-    the reason, for an inconclusive night."""
+    """`(outcome, sha, detail, log ref)`: `sha` is the commit the full run
+    read, `detail` the failing suites on red, else the reason, for an
+    inconclusive night."""
     tip = None
     try:
         run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
         tip = run(["git", "rev-parse", ctx.default], cwd=ctx.root)
+        if has_ci(ctx, tip):
+            return ci_night(ctx)
         cmd = seam_command(ctx.root, tip)
     except DrainError as exc:
-        return INCONCLUSIVE, tip, f"the seam could not start: {one_line(exc, 200)}"
+        return INCONCLUSIVE, tip, f"the seam could not start: {one_line(exc, 200)}", None
     log = os.path.join(ctx.log_dir, f"full-seam-{slug(ctx)}.log")
+    ref = f"`{log}` on the machine the backstop ran on"
     os.environ["TESTS_JOBS"] = str(jobs)
     try:
         run_in_scratch_tree(ctx, cmd, log, rev=tip)
@@ -105,13 +201,13 @@ def night(ctx, jobs):
         printed = False
     if exited == 0:
         if failed:
-            return INCONCLUSIVE, tip, f"`{cmd}` exited 0 but its log names failing suites ({', '.join(failed)})"
+            return INCONCLUSIVE, tip, f"`{cmd}` exited 0 but its log names failing suites ({', '.join(failed)})", ref
         if not printed:
-            return INCONCLUSIVE, tip, f"`{cmd}` exited 0 and printed nothing"
-        return GREEN, tip, None
+            return INCONCLUSIVE, tip, f"`{cmd}` exited 0 and printed nothing", ref
+        return GREEN, tip, None, ref
     if failed:
-        return RED, tip, failed
-    return INCONCLUSIVE, tip, f"{exited}, and its log ({log}) names no `FAIL <suite>` line"
+        return RED, tip, failed, ref
+    return INCONCLUSIVE, tip, f"{exited}, and its log ({log}) names no `FAIL <suite>` line", ref
 
 
 def slug(ctx):
@@ -144,34 +240,99 @@ def open_backstop_tickets(ctx):
 
 
 def merges_since(ctx, last, tip):
-    """The first-parent commits on `<default>` after `last`, oldest first, as
-    `<sha> <subject>` lines, or a line saying why they cannot be listed."""
+    """`(lines, None)`: the first-parent commits on `<default>` after `last`,
+    oldest first, as `<sha> <subject>` lines; or `([], why)` they cannot be
+    listed."""
     if not last:
-        return ["(no green run on record, so the merges since one cannot be listed)"]
+        return [], "no green run on record, so the merges since one cannot be listed"
     try:
         listed = run(["git", "log", "--first-parent", "--reverse", "--format=%H %s", f"{last}..{tip}"], cwd=ctx.root)
     except DrainError as exc:
-        return [f"(the merges since {last} could not be listed: {one_line(exc, 150)})"]
-    return listed.splitlines() or [f"(none: {tip} is the last green sha)"]
+        return [], f"the merges since {last} could not be listed: {one_line(exc, 150)}"
+    return listed.splitlines(), None
 
 
-def ticket_body(ctx, tip, last, failed):
-    lines = [f"The nightly backstop ran the full seam of `{ctx.repo}` on `{ctx.default}` at {tip} and it went red.",
-             "", "## Failing suites", ""]
-    lines += [f"- `{s}`" for s in failed]
+_PR = re.compile(r"\(#(\d+)\)\s*$")
+
+
+def pr_listing(ctx, number):
+    """`(suites, None)` from the PR's last `selector:` comment, or `(None,
+    why)` when it has no readable listing."""
+    try:
+        comments = json.loads(run(["gh", "pr", "view", number, "--repo", ctx.repo, "--json", "comments"]))["comments"]
+        bodies = [c.get("body") or "" for c in comments]
+    except (DrainError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return None, f"#{number}'s comments could not be read ({one_line(exc, 100)})"
+    last = next((b for b in reversed(bodies) if b.startswith("selector:")), "")
+    fence = re.search(r"\n```\n(.*?)\n?```", last, re.S)
+    if not last.startswith("selector: listed ") or not fence:
+        return None, f"#{number} has no `selector:` listing"
+    return {x.strip() for x in fence.group(1).splitlines() if x.strip()}, None
+
+
+def verdicts(ctx, last, tip, failed):
+    """`{suite: (verdict, detail)}` over the merges since `last`."""
+    merges, why = merges_since(ctx, last, tip)
+    if why or not merges:
+        why = why or f"no merge landed since the last green sha {last}"
+        return {s: ("unknown", why) for s in failed}
+    listings, gaps = {}, []
+    for line in merges:
+        m = _PR.search(line)
+        if not m:
+            gaps.append(f"{line[:12]} names no PR")
+            continue
+        suites, gap = pr_listing(ctx, m.group(1))
+        if gap:
+            gaps.append(gap)
+        else:
+            listings[f"#{m.group(1)}"] = suites
+    out = {}
+    for suite in failed:
+        hits = [n for n, suites in listings.items() if suite in suites]
+        if hits:
+            out[suite] = ("hit", f"selected by {', '.join(hits)}")
+        elif gaps:
+            readable = f" (none of {', '.join(listings)} selected it)" if listings else ""
+            out[suite] = ("unknown", "; ".join(gaps) + readable)
+        else:
+            out[suite] = ("miss", f"selected by none of {', '.join(listings)}")
+    return out
+
+
+def verdicts_path(ctx):
+    return os.path.join(ctx.log_dir, f"selector-verdicts-{slug(ctx)}.jsonl")
+
+
+def record_verdicts(ctx, tip, judged, suites):
+    """Append the filed suites' verdicts; the running `miss` count."""
+    path = verdicts_path(ctx)
+    with open(path, "a") as f:
+        for s in suites:
+            f.write(json.dumps({"sha": tip, "suite": s, "verdict": judged[s][0],
+                                "date": datetime.date.today().isoformat()}) + "\n")
+    with open(path) as f:
+        return sum(json.loads(x).get("verdict") == "miss" for x in f if x.strip())
+
+
+def ticket_body(ctx, tip, last, failed, judged, ref):
+    lines = [f"The nightly backstop read the full seam of `{ctx.repo}` on `{ctx.default}` at {tip} and it went red.",
+             "", "## Failing suites", "",
+             "Each with its selector verdict: `hit` when a merge below selected it, `miss` when every merge has a "
+             "listing and none did, `unknown` when a merge's listing is missing.", ""]
+    lines += [f"- `{s}`: {judged[s][0]}, {judged[s][1]}" for s in failed]
     lines += ["", f"## Merges since the last green sha ({last or 'none on record'})", ""]
-    lines += [f"- {x}" for x in merges_since(ctx, last, tip)]
-    lines += ["", "## Log", "",
-              f"`{os.path.join(ctx.log_dir, f'full-seam-{slug(ctx)}.log')}` on the machine the backstop ran on.",
-              "", f"<!-- backstop suites: {json.dumps(failed)} -->", ""]
+    merges, why = merges_since(ctx, last, tip)
+    lines += [f"- {x}" for x in merges] or [f"- ({why or f'none: {tip} is the last green sha'})"]
+    lines += ["", "## Log", "", f"{ref}.", "", f"<!-- backstop suites: {json.dumps(failed)} -->", ""]
     return "\n".join(lines)
 
 
-def file_ticket(ctx, tip, last, failed):
+def file_ticket(ctx, tip, last, failed, judged, ref):
     """The new ticket's URL."""
     with tempfile.NamedTemporaryFile("w", dir=ctx.log_dir, prefix="backstop-body-", suffix=".md",
                                      delete=False) as f:
-        f.write(ticket_body(ctx, tip, last, failed))
+        f.write(ticket_body(ctx, tip, last, failed, judged, ref))
     try:
         title = f"backstop: full seam red on {ctx.default.split('/')[-1]}: {', '.join(failed)}"
         return run(["gh", "issue", "create", "--repo", ctx.repo, "--title", one_line(title, 200),
@@ -189,7 +350,7 @@ def notify(cmd, title, body):
     return None
 
 
-def report_red(ctx, tip, failed, notifier):
+def report_red(ctx, tip, failed, notifier, ref):
     """File or name the ticket, notify; the exit code."""
     try:
         with open(last_green_path(ctx)) as f:
@@ -201,8 +362,16 @@ def report_red(ctx, tip, failed, notifier):
         named = open_backstop_tickets(ctx)
         new = [s for s in failed if s not in named]
         if new:
-            url = file_ticket(ctx, tip, last, failed)
+            judged = verdicts(ctx, last, tip, failed)
+            url = file_ticket(ctx, tip, last, failed, judged, ref)
             body = f"{', '.join(failed)} failing at {tip[:12]}; filed {url}"
+            try:
+                misses = record_verdicts(ctx, tip, judged, new)
+            except (OSError, ValueError) as exc:
+                print(f"backstop.py: selector verdicts not recorded: {one_line(exc, 200)}", file=sys.stderr)
+                body += "; selector verdicts not recorded"
+            else:
+                body += f"; {misses} selector {'miss' if misses == 1 else 'misses'} on record"
         else:
             held = sorted({named[s] for s in failed})
             body = f"still red: {', '.join(failed)} at {tip[:12]}, open in " + ", ".join(f"#{n}" for n in held)
@@ -249,7 +418,7 @@ def main(argv=None):
     except DrainError as exc:
         return report_inconclusive(args.repo, f"the seam could not start: {one_line(exc, 200)}", args.notify)
     ctx = Ctx(root, repo, default, state_dir, None, None)
-    outcome, tip, detail = night(ctx, args.jobs)
+    outcome, tip, detail, ref = night(ctx, args.jobs)
     if outcome == INCONCLUSIVE:
         return report_inconclusive(repo, f"{detail} (at {tip or 'no tip read'})", args.notify)
     if outcome == GREEN:
@@ -258,7 +427,7 @@ def main(argv=None):
         print(f"backstop: {repo} green at {tip}")
         return GREEN
     if outcome == RED:
-        return report_red(ctx, tip, detail, args.notify)
+        return report_red(ctx, tip, detail, args.notify, ref)
     return outcome
 
 
