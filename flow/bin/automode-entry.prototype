@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""PROTOTYPE for #1534 -- throwaway, never merge to main.
+
+Question: what should `automode-entry` look like to run from a `!` prompt?
+Three structurally different command shapes, picked by the first argument:
+
+  A  verbs + a substring that must match exactly one entry
+       A add    <section> <text|-|@file>
+       A edit   <section> <match> <text|-|@file>
+       A remove <section> <match>
+  B  open the whole autoMode block as a file, edit it anywhere, apply the diff
+       B open            writes the doc and prints its path
+       B apply           diffs the doc against settings and writes
+  C  numbered list, then act on a number
+       C list   [section]
+       C add    <section> <text|-|@file>
+       C edit   <section> <n> <text|-|@file>
+       C remove <section> <n>
+
+Sections: allow, soft_deny, environment.  `-` reads the text from stdin
+(a heredoc), `@file` from a file.
+
+It never touches the live settings: every run works on a copy under
+.scratch/automode-entry-PROTOTYPE/ (wipe me), symlinked into a fake HOME, so
+`claude auto-mode config` reads the copy and the symlink check is real.
+Commit and push are printed, not run.
+"""
+
+import difflib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+SECTIONS = ("allow", "soft_deny", "environment")
+REPO = Path(__file__).resolve().parents[2]
+REAL = Path.home() / ".claude" / "settings.json"
+PROTO = REPO / ".scratch" / "automode-entry-PROTOTYPE"
+HOME = PROTO / "home"
+STORE = PROTO / "store" / "settings.json"
+LINK = HOME / ".claude" / "settings.json"
+DOC = PROTO / "automode.md"
+
+
+def setup():
+    if not STORE.exists():
+        STORE.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REAL.resolve(), STORE)
+    LINK.parent.mkdir(parents=True, exist_ok=True)
+    if not LINK.is_symlink():
+        LINK.symlink_to(STORE)
+    assert LINK.resolve() != REAL.resolve(), "refusing: target is the live settings"
+
+
+def load():
+    return json.loads(LINK.read_text())
+
+
+def write(settings):
+    text = json.dumps(settings, indent=2, ensure_ascii=False) + "\n"
+    json.loads(text)  # refuse to write anything that does not parse back
+    with open(LINK, "w") as f:  # open() follows the link: the symlink survives
+        f.write(text)
+    print(f"symlink intact: {LINK.is_symlink()}  ->  {os.readlink(LINK)}")
+
+
+def die(msg):
+    print(f"refused: {msg}  (file unchanged)")
+    sys.exit(1)
+
+
+def text_arg(arg):
+    text = sys.stdin.read() if arg == "-" else Path(arg[1:]).read_text() if arg.startswith("@") else arg
+    text = " ".join(text.split())
+    if not text:
+        die("empty entry text")
+    return text
+
+
+def section(settings, name):
+    if name not in SECTIONS:
+        die(f"section must be one of {', '.join(SECTIONS)}")
+    return settings.setdefault("autoMode", {}).setdefault(name, ["$defaults"])
+
+
+def title(entry, width=72):
+    return textwrap.shorten(entry.split(":")[0] if ":" in entry[:120] else entry, width)
+
+
+def show(new_entries, removed=()):
+    """Read the rule back through `claude auto-mode config`, as Chris would."""
+    out = subprocess.run(
+        ["claude", "auto-mode", "config"], env={**os.environ, "HOME": str(HOME)},
+        capture_output=True, text=True, check=True,
+    ).stdout
+    effective = {x for v in json.loads(out).values() for x in v}
+    for e in new_entries:
+        mark = "in" if e in effective else "MISSING from"
+        print(f"  {mark} claude auto-mode config: {textwrap.shorten(e, 100)}")
+    for e in removed:
+        mark = "gone from" if e not in effective else "STILL in"
+        print(f"  {mark} claude auto-mode config: {textwrap.shorten(e, 100)}")
+
+
+def commit(what):
+    print(f"[stub] git -C {REPO} commit -m 'autoMode: {what}' flow/claude/settings.json && git push")
+
+
+def pick_by_match(entries, needle):
+    hits = [i for i, e in enumerate(entries) if needle.lower() in e.lower() and e != "$defaults"]
+    if len(hits) != 1:
+        print(f"'{needle}' matches {len(hits)} entries:")
+        for i in hits:
+            print(f"  - {title(entries[i])}")
+        die("a match must name exactly one entry")
+    return hits[0]
+
+
+def variant_a(args):
+    s = load()
+    match args:
+        case ["add", sec, text]:
+            entries, new = section(s, sec), text_arg(text)
+            entries.append(new)
+            write(s), show([new]), commit(f"add {sec} entry")
+        case ["edit", sec, needle, text]:
+            entries = section(s, sec)
+            i = pick_by_match(entries, needle)
+            old, entries[i] = entries[i], text_arg(text)
+            print(f"edit: {title(old)}")
+            write(s), show([entries[i]], [old]), commit(f"edit {sec} entry '{title(old, 40)}'")
+        case ["remove", sec, needle]:
+            entries = section(s, sec)
+            old = entries.pop(pick_by_match(entries, needle))
+            print(f"remove: {title(old)}")
+            write(s), show([], [old]), commit(f"remove {sec} entry '{title(old, 40)}'")
+        case _:
+            die(__doc__.split("B  ")[0].split("A  ")[1])
+
+
+def render(s):
+    am = s.get("autoMode", {})
+    parts = ["<!-- PROTOTYPE automode-entry: one entry per paragraph; edit, add, delete, then `B apply` -->"]
+    for sec in SECTIONS:
+        parts.append(f"# {sec}")
+        parts += am.get(sec, [])
+    return "\n\n".join(parts) + "\n"
+
+
+def parse(doc):
+    out, cur = {}, None
+    for para in doc.split("\n\n"):
+        para = " ".join(para.split())
+        if not para or para.startswith("<!--"):
+            continue
+        if para.startswith("# "):
+            cur = para[2:].strip()
+            if cur not in SECTIONS:
+                die(f"unknown section heading '# {cur}'")
+            out[cur] = []
+        elif cur is None:
+            die("text before the first '# section' heading")
+        else:
+            out[cur].append(para)
+    return out
+
+
+def variant_b(args):
+    s = load()
+    match args:
+        case ["open"]:
+            DOC.write_text(render(s))
+            print(f"edit this file, then run `B apply`:\n{DOC}")
+            print(f"Windows path: {subprocess.run(['wslpath', '-w', str(DOC)], capture_output=True, text=True).stdout.strip()}")
+        case ["apply"]:
+            new = parse(DOC.read_text())
+            added, removed = [], []
+            for sec in SECTIONS:
+                before = s.get("autoMode", {}).get(sec, [])
+                after = new.get(sec, before)
+                for op, a1, a2, b1, b2 in difflib.SequenceMatcher(None, before, after).get_opcodes():
+                    if op == "equal":
+                        continue
+                    for e in before[a1:a2]:
+                        print(f"  - {sec}: {title(e)}")
+                    for e in after[b1:b2]:
+                        print(f"  + {sec}: {title(e)}")
+                    removed += before[a1:a2]
+                    added += after[b1:b2]
+                s.setdefault("autoMode", {})[sec] = after
+            if not added and not removed:
+                print("no changes")
+                return
+            write(s), show(added, removed), commit(f"{len(added)} added, {len(removed)} removed")
+        case _:
+            die("usage: B open | B apply")
+
+
+def listing(s, only=None):
+    for sec in SECTIONS if only is None else [only]:
+        print(f"{sec}:")
+        for n, e in enumerate(section(s, sec)):
+            print(f"  {n:>2}  {title(e)}")
+
+
+def nth(entries, n):
+    if not n.isdigit() or not 0 < int(n) < len(entries):
+        die(f"no entry {n}; run `C list`")
+    return int(n)
+
+
+def variant_c(args):
+    s = load()
+    match args:
+        case ["list", *rest]:
+            listing(s, *rest)
+        case ["add", sec, text]:
+            entries, new = section(s, sec), text_arg(text)
+            entries.append(new)
+            write(s), show([new]), commit(f"add {sec} entry"), listing(s, sec)
+        case ["edit", sec, n, text]:
+            entries = section(s, sec)
+            i = nth(entries, n)
+            old, entries[i] = entries[i], text_arg(text)
+            write(s), show([entries[i]], [old]), commit(f"edit {sec} #{i}"), listing(s, sec)
+        case ["remove", sec, n]:
+            entries = section(s, sec)
+            old = entries.pop(nth(entries, n))
+            write(s), show([], [old]), commit(f"remove {sec} #{n}"), listing(s, sec)
+        case _:
+            die("usage: C list [section] | C add|edit|remove ...")
+
+
+if __name__ == "__main__":
+    setup()
+    try:
+        load()
+    except json.JSONDecodeError as e:
+        die(f"settings copy does not parse: {e}")
+    if len(sys.argv) < 2 or sys.argv[1] not in "ABC":
+        die("first argument is the variant: A, B or C (see the docstring)")
+    {"A": variant_a, "B": variant_b, "C": variant_c}[sys.argv[1]](sys.argv[2:])
