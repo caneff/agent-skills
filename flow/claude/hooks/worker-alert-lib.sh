@@ -86,3 +86,70 @@ worker_alert_controller_pane() { # <ctl_session> -> pane_id or empty
   timeout 2 herdr agent list 2>/dev/null | jq -r --arg s "$ctl_session" \
     '.result.agents[]? | select(.agent_session.value == $s) | .pane_id' 2>/dev/null | head -n1
 }
+
+# Resolves the brief's controller to the live records that stand for it, the
+# two hops `resolve-controller` makes (#923): herdr agent name -> `agent_session`
+# id -> live records sharing it, falling back to a live session bearing the
+# brief's literal as its name (then widened to its session id, #1114). Sets
+# four globals for the caller: `herdr_sid` (the herdr hop's session id, or
+# empty), `ctl_session` (the controller's session id, for the pane lookup),
+# and the arrays `names` (every live session name) and `sockets` (every
+# `uds:` address) a report to the controller could carry. A worktree without
+# `herdr`, or a `herdr agent list` that fails or times out, falls back to the
+# literal the way an older brief already carrying a session name does.
+worker_alert_resolve_controller() { # <controller from the brief> -> sets herdr_sid ctl_session names sockets
+  local controller="$1" resolved="" by_name_sid widened r_sid r_name r_sock
+  herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
+    | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
+    | head -n1)"
+  [ -n "$herdr_sid" ] && resolved="$(worker_alert_resolve_session sid "$herdr_sid")"
+  if [ -z "$resolved" ]; then
+    resolved="$(worker_alert_resolve_session name "$controller")"
+    # A name resolves one record; widen to every live record sharing its
+    # session id, so a nameless twin's socket counts here too (#1114).
+    by_name_sid="${resolved%%$'\x1f'*}"
+    [ -n "$by_name_sid" ] && widened="$(worker_alert_resolve_session sid "$by_name_sid")" \
+      && resolved="$widened"
+  fi
+  # `sid` mode can return several lines — every live record sharing the
+  # controller's session id (#1114). A report to any of them reached the
+  # controller, so every name and socket joins the match set; the session id,
+  # the same on every line, is what the pane lookup uses.
+  ctl_session="" names=() sockets=()
+  while IFS=$'\x1f' read -r r_sid r_name r_sock; do
+    [ -n "$ctl_session" ] || ctl_session="$r_sid"
+    [ -n "$r_name" ] && names+=("$r_name")
+    [ -n "$r_sock" ] && sockets+=("uds:$r_sock")
+  done <<<"$resolved"
+  # Belt and braces: a record removed between the herdr list and here, while
+  # herdr's own bookkeeping still knows the id.
+  [ -z "$ctl_session" ] && ctl_session="$herdr_sid"
+  return 0
+}
+
+# Submits `alert` into herdr pane `pane` with `herdr agent prompt`. herdr
+# refuses a prompt to a blocked agent (`agent_blocked`) before sending any
+# input, so that refusal is retried with backoff while `deadline` (a $SECONDS
+# value) allows. Sets `prompt_status` (`sent` or `not-sent`) and `prompt_msg`,
+# the alert-log line's text; returns 0 only when sent.
+worker_alert_prompt_pane() { # <pane> <alert> <deadline in $SECONDS> -> sets prompt_status prompt_msg
+  local pane="$1" alert="$2" deadline="$3" attempts=0 backoff=1 out blocked=""
+  while :; do
+    attempts=$((attempts + 1))
+    if out="$(timeout 3 herdr agent prompt "$pane" "$alert" 2>&1)"; then
+      prompt_status=sent prompt_msg="$pane: $alert"
+      return 0
+    fi
+    blocked="$(jq -r 'select(.error.code == "agent_blocked") | "yes"' <<<"$out" 2>/dev/null)"
+    [ "$blocked" = yes ] && [ $((SECONDS + backoff + 3)) -le "$deadline" ] || break
+    sleep "$backoff"
+    backoff=$((backoff * 2))
+  done
+  prompt_status=not-sent
+  if [ "$blocked" = yes ]; then
+    prompt_msg="controller blocked: herdr agent prompt $pane refused agent_blocked on all $attempts attempts: $alert"
+  else
+    prompt_msg="herdr agent prompt $pane failed: $(tr '\n' ' ' <<<"$out")"
+  fi
+  return 1
+}

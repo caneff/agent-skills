@@ -231,7 +231,10 @@ defines them.
   job by typing a line into the controller's herdr pane. It was unregistered
   from `settings.json` on 2026-10-04 because it typed into Chris's own input
   and fired about a dozen times in one burn without once being right. The script
-  stays installed, and re-adding its `Stop` entry restores it.
+  stays installed, and re-adding its `Stop` entry restores it. Its
+  send-time sibling `worker-send-alert.sh` (`PostToolUse` on `SendMessage`,
+  #1540) is registered: it alerts the controller's pane only for a send to the
+  controller that came back `success: false`, once per send.
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
   killed. `job-run` records the session that started it, and the `job-wake`
