@@ -993,3 +993,62 @@ def test_a_failed_prepass_is_named_and_the_run_orders_by_recency_alone(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "mutation prepass gave no ranking (exit 1)" in r.stderr, r.stderr
     assert "mutation-target: m.py" in r.stdout
+
+
+def test_mutation_estimate_names_count_and_worst_case():
+    """#1588: the whole-repo run prints the module count and a cost estimate
+    before it starts; the worst case is the per-module timeout times the count."""
+    line = driver.mutation_cost_estimate(4, timeout_s=3600)
+    assert "4 modules" in line and "up to 4h" in line, line
+    assert "1 module " in driver.mutation_cost_estimate(1, timeout_s=3600)
+
+
+def _repo_with_two_tested_modules(path):
+    _init_git_repo(path)
+    open(os.path.join(path, "pyproject.toml"), "w").write("[project]\nname = 'x'\n")
+    for stem in ("alpha", "beta"):
+        open(os.path.join(path, f"{stem}.py"), "w").write("def f():\n    return 1\n")
+        open(os.path.join(path, f"{stem}_test.py"), "w").write(f"import {stem}\n\ndef test_f():\n    assert {stem}.f() == 1\n")
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", path, "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", path, "commit", "-q", "-m", "mods"], check=True, env=env)
+
+
+def _mutation_all(repo, tmp, out, *flags, **extra_env):
+    here = os.path.dirname(os.path.abspath(__file__))
+    return subprocess.run(
+        [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation-all", "--out", out, *flags],
+        capture_output=True, text=True, env=_fake_tools_env(tmp, **extra_env),
+    )
+
+
+def test_mutation_all_runs_every_candidate_past_the_cap_and_prints_the_estimate(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"), MUTATION_MAX="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "2 modules" in r.stdout and "skipped" not in r.stdout, r.stdout
+    assert "[mutation:alpha.py] done" in r.stdout and "[mutation:beta.py] done" in r.stdout, r.stdout
+    assert r.stdout.index("2 modules") < r.stdout.index("[mutation:alpha.py] creating worktree"), r.stdout
+
+
+def test_mutation_all_lists_an_inconclusive_module_in_the_report_never_as_clean(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    out = os.path.join(tmp, "out")
+    why = "mutmut run failed (exit 1)"
+    r = _mutation_all(repo, tmp, out, FAKE_CLAUDE_INCONCLUSIVE=why)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "INCONCLUSIVE" in r.stdout, r.stdout
+    idx = _run_driver("--index", "--out", out)
+    assert idx.returncode == 0, idx.stdout + idx.stderr
+    sub = open(os.path.join(out, "collection", "mutation", "index.html")).read()
+    for module in ("alpha.py", "beta.py"):
+        assert f"<td>{module}</td><td>INCONCLUSIVE" in sub, sub
+    assert why in sub, sub
+    assert "0 mutants killed" not in sub
+
+
+def test_mutation_all_refuses_a_module_list(tmp_path):
+    r = _run_driver(str(tmp_path), "--mutation-all", "--mutation", "a.py")
+    assert r.returncode != 0 and "not allowed with" in r.stderr, r.stdout + r.stderr

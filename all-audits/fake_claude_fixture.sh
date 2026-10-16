@@ -6,6 +6,8 @@
 # FAKE_CLAUDE_NOOP=1 makes every audit, dead-code included, write nothing.
 # FAKE_CLAUDE_MISSING_REPORT=1 makes dead-code write a manifest whose
 # report_path names a file that does not exist (#1292).
+# FAKE_CLAUDE_INCONCLUSIVE=<why> makes the mutation audit's manifest carry
+# an `inconclusive` reason, as the real skill writes on audit.py's exit 3 (#1588).
 # FAKE_CLAUDE_PREPASS="a.py\nb.py" makes a prompt with no manifest request
 # (the mutation prepass) print that ranking (#1567).
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
@@ -46,7 +48,12 @@ case "$prompt" in
     dir="$(dirname "$manifest")/report"
     mkdir -p "$dir"
     echo '<html><body>mutation report</body></html>' >"$dir/report.html"
-    printf '{"report_path": "%s/report.html", "count": 0, "headline": "no survivors"}\n' "$dir" >"$manifest"
+    if [ -n "${FAKE_CLAUDE_INCONCLUSIVE:-}" ]; then
+      # audit.py exited INCONCLUSIVE: no rows, the reason in the manifest.
+      printf '{"report_path": "%s/report.html", "count": 0, "headline": "inconclusive", "inconclusive": "%s"}\n' "$dir" "$FAKE_CLAUDE_INCONCLUSIVE" >"$manifest"
+    else
+      printf '{"report_path": "%s/report.html", "count": 0, "headline": "no survivors"}\n' "$dir" >"$manifest"
+    fi
     exit "${FAKE_CLAUDE_EXIT_MUTATION:-0}"
     ;;
   *)
