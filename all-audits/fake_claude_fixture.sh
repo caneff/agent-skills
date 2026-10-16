@@ -8,6 +8,7 @@
 # report_path names a file that does not exist (#1292).
 # FAKE_CLAUDE_INCONCLUSIVE=<why> makes the mutation audit's manifest carry
 # an `inconclusive` reason, as the real skill writes on audit.py's exit 3 (#1588).
+# FAKE_CLAUDE_RENDEZVOUS / FAKE_CLAUDE_NO_FINDINGS_LOG: see the mutation branch below.
 # FAKE_CLAUDE_PREPASS="a.py\nb.py" makes a prompt with no manifest request
 # (the mutation prepass) print that ranking (#1567).
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
@@ -31,6 +32,9 @@ fi
 
 manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true)"
 [ -n "$manifest" ] || exit 0
+# The prompt itself, so a test can see what the driver asked for (#1588). After
+# the prepass branch: its candidate lines would read as a ranking.
+echo "prompt=$prompt"
 
 case "$prompt" in
   /dead-code\ *)
@@ -48,6 +52,20 @@ case "$prompt" in
     dir="$(dirname "$manifest")/report"
     mkdir -p "$dir"
     echo '<html><body>mutation report</body></html>' >"$dir/report.html"
+    # FAKE_CLAUDE_RENDEZVOUS=<dir> (#1588): mark this module started, wait up
+    # to 2s for another module's mark, and write <dir>/overlap if one shows
+    # up: two modules were in flight at once.
+    if [ -n "${FAKE_CLAUDE_RENDEZVOUS:-}" ]; then
+      mark="$FAKE_CLAUDE_RENDEZVOUS/started.$$"
+      : >"$mark"
+      for _ in $(seq 20); do
+        [ "$(ls "$FAKE_CLAUDE_RENDEZVOUS" | grep -c '^started\.')" -lt 2 ] || { : >"$FAKE_CLAUDE_RENDEZVOUS/overlap"; break; }
+        sleep 0.1
+      done
+      rm -f "$mark"
+    fi
+    # FAKE_CLAUDE_NO_FINDINGS_LOG=1 writes no findings.jsonl and no inconclusive key.
+    [ -n "${FAKE_CLAUDE_NO_FINDINGS_LOG:-}" ] || : >"$dir/findings.jsonl"
     if [ -n "${FAKE_CLAUDE_INCONCLUSIVE:-}" ]; then
       # audit.py exited INCONCLUSIVE: no rows, the reason in the manifest.
       printf '{"report_path": "%s/report.html", "count": 0, "headline": "inconclusive", "inconclusive": "%s"}\n' "$dir" "$FAKE_CLAUDE_INCONCLUSIVE" >"$manifest"

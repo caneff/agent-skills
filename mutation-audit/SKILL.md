@@ -130,7 +130,9 @@ in that setup.
    `results` fails or exceeds `MUTATION_AUDIT_TIMEOUT` seconds (default 3600),
    or when the results hold no mutant line at all.** Relay that line to the user
    as the result; an inconclusive run is not a clean run and never becomes
-   "no findings". Exit 0 with no rows means mutmut ran and every mutant died.
+   "no findings". Inside a driver run (§ Whole-repo mode, and
+   `driver.py --mutation`) the report and manifest are still written, with the
+   `inconclusive` key. Exit 0 with no rows means mutmut ran and every mutant died.
    Known blocker (`docs/research/2026-09-20-mutmut-against-this-repo.md`):
    mutmut 3.x aborts on a suite that runs the target as a subprocess, which
    is most CLI modules in this repo; expect INCONCLUSIVE there.
@@ -216,16 +218,23 @@ python3 ~/.agents/skills/all-audits/driver.py <repo> --mutation-all
   sibling test), `.py` and `.mjs`/`.js` alike. Modules with no sibling test are
   reported as untested, not mutated.
 - **No `MUTATION_MAX` cap.** The driver prints the module count and a worst-case
-  time estimate (`MUTATION_AUDIT_TIMEOUT` seconds per module) before it starts.
+  time estimate before it starts (each module is at most two bounded commands
+  of `MUTATION_AUDIT_TIMEOUT` seconds, `MUTATION_JOBS` modules at once).
+- **Parallel.** `driver.py --mutation` and `--mutation-all` run up to
+  `MUTATION_JOBS` modules at once (default 4), each in its own worktree with
+  its own log. A value that is not a positive integer stops the run.
 - **One report.** `collection/mutation/index.html` lists every module with its
   killed/total, weak-assertion and no-coverage counts, linking each module's
   own report.
 - **INCONCLUSIVE is per module, never clean.** A module whose `audit.py --run`
   exits 3 (the mutmut subprocess-suite blocker above, a missing `uvx`/`npx`, a
-  timeout) writes no finding rows. Its audit adds `"inconclusive": "<why>"` to
-  its manifest; the driver keeps that as `inconclusive.txt` beside the module's
-  report, the sub-index lists the module as `INCONCLUSIVE: <why>`, and the
-  module is not counted as killed or clean and not recorded as run. In a hand
+  timeout) writes no finding rows. Its audit still writes the report and the
+  manifest, adding `"inconclusive": "<why>"`; the driver keeps that as
+  `inconclusive.txt` beside the module's report, the sub-index and the top
+  index list the module as `INCONCLUSIVE: <why>`, and the module is not
+  counted as killed or clean and not recorded as run. A measured module writes
+  `findings.jsonl` (empty when nothing survived); a manifest with neither it
+  nor the key is a FAILED module, never a clean one. In a hand
   run, list each INCONCLUSIVE module with its `<why>` in the merged report the
   same way.
 
