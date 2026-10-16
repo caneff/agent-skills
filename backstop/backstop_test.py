@@ -37,6 +37,24 @@ elif args[:2] == ["issue", "create"]:
                                 labels=labels, state="open"))
     json.dump(state, open(path, "w"))
     print(f"https://github.com/{state['repo']}/issues/{len(state['issues'])}")
+elif args[:2] == ["run", "list"]:
+    if os.environ.get("FAIL_RUN_LIST"):
+        sys.stderr.write("fake gh: run list failed\n"); sys.exit(1)
+    assert opt("--repo") == state["repo"] and opt("--event") == "schedule", args
+    runs = [r for r in state.get("runs", []) if r["headBranch"] == opt("--branch")
+            and (not opt("--status") or r["status"] == opt("--status"))]
+    print(json.dumps(runs[::-1][:int(opt("--limit"))]))
+elif args[:2] == ["run", "view"]:
+    assert "--log-failed" in args and opt("--repo") == state["repo"], args
+    log = state.get("logs", {}).get(args[2])
+    if log is None:
+        sys.stderr.write("fake gh: no log\n"); sys.exit(1)
+    print(log)
+elif args[:2] == ["pr", "view"]:
+    assert opt("--repo") == state["repo"] and opt("--json") == "comments", args
+    if args[2] in state.get("pr_errors", []):
+        sys.stderr.write("fake gh: pr view failed\n"); sys.exit(1)
+    print(json.dumps({"comments": [{"body": b} for b in state.get("prs", {}).get(args[2], [])]}))
 else:
     sys.stderr.write("fake gh: unhandled %r\n" % args); sys.exit(2)
 '''
@@ -59,6 +77,7 @@ AGENTS = "# Repo\n\n## End-to-end seam\n\n- **Seam**: `{seam}`\n- **Blind to**: 
 
 
 def write(path, text, mode=None):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write(text)
     if mode:
@@ -139,6 +158,16 @@ class Sandbox:
 
     def tickets(self):
         return self.gh_state()["issues"]
+
+    def misses(self):
+        path = os.path.join(self.state_dir, "selector-verdicts-me__repo.jsonl")
+        rows = [json.loads(x) for x in read(path).splitlines()] if os.path.exists(path) else []
+        return [r["suite"] for r in rows if r["verdict"] == "miss"]
+
+    def set(self, **fields):
+        state = self.gh_state()
+        state.update(fields)
+        self.save(state)
 
 
 @pytest.fixture
@@ -261,3 +290,163 @@ def test_notifier_that_fails_exits_3(sb):
     out = sb.run("red", extra={"NOTIFY_LOG": os.path.join(sb.tmp, "no-such-dir", "log")})
     assert out.returncode == 3 and "notification not sent" in out.stderr
     assert len(sb.tickets()) == 1
+
+
+def listed(*suites):
+    """A merge's `selector:` comment as `selector_check.py comment` posts it."""
+    noun = "suite" if len(suites) == 1 else "suites"
+    return (f"selector: listed {len(suites)} {noun} from `bash tests/all.sh --changed origin/main --list`"
+            "\n\n```\n" + "\n".join(suites) + "\n```")
+
+
+def verdict_lines(body):
+    """The failing-suite lines of a ticket body."""
+    section = body.split("## Failing suites", 1)[1].split("##", 1)[0]
+    return [x for x in section.splitlines() if x.startswith("- ")]
+
+
+def test_suite_in_a_merged_listing_is_a_hit(sb):
+    red_night(sb)
+    sb.set(prs={"7": [listed("a/a_test.py")], "8": ["selector: not checked: x", listed("b/b.test.sh")]})
+    assert sb.run("red").returncode == 1
+    (ticket,) = sb.tickets()
+    assert verdict_lines(ticket["body"]) == ["- `b/b.test.sh`: hit, selected by #8"]
+    assert sb.misses() == []
+
+
+def test_suite_in_no_merged_listing_is_a_miss_and_counted(sb):
+    red_night(sb)
+    sb.set(prs={"7": [listed("a/a_test.py")], "8": [listed("c/c_test.py", "a/a_test.py")]})
+    out = sb.run("red")
+    assert out.returncode == 1, out.stderr
+    (ticket,) = sb.tickets()
+    assert verdict_lines(ticket["body"]) == ["- `b/b.test.sh`: miss, selected by none of #7, #8"]
+    assert sb.misses() == ["b/b.test.sh"]
+    assert "1 selector miss on record" in sb.notes()[0]
+
+
+def test_repeat_red_night_counts_its_miss_once(sb):
+    red_night(sb)
+    sb.set(prs={"7": [listed("a/a_test.py")], "8": [listed("a/a_test.py")]})
+    assert sb.run("red").returncode == 1
+    assert sb.run("red").returncode == 1
+    assert sb.misses() == ["b/b.test.sh"]
+
+
+@pytest.mark.parametrize("prs, why", [
+    ({"7": [listed("a/a_test.py")]}, "#8 has no `selector:` listing"),
+    ({"7": [listed("a/a_test.py")], "8": ["selector: clean"]}, "#8 has no `selector:` listing"),
+    ({"7": [listed("a/a_test.py")], "8": [listed("b/b.test.sh"), "selector: not checked: gone"]},
+     "#8 has no `selector:` listing"),
+])
+def test_a_merge_with_no_readable_listing_makes_an_absent_suite_unknown(sb, prs, why):
+    red_night(sb)
+    sb.set(prs=prs)
+    assert sb.run("red").returncode == 1
+    (ticket,) = sb.tickets()
+    (line,) = verdict_lines(ticket["body"])
+    assert line.startswith("- `b/b.test.sh`: unknown") and why in line, line
+    assert sb.misses() == []
+
+
+def test_unreadable_pr_comments_make_the_suite_unknown(sb):
+    red_night(sb)
+    sb.set(prs={"7": [listed("a/a_test.py")]}, pr_errors=["8"])
+    assert sb.run("red").returncode == 1
+    (line,) = verdict_lines(sb.tickets()[0]["body"])
+    assert line.startswith("- `b/b.test.sh`: unknown") and "#8" in line, line
+
+
+def test_no_green_on_record_makes_every_suite_unknown(sb):
+    sb.commit("feature (#7)", {"f": "x\n"})
+    sb.set(prs={"7": [listed("a/a_test.py")]})
+    assert sb.run("red").returncode == 1
+    (line,) = verdict_lines(sb.tickets()[0]["body"])
+    assert line.startswith("- `b/b.test.sh`: unknown") and "no green run on record" in line, line
+
+
+# A repo with CI: its tree carries a workflow with a `schedule:` trigger.
+WORKFLOW = "on:\n  pull_request:\n  schedule:\n    - cron: '17 3 * * *'\njobs: {}\n"
+
+
+def gh_log(*lines):
+    """`gh run view --log-failed` output: job, step and timestamp before each line."""
+    return "\n".join(f"check\tGate (check)\t2026-10-16T03:20:0{i}.1234567Z {x}" for i, x in enumerate(lines))
+
+
+def ci_run(sb, sha, conclusion, run_id=None, age_hours=2, status="completed", branch="main"):
+    import datetime
+    created = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=age_hours)
+    runs = sb.gh_state().get("runs", [])
+    runs.append(dict(databaseId=run_id or len(runs) + 100, status=status, conclusion=conclusion, headSha=sha,
+                     headBranch=branch, createdAt=created.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                     url=f"https://github.com/me/repo/actions/runs/{run_id or len(runs) + 100}"))
+    sb.set(runs=runs)
+    return runs[-1]["databaseId"]
+
+
+@pytest.fixture
+def ci(sb):
+    """A sandbox whose repo has CI; the sha the workflow landed at."""
+    sb.ci_sha = sb.commit("add CI (#5)", {".github/workflows/ci.yml": WORKFLOW})
+    return sb
+
+
+def test_ci_repo_green_comes_from_its_scheduled_run_and_no_seam_runs(ci):
+    ci_run(ci, ci.ci_sha, "success")
+    later = ci.commit("feature (#7)", {"f": "x\n"})
+    out = ci.run("red")  # the local seam would go red; it must not run
+    assert out.returncode == 0, out.stderr
+    assert ci.last_green() == ci.ci_sha, "the record is the sha the scheduled run read, not the tip"
+    assert later != ci.ci_sha
+    assert not os.path.exists(ci.jobs_log), "no local seam runs for a CI repo"
+
+
+def test_ci_repo_red_names_the_runs_failed_suites_with_verdicts(ci):
+    ci_run(ci, ci.ci_sha, "success")
+    assert ci.run("green").returncode == 0
+    m7 = ci.commit("feature (#7)", {"f": "x\n"})
+    ci.commit("fix (#8)", {"g": "y\n"})
+    run_id = ci_run(ci, m7, "failure")
+    ci.set(logs={str(run_id): gh_log("PASS a/a_test.py", "FAIL b/b.test.sh", "  FAIL nested/child",
+                                     "FAIL c/c_test.py")},
+           prs={"7": [listed("c/c_test.py")]})
+    out = ci.run("green")
+    assert out.returncode == 1, out.stderr
+    assert ci.last_green() == ci.ci_sha
+    (ticket,) = ci.tickets()
+    assert verdict_lines(ticket["body"]) == ["- `b/b.test.sh`: miss, selected by none of #7",
+                                             "- `c/c_test.py`: hit, selected by #7"]
+    assert "fix (#8)" not in ticket["body"], "the merges are those up to the run's sha, not the tip"
+    assert f"actions/runs/{run_id}" in ticket["body"]
+    assert not os.path.exists(ci.jobs_log)
+    assert ci.misses() == ["b/b.test.sh"]
+
+
+@pytest.mark.parametrize("setup, why", [
+    (lambda sb: None, "no completed scheduled run"),
+    (lambda sb: ci_run(sb, sb.ci_sha, "success", branch="other"), "no completed scheduled run"),
+    (lambda sb: ci_run(sb, sb.ci_sha, "success", status="in_progress"), "no completed scheduled run"),
+    (lambda sb: ci_run(sb, sb.ci_sha, "success", age_hours=60), "is from"),
+    (lambda sb: ci_run(sb, sb.ci_sha, "cancelled"), "concluded `cancelled`"),
+    (lambda sb: ci_run(sb, sb.ci_sha, "failure"), "its failed log could not be read"),
+    (lambda sb: sb.set(logs={str(ci_run(sb, sb.ci_sha, "failure")): gh_log("Segmentation fault")}),
+     "names no `FAIL <suite>` line"),
+    (lambda sb: ci_run(sb, "0" * 40, "success"), "is not on"),
+])
+def test_ci_repo_missing_or_unreadable_scheduled_run_is_inconclusive(ci, setup, why):
+    setup(ci)
+    out = ci.run("green")
+    assert out.returncode == 2, out.stderr
+    assert ci.last_green() is None, "an inconclusive night is never recorded green"
+    assert ci.tickets() == [] and not os.path.exists(ci.jobs_log)
+    (note,) = ci.notes()
+    assert "inconclusive" in note and why in note, note
+
+
+def test_ci_run_list_that_fails_is_inconclusive(ci):
+    ci_run(ci, ci.ci_sha, "success")
+    out = ci.run("green", extra={"FAIL_RUN_LIST": "1"})
+    assert out.returncode == 2 and ci.last_green() is None
+    (note,) = ci.notes()
+    assert "inconclusive" in note and "run list" in note, note
