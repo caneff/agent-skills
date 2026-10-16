@@ -15,6 +15,9 @@ pub struct LiveSession {
     pub name: String,
     /// The session's working directory, empty when the file has none.
     pub cwd: String,
+    /// The `messagingSocketPath` cross-session messages arrive on, empty when
+    /// the file has none (or `null`).
+    pub socket: String,
 }
 
 /// Whether `path` is `root` or inside it.
@@ -64,7 +67,8 @@ pub fn live_all(home: &Path) -> Vec<LiveSession> {
         if !pid.is_empty() && alive {
             let session_id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
             let name = v.get("name").and_then(|s| s.as_str()).unwrap_or("").to_string();
-            live.push(LiveSession { pid, session_id, name, cwd });
+            let socket = v.get("messagingSocketPath").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            live.push(LiveSession { pid, session_id, name, cwd, socket });
         }
     }
     live
