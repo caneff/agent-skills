@@ -192,7 +192,8 @@ def notify(cmd, title, body):
 def report_red(ctx, tip, failed, notifier):
     """File or name the ticket, notify; the exit code."""
     try:
-        last = open(last_green_path(ctx)).read().strip() or None
+        with open(last_green_path(ctx)) as f:
+            last = f.read().strip() or None
     except OSError:
         last = None
     title = f"backstop: {ctx.repo} red"
