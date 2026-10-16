@@ -319,8 +319,8 @@ class Sandbox:
         self.git(self.repo, "commit", "-qm", "marker")
         self.git(self.repo, "push", "-q", "origin", "main")
         self.git(self.repo, "remote", "set-head", "origin", "main")
-        self.git(self.repo, "config", "land.testcmd", "true")
         self.set_origin("me/repo")
+        self.set_seam("true")
         self.state_path = os.path.join(t, "state.json")
         self.dispatch_log = os.path.join(t, "claude.log")
         self.cleanup_log = os.path.join(t, "cleanup.log")
@@ -328,6 +328,18 @@ class Sandbox:
         self.seam_log = os.path.join(t, "seam.log")
         self.chooser_log = os.path.join(t, "chooser.log")
         self.write_state({})
+
+    def set_seam(self, seam, narrowed=None):
+        """Commit to main an `AGENTS.md` whose § End-to-end seam declares
+        `seam`, and a `Narrowed` line when `narrowed` is given: what
+        `selector_check.py command` reads for every merge's run."""
+        text = f"## End-to-end seam\n\n- **Seam**: `{seam}`\n- **Blind to**: the live editor\n"
+        if narrowed:
+            text += f"- **Narrowed**: `{narrowed}`\n"
+        write(os.path.join(self.repo, "AGENTS.md"), text)
+        self.git(self.repo, "add", ".")
+        self.git(self.repo, "commit", "-q", "--allow-empty", "-m", "seam")
+        self.git(self.repo, "push", "-q", "origin", "main")
 
     def git(self, cwd, *args):
         return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
@@ -415,7 +427,7 @@ class Sandbox:
             self.git(self.repo, "add", ".")
             self.git(self.repo, "commit", "-qm", "lockfile")
             self.git(self.repo, "push", "-q", "origin", "main")
-        self.git(self.repo, "config", "land.testcmd", f'test -d {os.path.join(where, "node_modules")} && echo seam >> "$SEAM_LOG"')
+        self.set_seam(f'test -d {os.path.join(where, "node_modules")} && echo seam >> "$SEAM_LOG"')
 
 
 @pytest.fixture
@@ -626,7 +638,7 @@ def test_a_pr_the_wait_refuses_never_reaches_the_seam(sb, env):
     # so a conflict or a failed check is refused before it, not after.
     marker = os.path.join(str(sb.tmp), "seam-ran")
     sb.write_state({1: {}})
-    sb.git(sb.repo, "config", "land.testcmd", f"touch {marker}")
+    sb.set_seam(f"touch {marker}")
     sb.drain("--once", env=dict(env, RESET_TO_OLD="1"))  # main moved past the PR's base, so a seam would run
     assert not os.path.exists(marker)
     assert "merged" not in sb.state()
@@ -634,17 +646,21 @@ def test_a_pr_the_wait_refuses_never_reaches_the_seam(sb, env):
 
 def test_a_red_seam_is_a_failed_build(sb):
     sb.write_state({1: {}})
-    sb.git(sb.repo, "config", "land.testcmd", "false")
-    sb.drain("--once", env={"RESET_TO_OLD": "1"})  # main moved past the PR's base, so the seam runs
+    sb.set_seam("false")
+    sb.drain("--once")
     assert "merged" not in sb.state()
     assert "seam `false` failed" in sb.handed_comment(1)[0]
 
 
 def test_the_seam_runs_on_the_pr_merged_into_current_main(sb):
-    # The PR is built on the commit before main's tip: `marker` comes from
+    # The PR is built on the commit before main's tip: `tip` comes from
     # main, `work-1.txt` from the PR, so only the merge holds both.
     sb.write_state({1: {}})
-    sb.git(sb.repo, "config", "land.testcmd", "test -e marker && test -e work-1.txt")
+    sb.set_seam("test -e tip && test -e work-1.txt")
+    write(os.path.join(sb.repo, "tip"), "t\n")
+    sb.git(sb.repo, "add", ".")
+    sb.git(sb.repo, "commit", "-qm", "tip")
+    sb.git(sb.repo, "push", "-q", "origin", "main")
     sb.drain("--once", env={"RESET_TO_OLD": "1"})
     assert [m[0] for m in sb.state().get("merged", [])] == [[1]]
 
@@ -969,34 +985,50 @@ def test_refuses_a_repo_the_user_does_not_own(sb):
     assert "someone-else" in r.stderr
 
 
-# --- #1415: targeted seam, one full run per drain run, --anchor ------------
+# --- #1597: each merge runs the per-change command; no full run, --anchor ---
 
 
-def test_the_seam_is_skipped_when_main_has_not_moved_past_the_pr(sb):
+def test_each_merge_runs_the_per_change_command_and_no_run_follows_the_last_bundle(sb):
     sb.write_state({1: {}, 2: {}})
-    sb.git(sb.repo, "config", "land.testcmd", 'echo "$0" >> "$SEAM_LOG"')
-    r = sb.drain("--max", "2")
-    assert [m[0] for m in sb.state()["merged"]] == [[1], [2]]
-    # Two bundles, neither with a moved main: the only run is the end-of-run full one.
-    assert len(sb.seam_runs()) == 1, r.stdout
+    sb.set_seam('echo run >> "$SEAM_LOG"')
+    r = sb.drain("--max", "2")  # main never moves past either PR: the merge still runs it
+    assert [m[0] for m in sb.state()["merged"]] == [[1], [2]], r.stdout
+    assert sb.seam_runs() == ["run", "run"], r.stdout
+    logs = os.listdir(os.path.join(sb.tmp, "logs"))
+    assert not [x for x in logs if x.startswith(("last-green-", "full-suite-"))], logs
 
 
-def test_the_default_seam_is_narrowed_with_changed_and_the_full_run_is_not(sb):
+def test_a_declared_narrowed_command_is_listed_then_run_in_place_of_the_seam(sb):
     sb.write_state({1: {}})
-    os.makedirs(os.path.join(sb.repo, "tests"))
-    write(os.path.join(sb.repo, "tests", "all.sh"), '#!/bin/sh\necho "all.sh $*" >> "$SEAM_LOG"\n', 0o755)
+    sb.set_seam('echo seam >> "$SEAM_LOG"', narrowed='echo narrowed >> "$SEAM_LOG"')
+    r = sb.drain("--once")
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == ["narrowed --list", "narrowed"]
+
+
+def test_a_repo_that_declares_no_per_change_command_merges_nothing_and_says_why(sb):
+    sb.write_state({1: {}})
+    write(os.path.join(sb.repo, "AGENTS.md"), "# Agents\n\nNo seam here.\n")
     sb.git(sb.repo, "add", ".")
-    sb.git(sb.repo, "commit", "-qm", "gate")
+    sb.git(sb.repo, "commit", "-qm", "no seam")
     sb.git(sb.repo, "push", "-q", "origin", "main")
-    sb.git(sb.repo, "config", "--unset", "land.testcmd")
-    sb.drain("--once", env={"RESET_TO_OLD": "1"})  # main moved: the per-merge check runs
-    assert sb.seam_runs() == ["all.sh --changed origin/main", "all.sh"]
+    sb.drain("--once")
+    assert "merged" not in sb.state()
+    assert "AGENTS.md has no `## End-to-end seam` section" in sb.handed_comment(1)[0]
+
+
+def test_land_testcmd_is_not_what_a_merge_runs(sb):
+    sb.write_state({1: {}})
+    sb.git(sb.repo, "config", "land.testcmd", "false")  # the fixture's AGENTS.md declares `true`
+    sb.drain("--once")
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+
 
 def test_a_lockfile_gets_its_dependencies_installed_before_the_seam_runs(sb):
     sb.write_state({1: {}})
     sb.lockfile_repo()
-    r = sb.drain("--once", env={"RESET_TO_OLD": "1"})  # per-PR seam, then the full run
-    assert sb.seam_runs() == ["npm ci", "seam", "npm ci", "seam"], r.stdout
+    r = sb.drain("--once", env={"RESET_TO_OLD": "1"})
+    assert sb.seam_runs() == ["npm ci", "seam"], r.stdout
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
 
 
@@ -1004,7 +1036,7 @@ def test_a_nested_lockfile_gets_its_dependencies_installed_in_its_own_directory(
     sb.write_state({1: {}})
     sb.lockfile_repo(where="test-audit")
     r = sb.drain("--once", env={"RESET_TO_OLD": "1"})
-    assert sb.seam_runs() == ["npm ci", "seam", "npm ci", "seam"], r.stdout
+    assert sb.seam_runs() == ["npm ci", "seam"], r.stdout
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
 
 
@@ -1015,39 +1047,28 @@ def test_every_tracked_lockfile_gets_its_own_install(sb):
     sb.git(sb.repo, "add", ".")
     sb.git(sb.repo, "commit", "-qm", "root lockfile")
     sb.git(sb.repo, "push", "-q", "origin", "main")
-    sb.git(sb.repo, "config", "land.testcmd",
-           'test -d node_modules && test -d test-audit/node_modules && echo seam >> "$SEAM_LOG"')
+    sb.set_seam('test -d node_modules && test -d test-audit/node_modules && echo seam >> "$SEAM_LOG"')
     r = sb.drain("--once", env={"RESET_TO_OLD": "1"})
-    assert sb.seam_runs() == ["npm ci", "npm ci", "seam", "npm ci", "npm ci", "seam"], r.stdout
+    assert sb.seam_runs() == ["npm ci", "npm ci", "seam"], r.stdout
 
 
 def test_a_repo_without_a_lockfile_installs_nothing(sb):
     sb.write_state({1: {}})
     sb.lockfile_repo(lock=False)
-    sb.git(sb.repo, "config", "land.testcmd", 'echo seam >> "$SEAM_LOG"')
+    sb.set_seam('echo seam >> "$SEAM_LOG"')
     sb.drain("--once", env={"RESET_TO_OLD": "1"})
-    assert sb.seam_runs() == ["seam", "seam"]
+    assert sb.seam_runs() == ["seam"]
 
 
 def test_a_failed_install_is_a_failed_build_and_the_seam_never_runs(sb):
     sb.write_state({1: {}})
     sb.lockfile_repo()
-    sb.git(sb.repo, "config", "land.testcmd", 'echo seam >> "$SEAM_LOG"')  # logs even without node_modules
+    sb.set_seam('echo seam >> "$SEAM_LOG"')  # logs even without node_modules
     sb.drain("--once", env={"RESET_TO_OLD": "1", "NPM_RED": "1"})
     assert "merged" not in sb.state()
     assert "`npm ci` failed" in sb.handed_comment(1)[0]
     runs = sb.seam_runs()  # a ticket gets two tries
     assert (runs and set(runs) == {"npm ci"}), runs
-
-
-def test_a_failed_install_before_the_full_run_stops_the_run_red(sb):
-    sb.write_state({1: {}})
-    sb.lockfile_repo()
-    sb.git(sb.repo, "config", "land.testcmd", 'echo seam >> "$SEAM_LOG"')
-    r = sb.drain("--once", env={"NPM_RED": "1"})  # main has not moved: only the full run installs
-    assert r.returncode == 1, r.stdout
-    assert "stopped: the full suite is red on main" in r.stdout
-    assert sb.seam_runs() == ["npm ci"]
 
 
 def test_an_npm_that_cannot_start_is_a_failed_build_not_a_crash(sb):
@@ -1059,121 +1080,21 @@ def test_an_npm_that_cannot_start_is_a_failed_build_not_a_crash(sb):
     assert "`npm ci` could not start" in sb.handed_comment(1)[0]
 
 
-def test_one_full_run_after_the_last_bundle_and_a_red_one_stops_with_the_merges_named(sb):
-    sb.write_state({1: {}, 2: {}})
-    sb.git(sb.repo, "config", "land.testcmd", 'echo run >> "$SEAM_LOG"; test -z "$SEAM_RED"')
-    r = sb.drain("--max", "2", env={"SEAM_RED": "1"})
-    assert [m[0] for m in sb.state()["merged"]] == [[1], [2]], "both merges landed before the full run"
-    assert len(sb.seam_runs()) == 1
-    assert r.returncode == 1
-    assert "stopped: the full suite is red on main" in r.stdout
-    for url in ("https://example.test/pull/101", "https://example.test/pull/102"):
-        assert url in r.stdout
-
-
-def test_a_green_full_run_records_main_and_a_later_red_one_names_the_merges_since(sb):
-    sb.write_state({1: {}, 2: {}})
-    sb.git(sb.repo, "config", "land.testcmd", 'test -z "$SEAM_RED"')
-    assert sb.drain("--once").returncode == 0
-    green = read(os.path.join(sb.tmp, "logs", "last-green-me__repo")).strip()
-    assert green == sb.git(sb.repo, "rev-parse", "origin/main")
-    # Two merges land on main since that green run (the fake `gh` never moves main itself).
-    for subject in ("first other merge", "second other merge"):
-        sb.git(sb.repo, "commit", "-q", "--allow-empty", "-m", subject)
-    sb.git(sb.repo, "push", "-q", "origin", "main")
-    r = sb.drain("--once", env={"SEAM_RED": "1"})
-    assert "stopped: the full suite is red on main" in r.stdout
-    assert "Merges since the last green full run: " in r.stdout
-    # Named from last-green's sha, not just this run's own merge: with the file unread
-    # the list would hold only the PR url.
-    for subject in ("first other merge", "second other merge"):
-        assert subject in r.stdout
-
-
-def test_the_full_run_log_is_named_for_its_repo(sb):
-    sb.write_state({1: {}})
-    sb.git(sb.repo, "config", "land.testcmd", 'echo full-run-output')
-    assert sb.drain("--once").returncode == 0
-    logs = os.path.join(sb.tmp, "logs")
-    assert "full-run-output" in read(os.path.join(logs, "full-suite-me__repo.log"))
-    assert not os.path.exists(os.path.join(logs, "full-suite.log")), "the shared name would be overwritten by the next repo"
-
-
-def gate_repo(sb, listed, message="gate"):
-    """Commit a `tests/all.sh` stub to main: with `--list --changed <base>` it
-    prints `listed` (what `--changed` selects at this commit) and logs its
+def gate_repo(sb, listed, declared=True):
+    """Commit to main a `tests/all.sh` stub and an `AGENTS.md` declaring it as
+    the `Seam`, with the narrowed `--changed origin/main` form as `Narrowed`
+    when `declared`. With `--list` the stub prints `listed` and logs its
     arguments to `$SEAM_LOG`; otherwise it fails the suite `SEAM_RED` names."""
     os.makedirs(os.path.join(sb.repo, "tests"), exist_ok=True)
     write(os.path.join(sb.repo, "tests", "all.sh"),
           '#!/bin/sh\ncase " $* " in *" --list "*) echo "$*" >> "$SEAM_LOG"; printf "%s\\n" ' + " ".join(listed) + '; exit 0;; esac\n'
           'test -z "$SEAM_RED" && exit 0\necho "FAIL $SEAM_RED"; exit 1\n', 0o755)
-    sb.git(sb.repo, "add", ".")
-    sb.git(sb.repo, "commit", "-q", "--allow-empty", "-m", message)
-    sb.git(sb.repo, "push", "-q", "origin", "main")
-    if subprocess.run(["git", "config", "land.testcmd"], cwd=sb.repo, capture_output=True).returncode == 0:
-        sb.git(sb.repo, "config", "--unset", "land.testcmd")  # the default seam is `bash tests/all.sh`
-    return sb.git(sb.repo, "rev-parse", "HEAD")
+    sb.set_seam("bash tests/all.sh", narrowed="bash tests/all.sh --changed origin/main" if declared else None)
 
 
-def red_after_a_green(sb, *listings):
-    """A green full run, then one merge per listing (each rewrites the stub, so
-    the listing is what `--changed` selects at that merge), then a red full run."""
-    sb.write_state({1: {}, 2: {}})
-    gate_repo(sb, ["alpha/a.test.sh"])
-    assert sb.drain("--once").returncode == 0  # records last-green
-    merges = [gate_repo(sb, listed, f"merge {i}") for i, listed in enumerate(listings)]
-    r = sb.drain("--once", env={"SEAM_RED": "zeta/z.test.sh"})
-    return r, merges
-
-
-def test_a_red_full_run_no_merges_gate_selects_is_a_selector_miss(sb):
-    r, _ = red_after_a_green(sb, ["alpha/a.test.sh"], ["tests/t.test.sh"])
-    assert "stopped: the full suite is red on main" in r.stdout
-    assert "selector miss: `--changed` would not have selected zeta/z.test.sh for any of the 2 merges" in r.stdout
-
-
-def test_the_selector_is_asked_per_merge_with_that_merges_parent_as_the_base(sb):
-    _, merges = red_after_a_green(sb, ["alpha/a.test.sh"], ["alpha/a.test.sh"])
-    asked = [x for x in sb.seam_runs() if x.startswith("--list")]
-    assert asked == [f"--list --changed {m}^1" for m in merges]
-
-
-def test_a_suite_selected_for_only_some_merges_is_not_called_clean_or_a_miss(sb):
-    r, merges = red_after_a_green(sb, ["zeta/z.test.sh"], ["alpha/a.test.sh"])
-    assert "selector miss:" not in r.stdout
-    assert f"for 1 of 2 merges ({merges[0][:8]})" in r.stdout
-    assert "(bisect to settle)" in r.stdout
-
-
-def test_a_suite_every_merge_selects_is_reported_selected(sb):
-    r, _ = red_after_a_green(sb, ["zeta/z.test.sh"], ["zeta/z.test.sh"])
-    assert "stopped: the full suite is red on main" in r.stdout
-    assert "selector miss:" not in r.stdout
-    assert "would have selected zeta/z.test.sh for every merge" in r.stdout
-
-
-def test_a_red_full_run_with_no_green_on_record_says_the_selector_was_not_checked(sb):
-    sb.write_state({1: {}})
-    gate_repo(sb, ["alpha/a.test.sh"])
-    r = sb.drain("--once", env={"SEAM_RED": "zeta/z.test.sh"})
-    assert "stopped: the full suite is red on main" in r.stdout
-    assert "selector not checked: no green full run on record" in r.stdout
-    assert "selector miss:" not in r.stdout
-
-
-def test_a_full_run_log_that_cannot_be_read_is_not_reported_as_one_without_a_failure_line(sb, monkeypatch):
-    sys.path.insert(0, HERE)
-    import drain as drain_module
-    ctx = drain_module.Ctx(sb.repo, "me/repo", "main", os.path.join(sb.tmp, "logs"), 1, None)
-    monkeypatch.setattr(drain_module, "seam_cmd", lambda c: drain_module.FULL_SEAM)
-    verdict = drain_module.selector_verdict(ctx, "0" * 40, "1" * 40)  # no log was ever written
-    assert "could not be read" in verdict
-    assert "no `FAIL" not in verdict
-
-
-def test_no_merge_means_no_full_run(sb):
+def test_no_merge_means_no_run(sb):
     sb.write_state({})
-    sb.git(sb.repo, "config", "land.testcmd", 'echo run >> "$SEAM_LOG"')
+    sb.set_seam('echo run >> "$SEAM_LOG"')
     sb.drain()
     assert sb.seam_runs() == []
 
@@ -1301,7 +1222,6 @@ def test_a_ticket_closed_by_hand_is_moot_with_no_sha_and_never_landed(sb):
     assert "landed" not in r.stdout
     assert "merged:" not in r.stdout
     assert "nothing to drain" not in r.stdout
-    assert not os.path.exists(os.path.join(sb.tmp, "logs", "last-green-me__repo")), "a moot close landed nothing to test"
     assert "implement-1" in read(sb.cleanup_log)
 
 
@@ -1427,13 +1347,6 @@ def test_a_closing_commit_git_cannot_find_says_it_could_not_be_checked_not_that_
     assert r.returncode == 0, r.stderr
     assert "landing not verified: could not check closing commit" in r.stdout
     assert "is not on origin/main" not in r.stdout
-
-
-def test_an_unverified_close_still_gets_the_full_run_on_main(sb):
-    sb.write_state({1: {}})
-    r = sb.drain("--once", env={"LIGHT": "1", "FAIL_EVENTS": "1"})
-    assert r.returncode == 0, r.stderr
-    assert os.path.exists(os.path.join(sb.tmp, "logs", "last-green-me__repo")), "code may be on main: run the suite"
 
 
 def test_a_ticket_claimed_by_an_assignee_alone_is_not_said_to_carry_in_progress(sb):
@@ -1716,14 +1629,7 @@ def test_run_group_kills_what_a_command_started(d, tmp_path):
 # --- #1537: selector evidence on every merge of a repo that declares a narrowed command ---
 
 
-def narrowed_repo(sb, listed, declared=True):
-    """`gate_repo`'s stub runner, plus an `AGENTS.md` whose § End-to-end seam
-    declares a `Narrowed` line when `declared`."""
-    if declared:
-        write(os.path.join(sb.repo, "AGENTS.md"),
-              "## End-to-end seam\n\n- **Seam**: `bash tests/all.sh`\n- **Blind to**: the live editor\n"
-              "- **Narrowed**: `bash tests/all.sh --changed origin/main`\n")
-    gate_repo(sb, listed)
+narrowed_repo = gate_repo
 
 
 LISTED = "selector: listed 1 suite from `bash tests/all.sh --changed origin/main --list`\n\n```\nalpha/a.test.sh\n```"
@@ -1778,13 +1684,12 @@ def test_a_comment_that_cannot_be_posted_does_not_stop_a_green_merge(sb):
     assert pr_comments(sb) == []
 
 
-def test_a_seam_command_with_a_trailing_semicolon_and_a_comment_still_runs_and_is_commented_on(sb):
+def test_a_seam_command_with_a_trailing_semicolon_and_a_comment_runs_as_declared(sb):
     sb.write_state({1: {}})
-    narrowed_repo(sb, ["alpha/a.test.sh"])
-    sb.git(sb.repo, "config", "land.testcmd", "true; # the repo's own seam")
+    sb.set_seam("echo ran >> \"$SEAM_LOG\"; # the repo's own seam")
     sb.drain("--once")
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
-    assert pr_comments(sb) == [LISTED]
+    assert sb.seam_runs() == ["ran"]
 
 
 def test_the_selector_files_are_named_by_absolute_path_whatever_the_log_dir_is(sb, monkeypatch):
@@ -1792,17 +1697,7 @@ def test_the_selector_files_are_named_by_absolute_path_whatever_the_log_dir_is(s
     import drain as drain_module
     ctx = drain_module.Ctx(sb.repo, "me/repo", "main", "logs", 1, None)
     seen = []
-    monkeypatch.setattr(drain_module, "declares_narrowed", lambda c: True)
     monkeypatch.setattr(drain_module, "run_in_scratch_tree", lambda c, cmd, log, head=None, rev=None: seen.append(cmd))
     drain_module.seam(ctx, "main", os.path.join("rel", "dir", "pr-seam.log"), 7)
     cmd = seen[0]
     assert os.path.abspath(os.path.join("rel", "dir", "pr-seam-selector.json")) in cmd
-
-
-def test_a_base_tree_git_cannot_read_is_asked_again_of_the_merged_tree_not_read_as_no_line(sb):
-    sys.path.insert(0, HERE)
-    import drain as drain_module
-    ctx = drain_module.Ctx(sb.repo, "me/repo", "no-such-ref", os.path.join(sb.tmp, "logs"), 1, None)
-    assert drain_module.declares_narrowed(ctx) is True
-    ctx = ctx._replace(default="main")  # a readable tree with no AGENTS.md declares nothing
-    assert drain_module.declares_narrowed(ctx) is False

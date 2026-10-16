@@ -49,14 +49,16 @@ tickets); `--once` stops after one bundle.
 
 Then it checks (the PR is not draft, CLEAN once `implement/pr_settle.py` has
 waited out UNKNOWN and running checks (#1526), closes the anchor within the
-bundle cap, and the repo's seam passes on the PR merged into current main,
-narrowed to what the PR touched; the check is skipped when main has not moved
-past the PR's base, because the worker ran the same suite on that exact tree),
-squash-merges, runs `merge-cleanup` (which closes the worker's pane), and
-returns any ticket the worker claimed but the PR did not close to the queue.
-A repo whose `AGENTS.md` declares a `Narrowed` line (#1537) gets the full seam
-on every merge instead of the narrowed one, with no skip, and each run leaves
-one `selector:` comment on the PR (`implement/selector_check.py`).
+bundle cap, and the repo's per-change command passes on the PR merged into
+current main), squash-merges, runs `merge-cleanup` (which closes the worker's
+pane), and returns any ticket the worker claimed but the PR did not close to
+the queue. The per-change command is what `implement/selector_check.py
+command` reads from the merged tree's `AGENTS.md` § End-to-end seam: its
+`Narrowed` command, else its `Seam` (#1597). It runs on every merge, and a
+repo that declares a `Narrowed` line gets that run's listing as one
+`selector:` comment on the PR, posted before the command, as the lane's merge
+step does (#1593). A section that declares no command merges nothing. No full
+seam runs in drain: the nightly backstop (`backstop/`) is the only full run.
 A bundle that fails is given one more try by prompting the same worker with
 the reason (waiting for it to start working before it looks again); a second
 failure closes the worker's pane, labels the anchor and every claimed ticket
@@ -77,8 +79,7 @@ PR is recorded as what closed it, from its `closed` event: `(landed on main,
 no PR)` with that commit's sha, or with the sha of the main commit whose
 message says `Closes #<n>` when a hand closed it after the trailer did not
 fire; `moot (closed, no PR)` with no sha when neither exists; or an unverified
-close with the reason, never as main's tip. An unverified close gets the full
-run on main like a merge. The run's last lines are one `passed over: #<n>
+close with the reason, never as main's tip. The run's last lines are one `passed over: #<n>
 <why>` per ready ticket it did not build (human-held, claimed, blocked, a kept
 workspace, not started), read fresh when a limit ends the run, and one
 `ended: <cause>`: `queue empty`, `no startable ticket` (every queued ticket has
@@ -94,10 +95,6 @@ ticket carrying drain's own `drain anchor:` comment is resumed (a worker
 started by `implement-dispatch` outside drain has none, so it is never taken)
 and its worker or open PR is waited on and checked rather than rebuilt. Only
 repos whose origin owner is the `gh` login.
-
-After the last bundle, one full `bash tests/all.sh` runs on current main
-(#1415): a red one stops the run and the summary names the merges since the
-last green full run (`last-green-<repo>` in the log directory), for Chris.
 """
 import argparse
 import collections
@@ -120,7 +117,6 @@ for _dir in ("burndown", "implement"):
 
 import frontier  # noqa: E402
 import pr_settle  # noqa: E402
-import selector_check  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
 ANCHOR_NOTE, BUNDLE_NOTE, HANDED_NOTE = "drain anchor:", "drain bundle:", "drain could not land"
@@ -148,7 +144,6 @@ SPEC_WALL_CLOCK_SECONDS = float(os.environ.get("DRAIN_SPEC_WALL_CLOCK_SECONDS", 
 # harness already trusts for unattended work. (A worker's own mode is
 # `implement-dispatch`'s.)
 PERMISSION_MODE = "auto"
-FULL_SEAM = "bash tests/all.sh"
 # How the wait on a worker is paced. Test hooks, not options: seconds between
 # looks at the worker, and how long its pane may sit idle with no PR before the
 # build counts as failed (an idle worker with a PR is done; one with none is
@@ -679,10 +674,6 @@ def open_pr(ctx, branch):
     return prs[0] if prs else None
 
 
-def seam_cmd(ctx):
-    return run(["git", "config", "land.testcmd"], cwd=ctx.root, check=False) or FULL_SEAM
-
-
 def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
     """`cmd` in a throwaway worktree of current main (or of `rev`), with `head`
     merged in when given. The merge commit uses the identity the repo is already configured
@@ -718,149 +709,60 @@ def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
 
 
 SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "implement", "selector_check.py")
+# What the run writes to its log before the per-change command, so a failure
+# names the command that ran, not the shell around it.
+RUNNING = "per-change command: "
+UNDECLARED = "selector_check.py command: "
 
 
-def declares_narrowed(ctx):
-    """Whether `AGENTS.md` on the base the seam runs on declares a `Narrowed`
-    line (#1537), read from the git tree the scratch worktree is made from, so
-    a stale primary checkout cannot answer for it. A tree git cannot read
-    answers yes: the scratch run then asks the merged tree itself, where
-    `selector_check.py list` finds no line (nothing is posted) or records the
-    failure as `not checked`. Only a tree that holds no `AGENTS.md` answers no."""
-    listed = subprocess.run(["git", "ls-tree", "--name-only", ctx.default, "AGENTS.md"], cwd=ctx.root,
-                            capture_output=True, text=True)
-    if listed.returncode:
-        return True
-    if not listed.stdout.strip():
-        return False
-    shown = subprocess.run(["git", "show", f"{ctx.default}:AGENTS.md"], cwd=ctx.root, capture_output=True, text=True)
-    return shown.returncode != 0 or selector_check.narrowed_in(shown.stdout) is not None
+def seam(ctx, head, log, pr):
+    """The repo's per-change command on the PR head merged into current main,
+    in a throwaway worktree, on every merge (#1597): what `selector_check.py
+    command` reads from the merged tree's `AGENTS.md` § End-to-end seam, its
+    `Narrowed` command, else its `Seam`. No full seam runs here: the nightly
+    backstop (`backstop/`) is the only full run (#1592).
 
-
-def seam(ctx, head, log, pr=None):
-    """The repo's seam (`land.testcmd`, else `bash tests/all.sh`) on the PR head
-    merged into current main, in a throwaway worktree. The default seam is
-    narrowed with `--changed <default>`: the PR's own diff is what it touched.
-    Skipped when main is an ancestor of `head`: the worker ran the suite on that
-    exact tree after merging main in, and only a main that has moved since can
-    make two PRs break each other (#1415).
-
-    A repo whose `AGENTS.md` declares a `Narrowed` line (#1537) gets the seam
-    in full instead, on every merge and with no skip: the point is to compare
-    its narrowed selection with what the full run fails on, which a narrowed
-    run could only agree with. `selector_check.py` lists the narrowed
-    selection before the seam and posts that listing on PR `pr` after it, red or
-    green, judging nothing (#1593); the seam's own exit status is what comes
-    out, never the comment's."""
-    cmd = seam_cmd(ctx)
+    As the lane's merge step does, the run lists the narrowed selection and
+    posts that listing on PR `pr` before the command, judging nothing
+    (#1537, #1593); a repo with no `Narrowed` line gets no listing and no
+    comment. The command's own exit status is what comes out, never the
+    comment's. A section that declares no command fails the merge with the
+    resolver's reason, before anything runs."""
     run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
-    checked = pr is not None and declares_narrowed(ctx)
-    moved = subprocess.run(["git", "merge-base", "--is-ancestor", ctx.default, head], cwd=ctx.root).returncode != 0
-    if not moved and not checked:
-        return
-    if checked:
-        log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
-        state = os.path.splitext(log)[0] + "-selector.json"
-        tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
-        cmd = (f"{tool} list --root . --state {shlex.quote(state)}; sh -c {shlex.quote(cmd)}; code=$?; "
-               f"{tool} comment --root . --state {shlex.quote(state)} --pr {pr} --repo {shlex.quote(ctx.repo)}; "
-               "exit $code")
-    elif cmd == FULL_SEAM:
-        cmd = f"{FULL_SEAM} --changed {shlex.quote(ctx.default)}"
+    log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(log)  # a conflict writes no log, and an earlier run's must not answer for it
+    state = shlex.quote(os.path.splitext(log)[0] + "-selector.json")
+    tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
+    cmd = (f"cmd=$({tool} command --root .) || exit 1; printf '{RUNNING}%s\\n' \"$cmd\"; "
+           f"if {tool} list --root . --state {state}; then "
+           f"{tool} comment --root . --state {state} --pr {pr} --repo {shlex.quote(ctx.repo)}; fi; "
+           'sh -c "$cmd"')
     try:
         run_in_scratch_tree(ctx, cmd, log, head)
     except DrainError as exc:
-        raise DrainError(f"seam {exc} on the PR merged into main") from exc
+        raise DrainError(f"seam {seam_failure(log) or exc} on the PR merged into main") from exc
+
+
+def seam_failure(log):
+    """What a failed `seam` run's log says failed: the resolver's reason, the
+    per-change command that ran, or `None` when neither got that far (a
+    conflict, an install), whose own error then stands."""
+    try:
+        with open(log, errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        if line.startswith(UNDECLARED):
+            return "the repo declares no per-change command: " + line[len(UNDECLARED):]
+    ran = [x[len(RUNNING):] for x in lines if x.startswith(RUNNING)]
+    return f"`{ran[-1]}` failed (output in {log})" if ran else None
 
 
 def repo_slug(ctx):
     """`owner__name`: the repo as one file-name component."""
     return ctx.repo.replace("/", "__")
-
-
-def last_green_path(ctx):
-    return os.path.join(ctx.log_dir, "last-green-" + repo_slug(ctx))
-
-
-def full_log_path(ctx):
-    """One file per repo: a shared name was overwritten by the next repo drained."""
-    return os.path.join(ctx.log_dir, f"full-suite-{repo_slug(ctx)}.log")
-
-
-MAX_SELECTOR_COMMITS = 30
-
-
-def selector_verdict(ctx, last, tip):
-    """After a red full run: would `--changed` have selected the suite that
-    failed? Each merge since the last green full run (`last`, a sha or `None`)
-    was gated on its own diff, so the question is asked per merge, at that
-    merge, and the answer names which merges' gates would have run the suite.
-    Without a bisect the breaking merge is unknown, so only "no merge's gate
-    selects it" is a selector miss. A selector miss is a defect-class instance,
-    so every answer that is not a clean one says what could not be checked
-    (#1495)."""
-    if seam_cmd(ctx) != FULL_SEAM:
-        return "selector not checked: the repo's seam is not `bash tests/all.sh`"
-    if not last:
-        return "selector not checked: no green full run on record"
-    try:
-        with open(full_log_path(ctx)) as f:
-            failed = next((m.group(1) for m in (re.match(r"FAIL (\S+)", x) for x in f) if m), None)
-    except OSError as exc:
-        return f"selector not checked: the full run's log could not be read ({one_line(exc, 100)})"
-    if not failed:
-        return "selector not checked: the full run's log has no `FAIL <suite>` line"
-    try:
-        merges = run(["git", "log", "--first-parent", "--format=%H", f"{last}..{tip}"], cwd=ctx.root).split()[::-1]
-    except DrainError as exc:
-        return f"selector not checked: {one_line(exc, 150)}"
-    if not merges:
-        return "selector not checked: no merge since the last green full run"
-    if len(merges) > MAX_SELECTOR_COMMITS:
-        return f"selector not checked: {len(merges)} merges since the last green full run (limit {MAX_SELECTOR_COMMITS})"
-    picked = []
-    for sha in merges:
-        listing = os.path.splitext(full_log_path(ctx))[0] + "-selection.log"
-        try:
-            run_in_scratch_tree(ctx, f"{FULL_SEAM} --list --changed {sha}^1", listing, rev=sha)
-            with open(listing) as f:
-                if failed in f.read().split():
-                    picked.append(sha[:8])
-        except (DrainError, OSError) as exc:
-            return f"selector not checked: {one_line(exc, 150)}"
-    if not picked:
-        return (f"selector miss: `--changed` would not have selected {failed} for any of the {len(merges)} "
-                "merges since the last green full run")
-    if len(picked) == len(merges):
-        return f"`--changed` would have selected {failed} for every merge since the last green full run"
-    return (f"`--changed` would have selected {failed} for {len(picked)} of {len(merges)} merges ({', '.join(picked)}); "
-            "if the breaking merge is one of the others, its gate skipped the suite, which is a selector miss (bisect to settle)")
-
-
-def full_run(ctx, merged):
-    """One full run of the seam on current main after the last bundle. `None`
-    when green, else the reason to stop, naming the merges since the last green
-    full run: the commits on main since it when its sha is on record, else this
-    run's merges, and whether `--changed` would have selected the failing suite."""
-    run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
-    tip = run(["git", "rev-parse", ctx.default], cwd=ctx.root)
-    try:
-        run_in_scratch_tree(ctx, seam_cmd(ctx), full_log_path(ctx))
-    except DrainError as exc:
-        since = [f"{m['via']} ({m['sha'] or 'no sha'})" for m in merged]
-        last = None
-        try:
-            with open(last_green_path(ctx)) as f:
-                last = f.read().strip()
-            listed = run(["git", "log", "--first-parent", "--format=%h %s", f"{last}..{tip}"], cwd=ctx.root)
-            since = listed.splitlines() or since
-        except (OSError, DrainError):
-            pass
-        return (f"the full suite is red on main after this run ({one_line(exc, 150)}). Merges since the last "
-                "green full run: " + "; ".join(since) + ". " + selector_verdict(ctx, last, tip))
-    with open(last_green_path(ctx), "w") as f:
-        f.write(tip + "\n")
-    return None
 
 
 def verify_pr(ctx, branch, anchor, kind):
@@ -1200,14 +1102,6 @@ def drain(ctx, limit, limit_name):
         stop = f"unexpected {type(exc).__name__}: {one_line(exc)}"
     if started:
         say(f"bundle ended: {refs(started)}  stopped: {stop}")
-    # A close drain could not verify may have put code on main, so it is tested like a merge.
-    landed = merged + [c for c in closed if c["outcome"] == UNVERIFIED]
-    if landed:
-        try:
-            red = full_run(ctx, landed)
-        except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
-            red = f"the full suite could not run on main: {type(exc).__name__}: {one_line(exc, 150)}"
-        stop = "; ".join(x for x in (stop, red) if x) or None
     if stop:
         cause = "stopped"
     return Run(merged, closed, handed, stop, cause, *passed_at_exit(ctx, cause, seen, ended, merged, closed, handed))
