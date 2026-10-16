@@ -1,8 +1,8 @@
 ---
 name: mutation-audit
-description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut (Python) or StrykerJS (.mjs/.js), scrape the survivors, emit test-audit findings; or check ONE diff against its covering test (single-diff witness mode). Opt-in, never in the default sweep.
+description: Point at ONE module (or, by explicit ask, every tested module in the repo) to learn which of its tests pass without actually catching a bug — run mutmut (Python) or StrykerJS (.mjs/.js), scrape the survivors, emit test-audit findings; or check ONE diff against its covering test (single-diff witness mode). Opt-in, never in the default sweep.
 disable-model-invocation: true
-argument-hint: "<target-module.py|.mjs|.js> | --patch <file> --test <command>"
+argument-hint: "<target-module.py|.mjs|.js> | --all | --patch <file> --test <command>"
 ---
 
 Run mutmut (a `.py` target) or StrykerJS (a `.mjs`/`.js` target, § JavaScript
@@ -14,8 +14,8 @@ the whole suite whether or not a test covers the mutated line, so a survivor
 is never proof of coverage. This is expensive (it
 reruns the test suite once per mutant) and only meaningful pointed at a
 single module you're actually worried about, so it is **never** part of
-`all-audits`' default sweep — it runs only when asked for by name, and it
-never mutates a whole repo.
+`all-audits`' default sweep — it runs only when asked for by name. It mutates a
+whole repo only on the explicit ask in § Whole-repo mode, never as a fallback.
 
 **Two passes**, mirroring `dead-code`. `audit.py` in this skill's directory
 is pass one — mechanical: run mutmut, parse `mutmut results`' stable text
@@ -73,7 +73,8 @@ covered without re-running mutmut.
    `<stem>.test.mjs` or `<stem>.test.js`) — the tool needs a test suite to
    mutate against, so an untested module isn't a useful target. Print the
    suggestions and **stop** — ask which one to run. Never fall back to
-   running mutmut over the whole repo; an empty suggestion list is a valid
+   running mutmut over the whole repo unless the user asked for
+   § Whole-repo mode; an empty suggestion list is a valid
    answer ("nothing here has a sibling test to mutate against"), not an
    error.
 
@@ -198,6 +199,35 @@ in that setup.
    INCONCLUSIVE run it may not, and a `.stryker-tmp/` this run left (untracked,
    `git status --porcelain` shows it) is removed with `rm -r .stryker-tmp`.
    Never remove one that was already there before the run.
+
+## Whole-repo mode
+
+Only when the user explicitly asks for the whole repo (`--all`, "audit every
+module"). It is a loop of the single-module flow above, one module at a time,
+merged into one report; it is never one mutmut run with repo-wide
+`source_paths`. Run it with the driver, which gives each module its own
+disposable git worktree:
+
+```sh
+python3 ~/.agents/skills/all-audits/driver.py <repo> --mutation-all
+```
+
+- **Candidates** are the `--suggest` list (`suggest_candidates`: modules with a
+  sibling test), `.py` and `.mjs`/`.js` alike. Modules with no sibling test are
+  reported as untested, not mutated.
+- **No `MUTATION_MAX` cap.** The driver prints the module count and a worst-case
+  time estimate (`MUTATION_AUDIT_TIMEOUT` seconds per module) before it starts.
+- **One report.** `collection/mutation/index.html` lists every module with its
+  killed/total, weak-assertion and no-coverage counts, linking each module's
+  own report.
+- **INCONCLUSIVE is per module, never clean.** A module whose `audit.py --run`
+  exits 3 (the mutmut subprocess-suite blocker above, a missing `uvx`/`npx`, a
+  timeout) writes no finding rows. Its audit adds `"inconclusive": "<why>"` to
+  its manifest; the driver keeps that as `inconclusive.txt` beside the module's
+  report, the sub-index lists the module as `INCONCLUSIVE: <why>`, and the
+  module is not counted as killed or clean and not recorded as run. In a hand
+  run, list each INCONCLUSIVE module with its `<why>` in the merged report the
+  same way.
 
 ## JavaScript targets
 

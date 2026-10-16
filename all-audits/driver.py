@@ -779,7 +779,7 @@ def collect(run, repo, plan, base=None):
         d = os.path.join(collection, entry)
         if not os.path.isdir(d) or entry in AUDIT_NAMES:
             continue
-        if os.path.isfile(os.path.join(d, "findings.jsonl")):
+        if os.path.isfile(os.path.join(d, "findings.jsonl")) or os.path.isfile(inconclusive_path(collection, entry)):
             mutation_modules.append(entry)
 
     mutation_survivors_sum = 0

@@ -48,8 +48,12 @@ instead, with no separate log file:
 
 `skill-audit` is **not** in the set — it scans the global skills directory, not
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and
-targeted at one module (never a whole-repo sweep); invoke it by name, or run
-`driver.py --mutation a.py,b.py` for the scripted per-module form.
+targeted at one module; invoke it by name, or run
+`driver.py --mutation a.py,b.py` for the scripted per-module form. The whole
+repo is a separate explicit ask, never part of this sweep:
+`driver.py --mutation-all` runs every `--suggest` candidate with no
+`MUTATION_MAX` cap, after printing the module count and a cost estimate
+(`mutation-audit/SKILL.md` § Whole-repo mode).
 With no value, `--mutation` takes its candidates from `mutation-audit/audit.py
 --suggest` (the model's prepass only ranks that list) and orders them never-run
 first, then changed since their recorded sha, then oldest run first, before
