@@ -100,8 +100,11 @@ When the last slice has landed:
    workspace on `spec-<n>`: git refuses a second checkout of a branch a
    workspace already holds. It follows steps 2–3 of
    `implement/SKILL.md` § Review, with the spec number for `<n>`: every finding gets one disposition in
-   `dispositions-<spec>.jsonl`, and the full seam runs, `bash tests/all.sh`
-   from a tree with `origin/<default>` merged in again. The pre-report gate
+   `dispositions-<spec>.jsonl`, and the run is what
+   `python3 ~/.agents/skills/implement/selector_check.py command --root .`
+   prints from `spec-<n>`, with `origin/<default>` merged in again: the
+   repo's per-change command, as `implement/SKILL.md` § Review step 3 runs
+   it. The nightly backstop is the only full run. The pre-report gate
    runs the merge check on `spec-<n>` keyed on the spec number, so
    `fix-check.sh <spec> spec-<spec>` must exit 0 before the PR goes up.
 4. **The integration PR.** Run step 1's block once more, and open it:
