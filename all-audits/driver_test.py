@@ -1091,6 +1091,40 @@ def test_mutation_all_prompt_asks_for_the_findings_log_and_the_inconclusive_key(
     assert '"inconclusive" key' in log and "findings.jsonl" in log and "still write the report" in log, log
 
 
+def test_no_open_instruction_is_one_text_in_the_sweep_and_the_mutation_prompt():
+    assert driver.NO_OPEN_INSTRUCTION in driver.audit_prompt("dead-code", "/some/repo")
+
+
+def test_mutation_module_prompt_forbids_opening_its_report(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = open(os.path.join(tmp, "out", "logs", "mutation-alpha.py.log")).read()
+    assert driver.NO_OPEN_INSTRUCTION in log, log
+
+
+def test_mutation_run_opens_one_page_and_it_is_the_index(tmp_path):
+    repo, tmp, bin_dir = _mkdirs(tmp_path, "repo", "tmp", "bin")
+    _repo_with_two_tested_modules(repo)
+    opened = os.path.join(tmp, "opened.txt")
+    for opener in ("xdg-open", "open"):
+        with open(os.path.join(bin_dir, opener), "w") as f:
+            f.write(f'#!/bin/sh\necho "$1" >> {opened}\n')
+        os.chmod(os.path.join(bin_dir, opener), 0o755)
+    env = _fake_tools_env(tmp, AUDITS_NO_OPEN="0")
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    out = os.path.join(tmp, "out")
+    r = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
+         repo, "--mutation-all", "--out", out],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    pages = open(opened).read().split()
+    assert pages == [os.path.join(out, "collection", "mutation", "index.html")], pages
+
+
 def test_mutation_module_answering_neither_findings_nor_inconclusive_is_a_failure(tmp_path):
     """A manifest with no `inconclusive` key and no findings.jsonl is no answer:
     a failure line, never a clean module that went unrecorded."""

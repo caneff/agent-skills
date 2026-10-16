@@ -344,6 +344,15 @@ def manifest_instruction(manifest_path):
     )
 
 
+# The one no-open instruction (#1598): the sweep's audits and every per-module
+# mutation run carry it, so a driver run opens only its final index.
+NO_OPEN_INSTRUCTION = (
+    "Do NOT open the report: skip every xdg-open/open/start step the skill would run. You are one "
+    "run inside an all-audits driver, and the driver opens only the final index — a page per report "
+    "would bury it. Just write the report."
+)
+
+
 def audit_prompt(name, repo, manifest_path=None):
     ignore_file = os.path.join(repo, ".audit-ignore.md")
     ignore_block = ""
@@ -355,10 +364,7 @@ def audit_prompt(name, repo, manifest_path=None):
         f"Audit the ENTIRE repository at {repo} — every source file, not a git diff or recent-changes review. "
         "Override any branch-diff or hot-spot default the skill has. Exclude vendored, generated, and dependency "
         "trees (node_modules, .venv, dist, vendor, build output, lockfiles), any .git/ tree, and any worktrees/ "
-        "tree — audit only the project's own tracked source. Do NOT open the report: skip every "
-        "xdg-open/open/start step the skill would run. You are one audit inside an all-audits sweep, and the "
-        "sweep opens only the final index — thirteen reports opening at once would bury it. Just write the "
-        "report."
+        "tree — audit only the project's own tracked source. " + NO_OPEN_INSTRUCTION
     )
     manifest_block = manifest_instruction(manifest_path) if manifest_path else ""
     return f"/{name} {repo}\n{override}{manifest_block}{ignore_block}\n"
@@ -1011,6 +1017,9 @@ def mutation_mode(repo, modules, out, whole_repo=False):
         _run(["git", "-C", repo, "worktree", "prune"])
 
     print(f"\ncollection: {collection}")
+    index = collect(run, repo, Plan())
+    sub_index = os.path.join(collection, "mutation", "index.html")
+    open_index(sub_index if os.path.isfile(sub_index) else index)
     if failed:
         print(f"FAILED modules: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
@@ -1063,7 +1072,8 @@ def _run_mutation_module(repo, module, run):
                 reason = "uv sync failed"
             else:
                 print(f"[mutation:{module}] running /mutation-audit {module}")
-                prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}{INCONCLUSIVE_INSTRUCTION}"
+                prompt = (f"/mutation-audit {module}\n{NO_OPEN_INSTRUCTION}"
+                          f"{manifest_instruction(manifest)}{INCONCLUSIVE_INSTRUCTION}")
                 with open(log, "a", encoding="utf-8") as f:
                     r = subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False, env=claude_env())
                 reason = audit_failure(
