@@ -7,5 +7,5 @@
 # one, so each runs its seam locally.
 ~/.agents/skills
 ~/src/sudokumaker-custom-constraints
-~/src/grid-hunts
+~/src/grid-hunts workflow=ci.yml
 ~/src/twitch-rules-scroller
