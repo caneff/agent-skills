@@ -136,8 +136,9 @@ Description=Nightly full seam run over the repos in flow/backstop-repos (#1595)
 
 [Service]
 Type=oneshot
-# The backstop shells out to git, gh and python3; systemd's user PATH lacks ~/.local/bin.
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# The listed repos' seams need cargo (~/.cargo/bin); node, npm, uv and gh
+# (~/.local/bin); git and python3 (/usr/bin). systemd's user PATH has neither home dir.
+Environment=PATH=%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.local/bin/backstop-nightly
 UNIT
 cat > "$unit_dir/backstop.timer" <<'UNIT'

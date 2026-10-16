@@ -17,9 +17,16 @@ cat > "$tmp/stub.py" <<'STUB'
 import os, sys
 with open(os.environ["STUB_LOG"], "a") as f:
     f.write(" ".join(sys.argv[1:]) + "\n")
-sys.exit(1 if os.environ.get("STUB_FAIL_ON", "@@") in sys.argv else 0)
+sys.exit(int(os.environ.get("STUB_RC", "1")) if os.environ.get("STUB_FAIL_ON", "@@") in sys.argv else 0)
 STUB
-export STUB_LOG="$log" BACKSTOP_PY="$tmp/stub.py" BACKSTOP_JOBS=3
+cat > "$tmp/notify" <<'STUB'
+#!/usr/bin/env bash
+printf '%s | %s\n' "$1" "$2" >> "$NOTIFY_LOG"
+STUB
+chmod +x "$tmp/notify"
+nlog="$tmp/notified"
+export STUB_LOG="$log" BACKSTOP_PY="$tmp/stub.py" BACKSTOP_JOBS=3 BACKSTOP_NOTIFY="$tmp/notify" NOTIFY_LOG="$nlog"
+: > "$nlog"
 
 printf '# comment\n\n%s\n~/rel-repo\n%s\n' "$tmp/a" "$tmp/b" > "$tmp/list"
 : > "$log"
@@ -63,8 +70,44 @@ out=$(STUB_FAIL_ON="$tmp/a" HOME="$tmp/home" "$tool" "$tmp/list" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] && [ "$(wc -l < "$log")" = 3 ]; then
   pass "a failing repo does not skip the others and the job exits non-zero"
 else
-  fail "failing first repo (rc=$rc, calls $(wc -l < "$log")): $out"; fails=1
+  fail "failing first repo (rc=$rc, calls $(wc -l < "$log")): $out"
 fi
+
+# A workflow= field passes --workflow to that repo's run only.
+printf '%s workflow=gate.yml\n%s\n' "$tmp/w" "$tmp/x" > "$tmp/wlist"
+: > "$log"
+"$tool" "$tmp/wlist" >/dev/null 2>&1; rc=$?
+if [ "$rc" = 0 ] && grep -qx -- "--repo $tmp/w --jobs 3 --workflow gate.yml" "$log" \
+   && grep -qx -- "--repo $tmp/x --jobs 3" "$log"; then
+  pass "a workflow= field becomes --workflow for that repo only"
+else
+  fail "workflow field (rc=$rc): $(cat "$log")"
+fi
+
+# A list that cannot be used notifies, and the exit stays non-zero.
+: > "$nlog"
+"$tool" "$tmp/absent" >/dev/null 2>&1; rc=$?
+if [ "$rc" -ne 0 ] && grep -q "could not run | .*absent" "$nlog"; then pass "a missing list notifies"
+else fail "missing list notify (rc=$rc): $(cat "$nlog")"; fi
+: > "$nlog"
+"$tool" "$tmp/empty" >/dev/null 2>&1; rc=$?
+if [ "$rc" -ne 0 ] && [ -s "$nlog" ]; then pass "an empty list notifies"
+else fail "empty list notify (rc=$rc): $(cat "$nlog")"; fi
+
+# backstop.py exits 1-3 after notifying itself; any other exit is a crash the
+# wrapper must announce. Both stay non-zero.
+for code in 1 2 3; do
+  : > "$nlog"
+  STUB_RC=$code STUB_FAIL_ON="$tmp/a" HOME="$tmp/home" "$tool" "$tmp/list" >/dev/null 2>&1; rc=$?
+  if [ "$rc" -ne 0 ] && [ ! -s "$nlog" ]; then pass "exit $code is not re-notified by the wrapper"
+  else fail "exit $code (rc=$rc): $(cat "$nlog")"; fi
+done
+for code in 4 137; do
+  : > "$nlog"
+  STUB_RC=$code STUB_FAIL_ON="$tmp/a" HOME="$tmp/home" "$tool" "$tmp/list" >/dev/null 2>&1; rc=$?
+  if [ "$rc" -ne 0 ] && [ "$(wc -l < "$nlog")" = 1 ] && grep -q "$tmp/a crashed" "$nlog"; then pass "exit $code (a crash) notifies once and exits non-zero"
+  else fail "exit $code (rc=$rc): $(cat "$nlog")"; fi
+done
 
 # The shipped list names the four repos.
 for r in .agents/skills sudokumaker-custom-constraints grid-hunts twitch-rules-scroller; do

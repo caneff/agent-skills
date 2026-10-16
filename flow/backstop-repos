@@ -1,6 +1,10 @@
 # The repos the nightly backstop runs (#1595): one checkout per line, `~/` is
 # the home directory, `#` starts a comment, blank lines are skipped. Adding or
 # removing a repo is one line here; bin/backstop-nightly reads this file.
+# Optional second field: `<checkout> workflow=<file name>` names the repo's
+# full-gate workflow (e.g. `workflow=gate.yml`); the backstop then reads that
+# repo's result from CI instead of running its seam locally. No repo below has
+# one, so each runs its seam locally.
 ~/.agents/skills
 ~/src/sudokumaker-custom-constraints
 ~/src/grid-hunts
