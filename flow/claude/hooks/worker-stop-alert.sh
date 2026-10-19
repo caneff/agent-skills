@@ -56,7 +56,9 @@ source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
 # since worker_alert_logline can be exactly the missing symbol. Checked here
 # with `lib_missing`, which needs none of them (Codex gate pass on PR #1066).
 for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
-          worker_alert_worker_agent_name worker_alert_controller_pane; do
+          worker_alert_worker_agent_name worker_alert_controller_pane \
+          worker_alert_resolve_controller worker_alert_prompt_pane \
+          worker_alert_current_controller; do
   declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
 done
 
@@ -77,46 +79,13 @@ IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 
 # The brief carries the controller's herdr agent name (#923); a compliant
 # worker resolves that to a session name or socket before sending, so
-# matching on the brief's literal alone can miss a delivered report and,
-# when an alert is owed, find no live session for the pane lookup. Resolve
-# the same two hops `resolve-controller` does — herdr agent name ->
-# `agent_session` id -> the live session record's current session id, name
-# and socket — before either use, but keep matching the brief's own literal
-# too: nothing here requires a worker to route through `resolve-controller`
-# first. Unlike `resolve-controller` (`sessions::name_of_session`, which
-# needs a name because it returns one), `worker_alert_resolve_session`'s
-# `sid` mode does not require the record to have a `.name` — see its own
-# comment in worker-alert-lib.sh for why. A worktree without `herdr`, or a
-# `herdr agent list` that fails or times out, falls back the same way an
-# older brief already carrying a session name does.
-herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
-  | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
-  | head -n1)"
-resolved=""
-[ -n "$herdr_sid" ] && resolved="$(worker_alert_resolve_session sid "$herdr_sid")"
-if [ -z "$resolved" ]; then
-  resolved="$(worker_alert_resolve_session name "$controller")"
-  # A name resolves one record; widen to every live record sharing its
-  # session id, so a nameless twin's socket counts here too (#1114).
-  by_name_sid="${resolved%%$'\x1f'*}"
-  [ -n "$by_name_sid" ] && widened="$(worker_alert_resolve_session sid "$by_name_sid")" \
-    && resolved="$widened"
-fi
-# `sid` mode can return several lines — every live record sharing the
-# controller's session id (#1114). A report to any of them reached the
-# controller, so every name and socket joins the match set; the session id,
-# the same on every line, is what the pane lookup uses.
-ctl_session="" names=() sockets=()
-while IFS=$'\x1f' read -r r_sid r_name r_sock; do
-  [ -n "$ctl_session" ] || ctl_session="$r_sid"
-  [ -n "$r_name" ] && names+=("$r_name")
-  [ -n "$r_sock" ] && sockets+=("uds:$r_sock")
-done <<<"$resolved"
-# Belt and braces: worker_alert_resolve_session above already returns a
-# nameless record's session id, so this rarely fires, but it keeps the pane
-# lookup working even if it found nothing (a record removed between the
-# herdr list and here) while herdr's own bookkeeping still knows the id.
-[ -z "$ctl_session" ] && ctl_session="$herdr_sid"
+# matching on the brief's literal alone can miss a delivered report. Resolve
+# the same two hops `resolve-controller` does, but keep matching the brief's
+# own literal too: nothing here requires a worker to route through
+# `resolve-controller` first. (`worker_alert_resolve_controller`'s comment
+# holds the hops and why a nameless record counts.)
+controller="$(worker_alert_current_controller "$transcript" "$controller")"
+worker_alert_resolve_controller "$controller"
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
 # plus the transcript's last entry as the stop's key. `$c` is the brief's
@@ -248,23 +217,6 @@ if [ -z "$pane" ]; then
   exit 0
 fi
 
-# herdr refuses a prompt to a blocked agent (`agent_blocked`) before sending
-# any input, so retry that refusal with backoff while the deadline allows.
-attempts=0 backoff=1
-while :; do
-  attempts=$((attempts + 1))
-  if out="$(timeout 3 herdr agent prompt "$pane" "$alert" 2>&1)"; then
-    logline "sent" "$pane: $alert"
-    exit 0
-  fi
-  blocked="$(jq -r 'select(.error.code == "agent_blocked") | "yes"' <<<"$out" 2>/dev/null)"
-  [ "$blocked" = yes ] && [ $((SECONDS + backoff + 3)) -le "$deadline" ] || break
-  sleep "$backoff"
-  backoff=$((backoff * 2))
-done
-if [ "$blocked" = yes ]; then
-  logline "not-sent" "controller blocked: herdr agent prompt $pane refused agent_blocked on all $attempts attempts: $alert"
-else
-  logline "not-sent" "herdr agent prompt $pane failed: $(tr '\n' ' ' <<<"$out")"
-fi
+worker_alert_prompt_pane "$pane" "$alert" "$deadline"
+logline "$prompt_status" "$prompt_msg"
 exit 0

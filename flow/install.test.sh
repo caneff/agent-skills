@@ -136,6 +136,11 @@ if [ -L "$tmp/home/.claude/hooks/worker-stop-alert.sh" ]; then
 else
   echo "FAIL claude/hooks/worker-stop-alert.sh not linked under the scratch HOME"; fails=1
 fi
+if [ -L "$tmp/home/.claude/hooks/worker-send-alert.sh" ]; then
+  echo "PASS the worker-send alert hook linked under the scratch HOME"
+else
+  echo "FAIL claude/hooks/worker-send-alert.sh not linked under the scratch HOME"; fails=1
+fi
 # worker-stop-alert.sh sources this file by BASH_SOURCE-relative path, which
 # resolves against the installed symlink's own directory (~/.claude/hooks),
 # not the repo — so it must be linked there too, or the hook silently fails

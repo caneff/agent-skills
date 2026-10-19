@@ -147,8 +147,13 @@ in `~/.claude/sessions`) or a session name a live session bears now, and
 prints the controller's live session name either way; that output is the
 `to`. Never save the printed name for later, and never send
 to the brief's literal: it may be a herdr agent name, which `SendMessage`
-rejects. Non-zero exit means the name resolves to nothing live: retry once, then
-stop and say so in your pane, sending nothing to a guessed name. A controller announcing a
+rejects. Non-zero exit means the name resolves to nothing live, or to a
+session whose messaging socket is missing, refuses a connection or does not
+accept one in 3 s (the error names the path): retry once, then stop and say
+so in your pane, sending nothing to a guessed name. A send to the controller
+that comes back `success: false` is also typed into its pane by
+`worker-send-alert.sh` (`flow/claude/OPERATIONS.md`); that does not replace
+your own stop. A controller announcing a
 new name (`Your controller is now <name>`) replaces the brief's. Send it every
 question and your finish notice with `SendMessage` to that resolved name —
 never to Chris. An ordinary

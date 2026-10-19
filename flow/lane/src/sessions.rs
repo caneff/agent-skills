@@ -15,6 +15,9 @@ pub struct LiveSession {
     pub name: String,
     /// The session's working directory, empty when the file has none.
     pub cwd: String,
+    /// The `messagingSocketPath` cross-session messages arrive on, empty when
+    /// the file has none (or `null`).
+    pub socket: String,
 }
 
 /// Whether `path` is `root` or inside it.
@@ -64,7 +67,8 @@ pub fn live_all(home: &Path) -> Vec<LiveSession> {
         if !pid.is_empty() && alive {
             let session_id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
             let name = v.get("name").and_then(|s| s.as_str()).unwrap_or("").to_string();
-            live.push(LiveSession { pid, session_id, name, cwd });
+            let socket = v.get("messagingSocketPath").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            live.push(LiveSession { pid, session_id, name, cwd, socket });
         }
     }
     live
@@ -137,9 +141,9 @@ pub fn find_live_by_name(home: &Path, name: &str) -> Option<LiveSession> {
     live_all(home).into_iter().find(|s| s.name == name)
 }
 
-/// The current name of the live session `id`, the second hop of a herdr
-/// agent name's resolution. `None` when no live record carries that id or
-/// the record has no name. Deliberately not built on
+/// The live, named registry session carrying Claude sessionId `id`, the second
+/// hop of a herdr agent name's resolution. `None` when no live record carries
+/// that id or the record has no name. Deliberately not built on
 /// `find_live_by_session_id` (#964 correctness C7): that returns the first
 /// live record matching `id` regardless of whether it has a name, so if two
 /// live records ever shared a sessionId — a race between an old record not
@@ -147,11 +151,16 @@ pub fn find_live_by_name(home: &Path, name: &str) -> Option<LiveSession> {
 /// on an unnamed first match while a later match with the same id has a real
 /// name. This scans for the first record that is both a match and named, the
 /// same single pass the pre-#964 version made.
-pub fn name_of_session(home: &Path, id: &str) -> Option<String> {
+pub fn named_session_of(home: &Path, id: &str) -> Option<LiveSession> {
     if id.is_empty() {
         return None;
     }
-    live_all(home).into_iter().find(|s| s.session_id == id && !s.name.is_empty()).map(|s| s.name)
+    live_all(home).into_iter().find(|s| s.session_id == id && !s.name.is_empty())
+}
+
+/// The current name of the live session `id` (`named_session_of`'s name).
+pub fn name_of_session(home: &Path, id: &str) -> Option<String> {
+    named_session_of(home, id).map(|s| s.name)
 }
 
 /// Whether a live session is currently named `name`.
