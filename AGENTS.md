@@ -56,6 +56,7 @@ Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agen
 ## End-to-end seam
 
 - **Seam**: `bash tests/all.sh`
+- **Narrowed**: `bash tests/all.sh --changed origin/main` — the suites under every top-level directory the diff touches, everything under `tests/`, the cross-directory edges `tests/suite-edges.py` finds, and every suite marked `# all.sh: repo-wide`; `tests/all.sh`'s header states when it widens to the full seam
 - **Blind to**: anything a human reads rather than a test asserts: whether a model follows a skill's prose, whether a present `SKILL.md` instruction is also unambiguous, and the harness behaviours around them (a hook denying a step, a worker spinning on no-op tool calls, a pane closing before a question is answered, #925)
 
 The gate runs the repo's shell and Python suites. The grammar and its reader: `implement-spec/references/closing-ticket.md`.

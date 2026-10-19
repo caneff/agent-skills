@@ -23,7 +23,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 # fixture test.
 stub="$tmp/stub"
 mkdir -p "$stub"
-for x in reg.exe powershell.exe; do
+for x in reg.exe powershell.exe systemctl; do
   cat > "$stub/$x" <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -171,6 +171,40 @@ for r in instruction-files skill-files research-notes; do
     echo "FAIL claude/rules/$r.md not linked under the scratch HOME"; fails=1
   fi
 done
+
+# The nightly backstop (#1595): a user service and a Persistent timer, written
+# under the scratch HOME, in the shape of second-brain-v2's digest.timer. The
+# systemctl stub above keeps the install from touching the live user manager.
+unit_dir="$tmp/home/.config/systemd/user"
+if grep -q '^ExecStart=%h/.local/bin/backstop-nightly$' "$unit_dir/backstop.service" 2>/dev/null \
+   && grep -q '^Type=oneshot$' "$unit_dir/backstop.service" \
+   && [ "$(readlink "$tmp/home/.local/bin/backstop-nightly")" = "$repo/flow/bin/backstop-nightly" ]; then
+  echo "PASS backstop.service runs the linked backstop-nightly"
+else
+  echo "FAIL backstop.service missing or wrong under the scratch HOME: $(cat "$unit_dir/backstop.service" 2>&1)"; fails=1
+fi
+if grep -Eq '^OnCalendar=\*-\*-\* 0[0-5]:[0-9:]+$' "$unit_dir/backstop.timer" 2>/dev/null \
+   && grep -q '^Persistent=true$' "$unit_dir/backstop.timer" \
+   && grep -q '^WantedBy=timers.target$' "$unit_dir/backstop.timer"; then
+  echo "PASS backstop.timer is persistent and fires after midnight"
+else
+  echo "FAIL backstop.timer missing or wrong under the scratch HOME: $(cat "$unit_dir/backstop.timer" 2>&1)"; fails=1
+fi
+
+# The seams of the listed repos need cargo, node, npm, uv, gh, git and python3;
+# the unit's PATH is replaced, so each one's directory must be on it (on this
+# machine cargo is in ~/.cargo/bin, node/npm/uv/gh in ~/.local/bin, git and
+# python3 in /usr/bin).
+unit_path=$(sed -n 's/^Environment=PATH=//p' "$unit_dir/backstop.service" 2>/dev/null)
+missing=""
+for d in '%h/.cargo/bin' '%h/.local/bin' /usr/bin; do
+  case ":$unit_path:" in *":$d:"*) ;; *) missing="$missing $d" ;; esac
+done
+if [ -n "$unit_path" ] && [ -z "$missing" ]; then
+  echo "PASS backstop.service PATH carries the cargo, ~/.local/bin and /usr/bin directories"
+else
+  echo "FAIL backstop.service PATH '$unit_path' lacks:$missing"; fails=1
+fi
 
 # herdr-toast-install (#1016) is routed from install.sh, but this scratch repo
 # sits under /tmp, so the toast installer refuses (by design) — the refusal
@@ -339,6 +373,29 @@ if [ "$rc" -eq 0 ] && printf '%s' "$link_out" | grep -q '^refusing: ' && printf 
   echo "PASS a second real file is refused, not moved over the first backup, and the install carries on"
 else
   echo "FAIL the existing .pre-flow backup was clobbered, the second file lost, or the refusal was fatal (rc=$rc): $link_out"; fails=1
+fi
+
+# A failed `systemctl --user enable` fails the install and says why (a timer
+# that is not enabled never fires). Everything else is made to succeed, so the
+# non-zero exit can only come from the unit step; a working systemctl is the
+# control.
+sysd="$tmp/sysd"
+scratch_repo "$sysd"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$sysd/flow/lane-install.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$sysd/flow/install-check.sh"
+out=$(HOME="$tmp/sysd-ok-home" bash "$sysd/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "FAIL control install with a working systemctl exited $rc: $out"; fails=1
+fi
+failbin="$tmp/failbin"; mkdir -p "$failbin"
+printf '#!/usr/bin/env bash\n[ "$2" = enable ] && exit 1\nexit 0\n' > "$failbin/systemctl"
+chmod +x "$failbin/systemctl"
+out=$(PATH="$failbin:$PATH" HOME="$tmp/sysd-home" bash "$sysd/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "could not enable backstop.timer" \
+   && [ -L "$tmp/sysd-home/.local/bin/job-run" ]; then
+  echo "PASS a failed systemctl enable fails the install and names the timer"
+else
+  echo "FAIL a failed systemctl enable did not fail the install (rc=$rc): $out"; fails=1
 fi
 
 [ "$fails" = 0 ] && echo "ALL PASS"

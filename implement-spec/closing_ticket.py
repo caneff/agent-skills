@@ -248,8 +248,12 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
             f"spec #{spec} and every slice, bodies and comments. The findings "
             f"sidecars, `dispositions-{spec}.jsonl` and the review-ledger "
             f"rows are keyed on #{spec}. One fix worker disposes of every "
-            "finding (steps 2–3 of `implement/SKILL.md` § Review) and runs the "
-            f"full seam; `fix-check.sh {spec} origin/{branch}` then exits 0.",
+            "finding (steps 2–3 of `implement/SKILL.md` § Review) and runs "
+            "what `python3 ~/.agents/skills/implement/selector_check.py "
+            f"command --root .` prints on `{branch}` with `origin/{default}` "
+            "merged in again, the repo's per-change command; the nightly "
+            "backstop is the only full run. "
+            f"`fix-check.sh {spec} origin/{branch}` then exits 0.",
             ""]
     lines += ["### Acceptance criteria", "",
               "- [ ] One end-to-end test drives the whole spec's acceptance "

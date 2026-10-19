@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# backstop-nightly [<list-file>] — run the backstop (backstop/backstop.py) once
+# per repo named in the list file (#1595); the systemd backstop.service runs it.
+# The list defaults to flow/backstop-repos. A missing, unreadable or empty list
+# is an error, never zero repos run: a night with nothing checked must not look
+# like a green one. Every repo runs even when an earlier one fails; the exit
+# status is non-zero if any run, or the list, failed.
+# A list line is `<checkout>` or `<checkout> workflow=<file>`; the second form
+# passes `--workflow <file>` to the backstop, which then reads that repo's
+# full-gate result from CI instead of running its seam locally.
+# backstop.py exits 0 green, 1 red, 2 inconclusive, 3 a red or inconclusive
+# night whose ticket or notification failed; it has notified for 1-3 itself.
+# An unreadable list, or any other exit (a crash), is notified here.
+# Env: BACKSTOP_JOBS (the seam's TESTS_JOBS, default 4), BACKSTOP_PY and
+# BACKSTOP_NOTIFY (test seams; the notifier defaults to flow/bin/notify-send).
+set -uo pipefail
+real="$(readlink -f "${BASH_SOURCE[0]}")"
+flow="$(cd "$(dirname "$real")/.." && pwd)"
+list="${1:-$flow/backstop-repos}"
+py="${BACKSTOP_PY:-$flow/../backstop/backstop.py}"
+jobs="${BACKSTOP_JOBS:-4}"
+notifier="${BACKSTOP_NOTIFY:-$flow/bin/notify-send}"
+
+# die <message>: say it on stderr, tell the human, exit 2 (nothing was checked).
+die() {
+  echo "backstop-nightly: $1" >&2
+  "$notifier" "backstop: the nightly run could not run" "$1" || echo "backstop-nightly: the notifier failed" >&2
+  exit 2
+}
+
+[ -f "$list" ] && [ -r "$list" ] || die "cannot read the repo list $list"
+repos=()
+wfs=()
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%%#*}"
+  line="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  [ -n "$line" ] || continue
+  wf=""
+  case "$line" in *[[:space:]]workflow=*) wf="${line##*[[:space:]]workflow=}"; line="${line%%[[:space:]]workflow=*}"
+    line="$(printf '%s' "$line" | sed 's/[[:space:]]*$//')" ;; esac
+  case "$line" in "~/"*) line="$HOME/${line#\~/}" ;; esac
+  repos+=("$line"); wfs+=("$wf")
+done < "$list" || die "reading $list failed"
+[ "${#repos[@]}" -gt 0 ] || die "$list names no repo"
+
+status=0
+for i in "${!repos[@]}"; do
+  repo="${repos[$i]}"
+  args=(--repo "$repo" --jobs "$jobs")
+  [ -z "${wfs[$i]}" ] || args+=(--workflow "${wfs[$i]}")
+  python3 "$py" "${args[@]}"; rc=$?
+  case "$rc" in
+    0) ;;
+    1|2|3) echo "backstop-nightly: $repo exited $rc" >&2; status=1 ;;
+    *) echo "backstop-nightly: $repo crashed (exit $rc)" >&2; status=1
+       "$notifier" "backstop: $repo crashed" "backstop.py exited $rc; the night was not checked" || echo "backstop-nightly: the notifier failed" >&2 ;;
+  esac
+done
+exit "$status"

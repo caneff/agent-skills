@@ -993,3 +993,238 @@ def test_a_failed_prepass_is_named_and_the_run_orders_by_recency_alone(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "mutation prepass gave no ranking (exit 1)" in r.stderr, r.stderr
     assert "mutation-target: m.py" in r.stdout
+
+
+def test_mutation_estimate_names_count_jobs_and_worst_case():
+    """#1588: the whole-repo run prints the module count and a cost estimate
+    before it starts. A module is at most two bounded commands (mutmut run and
+    results) and `jobs` modules overlap."""
+    line = driver.mutation_cost_estimate(4, jobs=2, timeout_s=3600)
+    assert "4 modules" in line and "2 at a time" in line and "up to 4h" in line, line
+    assert "1 module to" in driver.mutation_cost_estimate(1, timeout_s=3600)
+    assert "up to 0.5h" in driver.mutation_cost_estimate(1, timeout_s=900.0)
+
+
+def test_mutation_estimate_reads_a_decimal_timeout_like_audit_py(monkeypatch):
+    monkeypatch.setenv("MUTATION_AUDIT_TIMEOUT", "90.5")
+    assert "90.5s per module" in driver.mutation_cost_estimate(1)
+
+
+def _repo_with_two_tested_modules(path):
+    _init_git_repo(path)
+    open(os.path.join(path, "pyproject.toml"), "w").write("[project]\nname = 'x'\n")
+    for stem in ("alpha", "beta"):
+        open(os.path.join(path, f"{stem}.py"), "w").write("def f():\n    return 1\n")
+        open(os.path.join(path, f"{stem}_test.py"), "w").write(f"import {stem}\n\ndef test_f():\n    assert {stem}.f() == 1\n")
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", path, "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", path, "commit", "-q", "-m", "mods"], check=True, env=env)
+
+
+def _mutation_all(repo, tmp, out, *flags, **extra_env):
+    here = os.path.dirname(os.path.abspath(__file__))
+    return subprocess.run(
+        [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation-all", "--out", out, *flags],
+        capture_output=True, text=True, env=_fake_tools_env(tmp, **extra_env),
+    )
+
+
+def _recorded_mutation_modules(repo, tmp):
+    os.environ["XDG_CACHE_HOME"], old = tmp, os.environ.get("XDG_CACHE_HOME")
+    try:
+        return set(driver.mutation_runs(driver.load_record(driver._record_file(repo))))
+    finally:
+        if old is None:
+            del os.environ["XDG_CACHE_HOME"]
+        else:
+            os.environ["XDG_CACHE_HOME"] = old
+
+
+def test_mutation_all_runs_every_candidate_past_the_cap_and_prints_the_estimate_once(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"), MUTATION_MAX="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "2 modules" in r.stdout and "skipped" not in r.stdout, r.stdout
+    assert "[mutation:alpha.py] done" in r.stdout and "[mutation:beta.py] done" in r.stdout, r.stdout
+    # The repo's own untested a.py makes the no-test filter fire: still one line.
+    assert r.stdout.count("mutation-all:") == 1, r.stdout
+    assert r.stdout.index("mutation-all:") < r.stdout.index("creating worktree"), r.stdout
+    assert _recorded_mutation_modules(repo, tmp) == {"alpha.py", "beta.py"}
+
+
+def test_mutation_all_skips_the_model_prepass_and_runs_in_recency_order(tmp_path):
+    """A prepass ranking beta first would put it first among the never-run
+    modules; whole-repo mode has no prepass, so alpha leads."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"), AUDITS_NO_SYNTH="0", FAKE_CLAUDE_PREPASS="beta.py\nalpha.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.index("mutation-target: alpha.py") < r.stdout.index("mutation-target: beta.py"), r.stdout
+
+
+def test_mutation_all_lists_an_inconclusive_module_in_the_report_never_as_clean(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    out = os.path.join(tmp, "out")
+    why = "mutmut run failed (exit 1)"
+    r = _mutation_all(repo, tmp, out, FAKE_CLAUDE_INCONCLUSIVE=why)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"INCONCLUSIVE: {why}" in r.stdout, r.stdout
+    assert _recorded_mutation_modules(repo, tmp) == set(), "an INCONCLUSIVE module measured nothing and is not recorded"
+    idx = _run_driver("--index", "--out", out)
+    assert idx.returncode == 0, idx.stdout + idx.stderr
+    sub = open(os.path.join(out, "collection", "mutation", "index.html")).read()
+    for module in ("alpha.py", "beta.py"):
+        assert f"<td>{module}</td><td>INCONCLUSIVE: {why}</td><td>—</td><td>—</td>" in sub, sub
+    assert "2 of 2 modules INCONCLUSIVE" in sub, sub
+    top = open(os.path.join(out, "collection", "index.html")).read()
+    assert "0 modules measured" in top and "2 INCONCLUSIVE" in top, top
+
+
+def test_mutation_all_prompt_asks_for_the_findings_log_and_the_inconclusive_key(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = open(os.path.join(tmp, "out", "logs", "mutation-alpha.py.log")).read()
+    assert '"inconclusive" key' in log and "findings.jsonl" in log and "still write the report" in log, log
+
+
+def test_sweep_prompt_carries_the_shared_no_open_instruction():
+    assert driver.NO_OPEN_INSTRUCTION in driver.audit_prompt("dead-code", "/some/repo")
+
+
+def test_mutation_module_prompt_forbids_opening_its_report(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = open(os.path.join(tmp, "out", "logs", "mutation-alpha.py.log")).read()
+    assert driver.NO_OPEN_INSTRUCTION in log, log
+
+
+def _fake_openers(tmp):
+    """`xdg-open` and `open` stubs in `tmp` (first on the fake-tools PATH) that
+    append their argument to `opened.txt`; returns its path."""
+    opened = os.path.join(tmp, "opened.txt")
+    for opener in ("xdg-open", "open"):
+        with open(os.path.join(tmp, opener), "w") as f:
+            f.write(f'#!/bin/sh\necho "$1" >> {opened}\n')
+        os.chmod(os.path.join(tmp, opener), 0o755)
+    return opened
+
+
+def _pages_opened(opened):
+    return open(opened).read().split() if os.path.exists(opened) else []
+
+
+def test_mutation_run_opens_one_page_and_it_is_the_index(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    opened = _fake_openers(tmp)
+    out = os.path.join(tmp, "out")
+    r = _mutation_all(repo, tmp, out, AUDITS_NO_OPEN="0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    index = os.path.join(out, "collection", "mutation", "index.html")
+    assert _pages_opened(opened) == [index]
+    assert f"index: {index}" in r.stdout, r.stdout
+
+
+def test_mutation_run_with_no_module_to_mutate_still_opens_the_index(tmp_path):
+    """Every target filtered out as testless: no module runs, but the no-tests
+    page exists and is the one page opened."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_env_manifest(repo)
+    open(os.path.join(repo, "solver.py"), "w").write("def f():\n    return 1\n")
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", repo, "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", repo, "commit", "-q", "-m", "solver"], check=True, env=env)
+    opened = _fake_openers(tmp)
+    out = os.path.join(tmp, "out")
+    r = _mutation_with_fake_claude(repo, tmp, out, AUDITS_NO_OPEN="0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "[mutation:solver.py] done" not in r.stdout, r.stdout
+    assert _pages_opened(opened) == [os.path.join(out, "collection", "mutation", "index.html")], r.stdout
+
+
+def test_mutation_run_does_not_rebuild_the_top_index_of_a_sweep_in_out(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    out = os.path.join(tmp, "out")
+    top = os.path.join(out, "collection", "index.html")
+    os.makedirs(os.path.dirname(top))
+    open(top, "w").write("sweep index")
+    r = _mutation_all(repo, tmp, out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert open(top).read() == "sweep index"
+
+
+def test_mutation_module_answering_neither_findings_nor_inconclusive_is_a_failure(tmp_path):
+    """A manifest with no `inconclusive` key and no findings.jsonl is no answer:
+    a failure line, never a clean module that went unrecorded."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"), FAKE_CLAUDE_NO_FINDINGS_LOG="1")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "FAILED: manifest has no `inconclusive` key and the report has no findings.jsonl" in r.stdout, r.stdout
+    assert _recorded_mutation_modules(repo, tmp) == set()
+
+
+def test_mutation_all_stale_inconclusive_from_an_earlier_run_does_not_label_a_failure(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    out = os.path.join(tmp, "out")
+    assert _mutation_all(repo, tmp, out, FAKE_CLAUDE_INCONCLUSIVE="OLD REASON").returncode == 0
+    again = _mutation_all(repo, tmp, out, FAKE_CLAUDE_NOOP="1")
+    assert again.returncode != 0, again.stdout + again.stderr
+    _run_driver("--index", "--out", out)
+    sub = open(os.path.join(out, "collection", "mutation", "index.html")).read()
+    assert "OLD REASON" not in sub, sub
+
+
+def test_mutation_modules_run_at_once_up_to_mutation_jobs(tmp_path):
+    """#1588: two modules in flight together under MUTATION_JOBS=2, one at a
+    time under MUTATION_JOBS=1. The fake audit waits for another to start."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    for jobs, overlapped in (("2", True), ("1", False)):
+        rv = os.path.join(tmp, f"rv{jobs}")
+        os.mkdir(rv)
+        r = _mutation_all(repo, tmp, os.path.join(tmp, f"out{jobs}"), MUTATION_JOBS=jobs, FAKE_CLAUDE_RENDEZVOUS=rv)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert os.path.exists(os.path.join(rv, "overlap")) is overlapped, (jobs, r.stdout)
+        assert f"{jobs} at a time" in r.stdout, r.stdout
+        for module in ("alpha.py", "beta.py"):
+            assert f"[mutation:{module}] done" in r.stdout
+
+
+def test_parallel_modules_keep_one_log_each_and_a_failed_one_is_listed(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    r = _mutation_all(repo, tmp, os.path.join(tmp, "out"), MUTATION_JOBS="2", FAKE_CLAUDE_EXIT_MUTATION="3")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "FAILED modules: alpha.py, beta.py" in r.stderr, r.stderr
+    for module in ("alpha.py", "beta.py"):
+        log = open(os.path.join(tmp, "out", "logs", f"mutation-{module}.log")).read()
+        assert f"/mutation-audit {module}" in log and f"/mutation-audit {'beta.py' if module == 'alpha.py' else 'alpha.py'}" not in log
+    assert _recorded_mutation_modules(repo, tmp) == set()
+
+
+def test_mutation_jobs_must_be_a_positive_integer(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _repo_with_two_tested_modules(repo)
+    for bad in ("0", "many"):
+        r = _mutation_all(repo, tmp, os.path.join(tmp, "out"), MUTATION_JOBS=bad)
+        assert r.returncode == 2 and "MUTATION_JOBS must be a positive integer" in r.stderr, r.stdout + r.stderr
+        assert "creating worktree" not in r.stdout
+
+
+def test_mutation_all_refuses_a_module_list(tmp_path):
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    r = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), repo, "--mutation-all", "--mutation", "a.py"],
+        capture_output=True, text=True, env=_fake_tools_env(tmp),
+    )
+    assert r.returncode != 0 and "not allowed with" in r.stderr, r.stdout + r.stderr
+    assert os.listdir(os.path.join(tmp, "all-audits")) == [] if os.path.isdir(os.path.join(tmp, "all-audits")) else True
