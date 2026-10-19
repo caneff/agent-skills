@@ -2,25 +2,26 @@
 # PostToolUse hook on SendMessage: tell the controller's pane at once when a
 # worker's send to its controller failed (#1540). Two episodes in one week had
 # a worker whose sends all failed (a Claude Code upgrade moved the socket
-# directory) while nothing said so until the worker stopped;
-# worker-stop-alert.sh fires at the stop, this fires at the failed send.
+# directory) while nothing said so until the worker stopped. The Stop hook
+# worker-stop-alert.sh is that stop-time alert (its entry is unregistered by
+# design, flow/claude/OPERATIONS.md); this one fires at the failed send.
 #
-# Contract: read the PostToolUse event JSON on stdin (a live firing, 2026-10-16:
-# the event carries `tool_name`, `tool_use_id`, `tool_input.to` and
-# `tool_response`, whose `success` is false on a send that did not deliver;
-# PostToolUseFailure did not fire for it). The session is a worker when its
-# transcript opens with an `/implement` or `/implement-spec` brief carrying
-# `--controller "<name>"`. The send is to the controller when `to` is the
-# brief's literal, a resolved live session name or a resolved `uds:` address —
-# the same match set as the stop hook, from the shared lib. A response whose
-# `success` is not true is a failed send: one line goes into the controller's
-# herdr pane with `herdr agent prompt`, a hook command the auto-mode
-# classifier never sees. A controller named `drain` is no session, so no
-# alert. One alert per send: every attempt is logged to
-# ~/.claude/worker-send-alerts.log keyed by `tool_use_id`, and a logged send
-# never alerts again. An event with no `tool_response` is logged, never read as
-# delivered or as failed. Always exit 0 — a hook failure must never block the
-# worker's own tool call.
+# Contract: read the PostToolUse event JSON on stdin. Observed live
+# 2026-10-16 (docs/research/2026-10-16-send-time-alert-proofs.md): the event
+# carries `tool_name`, `tool_use_id`, `tool_input.to` and `tool_response`,
+# whose `success` is false on a send that did not deliver. The session is a
+# worker when its transcript opens with an `/implement` or `/implement-spec`
+# brief carrying `--controller "<name>"`; a later `Your controller is now
+# <name>` peer message replaces it. The send is to the controller when
+# `worker_alert_is_controller_target` says so. A response whose `success` is
+# not true is a failed send: one line goes into the controller's herdr pane
+# with `herdr agent prompt`, a hook command the auto-mode classifier never
+# sees. A controller named `drain` is no session, so no alert. One alert per
+# send: every attempt is logged to ~/.claude/worker-send-alerts.log keyed by
+# `tool_use_id` (an event without one is keyed by its own content), and a
+# logged send never alerts again. An event with no `tool_response` is logged,
+# never read as delivered or as failed. Always exit 0 — a hook failure must
+# never block the worker's own tool call.
 
 set -u
 
@@ -35,7 +36,8 @@ source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
   lib_missing "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller"
 for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
           worker_alert_worker_agent_name worker_alert_controller_pane \
-          worker_alert_resolve_controller worker_alert_prompt_pane; do
+          worker_alert_resolve_controller worker_alert_prompt_pane \
+          worker_alert_current_controller worker_alert_is_controller_target; do
   declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
 done
 
@@ -46,20 +48,23 @@ transcript="$(jq -r '.transcript_path // ""' <<<"$event" 2>/dev/null)"
 [ -r "$transcript" ] || exit 0
 
 IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
-[ -n "${controller:-}" ] && [ "$controller" != drain ] || exit 0
+[ -n "${controller:-}" ] || exit 0
+controller="$(worker_alert_current_controller "$transcript" "$controller")"
+[ "$controller" != drain ] || exit 0
 
 to="$(jq -r '.tool_input.to // "" | strings' <<<"$event" 2>/dev/null)"
 [ -n "$to" ] || exit 0
 worker_alert_resolve_controller "$controller"
-to_controller=""
-for nm in "$controller" ${names[@]+"${names[@]}"} ${sockets[@]+"${sockets[@]}"}; do
-  [ "$to" = "$nm" ] || [[ "$to" == "$nm ["* ]] && to_controller=yes
-done
-[ -n "$to_controller" ] || exit 0
+worker_alert_is_controller_target "$to" "$controller" || exit 0
 
-tool_use_id="$(jq -r '.tool_use_id // ""' <<<"$event" 2>/dev/null)"
-key="${tool_use_id:-$(jq -r '.session_id // ""' <<<"$event" 2>/dev/null)}"
+# One key per send, never empty: `tool_use_id`, else a digest of the event, so
+# an event without an id is neither silenced by an earlier alert nor matched
+# by the empty pattern.
+key="$(jq -r '.tool_use_id // empty' <<<"$event" 2>/dev/null)"
+[ -n "$key" ] || key="event-$(sha1sum <<<"$event" | cut -c1-16)"
 logline() { worker_alert_logline "$log" "$key" "$1" "$2"; }
+# One alert per send: a send already in the log never alerts again.
+grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
 # The answer, three ways: delivered, failed, or absent. `success` must be
 # exactly true to count as delivered; a bare error string is a failure too.
@@ -69,11 +74,8 @@ verdict="$(jq -r 'if (has("tool_response") | not) or .tool_response == null then
 case "$verdict" in
   delivered) exit 0 ;;
   failed) ;;
-  *) grep -qF -- "$key"$'\t' "$log" 2>/dev/null || logline "not-sent" "no tool_response in the event for the send to $to; nothing alerted"; exit 0 ;;
+  *) logline "not-sent" "no tool_response in the event for the send to $to; nothing alerted"; exit 0 ;;
 esac
-
-# One alert per send: a send already in the log never alerts again.
-grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
 reason="$(jq -r '.tool_response | if type == "object" then (.message // "") else tostring end | split("\n")[0]' <<<"$event" 2>/dev/null)"
 deadline=$((SECONDS + 10))

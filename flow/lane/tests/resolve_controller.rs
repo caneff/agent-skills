@@ -142,7 +142,10 @@ fn a_live_record_with_no_socket_path_is_unreachable_and_says_so() {
     let out = resolve(&f, "skills-ctl");
     assert_eq!(out.status.code(), Some(1), "{}", out_text(&out));
     assert!(stdout(&out).is_empty(), "{}", out_text(&out));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("messagingSocketPath"), "{}", out_text(&out));
+    let err = String::from_utf8_lossy(&out.stderr);
+    // The ruling asks for the path: with no socket key, the record file is the path there is.
+    let record = format!("{}.json", std::process::id());
+    assert!(err.contains("messagingSocketPath") && err.contains(&record), "{err}");
 }
 
 #[test]

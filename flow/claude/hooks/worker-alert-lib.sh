@@ -153,3 +153,32 @@ worker_alert_prompt_pane() { # <pane> <alert> <deadline in $SECONDS> -> sets pro
   fi
   return 1
 }
+
+# The controller a worker reports to now: the name in the latest `Your
+# controller is now <name>` peer message (what `controller-adopt` tells a
+# worker when its dispatcher's process exited, #1098), else the brief's
+# literal. Only a peer-origin entry counts, so text a ticket or a web page
+# carried into the transcript cannot name a controller.
+worker_alert_current_controller() { # <transcript> <brief controller> -> name on stdout
+  local adopted
+  adopted="$(jq -nc '[inputs | fromjson? | objects]' -R "$1" 2>/dev/null | jq -r '
+    [.[] | select(.type == "user" and .origin.kind == "peer") | .message.content
+         | if type == "string" then . else ([.[]? | .text? // empty] | join("\n")) end
+         | capture("Your controller is now (?<c>[A-Za-z0-9_-]+)") | .c]
+    | last // empty' 2>/dev/null)"
+  printf '%s\n' "${adopted:-$2}"
+}
+
+# Whether a SendMessage `to` addresses the controller: the brief's literal
+# (`$2`), a name or a `uds:` address `worker_alert_resolve_controller` left in
+# `names` and `sockets`, each optionally followed by SendMessage's ` [ref]`.
+# worker-stop-alert.sh reads the same rule in jq over the transcript, where
+# this function cannot be called; a change to one is a change to both.
+worker_alert_is_controller_target() { # <to> <brief controller> -> 0 when it is
+  local to="$1" nm
+  for nm in "$2" ${names[@]+"${names[@]}"} ${sockets[@]+"${sockets[@]}"}; do
+    [ "$to" = "$nm" ] && return 0
+    [[ "$to" == "$nm ["* ]] && return 0
+  done
+  return 1
+}

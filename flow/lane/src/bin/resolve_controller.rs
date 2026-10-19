@@ -6,10 +6,11 @@
 //! that is no herdr agent is accepted only if a live session bears it now.
 //! Nothing resolves -> exit 1 with the reason, never a guess. A name that
 //! resolves is then connected to on the live record's `messagingSocketPath`
-//! (nothing sent): a missing path or a refused connection is exit 1, naming
-//! the path and the error (#1540).
+//! (nothing sent): a missing path, a refused connection or one not accepted
+//! within 3 s is exit 1, naming the path and the error (#1540).
 
 use lane::herdr::HERDR_QUERY_TIMEOUT;
+use lane::sessions::LiveSession;
 use lane::{herdr, runner::quiet_stdout_timeout, sessions};
 use std::path::Path;
 use std::os::unix::net::UnixStream;
@@ -26,16 +27,18 @@ fn fail(msg: &str) -> ExitCode {
     ExitCode::from(1)
 }
 
-/// Opens a connection to the live session `name`'s `messagingSocketPath` and
-/// closes it, sending nothing (#1540): the test runs from the sender's side,
-/// where a moved socket directory or a stale socket file shows up as an
-/// error. `Err` is the sentence naming the path and why it cannot be reached.
-fn reachable(home: &Path, name: &str) -> Result<(), String> {
-    let session = sessions::find_live_by_name(home, name).ok_or_else(|| format!("{name} has no live session record to read a socket from"))?;
+/// Opens a connection to `session`'s `messagingSocketPath` and closes it,
+/// sending nothing (#1540): the test runs from the sender's side, where a
+/// moved socket directory or a stale socket file shows up as an error. `Err`
+/// is the sentence naming the path and why it cannot be reached; a record
+/// with no socket key names its own file, the only path there is.
+fn reachable(home: &Path, session: &LiveSession) -> Result<(), String> {
+    let name = &session.name;
     if session.socket.is_empty() {
-        return Err(format!("{name}'s session record has no messagingSocketPath, so nothing can deliver to it"));
+        let record = home.join(".claude/sessions").join(format!("{}.json", session.pid));
+        return Err(format!("{name}'s session record {} has no messagingSocketPath, so nothing can deliver to it", record.display()));
     }
-    let path = session.socket;
+    let path = session.socket.clone();
     let (tx, rx) = mpsc::channel();
     let target = path.clone();
     std::thread::spawn(move || {
@@ -48,11 +51,11 @@ fn reachable(home: &Path, name: &str) -> Result<(), String> {
     }
 }
 
-/// Prints `name` when its socket is reachable, else exits 1 with why.
-fn print_if_reachable(home: &Path, name: &str) -> ExitCode {
-    match reachable(home, name) {
+/// Prints the session's name when its socket is reachable, else exits 1 with why.
+fn print_if_reachable(home: &Path, session: &LiveSession) -> ExitCode {
+    match reachable(home, session) {
         Ok(()) => {
-            println!("{name}");
+            println!("{}", session.name);
             ExitCode::SUCCESS
         }
         Err(why) => fail(&why),
@@ -68,7 +71,8 @@ fn main() -> ExitCode {
              either a herdr agent name (herdr agent list -> agent_session.value ->\n\
              ~/.claude/sessions/*.json name) or a session name a live session bears now.\n\
              Exit 1, naming the path and the error, when that session's messagingSocketPath\n\
-             is missing or refuses a connection (the connection sends nothing)."
+             is missing, refuses a connection or does not accept one within 3 s (the\n\
+             connection sends nothing)."
         );
         return ExitCode::SUCCESS;
     }
@@ -86,13 +90,13 @@ fn main() -> ExitCode {
         None => return fail("herdr agent list gave output of an unexpected shape"),
     };
     if let Some(agent) = agents.iter().find(|a| a.given_name() == Some(target.as_str())) {
-        return match sessions::name_of_session(home, agent.session()) {
-            Some(name) => print_if_reachable(home, &name),
+        return match sessions::named_session_of(home, agent.session()) {
+            Some(session) => print_if_reachable(home, &session),
             None => fail(&format!("herdr agent {target} runs session {:?}, which no live session record names", agent.session())),
         };
     }
-    if sessions::is_live_name(home, target) {
-        return print_if_reachable(home, target);
+    if let Some(session) = sessions::find_live_by_name(home, target) {
+        return print_if_reachable(home, &session);
     }
     fail(&format!("{target} is neither a herdr agent name nor the name of a live session"))
 }

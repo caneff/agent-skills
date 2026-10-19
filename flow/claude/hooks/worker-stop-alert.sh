@@ -57,7 +57,8 @@ source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
 # with `lib_missing`, which needs none of them (Codex gate pass on PR #1066).
 for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
           worker_alert_worker_agent_name worker_alert_controller_pane \
-          worker_alert_resolve_controller worker_alert_prompt_pane; do
+          worker_alert_resolve_controller worker_alert_prompt_pane \
+          worker_alert_current_controller; do
   declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
 done
 
@@ -83,6 +84,7 @@ IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 # own literal too: nothing here requires a worker to route through
 # `resolve-controller` first. (`worker_alert_resolve_controller`'s comment
 # holds the hops and why a nameless record counts.)
+controller="$(worker_alert_current_controller "$transcript" "$controller")"
 worker_alert_resolve_controller "$controller"
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,

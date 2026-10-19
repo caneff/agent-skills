@@ -233,8 +233,7 @@ defines them.
   and fired about a dozen times in one burn without once being right. The script
   stays installed, and re-adding its `Stop` entry restores it. Its
   send-time sibling `worker-send-alert.sh` (`PostToolUse` on `SendMessage`,
-  #1540) is registered: it alerts the controller's pane only for a send to the
-  controller that came back `success: false`, once per send.
+  #1540) is registered; its header states when it fires.
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
   killed. `job-run` records the session that started it, and the `job-wake`
