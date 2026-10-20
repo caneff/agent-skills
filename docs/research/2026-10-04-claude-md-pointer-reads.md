@@ -95,3 +95,23 @@ still exist.
 `# pointer-reads-recount-1413`. Fourteen days after #1413 closes it appends
 a dated re-count of the 14 days after closing to this note, pushes it, and
 removes its own line.
+
+## Re-count 2026-10-18: 14 days after #1413 closed
+
+Same space and regexes as above, over the 14 days after #1413 closed at 2026-10-04T20:49:46Z; written by `flow/claude/pointer_reads.py recount` from cron.
+
+Window: 2026-10-04T20:49:46Z to 2026-10-18T20:49:46Z. Sessions in the window: 672.
+
+| Doc | Trigger regex | Triggered | Read |
+|---|---|---|---|
+| OPERATIONS | `gh pr merge\|implement-dispatch\|merge-cleanup` | 287 | 30 |
+| WORKFLOW | `gh issue create\|gh issue edit` | 74 | 31 |
+| VISUAL-INSPECTION | `shot-scraper\|zed ` | 37 | 15 |
+| SHELL-SAFETY | `pkill\|kill -\|kill [0-9]` | 28 | 0 |
+
+| Doc | Triggered | Not covered by a skill | Of those, read the doc |
+|---|---|---|---|
+| OPERATIONS | 287 | 10 | 3 |
+| WORKFLOW | 74 | 3 | 1 |
+| VISUAL-INSPECTION | 37 | 36 | 14 |
+| SHELL-SAFETY | 28 | 27 | 0 |
