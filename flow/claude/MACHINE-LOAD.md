@@ -4,6 +4,7 @@ Read before launching a solver, hunt, search or any multi-core job. Moved
 here from sudokumaker-custom-constraints' `AGENTS.md` when its finders left
 for `caneff/grid-hunts` (that repo's #748), so one copy serves every repo.
 
+- **Reason before you search.** Before a hunt, count or exhaustive search, work out what the rules force (counting and parity arguments, impossible placements, symmetries that make two layouts the same), cut the search space with it and report what that reasoning ruled out; a blind sample or brute force runs only after this step, because a few lines of reasoning often prune a search or prove it empty before any core is spent. (Promoted from the weekly-retro inbox, Chris 2026-10-20.)
 - **One hunt at a time, and `--workers 1` unless told otherwise.** This box is
   a WSL2 VM other agents share; oversubscribing it has hung the desktop. Check
   `uptime` before launching anything, and never let the total worker count

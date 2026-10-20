@@ -57,8 +57,12 @@ doc-vs-code contradiction is mine to rule on: report both sides.
 - Never spin while a subagent or job is out: no poll loop, no `sleep`. End the
   turn; completion wakes you. A long job runs under `job-run`; the
   background-job guard wraps one you forget.
-- Before you launch a solver, hunt, search or any multi-core job: read
-  `~/.agents/skills/flow/claude/MACHINE-LOAD.md`.
+- Before you launch a solver, hunt, count, search or any multi-core job:
+  read `~/.agents/skills/flow/claude/MACHINE-LOAD.md`.
+- Before you name the cause of a symptom I report: read
+  `~/.agents/skills/flow/claude/SYMPTOMS.md`.
+- Before you run or grade a drill or quiz: read
+  `~/.agents/skills/flow/claude/DRILLS.md`.
 - When I say "always" about a recurring output's shape, change the skill that
   makes it.
 - `~/.claude/settings.json` is a symlink: edit it in place, never replace it
