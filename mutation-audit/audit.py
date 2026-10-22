@@ -274,12 +274,13 @@ def run_stryker(target):
 
 
 def _sibling_tests(p):
-    """The sibling-test paths for a mutation-worthy source module `p`, or
-    `None` when `p` is not a worthy source module at all — an `__init__.py`, a
-    test file, or anything under a skip/fixture dir (the shared
-    `auditlib.is_test_or_fixture` check, #611). The single predicate both
-    `suggest_candidates` (keep when a sibling exists) and `no_test_modules`
-    (keep when none does) share, so the two can never drift apart.
+    """The test paths for a mutation-worthy source module `p` (beside it, or
+    under a root `tests/` tree, see below), or `None` when `p` is not a worthy
+    source module at all — an `__init__.py`, a test file, or anything under a
+    skip/fixture dir (the shared `auditlib.is_test_or_fixture` check, #611).
+    The single predicate both `suggest_candidates` (keep when a test exists)
+    and `no_test_modules` (keep when none does) share, so the two can never
+    drift apart.
     """
     if auditlib.is_test_or_fixture(p):
         return None
@@ -288,14 +289,13 @@ def _sibling_tests(p):
     stem = name[: name.rindex(".")]
     if name.endswith(auditlib.JS_SUFFIXES):
         return {"/".join([*dirs, f"{stem}.test.mjs"]), "/".join([*dirs, f"{stem}.test.js"])}
-    # A `src/` layout keeps tests in a root `tests/` tree that mirrors the
-    # package path below `src/` (or below the repo root, with no `src/`).
+    # A `src/` layout keeps tests in a root `tests/` tree: flat, or mirroring
+    # the module's path below `src/` (below the repo root, with no `src/`).
     mirror = dirs[1:] if dirs[:1] == ["src"] else dirs
     return {
-        *("/".join([*base, leaf]) for base in (dirs, ["tests", *mirror])
-          for leaf in (f"test_{name}", f"{stem}_test.py")),
-        "/".join(["tests", f"test_{name}"]),
-        "/".join(["tests", f"{stem}_test.py"]),
+        "/".join([*base, leaf])
+        for base in (dirs, ["tests"], ["tests", *mirror])
+        for leaf in (f"test_{name}", f"{stem}_test.py")
     }
 
 
@@ -309,7 +309,7 @@ def suggest_candidates(paths):
 
     Pure: a list of repo-relative `.py`/`.mjs`/`.js` paths in, candidate module paths out
     (sorted). A path is a candidate when it's a worthy source module (see
-    `_sibling_tests`) AND a sibling test file exists for it in `paths` (the
+    `_sibling_tests`) AND one of those test files exists for it in `paths` (the
     mutation tool needs a test suite to mutate against; a module with no tests is not a
     useful target — `no_test_modules` reports those instead). Never errors,
     never falls back to "everything" — an empty input or a repo with no
@@ -414,10 +414,14 @@ def _check_candidate_selection():
 def _check_src_tests_layout():
     paths = ["src/kit/cpsat.py", "tests/test_cpsat.py",
              "src/kit/sub/deep.py", "tests/kit/sub/test_deep.py",
+             "src/kit/flatsuffix.py", "tests/flatsuffix_test.py",
+             "src/kit/mirsuffix.py", "tests/kit/mirsuffix_test.py",
+             "nosrc/sub/inner.py", "tests/nosrc/sub/test_inner.py",
              "src/kit/lone.py",
              "src/kit/__init__.py", "tests/test_other.py",
              "flat/mod.py", "tests/test_mod.py"]
-    assert suggest_candidates(paths) == ["flat/mod.py", "src/kit/cpsat.py", "src/kit/sub/deep.py"], suggest_candidates(paths)
+    assert suggest_candidates(paths) == ["flat/mod.py", "nosrc/sub/inner.py", "src/kit/cpsat.py", "src/kit/flatsuffix.py",
+                                         "src/kit/mirsuffix.py", "src/kit/sub/deep.py"], suggest_candidates(paths)
     assert no_test_modules(paths) == ["src/kit/lone.py"], no_test_modules(paths)
 
 
