@@ -745,7 +745,8 @@ Last reviewed sha: <sha>
 CLEAN observed at: <sha>
 Tip: <headRefOid> — <"no commits past the reviewed sha", or one
   "<sha> — <diff class>" line per commit past it>
-Seam run at: <sha> — the commit § Review step 3's suite run covered, green
+Seam run at: <sha> — the commit the worker's green suite run covered (§ Review
+  step 3, or a slice's run in its paragraph)
 Codex pass: <"ran, <k> findings", "skipped: <the printed reason>" or
   "refused: <why>">
 Mutation check: <the change that made it fail, that you saw it fail, and
@@ -849,7 +850,7 @@ substitutions:
 - **The seam rerun starts from `origin/spec-<p>`**: step 3's worktree start
   point and its merge of the head name it, and the run is step 3's own: the
   scope the repo's `AGENTS.md` names, else the resolver's command. Step 3's skip
-  rule applies to it, with `origin/spec-<p>` as the base.
+  rule applies to it.
 - **`closingIssuesReferences` is not required.** GitHub fills it only for a
   PR into the default branch, so a slice PR's reads empty and blocks nothing.
   The slice ticket stays open until the spec's integration PR closes it, so
@@ -934,18 +935,24 @@ closed.
    leaves it dirty.
 
    **Skip when the base is already in the head** (#1616, Chris 2026-10-22).
-   When `git merge-base --is-ancestor origin/<default> <headRefOid>` exits 0
-   after `git fetch origin`, and the "PR up" `Seam run at:` line equals
-   <headRefOid>, the merge yields the tree the worker's green run covered,
-   so the rerun repeats it: skip the worktree and the run, and record it
-   with `gh pr comment <pr> --repo <owner/name> --body "selector: skipped:
-   origin/<default> <sha> is in the head <headRefOid>, worker's run at
-   <headRefOid>"`. Anything else gets the full rerun: a moved base gets the
-   full rerun, and so does a head past the worker's run or a report without
-   the line. A slice reads `origin/spec-<p>` for `origin/<default>`, and the
-   integration PR's run is the spec run's own (`Seam run at:` is what its
-   § Review step 3 covered). The final `git fetch origin` below still
-   applies: a base that moved since the check is a moved base.
+   After `git fetch origin`, skip the worktree and the run when all three
+   hold: `git merge-base --is-ancestor origin/<default> <headRefOid>` exits
+   0; the "PR up" `Seam run at:` line equals <headRefOid>; and
+   `git diff --quiet origin/<default> <headRefOid> -- AGENTS.md` exits 0. The
+   merge then yields the tree the worker's green run covered, so the rerun
+   repeats it. The third condition keeps a PR from choosing its own gate: the
+   worker's run reads the command from the PR's own `AGENTS.md`, step 3 from
+   the base's. Record the skip with `gh pr comment <pr> --repo <owner/name>
+   --body "seam rerun skipped: origin/<default> <sha> is in the head
+   <headRefOid>, worker's run at <headRefOid>"`. It is not a `selector:`
+   comment, so a skipped PR leaves no listing and the backstop grades its
+   suites `unknown`. Anything else gets the rerun: a moved base, a head past
+   the worker's run, a report without the line, a PR that touches
+   `AGENTS.md`. A slice reads `origin/spec-<p>` for `origin/<default>`, and
+   the integration PR's `Seam run at:` is its spec run's § Review step 3
+   run. The final `git fetch origin` below compares against the sha this check
+   read: a base that moved since is a moved base. `drain` gets no "PR up"
+   report, so it keeps the rerun.
 
    **Selector evidence** (#1537, #1593). The `list` and `comment` lines
    record the suites the narrowed command selected as one comment on the PR,
