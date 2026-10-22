@@ -11,6 +11,7 @@ every commit here is a backup.
 | Repo path | Live location | What it is |
 |---|---|---|
 | `bin/issue-counts` | `~/.local/bin/issue-counts` | Open-issue counts per wayfinder group for the current repo |
+| `bin/automode-entry` | `~/.local/bin/automode-entry` | Add, edit or remove autoMode entries in `claude/settings.json` in place, then commit and push (`add`, or `open` then `apply`) |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions (hard rules, the two gates) |
 | `claude/settings.json` | `~/.claude/settings.json` | Harness config: hooks, permissions |
 | `claude/settings.local.json` | `~/.claude/settings.local.json` | Machine-local overrides |

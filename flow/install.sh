@@ -32,6 +32,7 @@ link() { # link <repo-relative-src> <live-dest>
 }
 
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
+link bin/automode-entry         "$HOME/.local/bin/automode-entry"
 link bin/job-run                "$HOME/.local/bin/job-run"
 link bin/drain                  "$HOME/.local/bin/drain"
 link bin/backstop-nightly       "$HOME/.local/bin/backstop-nightly"
