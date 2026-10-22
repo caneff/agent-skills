@@ -949,8 +949,8 @@ closed.
    suites `unknown`. Anything else gets the rerun: a moved base, a head past
    the worker's run, a report without the line, a PR that touches
    `AGENTS.md`. A slice reads `origin/spec-<p>` for `origin/<default>`, and
-   the integration PR's `Seam run at:` is its spec run's § Review step 3
-   run. The final `git fetch origin` below compares against the sha this check
+   the integration PR's `Seam run at:` is its spec run's
+   `implement/SKILL.md` § Review step 3 run. The final `git fetch origin` below compares against the sha this check
    read: a base that moved since is a moved base. `drain` gets no "PR up"
    report, so it keeps the rerun.
 
