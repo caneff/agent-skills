@@ -60,9 +60,6 @@ repo that declares a `Narrowed` line gets that run's listing as one
 `selector:` comment on the PR, posted before the command, as the lane's merge
 step does (#1593). A section that declares no command merges nothing. No full
 seam runs in drain: the nightly backstop (`backstop/`) is the only full run.
-The merge step's skip when the base is already in the head (#1616) needs a
-worker's "PR up" `Seam run at:` line, which drain never receives, so drain
-reruns on every merge.
 A bundle that fails is given one more try by prompting the same worker with
 the reason (waiting for it to start working before it looks again); a second
 failure closes the worker's pane, labels the anchor and every claimed ticket
