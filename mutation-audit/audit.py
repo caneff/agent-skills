@@ -288,9 +288,14 @@ def _sibling_tests(p):
     stem = name[: name.rindex(".")]
     if name.endswith(auditlib.JS_SUFFIXES):
         return {"/".join([*dirs, f"{stem}.test.mjs"]), "/".join([*dirs, f"{stem}.test.js"])}
+    # A `src/` layout keeps tests in a root `tests/` tree that mirrors the
+    # package path below `src/` (or below the repo root, with no `src/`).
+    mirror = dirs[1:] if dirs[:1] == ["src"] else dirs
     return {
-        "/".join([*dirs, f"test_{name}"]),
-        "/".join([*dirs, f"{stem}_test.py"]),
+        *("/".join([*base, leaf]) for base in (dirs, ["tests", *mirror])
+          for leaf in (f"test_{name}", f"{stem}_test.py")),
+        "/".join(["tests", f"test_{name}"]),
+        "/".join(["tests", f"{stem}_test.py"]),
     }
 
 
@@ -404,6 +409,16 @@ def _check_candidate_selection():
     assert no_test_modules(["pkg/test_only.py"]) == []  # a test file is not worthy
     # The two partition the worthy universe: no module is in both.
     assert not (set(suggest_candidates(paths)) & set(no_test_modules(paths)))
+
+
+def _check_src_tests_layout():
+    paths = ["src/kit/cpsat.py", "tests/test_cpsat.py",
+             "src/kit/sub/deep.py", "tests/kit/sub/test_deep.py",
+             "src/kit/lone.py",
+             "src/kit/__init__.py", "tests/test_other.py",
+             "flat/mod.py", "tests/test_mod.py"]
+    assert suggest_candidates(paths) == ["flat/mod.py", "src/kit/cpsat.py", "src/kit/sub/deep.py"], suggest_candidates(paths)
+    assert no_test_modules(paths) == ["src/kit/lone.py"], no_test_modules(paths)
 
 
 def _check_cli_path():
@@ -730,7 +745,7 @@ def _check_run_js_target_through_stryker():
         assert code == 3 and out == "" and "npx" in err, (code, out, err)
 
 
-_CHECKS = (_check_parsing, _check_candidate_selection, _check_cli_path,
+_CHECKS = (_check_parsing, _check_candidate_selection, _check_src_tests_layout, _check_cli_path,
            _check_inconclusive_when_mutmut_cannot_run,
            _check_run_inconclusive_on_each_broken_mutmut_output,
            _check_unmodelled_status_is_inconclusive,

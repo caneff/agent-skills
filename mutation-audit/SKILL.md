@@ -69,7 +69,8 @@ covered without re-running mutmut.
    This calls `suggest_candidates` — the tested pure seam: a module is a
    candidate when it's a plain module (not `__init__.py`, not a test file,
    not under a `fixtures/` dir) **and** a sibling test file exists for it
-   (`test_<name>.py` or `<stem>_test.py`; for a `.mjs`/`.js` module,
+   (`test_<name>.py` or `<stem>_test.py` beside it, or under a root `tests/`
+   dir, flat or mirroring the module's path below `src/`; for a `.mjs`/`.js` module,
    `<stem>.test.mjs` or `<stem>.test.js`) — the tool needs a test suite to
    mutate against, so an untested module isn't a useful target. Print the
    suggestions and **stop** — ask which one to run. Never fall back to
