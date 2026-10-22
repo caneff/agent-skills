@@ -90,10 +90,35 @@ def test_merge_step3_runs_on_the_pr_merged_into_current_default_and_merges_only_
     assert "is no longer the sha the seam's worktree was created from, re-run this step" in text
 
 
-def test_merge_step3_keeps_no_skip_rule():
-    text = step3()
-    assert "is-ancestor" not in text
-    assert "skip rule" not in text
+def skip_text():
+    text = flat(step3())
+    return text[text.index("**Skip when the base is already in the head**"):text.index("**Selector evidence**")]
+
+
+def test_merge_step3_skips_the_rerun_when_the_base_is_in_the_head_the_worker_ran():
+    # Chris 2026-10-22 (#1616): the merge is then the tree the worker tested.
+    text = skip_text()
+    assert "git merge-base --is-ancestor origin/<default> <headRefOid>" in text
+    assert "after `git fetch origin`" in text
+    assert "`Seam run at:` line" in text
+    assert "equals <headRefOid>" in text
+    assert "a moved base gets the full rerun" in text
+
+
+def test_merge_step3_records_the_skip_as_a_pr_comment():
+    text = skip_text()
+    assert "gh pr comment" in text
+    assert "selector: skipped: " in text
+
+
+def test_pr_up_report_carries_the_seam_run_sha():
+    assert "Seam run at: <sha>" in flat(skill())
+
+
+def test_the_skip_covers_a_slices_base_and_the_integration_pr():
+    text = skip_text()
+    assert "origin/spec-<p>" in text
+    assert "integration PR" in text
 
 
 def test_slice_merge_bullet_runs_step3s_command_from_the_spec_branch():
