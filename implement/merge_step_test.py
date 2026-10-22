@@ -90,15 +90,61 @@ def test_merge_step3_runs_on_the_pr_merged_into_current_default_and_merges_only_
     assert "is no longer the sha the seam's worktree was created from, re-run this step" in text
 
 
-def test_merge_step3_keeps_no_skip_rule():
-    text = step3()
-    assert "is-ancestor" not in text
-    assert "skip rule" not in text
+def skip_text():
+    text = flat(step3())
+    return text[text.index("**Skip when the base is already in the head**"):text.index("**Selector evidence**")]
+
+
+def test_merge_step3_skips_the_rerun_only_when_all_three_conditions_hold():
+    # Chris 2026-10-22 (#1616): the merge is then the tree the worker tested.
+    text = skip_text()
+    assert ("After `git fetch origin`, skip the worktree and the run when all three hold: "
+            "`git merge-base --is-ancestor origin/<default> <headRefOid>` exits 0; "
+            "the \"PR up\" `Seam run at:` line equals <headRefOid>; and "
+            "`git diff --quiet origin/<default> <headRefOid> -- AGENTS.md` exits 0.") in text
+    assert "Anything else gets the rerun: a moved base, a head past the worker's run, a report without the line, " in text
+    assert "a PR that touches `AGENTS.md`" in text
+
+
+def test_the_skip_does_not_let_a_pr_choose_its_own_gate():
+    # C1: the worker's run reads the PR's AGENTS.md; step 3 reads the base's.
+    assert "keeps a PR from choosing its own gate" in skip_text()
+
+
+def test_merge_step3_records_the_skip_outside_the_selector_namespace():
+    text = skip_text()
+    assert "gh pr comment <pr> --repo <owner/name>" in text
+    assert 'seam rerun skipped: origin/<default>' in text
+    assert "selector: skipped" not in text
+    assert "It is not a `selector:` comment" in text
+
+
+def test_the_final_fetch_compares_against_the_sha_the_skip_check_read():
+    assert "compares against the sha this check read" in skip_text()
+
+
+def test_drain_keeps_the_rerun():
+    assert "`drain` gets no \"PR up\" report, so it keeps the rerun" in skip_text()
+
+
+def test_pr_up_report_carries_the_seam_run_sha():
+    assert "Seam run at: <sha>" in flat(skill())
+
+
+def test_the_skip_covers_a_slices_base_and_the_integration_pr():
+    text = skip_text()
+    assert "A slice reads `origin/spec-<p>` for `origin/<default>`" in text
+    assert "integration PR's `Seam run at:`" in text
+
+
+def test_the_skip_wording_calls_the_rerun_a_rerun_not_a_full_seam():
+    assert "full rerun" not in skip_text()
 
 
 def test_slice_merge_bullet_runs_step3s_command_from_the_spec_branch():
     bullet = flat(slice_merge_bullet())
     assert "skip test" not in bullet
+    assert "Step 3's skip rule applies to it." in bullet
     assert "origin/spec-<p>" in bullet
     assert "full seam" not in bullet
 
