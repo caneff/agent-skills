@@ -306,10 +306,13 @@ def test_readback_that_disagrees_leaves_the_change_written_but_uncommitted(rig):
     assert "Delta entry." not in rig.data()["autoMode"]["allow"]
 
 
-def test_a_removal_is_not_confirmed_by_a_config_that_never_read_the_file(rig):
+@pytest.mark.parametrize(
+    "printed", ["{}", '{"allow": [], "soft_deny": [], "environment": []}']
+)  # the second has the right shape but none of the entries a read file would show
+def test_a_removal_is_not_confirmed_by_a_config_that_never_read_the_file(rig, printed):
     rig.run("open")
     rig.doc().write_text(rig.doc().read_text().replace("Beta entry.\n\n", ""))
-    rig.stub_claude("{}")  # exits 0 and prints no entries at all
+    rig.stub_claude(printed)
     r = rig.run("apply")
     assert r.returncode != 0 and "not committed" in out(r)
     assert rig.commits() == 1
