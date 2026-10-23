@@ -318,6 +318,7 @@
   "autoMode": {
     "allow": [
       "$defaults",
+      "Minting SudokuMaker short links (ruled by Chris 2026-10-23): POSTing a puzzle payload from the user's own repos (grid-hunts, sudokumaker-custom-constraints, sudoku-kit) to `https://sudokumaker.app/api/puzzles`, by curl, Python or sudoku-kit's shorten command, and reading the id back from `https://sudokumaker.app/api/puzzles/<id>`. Every SudokuMaker link handed to Chris is a short link, so this upload is intended work, not Data Exfiltration.",
       "Git worktree commands in any repository, including the `git -C <path> worktree ...` form: add, list, lock, unlock, prune, remove.",
       "Removing a throwaway review worktree: `git worktree remove --force` (or `git -C <path> worktree remove --force`) on a worktree this session's review created under `~/.cache/agent-reviews/<repo>/` (multi-axis-code-review's witness-check.sh) is cleanup of the session's own throwaway checkout, not Irreversible Local Destruction.",
       "Driving the OBS e2e rig from this repo: closing OBS's window via PowerShell `Get-Process obs64` + `CloseMainWindow()`, and any obs-websocket request sent through `layout/obs-request.mjs` (including SetSourceFilterEnabled).",
