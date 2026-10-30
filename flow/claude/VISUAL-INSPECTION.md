@@ -40,8 +40,15 @@ a step your own hands can do.
   `AppData/Roaming/Zed/settings.json`, so it shows up in the launchpad.
   Added 2026-09-19.
 
-- A rendered HTML page I should look at myself: `wslview <file>` opens it in
-  my Windows browser. That is my opener, not your reader — you read the page
+- A web link or rendered HTML page I should look at myself opens in my
+  **personal** Chrome profile, never through `wslview` or a bare `start`:
+  `"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe"
+  --profile-directory=Default <url-or-$(wslpath -w <file>)>`. `Default` is
+  caneff@gmail.com; `Profile 4` is the mercor.expert work profile. Why:
+  Chrome hands an outside link to whichever profile window was used last,
+  and on 2026-10-30 shopping links landed in the work profile. A link I click
+  in the terminal still goes to the last-used window; only links you open
+  are pinned. That is my opener, not your reader — you read the page
   through `shot-scraper` below.
 
 - An image or sheet I should look at: write it under a temporary name and
