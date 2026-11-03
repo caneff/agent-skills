@@ -5,6 +5,7 @@ exist. Each case runs the checker's command line and reads its exit status
 and output; the real-tree case is the gate itself, the rest are fixtures
 that prove each failure is caught by its own assertion."""
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -108,8 +109,11 @@ def test_pointer_without_an_action_fails(fx):
     assert "pointer line names no action" in out
 
 
-def test_real_claude_md_plus_200_words_fails_on_budget(fx):
-    text = REAL.read_text() + "\n" + " ".join(["word"] * 200) + "\n"
+def test_real_claude_md_padded_past_budget_fails_on_budget(fx):
+    # Pad by BUDGET + 1 words so the total passes BUDGET whatever the real file's
+    # headroom is (#1632); BUDGET is read from the checker's source.
+    budget = int(re.search(r"^BUDGET = (\d+)", CHECKER.read_text(), re.M).group(1))
+    text = REAL.read_text() + "\n" + " ".join(["word"] * (budget + 1)) + "\n"
     f = fx.tmp / "CLAUDE.md"
     f.write_text(text)
     code, out = run(f)
@@ -117,4 +121,3 @@ def test_real_claude_md_plus_200_words_fails_on_budget(fx):
     assert "over budget" in out
     assert "does not exist" not in out
     assert "import not found" not in out
-
