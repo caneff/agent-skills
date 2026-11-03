@@ -375,6 +375,60 @@ else
   echo "FAIL the existing .pre-flow backup was clobbered, the second file lost, or the refusal was fatal (rc=$rc): $link_out"; fails=1
 fi
 
+# The interop repoint (#1625): ~/.bashrc is in no repo, so install.sh carries the
+# line a new herdr pane shell needs, keeps a backup of what it edits, and adds
+# the line once. A real interactive bash reading that file is the proof.
+br="$tmp/br"
+scratch_repo "$br"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$br/flow/lane-install.sh"
+br_home="$tmp/br-home"; mkdir -p "$br_home"
+printf '# theirs\n' > "$br_home/.bashrc"
+out=$(HOME="$br_home" bash "$br/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c 'wsl-interop-repoint' "$br_home/.bashrc")" = 1 ] \
+   && [ "$(head -n1 "$br_home/.bashrc")" = "# theirs" ]; then
+  echo "PASS install.sh appends the repoint line to an existing ~/.bashrc"
+else
+  echo "FAIL the repoint line was not appended (rc=$rc): $out"; fails=1
+fi
+if [ "$(cat "$br_home/.bashrc.pre-wsl-interop" 2>/dev/null)" = "# theirs" ]; then
+  echo "PASS the ~/.bashrc edit keeps a backup"
+else
+  echo "FAIL no backup of ~/.bashrc"; fails=1
+fi
+printf '# later edit\n' >> "$br_home/.bashrc"
+HOME="$br_home" bash "$br/flow/install.sh" >/dev/null 2>&1
+if [ "$(grep -c 'wsl-interop-repoint' "$br_home/.bashrc")" = 1 ] \
+   && [ "$(cat "$br_home/.bashrc.pre-wsl-interop")" = "# theirs" ]; then
+  echo "PASS a second install adds no second line and keeps the first backup"
+else
+  echo "FAIL a second install changed the line count or the backup"; fails=1
+fi
+# The script only needs to prove it ran: a marker in place of the real one.
+printf 'export REPOINT_RAN=yes\n' > "$br/flow/bin/wsl-interop-repoint.sh"
+# The system bashrc may print its own lines first, so read the last of them.
+got=$(HOME="$br_home" bash --rcfile "$br_home/.bashrc" -ic 'printf %s "$REPOINT_RAN"' 2>/dev/null)
+if [ "${got##*$'\n'}" = yes ]; then
+  echo "PASS an interactive shell reading that ~/.bashrc sources the script"
+else
+  echo "FAIL an interactive shell did not source the script: [$got]"; fails=1
+fi
+rm "$br/flow/bin/wsl-interop-repoint.sh"
+# bash itself says "no job control" here with no terminal, so look for our path.
+got=$(HOME="$br_home" bash --rcfile "$br_home/.bashrc" -ic 'echo started' 2>&1)
+if [[ "$got" == *started ]] && [[ "$got" != *wsl-interop-repoint* ]]; then
+  echo "PASS a checkout without the script still starts a silent shell"
+else
+  echo "FAIL a missing script broke or noised up the shell: [$got]"; fails=1
+fi
+fresh_home="$tmp/fresh-home"
+cp "$root/flow/bin/wsl-interop-repoint.sh" "$br/flow/bin/wsl-interop-repoint.sh"
+HOME="$fresh_home" bash "$br/flow/install.sh" >/dev/null 2>&1
+if [ "$(grep -c 'wsl-interop-repoint' "$fresh_home/.bashrc" 2>/dev/null)" = 1 ] && [ ! -e "$fresh_home/.bashrc.pre-wsl-interop" ]; then
+  echo "PASS a machine with no ~/.bashrc gets the line and no empty backup"
+else
+  echo "FAIL a missing ~/.bashrc was not handled"; fails=1
+fi
+
 # A failed `systemctl --user enable` fails the install and says why (a timer
 # that is not enabled never fires). Everything else is made to succeed, so the
 # non-zero exit can only come from the unit step; a working systemctl is the

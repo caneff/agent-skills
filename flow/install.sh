@@ -75,6 +75,21 @@ if [ -L "$HOME/.claude/hooks/require-agent-model.sh" ]; then
   rm -f "$HOME/.claude/hooks/require-agent-model.sh"
 fi
 
+# The interop repoint (#1625, its header says why): ~/.bashrc is in no repo, so
+# this is its one install path. Appended, since a pane shell runs the whole file
+# and the Zed attach above the end of it only ever exits. Written through `>>`, so
+# a linked ~/.bashrc stays linked; the first edit keeps a copy of what it edited.
+repoint="$here/bin/wsl-interop-repoint.sh"
+repoint_line="[ -r \"$repoint\" ] && . \"$repoint\"  # #1625"
+if ! grep -qxF "$repoint_line" "$HOME/.bashrc" 2>/dev/null; then
+  if [ -e "$HOME/.bashrc" ] && [ ! -e "$HOME/.bashrc.pre-wsl-interop" ]; then
+    cp -p "$HOME/.bashrc" "$HOME/.bashrc.pre-wsl-interop"
+    echo "backed up $HOME/.bashrc -> $HOME/.bashrc.pre-wsl-interop"
+  fi
+  printf '%s\n' "$repoint_line" >> "$HOME/.bashrc"
+  echo "added the interop repoint to $HOME/.bashrc"
+fi
+
 # The pre-push hook that ran tests/all.sh is retired (#633): a push is not the
 # gate, the merge is (`git config land.testcmd`), and the hook's own GIT_DIR
 # leaked into the suite. Drop the symlink an earlier install left. Hooks are
