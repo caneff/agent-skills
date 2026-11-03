@@ -100,6 +100,11 @@ defines them.
   containing `i` (never an agent Bash tool), and on `HERDR_NO_AUTOATTACH=1`,
   which gets you a plain shell in Zed when you want one. `herdr && exit`
   rather than `exec`, so a failed attach leaves the error on a live shell.
+  Only the first terminal attaches: with a client already attached
+  (`pgrep -u "$USER" -fx herdr`), a new Zed terminal stays a plain shell, and
+  typing `herdr` there takes over. Why: a bare `herdr` kills the attached
+  client, so every new terminal replaced the old one and Zed seemed unable to
+  open a second (Chris, 2026-11-03).
   Zed's own `terminal.shell` setting is **not** the mechanism: it is ignored
   over the WSL remote, both in the Windows `settings.json` and in a project
   `.zed/settings.json` (checked 2026-09-20 on Zed 1.20.2 -- terminals still
