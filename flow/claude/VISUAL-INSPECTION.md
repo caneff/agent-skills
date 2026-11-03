@@ -137,11 +137,11 @@ I cannot see, and `wsl --shutdown` kills every session running in WSL.
 **An opener's exit status does not prove a window appeared** (#1625). A shell
 whose `WSL_INTEROP` socket is gone reaches Windows session 0, which has no
 desktop: `wslview` exited 0 and `chrome.exe` exited 21 with nothing on screen,
-and `clip.exe` filled a clipboard nobody reads. Check with
-`(Get-Process | ? MainWindowTitle -match <name>)` and the clipboard with
-`Get-Clipboard`, and read `(Get-Process -Id $PID).SessionId` through
-`powershell.exe`: 0 is this failure. A live socket does not settle it either,
-since some live sockets reach session 0.
+and `clip.exe` filled a clipboard nobody reads. Check a window with
+`(Get-Process | ? MainWindowTitle -match <name>)`, which took Photos 7 s to fill
+after launch, and the clipboard with `Get-Clipboard`. To tell this failure, read
+`(Get-Process -Id $PID).SessionId` through `powershell.exe`: 0 is this failure.
+A live socket does not settle it either, since some live sockets reach session 0.
 
 `flow/bin/wsl-interop-repoint.sh` (its header names what carries it) moves a
 dead `WSL_INTEROP` to a socket reaching a user session, in each new shell. A
