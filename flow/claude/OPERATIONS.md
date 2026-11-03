@@ -89,9 +89,11 @@ defines them.
   (`zed <path>:<line>`, see `VISUAL-INSPECTION.md`). It needs no custom
   bindings: prefix keys, sidebar clicks, Shift+Enter, Wispr Flow dictation
   and Ctrl+V image paste into Claude Code were all checked working on Zed
-  1.20.2. As of 2026-11-03 (Zed 1.26.2, herdr 0.9.0) image paste works in Zed
-  outside herdr and fails inside a herdr pane, with both Ctrl+V and Alt+V;
-  when it fails, the controller reads the clipboard
+  1.20.2. Image paste needs a live `WSL_INTEROP` in the Claude process itself:
+  `wsl-interop-repoint.sh` fixes shells and Bash tool calls, not a Claude
+  already running on a dead socket, whose clipboard then reads empty
+  (2026-11-03: 14 of 15 Claudes dead, and the one live one pasted). Restart that
+  Claude from a new pane; until then the controller reads the clipboard
   (`VISUAL-INSPECTION.md`). herdr takes one client at a time — attaching from another terminal
   drops the current one; the server and panes keep running, so re-running
   `herdr` is the whole recovery.
