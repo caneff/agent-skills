@@ -63,6 +63,9 @@ doc-vs-code contradiction is mine to rule on: report both sides.
   `~/.agents/skills/flow/claude/SYMPTOMS.md`.
 - Before you run or grade a drill or quiz: read
   `~/.agents/skills/flow/claude/DRILLS.md`.
+- Before you build a solver, tool or check, say none exists, or answer a
+  factual question about a third-party product: read
+  `~/.agents/skills/flow/claude/RESEARCH-FIRST.md`.
 - When I say "always" about a recurring output's shape, change the skill that
   makes it.
 - `~/.claude/settings.json` is a symlink: edit it in place, never replace it

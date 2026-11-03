@@ -35,6 +35,10 @@ a deletion".
   by design.
 - Any force-push to `main`, any `--force` without a lease, and any rebase or
   reset I did not already sanction: still ask.
+- When I approve an irreversible step that a worker or a spec run asked about,
+  the session I told does the step itself and reports it. A yes I have already
+  given is never put to me again in any form. Why: a worker rightly refuses a
+  relayed approval, and the ask then loops back to me.
 
 ## Gate 2 — the two lanes
 

@@ -5,6 +5,7 @@ here from sudokumaker-custom-constraints' `AGENTS.md` when its finders left
 for `caneff/grid-hunts` (that repo's #748), so one copy serves every repo.
 
 - **Reason before you search.** Before a hunt, count or exhaustive search, work out what the rules force (counting and parity arguments, impossible placements, symmetries that make two layouts the same), cut the search space with it and report what that reasoning ruled out; a blind sample or brute force runs only after this step, because a few lines of reasoning often prune a search or prove it empty before any core is spent. (Promoted from the weekly-retro inbox, Chris 2026-10-20.)
+- **Use the repo's model.** A hunt, check or count for a puzzle type runs on the model and tools the repo already has for it, and a scratch script is written only when the repo has none and is named as scratch in the report, because a throwaway model carries its own bugs and its answers then need a second run on the repo model before Chris can trust them. (Promoted from the weekly-retro inbox, Chris 2026-11-03.)
 - **One hunt at a time, and `--workers 1` unless told otherwise.** This box is
   a WSL2 VM other agents share; oversubscribing it has hung the desktop. Check
   `uptime` before launching anything, and never let the total worker count
