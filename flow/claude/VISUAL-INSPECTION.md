@@ -66,6 +66,22 @@ a step your own hands can do.
 
 ## Getting a pasted image to an agent as a file
 
+**When paste itself stopped working** (Ctrl+V or Alt+V attaches nothing or
+inserts text, while a Claude in a new window pastes fine), check the socket
+first: read `WSL_INTEROP` from `/proc/<claude pid>/environ` and test it with
+`[ -S ... ]`. Claude reads the image through `powershell.exe`, and on a dead
+socket that lands in Windows session 0, where the clipboard reads empty.
+`wsl-interop-repoint.sh` repairs shells and Bash tool calls, never a running
+Claude, and restarting in the same pane inherits the pane shell's dead socket.
+The fix, tried 2026-11-03: `/exit`, then at that pane's shell:
+
+```
+source ~/.agents/skills/flow/bin/wsl-interop-repoint.sh && cd <dir> && claude --resume <session id>
+```
+
+A new pane needs no sourcing. Not the cause, each tested that day:
+`DISPLAY`, an `xclip` that hangs, the `weston` crash loop, herdr itself.
+
 A paste into a teammate or subagent I have entered is not known to reach it
 (`docs/research/2026-09-28-teammate-attach.md`). When I say an image is on my
 clipboard, or a paste did not arrive, save the clipboard yourself and read the
