@@ -134,6 +134,25 @@ recommending tools, macOS-only is a non-starter and so is anything needing
 one window per repo. Why: a Linux GUI or a blind input tool acts on a display
 I cannot see, and `wsl --shutdown` kills every session running in WSL.
 
+**An opener's exit status does not prove a window appeared** (#1625). A shell
+whose `WSL_INTEROP` socket is gone reaches Windows session 0, which has no
+desktop: `wslview` exited 0 and `chrome.exe` exited 21 with nothing on screen,
+and `clip.exe` filled a clipboard nobody reads. Check with
+`(Get-Process | ? MainWindowTitle -match <name>)` and the clipboard with
+`Get-Clipboard`, and read `(Get-Process -Id $PID).SessionId` through
+`powershell.exe`: 0 is this failure. A live socket does not settle it either,
+since some live sockets reach session 0.
+
+`flow/bin/wsl-interop-repoint.sh` moves a dead `WSL_INTEROP` to a socket that
+reaches a user session, in each new shell: `env.BASH_ENV` in `settings.json`
+carries it to Bash tool calls and `!` commands, a `~/.bashrc` line from
+`flow/install.sh` to herdr pane shells. What it leaves alone: a shell already
+running when its socket died; a Claude session started before `BASH_ENV` landed;
+a live socket reaching session 0; a `sh` script no bash started; and every shell
+when no socket reaches a user session, for instance while nobody is signed in.
+In those cases, pick a socket the way the script does and set `WSL_INTEROP` for
+the call.
+
 ## Judging visual work
 
 - A visual pass or fix is judged from a picture, never from settings or a
