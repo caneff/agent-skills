@@ -142,10 +142,14 @@ want "a record that cannot be written stays silent" "" "$(cat "$DIR/err")"
 fixture strict 10='0\r\n'
 want "bash -eu survives every path and runs the command" "ran" \
   "$(start "$DIR/gone" -eu -c 'echo ran')"
-want "bash -eu survives an unset WSL_INTEROP" "ran" \
-  "$(BASH_ENV="$script" STUB_DIR="$DIR" WSL_INTEROP_POWERSHELL="$tmp/powershell" \
-     WSL_INTEROP_SOCKET_DIR="$SOCKETS" WSL_INTEROP_CACHE_DIR="$CACHE" \
-     env -u WSL_INTEROP bash -eu -c 'echo ran')"
+# bash keeps going after an unbound variable in a BASH_ENV file, so a command
+# that ran proves nothing here: the file stopping shows as a message and no repoint.
+fixture strict-unset 10='1\r\n'
+got=$(BASH_ENV="$script" STUB_DIR="$DIR" WSL_INTEROP_POWERSHELL="$tmp/powershell" \
+  WSL_INTEROP_SOCKET_DIR="$SOCKETS" WSL_INTEROP_CACHE_DIR="$CACHE" \
+  env -u WSL_INTEROP bash -eu -c 'printf %s "$WSL_INTEROP"' 2>"$DIR/err" </dev/null)
+want "bash -eu with WSL_INTEROP unset still repoints" "$SOCKETS/10_interop" "$got"
+want "bash -eu with WSL_INTEROP unset stays silent" "" "$(cat "$DIR/err")"
 
 fixture status 10='0\r\n'
 start "$DIR/gone" -c 'exit 7'; want "the command's exit status comes through" "7" "$?"
