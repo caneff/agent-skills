@@ -93,7 +93,10 @@ defines them.
   `wsl-interop-repoint.sh` fixes shells and Bash tool calls, not a Claude
   already running on a dead socket, whose clipboard then reads empty
   (2026-11-03: 14 of 15 Claudes dead, and the one live one pasted). Restart that
-  Claude from a new pane; until then the controller reads the clipboard
+  Claude from a new pane, or in its own pane after
+  `source ~/.agents/skills/flow/bin/wsl-interop-repoint.sh`, since a plain
+  restart there inherits the shell's dead socket; until then the controller
+  reads the clipboard
   (`VISUAL-INSPECTION.md`). herdr takes one client at a time — attaching from another terminal
   drops the current one; the server and panes keep running, so re-running
   `herdr` is the whole recovery.
