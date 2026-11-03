@@ -11,9 +11,10 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fails=0
 
-bashrc_line() { # the line install.sh appends for a flow dir
-  printf '[ -r "%s/bin/wsl-interop-repoint.sh" ] && . "%s/bin/wsl-interop-repoint.sh"  # #1625' "$1" "$1"
-}
+# The one definition of the ~/.bashrc line, also copied into each fixture's
+# manifest below.
+# shellcheck source=hooks-manifest.sh
+. "$here/hooks-manifest.sh"
 # A healthy fixture: a flow dir with a hook registered by path under
 # ~/.claude/hooks (a.sh) and its lib (a-lib.sh), a hook run from the repo
 # (b.sh), one unregistered by design (quiet.sh) and a test file; and a HOME
@@ -22,11 +23,12 @@ fixture() { # fixture <name> -> sets FLOW and HOME_DIR
   FLOW="$tmp/$1/flow"; HOME_DIR="$tmp/$1/home"
   mkdir -p "$FLOW/claude/hooks" "$HOME_DIR/.claude/hooks"
   printf 'LINKED_HOOKS=(a.sh a-lib.sh)\nUNREGISTERED_BY_DESIGN=(quiet.sh)\nSOURCED_LIBS=(a-lib.sh)\n' > "$FLOW/hooks-manifest.sh"
+  declare -f repoint_bashrc_line >> "$FLOW/hooks-manifest.sh"
   for h in a.sh a-lib.sh b.sh quiet.sh a.test.sh; do : > "$FLOW/claude/hooks/$h"; done
   mkdir -p "$FLOW/bin"; : > "$FLOW/bin/wsl-interop-repoint.sh"
-  printf '# theirs\n%s\n' "$(bashrc_line "$FLOW")" > "$HOME_DIR/.bashrc"
+  printf '# theirs\n%s\n' "$(repoint_bashrc_line "$FLOW/bin/wsl-interop-repoint.sh")" > "$HOME_DIR/.bashrc"
   cat > "$FLOW/claude/settings.json" <<JSON
-{"env":{"BASH_ENV":"/x/flow/bin/wsl-interop-repoint.sh"},"hooks":{"PreToolUse":[{"hooks":[
+{"env":{"BASH_ENV":"$FLOW/bin/wsl-interop-repoint.sh"},"hooks":{"PreToolUse":[{"hooks":[
   {"type":"command","command":"/x/.claude/hooks/a.sh"},
   {"type":"command","command":"bash /x/flow/claude/hooks/b.sh","timeout":5}]}]}}
 JSON
@@ -94,8 +96,8 @@ cat > "$FLOW/claude/settings.json" <<'JSON'
 JSON
 case_ "a misplaced autoMode block fails the install check" 1 "permissions.autoMode"
 
-# The two carriers of the interop repoint (#1625): a fresh shell or a Bash tool
-# call with one of them missing runs on a dead socket, and nothing else says so.
+# The carriers of the interop repoint (#1625): with one missing a shell runs on
+# a dead socket, and nothing else says so.
 fixture no-bashrc
 rm "$HOME_DIR/.bashrc"
 case_ "a missing ~/.bashrc fails, naming the repoint" 1 "wsl-interop-repoint.sh is not sourced"
@@ -103,7 +105,7 @@ fixture bashrc-without-line
 printf '# theirs\n' > "$HOME_DIR/.bashrc"
 case_ "a ~/.bashrc without the repoint line fails" 1 "wsl-interop-repoint.sh is not sourced"
 fixture bashrc-commented
-printf '# %s\n' "$(bashrc_line "$FLOW")" > "$HOME_DIR/.bashrc"
+printf '# %s\n' "$(repoint_bashrc_line "$FLOW/bin/wsl-interop-repoint.sh")" > "$HOME_DIR/.bashrc"
 case_ "a commented-out repoint line fails" 1 "wsl-interop-repoint.sh is not sourced"
 fixture no-bash-env
 jq 'del(.env)' "$FLOW/claude/settings.json" > "$tmp/s.json"; cp "$tmp/s.json" "$FLOW/claude/settings.json"
@@ -114,10 +116,16 @@ case_ "settings.json with some other BASH_ENV fails" 1 "env.BASH_ENV"
 fixture no-script
 rm "$FLOW/bin/wsl-interop-repoint.sh"
 case_ "a repoint script gone from the repo fails" 1 "bin/wsl-interop-repoint.sh does not exist"
+fixture bash-env-elsewhere
+jq '.env.BASH_ENV="/nope/flow/bin/wsl-interop-repoint.sh"' "$FLOW/claude/settings.json" > "$tmp/s.json"; cp "$tmp/s.json" "$FLOW/claude/settings.json"
+case_ "a BASH_ENV with the right name in the wrong checkout fails" 1 "env.BASH_ENV"
+fixture bad-settings
+printf '{nope' > "$FLOW/claude/settings.json"
+case_ "settings.json jq cannot read is not reported as a missing key" 2 "cannot read env.BASH_ENV"
 
 # This repo's own flow/, HOME linked from its manifest.
 real_home="$tmp/real-home"; mkdir -p "$real_home/.claude/hooks"
-bashrc_line "$here" > "$real_home/.bashrc"
+repoint_bashrc_line "$here/bin/wsl-interop-repoint.sh" > "$real_home/.bashrc"
 # shellcheck source=hooks-manifest.sh
 . "$here/hooks-manifest.sh"
 ln -s "$here/claude/settings.json" "$real_home/.claude/settings.json"

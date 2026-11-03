@@ -53,6 +53,9 @@ scratch_repo() { # scratch_repo <dir>
   cp "$root/tests/all.sh" "$dir/tests/all.sh"
   git -C "$dir" init -q
   printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/flow/backup-sync.sh"
+  # The tracked BASH_ENV names the real checkout; this repo is its own.
+  jq --arg p "$dir/flow/bin/wsl-interop-repoint.sh" '.env.BASH_ENV=$p' \
+    "$root/flow/claude/settings.json" > "$dir/flow/claude/settings.json"
 }
 
 # The first case's repo also carries a stale pre-push hook left by an earlier
@@ -420,8 +423,17 @@ if [[ "$got" == *started ]] && [[ "$got" != *wsl-interop-repoint* ]]; then
 else
   echo "FAIL a missing script broke or noised up the shell: [$got]"; fails=1
 fi
-fresh_home="$tmp/fresh-home"
+nonl_home="$tmp/nonl-home"; mkdir -p "$nonl_home"
+printf 'export THEIRS=1' > "$nonl_home/.bashrc"
 cp "$root/flow/bin/wsl-interop-repoint.sh" "$br/flow/bin/wsl-interop-repoint.sh"
+HOME="$nonl_home" bash "$br/flow/install.sh" >/dev/null 2>&1
+if [ "$(head -n1 "$nonl_home/.bashrc")" = "export THEIRS=1" ] \
+   && [ "$(grep -c '^\[ -r .*wsl-interop-repoint' "$nonl_home/.bashrc")" = 1 ]; then
+  echo "PASS a ~/.bashrc with no last newline keeps both lines whole"
+else
+  echo "FAIL a ~/.bashrc with no last newline was corrupted: $(cat "$nonl_home/.bashrc")"; fails=1
+fi
+fresh_home="$tmp/fresh-home"
 HOME="$fresh_home" bash "$br/flow/install.sh" >/dev/null 2>&1
 if [ "$(grep -c 'wsl-interop-repoint' "$fresh_home/.bashrc" 2>/dev/null)" = 1 ] && [ ! -e "$fresh_home/.bashrc.pre-wsl-interop" ]; then
   echo "PASS a machine with no ~/.bashrc gets the line and no empty backup"

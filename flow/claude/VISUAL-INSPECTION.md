@@ -143,15 +143,20 @@ and `clip.exe` filled a clipboard nobody reads. Check with
 `powershell.exe`: 0 is this failure. A live socket does not settle it either,
 since some live sockets reach session 0.
 
-`flow/bin/wsl-interop-repoint.sh` moves a dead `WSL_INTEROP` to a socket that
-reaches a user session, in each new shell: `env.BASH_ENV` in `settings.json`
-carries it to Bash tool calls and `!` commands, a `~/.bashrc` line from
-`flow/install.sh` to herdr pane shells. What it leaves alone: a shell already
-running when its socket died; a Claude session started before `BASH_ENV` landed;
-a live socket reaching session 0; a `sh` script no bash started; and every shell
-when no socket reaches a user session, for instance while nobody is signed in.
-In those cases, pick a socket the way the script does and set `WSL_INTEROP` for
-the call.
+`flow/bin/wsl-interop-repoint.sh` (its header names what carries it) moves a
+dead `WSL_INTEROP` to a socket reaching a user session, in each new shell. A
+shell already running when its socket died, a Claude session started before
+`BASH_ENV` landed, and a live socket reaching session 0 all miss it; for those,
+run the one call through a new shell, which treats unset as dead:
+
+```
+env -u WSL_INTEROP BASH_ENV="$HOME/.agents/skills/flow/bin/wsl-interop-repoint.sh" bash -c '<the call>'
+```
+
+If that still reads session 0, `/run/user/$UID/wsl-interop-repoint` says why:
+`no-user-session` means no socket reaches one, so nothing here can open a window
+until I sign in; `unanswered` means a probe failed or ran out of time, retried
+after 10 s.
 
 ## Judging visual work
 

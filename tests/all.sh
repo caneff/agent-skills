@@ -38,6 +38,9 @@ set -uf
 # git call below (and in every suite it spawns) at that caller's repo instead
 # of this one (#620) — scrub before touching git at all.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+# A live session's BASH_ENV (#1625) would run in every bash a suite starts, and
+# can start Windows processes and write a live record: a suite must not read it.
+unset BASH_ENV
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 

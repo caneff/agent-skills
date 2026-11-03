@@ -76,15 +76,17 @@ if [ -L "$HOME/.claude/hooks/require-agent-model.sh" ]; then
 fi
 
 # The interop repoint (#1625, its header says why): ~/.bashrc is in no repo, so
-# this is its one install path. Appended, since a pane shell runs the whole file
-# and the Zed attach above the end of it only ever exits. Written through `>>`, so
-# a linked ~/.bashrc stays linked; the first edit keeps a copy of what it edited.
-repoint="$here/bin/wsl-interop-repoint.sh"
-repoint_line="[ -r \"$repoint\" ] && . \"$repoint\"  # #1625"
+# this is its one install path. Written through `>>`, so a linked ~/.bashrc
+# stays linked; the first edit keeps a copy of what it edited.
+repoint_line=$(repoint_bashrc_line "$here/bin/wsl-interop-repoint.sh")
 if ! grep -qxF "$repoint_line" "$HOME/.bashrc" 2>/dev/null; then
   if [ -e "$HOME/.bashrc" ] && [ ! -e "$HOME/.bashrc.pre-wsl-interop" ]; then
     cp -p "$HOME/.bashrc" "$HOME/.bashrc.pre-wsl-interop"
     echo "backed up $HOME/.bashrc -> $HOME/.bashrc.pre-wsl-interop"
+  fi
+  # A last line with no newline would swallow ours and break both.
+  if [ -s "$HOME/.bashrc" ] && [ -n "$(tail -c1 "$HOME/.bashrc")" ]; then
+    echo >> "$HOME/.bashrc"
   fi
   printf '%s\n' "$repoint_line" >> "$HOME/.bashrc"
   echo "added the interop repoint to $HOME/.bashrc"

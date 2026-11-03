@@ -46,16 +46,19 @@ for h in "${LINKED_HOOKS[@]}"; do
     problem "$h is not linked: $home/.claude/hooks/$h should link to $flow/claude/hooks/$h (run flow/install.sh)"
 done
 
-# The interop repoint has two carriers and reaches a shell only through them: a
-# Bash tool call needs BASH_ENV, a new herdr pane shell needs the ~/.bashrc line.
+# The interop repoint's two carriers (its header says what each reaches). The
+# settings path is checked against the primary checkout, which the live link
+# reads from any worktree; bash says nothing when BASH_ENV names no file.
 repoint="$flow/bin/wsl-interop-repoint.sh"
-[ -e "$repoint" ] || problem "$repoint does not exist, and ~/.bashrc and settings.json both source it"
-grep -qxF "[ -r \"$repoint\" ] && . \"$repoint\"  # #1625" "$home/.bashrc" 2>/dev/null ||
+[ -e "$repoint" ] || problem "$repoint does not exist"
+grep -qxF "$(repoint_bashrc_line "$repoint")" "$home/.bashrc" 2>/dev/null ||
   problem "wsl-interop-repoint.sh is not sourced from $home/.bashrc, so a new herdr pane shell can start on a dead WSL_INTEROP (run flow/install.sh)"
-case "$(jq -r '.env.BASH_ENV // empty' "$settings" 2>/dev/null)" in
-  */flow/bin/wsl-interop-repoint.sh) ;;
-  *) problem "$settings has no env.BASH_ENV naming flow/bin/wsl-interop-repoint.sh, so a Claude Code Bash call can start on a dead WSL_INTEROP" ;;
-esac
+primary=$(git -C "$flow" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+want_bash_env="${primary:-${flow%/flow}}/flow/bin/wsl-interop-repoint.sh"
+bash_env=$(jq -r '.env.BASH_ENV // empty' "$settings") ||
+  { echo "cannot read env.BASH_ENV from $settings" >&2; exit 2; }
+[ "$bash_env" = "$want_bash_env" ] ||
+  problem "$settings has env.BASH_ENV [$bash_env], not $want_bash_env, so a Claude Code Bash call can start on a dead WSL_INTEROP"
 
 # A misplaced autoMode block or a list missing "$defaults" is silent damage.
 lint_out=$(bash "$(dirname "${BASH_SOURCE[0]}")/settings-lint.sh" "$settings") || {

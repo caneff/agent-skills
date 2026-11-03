@@ -51,6 +51,7 @@ cp "$root/tests/all.sh" "$shadow/tests/all.sh" \
 cat >"$shadow/probe.test.sh" <<'PROBE'
 #!/usr/bin/env bash
 git config --local probe.ran yes
+[ -z "${BASH_ENV:-}" ] || git config --local probe.bash-env leaked
 git update-index --add --cacheinfo "100644,$(git hash-object -w --stdin </dev/null),probe-marker"
 PROBE
 git -C "$shadow" init -q \
@@ -68,6 +69,7 @@ out=$(
   cd "$shadow" &&
     GIT_ENV_SCRUB_TEST_ACTIVE="$_nested_sentinel" \
     GIT_DIR="$victim/.git" GIT_WORK_TREE="$victim" GIT_INDEX_FILE="$victim/.git/index" \
+    BASH_ENV=/dev/null \
     bash "$shadow/tests/all.sh" 2>&1
 )
 rc=$?
@@ -85,6 +87,12 @@ fi
 
 if [ "$(git -C "$shadow" config --local --get probe.ran)" != yes ]; then
   echo "FAIL: the probe suite did not write into the shadow repo, so the run did not resolve its root there"
+  exit 1
+fi
+
+# A live session's BASH_ENV (#1625) runs in every bash a suite starts.
+if [ -n "$(git -C "$shadow" config --local --get probe.bash-env)" ]; then
+  echo "FAIL: BASH_ENV reached a suite through tests/all.sh"
   exit 1
 fi
 

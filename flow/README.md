@@ -54,11 +54,14 @@ git clone <agent-skills>  ~/.agents/skills   # or wherever it lives
 `install-check.sh` (run at the end of `install.sh`, and on its own) verifies the
 result: `~/.claude/settings.json` is the link to `claude/settings.json` and
 fails loudly when it is a plain file, every hook in `hooks-manifest.sh`'s
-`LINKED_HOOKS` is linked to its repo file, and every repo hook is registered in
-`settings.json` or named in `UNREGISTERED_BY_DESIGN`.
+`LINKED_HOOKS` is linked to its repo file, every repo hook is registered in
+`settings.json` or named in `UNREGISTERED_BY_DESIGN`, and `env.BASH_ENV` and the
+`~/.bashrc` line both source `bin/wsl-interop-repoint.sh` (#1625).
 
 `install.sh` is idempotent and moves any existing real file aside to
-`<file>.pre-flow` before linking, so nothing is overwritten silently.
+`<file>.pre-flow` before linking, so nothing is overwritten silently. It also
+appends that line to `~/.bashrc`, once, keeping the first version as
+`~/.bashrc.pre-wsl-interop`.
 
 ## Notes
 
