@@ -134,6 +134,30 @@ recommending tools, macOS-only is a non-starter and so is anything needing
 one window per repo. Why: a Linux GUI or a blind input tool acts on a display
 I cannot see, and `wsl --shutdown` kills every session running in WSL.
 
+**An opener's exit status does not prove a window appeared** (#1625). A shell
+whose `WSL_INTEROP` socket is gone reaches Windows session 0, which has no
+desktop: `wslview` exited 0 and `chrome.exe` exited 21 with nothing on screen,
+and `clip.exe` filled a clipboard nobody reads. Check a window with
+`(Get-Process | ? MainWindowTitle -match <name>)`, which took Photos 7 s to fill
+after launch, and the clipboard with `Get-Clipboard`. To tell this failure, read
+`(Get-Process -Id $PID).SessionId` through `powershell.exe`: 0 is this failure.
+A live socket does not settle it either, since some live sockets reach session 0.
+
+`flow/bin/wsl-interop-repoint.sh` (its header names what carries it) moves a
+dead `WSL_INTEROP` to a socket reaching a user session, in each new shell. A
+shell already running when its socket died, a Claude session started before
+`BASH_ENV` landed, and a live socket reaching session 0 all miss it; for those,
+run the one call through a new shell, which treats unset as dead:
+
+```
+env -u WSL_INTEROP BASH_ENV="$HOME/.agents/skills/flow/bin/wsl-interop-repoint.sh" bash -c '<the call>'
+```
+
+If that still reads session 0, `/run/user/$UID/wsl-interop-repoint` says why:
+`no-user-session` means no socket reaches one, so nothing here can open a window
+until I sign in; `unanswered` means a probe failed or ran out of time, retried
+after 10 s.
+
 ## Judging visual work
 
 - A visual pass or fix is judged from a picture, never from settings or a

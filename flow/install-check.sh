@@ -2,8 +2,9 @@
 # Check that the live ~/.claude matches this repo (#1224): settings.json is the
 # link install.sh makes, every installed hook is linked to its repo file, and
 # every repo hook is registered in settings.json or named in
-# hooks-manifest.sh as unregistered by design. Prints one line per problem and
-# exits 1 on any; exit 0 means all of it holds.
+# hooks-manifest.sh as unregistered by design, and both carriers of the interop
+# repoint are in place (#1625). Prints one line per problem and exits 1 on any;
+# exit 0 means all of it holds.
 # --quiet prints nothing when all of it holds (for a SessionStart hook).
 # Usage: install-check.sh [--quiet] [--home <dir>] [--flow <dir>]
 set -uo pipefail
@@ -44,6 +45,20 @@ for h in "${LINKED_HOOKS[@]}"; do
   linked_to "$home/.claude/hooks/$h" "$flow/claude/hooks/$h" ||
     problem "$h is not linked: $home/.claude/hooks/$h should link to $flow/claude/hooks/$h (run flow/install.sh)"
 done
+
+# The interop repoint's two carriers (its header says what each reaches). The
+# settings path is checked against the primary checkout, which the live link
+# reads from any worktree; bash says nothing when BASH_ENV names no file.
+repoint="$flow/bin/wsl-interop-repoint.sh"
+[ -e "$repoint" ] || problem "$repoint does not exist"
+grep -qxF "$(repoint_bashrc_line "$repoint")" "$home/.bashrc" 2>/dev/null ||
+  problem "wsl-interop-repoint.sh is not sourced from $home/.bashrc, so a new herdr pane shell can start on a dead WSL_INTEROP (run flow/install.sh)"
+primary=$(git -C "$flow" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+want_bash_env="${primary:-${flow%/flow}}/flow/bin/wsl-interop-repoint.sh"
+bash_env=$(jq -r '.env.BASH_ENV // empty' "$settings") ||
+  { echo "cannot read env.BASH_ENV from $settings" >&2; exit 2; }
+[ "$bash_env" = "$want_bash_env" ] ||
+  problem "$settings has env.BASH_ENV [$bash_env], not $want_bash_env, so a Claude Code Bash call can start on a dead WSL_INTEROP"
 
 # A misplaced autoMode block or a list missing "$defaults" is silent damage.
 lint_out=$(bash "$(dirname "${BASH_SOURCE[0]}")/settings-lint.sh" "$settings") || {

@@ -1,5 +1,9 @@
 # Sourced by install.sh (what to link) and install-check.sh (what must be
-# linked and registered), so the two cannot disagree about the hook set.
+# linked and registered), so the two cannot disagree about the hook set or the
+# ~/.bashrc line.
+
+# The line that sources the interop repoint (#1625) for a repoint script's path.
+repoint_bashrc_line() { printf '[ -r "%s" ] && . "%s"  # #1625\n' "$1" "$1"; }
 
 # Hooks linked into ~/.claude/hooks. A lib sits here too: the hook that sources
 # it resolves it beside the link, and a lib not linked made every stop log
