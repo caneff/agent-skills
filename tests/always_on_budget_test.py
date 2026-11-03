@@ -110,7 +110,7 @@ def test_pointer_without_an_action_fails(fx):
 
 
 def test_real_claude_md_padded_past_budget_fails_on_budget(fx):
-    # Pad by BUDGET words so the total passes BUDGET whatever the real file's
+    # Pad by BUDGET + 1 words so the total passes BUDGET whatever the real file's
     # headroom is (#1632); BUDGET is read from the checker's source.
     budget = int(re.search(r"^BUDGET = (\d+)", CHECKER.read_text(), re.M).group(1))
     text = REAL.read_text() + "\n" + " ".join(["word"] * (budget + 1)) + "\n"
