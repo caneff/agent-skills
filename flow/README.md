@@ -12,6 +12,7 @@ every commit here is a backup.
 |---|---|---|
 | `bin/issue-counts` | `~/.local/bin/issue-counts` | Open-issue counts per wayfinder group for the current repo |
 | `bin/automode-entry` | `~/.local/bin/automode-entry` | Add, edit or remove autoMode entries in `claude/settings.json` in place, then commit and push (`add`, or `open` then `apply`) |
+| `bin/wsl-interop-repoint.sh` | not linked: `env.BASH_ENV` in `claude/settings.json` and a line in `~/.bashrc` source it | Moves a dead `WSL_INTEROP` to a socket reaching a user session in each new shell (#1625) |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions (hard rules, the two gates) |
 | `claude/settings.json` | `~/.claude/settings.json` | Harness config: hooks, permissions |
 | `claude/settings.local.json` | `~/.claude/settings.local.json` | Machine-local overrides |
