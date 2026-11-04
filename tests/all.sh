@@ -363,7 +363,11 @@ cat "$tmp/parallel" "$tmp/serial" >"$tmp/ordered"
 # tests/all.test.sh was 251 of the suite's 494 serial seconds) is a red line and
 # not a quiet tax on every merge. A suite that needs more is named below with
 # its own budget and a one-line reason; adding a line is the visible diff.
-default_cpu_budget=15
+# 25, not 15: pytest suites that cost ~10.5s CPU alone measured 15.1-15.7s in a
+# full parallel run (backstop_test, fix_check_test, retire_landing_test failed
+# the 15s line on a loaded box, 2026-11-04, #1615). Still far under a suite that
+# re-runs the repo.
+default_cpu_budget=25
 cpu_budget() { # <label>: prints the suite's budget in seconds
   case $1 in
     flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir) and runs 140+ process-spawning tests
