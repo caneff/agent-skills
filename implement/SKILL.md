@@ -288,15 +288,18 @@ No PR and no reviewer; Chris reads the log after.
   ```
   python3 ~/.agents/skills/implement/fanout-brief.py --repo <repo> --worktree <this workspace> \
     --ticket <n> --for <worker> --test-command "<covering test>" \
-    --assign <worker>=<file>,<file> --assign <other>=<file> ...
+    --assign <worker>=<file>,<file> --assign <other>=<file> ... \
+    [--finding <worker>:<id>=<text> ...] [--ruled <worker>:<id>=<text> ...] \
+    [--workers <k>] [--ceiling <seconds>]
   ```
 
-  Every worker's `--assign` is passed on every render, so each brief names the
-  whole split. It prints one line; send that line to `Agent` unedited, with
-  `model`. It refuses a file owned by two workers (a directory counts for the files
-  under it), a worker owning none, and a split of fewer than two workers. The
-  skeleton it reads (`briefs/fanout-worker.md`) holds the no-git-write,
-  no-subagent, scratch-copy mutation and report rules once.
+  A fix round passes every finding by id (#1620): `--finding` for each, and
+  `--ruled` for one the controller has ruled on (flagged in the brief as
+  flag-if-you-disagree). Each brief lists only its worker's findings and asks
+  for a `fixed` or `disputed` line per id. The renderer cannot see the review
+  sidecars, so passing every id is on the caller; its refusals (an id given
+  twice, a worker with none) are in its docstring. `--workers` (default 1) and
+  `--ceiling` (default 600 seconds) cap any test run the sub-worker makes.
 - Typecheck and run only the tests for the files you touch as you go; no
   suite run at the end of the build. A ticket's one suite run is § Review
   step 3's, after the fix round. Why: a failure caught at the file it came
@@ -370,6 +373,9 @@ round follows steps 2–3 below keyed on the spec number:
    - `disputed: <why>`: the finding is wrong or cannot occur, in a reason Chris
      can read. A finding whose failure cannot occur here is disputed under the
      reachability bar below, whatever its rating.
+
+   Fanning the fixes out across sub-workers: the Build bullet on fanning out sub-workers (§ Build) renders it with `fanout-brief.py`,
+   `--finding` per id (#1620), never a hand-typed task.
 
    **The reachability bar.** Stated here once, applied before a finding is
    fixed or moved: its failure must be nameable in our environment — this box
