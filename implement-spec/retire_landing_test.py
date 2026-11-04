@@ -454,6 +454,12 @@ def test_a_dirty_checkout_whose_fix_already_landed_does_not_stop(land):
     assert land.finish().returncode == 0
 
 
+def test_a_deleted_agents_file_counts_as_a_dirty_checkout(land):
+    (land.clone("sudokupad-art") / "AGENTS.md").unlink()
+    refused(land.finish(), "dirty checkout")
+    assert land.origin_commits("sudokupad-art") == []
+
+
 def test_a_checkout_off_main_stops_its_step(land):
     git(land.clone("sudokupad-art"), "checkout", "-q", "-b", "other")
     refused(land.finish(), "on branch other")

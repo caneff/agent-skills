@@ -325,7 +325,7 @@ def commit_rewording(path, edits):
     target = path / "AGENTS.md"
     head = git(path, "show", "HEAD:AGENTS.md")
     dirty = git(path, "status", "--porcelain").splitlines()
-    ours = target.read_text() == reword(head, edits) \
+    ours = target.is_file() and target.read_text() == reword(head, edits) \
         and all(line[3:] == "AGENTS.md" for line in dirty)
     if dirty and not ours:
         raise Refused(f"dirty checkout: {'; '.join(dirty)}")
@@ -386,7 +386,7 @@ def finish(own_run):
         move_cache()
         rebuild_dispatch()
         remove_skill_link()
-    except Refused as exc:
+    except (Refused, OSError) as exc:
         print(f"stopped: {exc}")
         return 1
     steps = [(repo, lambda r=repo, e=edits: fix_repo(r, e))
@@ -396,7 +396,7 @@ def finish(own_run):
     for name, step in steps:
         try:
             step()
-        except Refused as exc:
+        except (Refused, OSError) as exc:
             print(f"stopped: {name}: {exc}")
             failed = True
     return 1 if failed else 0
