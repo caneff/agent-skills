@@ -222,6 +222,41 @@ fn creates_the_workspace_and_branch_off_origin_default_with_no_origin_head() {
 }
 
 #[test]
+fn dispatch_keeps_its_worktree_out_of_git_status_1630() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    assert!(!git_out(&repo, &["check-ignore", ".claude/worktrees/implement-395"]).contains(".claude"), "fixture already ignores the path");
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
+
+    assert_eq!(git_out(&repo, &["status", "--porcelain"]), "", "the workspace shows in git status");
+    let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+    assert_eq!(exclude.lines().filter(|l| *l == "/.claude/worktrees/").count(), 1, "exclude: {exclude}");
+}
+
+#[test]
+fn dispatch_leaves_the_exclude_alone_when_the_path_is_already_ignored_1630() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let git = |a: &[&str]| {
+        assert!(std::process::Command::new("git").arg("-C").arg(&repo).args(a).status().unwrap().success());
+    };
+    std::fs::write(repo.join(".gitignore"), ".claude/\n").unwrap();
+    git(&["add", ".gitignore"]);
+    git(&["commit", "-qm", "ignore"]);
+    let before = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap_or_default();
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
+
+    let after = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap_or_default();
+    assert_eq!(before, after);
+}
+
+#[test]
 fn writes_the_trust_key_for_exactly_the_new_path() {
     let f = Fixture::new();
     f.reset_home(true);
