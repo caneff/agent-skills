@@ -263,8 +263,7 @@ defines them.
   the run ended. A `run_in_background` call also raises the harness's own
   completion notice, so one job's end can start two turns: they are the same
   event. A sharded run of several `job-run` processes starts each with the
-  same `--group <name>` in one step: the mod then wakes once, at the last
-  member's end or the first failure, not once per member.
+  same `--group <name>` (rule: `flow/bin/job-run` header), not once per member.
   Why: a plain background run loses its output and exit code when its
   shell is killed, a lost completion notice leaves an idle session asleep
   (ADR 0003), and a Monitor expires and needs re-arming (#1223 reports 30

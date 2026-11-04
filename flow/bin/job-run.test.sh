@@ -494,6 +494,7 @@ wait "$rpid" 2>/dev/null
   || no "a run with no --group leaves no group file"
 refuse "--group may hold only" --name g3 --group ../x -- true
 refuse "--group needs a value" --group
+refuse "--group may not be empty" --name g3 --group "" -- true
 refuse "--group cannot be combined with --status" --status a --group b
 refuse "--group cannot be combined with --wait" --wait a --group b
 [ ! -e "$jobs_dir/g3" ] \

@@ -363,10 +363,10 @@ test('a refused Bash call is handed back as refused, and a run found beside it i
 })
 
 // A sharded run: several `job-run --group` members of one session, one wake.
-const shard = ($: any, w: ReturnType<typeof world>, names: string[], group = 'shards') =>
+const shard = ($: any, w: ReturnType<typeof world>, names: string[]) =>
   bash($, w, { command: 'for i in 0 1 2; do job-run --group shards -- hb & done', run_in_background: true }, () => {
     names.forEach((n, i) => {
-      w.jobs[n] = job(String(100 + i), ALIVE, { group })
+      w.jobs[n] = job(String(100 + i), ALIVE, { group: 'shards' })
     })
   })
 const ended = (n: string, rc = 0): [number, string] => [0, `finished ${n} rc=${rc} cause=exit ended=t`]
@@ -414,7 +414,7 @@ test('a killed member wakes the group', async ($, on) => {
   expect(w.wakes[0]).toContain('killed hb0')
 })
 
-test('a failure line in one member wakes the group once, naming the line', async ($, on) => {
+test('a failure line in a running member wakes the group, and the group still wakes when its last member ends', async ($, on) => {
   const w = world(on)
   await shard($, w, ['hb0', 'hb1'])
   w.at('hb1').progress.push('t Traceback (most recent call last):')
@@ -422,10 +422,29 @@ test('a failure line in one member wakes the group once, naming the line', async
   expect(w.wakes.length).toBe(1)
   expect(w.wakes[0]).toContain('hb1 failed')
   expect(w.wakes[0]).toContain('matched line: t Traceback (most recent call last):')
-  w.at('hb0').status = ended('hb0')
-  w.at('hb1').status = ended('hb1', 1)
   await w.clock.advance(POLL * 3)
   expect(w.wakes.length).toBe(1)
+  w.at('hb0').status = ended('hb0')
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  w.at('hb1').status = ended('hb1')
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(2)
+  expect(w.wakes[1]).toContain('group shards: all 2 jobs ended')
+})
+
+test('a failure line seen before an ended failure does not hide the failure: it still wakes', async ($, on) => {
+  const w = world(on)
+  await shard($, w, ['hb0', 'hb1'])
+  w.at('hb1').progress.push('t Error: spurious')
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  w.at('hb0').status = ended('hb0', 3)
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(2)
+  expect(w.wakes[1]).toContain('hb0 failed')
+  await w.clock.advance(POLL * 3)
+  expect(w.wakes.length).toBe(2)
 })
 
 test('two groups, and a run with no group, each wake on their own', async ($, on) => {
@@ -467,7 +486,7 @@ test('a group wake that does not enter the session is sent again, and marks no m
 test('after a reload a group whose wake was sent stays quiet, and one never sent wakes once', async ($, on) => {
   const w = world(on)
   w.jobs.told0 = job('100', ended('told0'), { group: 'T', markers: { 'woken-end': '100' } })
-  w.jobs.told1 = job('101', ALIVE, { group: 'T', markers: { 'woken-end': '101' } })
+  w.jobs.told1 = job('101', ended('told1'), { group: 'T', markers: { 'woken-end': '101' } })
   w.jobs.new0 = job('102', ended('new0'), { group: 'N' })
   w.jobs.new1 = job('103', ended('new1'), { group: 'N' })
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })

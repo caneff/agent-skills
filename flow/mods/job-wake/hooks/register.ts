@@ -64,10 +64,10 @@ const scan = async ($: EngineInterface): Promise<Run[]> => {
     const name = /\/([^/]+)\/session$/.exec(path)?.[1]
     if (name === undefined) continue
     const pid = await firstLine($, `${dir}/${name}/pid`)
-    if (pid === undefined || runs.has(`${name}:${pid}`)) continue
+    if (pid === undefined || runs.has(runKey({ name, pid }))) continue
     const run: Run = { name, pid, group: await firstLine($, `${dir}/${name}/group`) }
     if (await isMarked($, run, 'woken-end')) continue
-    runs.set(`${name}:${pid}`, run)
+    runs.set(runKey(run), run)
     fresh.push(run)
   }
   return fresh
@@ -97,14 +97,24 @@ const wake = async ($: EngineInterface, run: Run, status: string, matched?: stri
   return false
 }
 
-const check = async ($: EngineInterface, run: Run) => {
-  const key = `${run.name}:${run.pid}`
-  // A rerun under this name replaced the run: its end can no longer be read.
-  if ((await firstLine($, `${await jobsDir($)}/${run.name}/pid`)) !== run.pid) return runs.delete(key)
+const runKey = (run: Run) => `${run.name}:${run.pid}`
+
+// A run's state now, or undefined (and the run forgotten) when a rerun under
+// its name replaced it or its directory is gone: its end can no longer be read.
+const readState = async ($: EngineInterface, run: Run) => {
+  if ((await firstLine($, `${await jobsDir($)}/${run.name}/pid`)) !== run.pid) return void runs.delete(runKey(run))
   const { code, line } = await statusOf($, run)
+  if (code === NO_RUN) return void runs.delete(runKey(run))
   const hasEnded = code === FINISHED || code === KILLED
-  if (code === NO_RUN) return runs.delete(key)
   if (!hasEnded && code !== ALIVE) throw new Error(`job-run --status ${run.name} exited ${code}: ${line}`)
+  return { code, line, hasEnded }
+}
+
+const check = async ($: EngineInterface, run: Run) => {
+  const key = runKey(run)
+  const state = await readState($, run)
+  if (state === undefined) return
+  const { line, hasEnded } = state
   const matched = (await isMarked($, run, 'woken-line')) ? undefined : await failureLine($, run)
   if (!hasEnded && matched === undefined) return
   const status = hasEnded ? line : 'still running, and its output matched a failure signature'
@@ -115,33 +125,27 @@ const check = async ($: EngineInterface, run: Run) => {
   runs.delete(key)
 }
 
-// One wake for a group: when its last member has ended, or at the first one
-// that fails (killed, a non-zero rc, or a failure line in its output). Marking
-// every member, a still-running one included, is what keeps the rest of the
-// group quiet; a wake that did not enter the session marks none, so it is sent
-// again.
+// One wake for a group (the rule is in flow/bin/job-run's header). A failure
+// line alone, in a member still running, wakes but ends no watch: the group
+// still wakes at its last end or an ended failure, as a run with no group does.
+// Marking every member, a running one included, is what silences the rest; a
+// wake that did not enter the session marks none, so it is sent again.
 const checkGroup = async ($: EngineInterface, group: string, members: Run[]) => {
   const rows: { run: Run; line: string; hasEnded: boolean; hasFailed: boolean; matched?: string }[] = []
   for (const run of members) {
-    // A rerun under this name replaced the run: its end can no longer be read.
-    if ((await firstLine($, `${await jobsDir($)}/${run.name}/pid`)) !== run.pid) {
-      runs.delete(`${run.name}:${run.pid}`)
-      continue
-    }
-    const { code, line } = await statusOf($, run)
-    if (code === NO_RUN) {
-      runs.delete(`${run.name}:${run.pid}`)
-      continue
-    }
-    const hasEnded = code === FINISHED || code === KILLED
-    if (!hasEnded && code !== ALIVE) throw new Error(`job-run --status ${run.name} exited ${code}: ${line}`)
-    const matched = await failureLine($, run)
-    const hasFailed = code === KILLED || (code === FINISHED && !/ rc=0 /.test(line)) || matched !== undefined
-    rows.push({ run, line, hasEnded, hasFailed, matched })
+    const state = await readState($, run)
+    if (state === undefined) continue
+    const { code, line, hasEnded } = state
+    rows.push({ run, line, hasEnded, hasFailed: code === KILLED || (code === FINISHED && !/ rc=0 /.test(line)) })
   }
-  const failed = rows.find(r => r.hasFailed)
+  // Failure lines are searched until one has woken the group.
+  let isLineWoken = false
+  for (const r of rows) isLineWoken ||= await isMarked($, r.run, 'woken-line')
+  if (!isLineWoken) for (const r of rows) r.matched = await failureLine($, r.run)
+  const failed = rows.find(r => r.hasFailed) ?? rows.find(r => r.matched !== undefined)
   const endedCount = rows.filter(r => r.hasEnded).length
-  if (failed === undefined && (rows.length === 0 || endedCount < rows.length)) return
+  const isDone = rows.length > 0 && endedCount === rows.length
+  if (failed === undefined && !isDone) return
   const lines = [
     failed === undefined
       ? `job-wake: group ${group}: all ${rows.length} jobs ended`
@@ -155,9 +159,10 @@ const checkGroup = async ($: EngineInterface, group: string, members: Run[]) => 
     await logOnce($, `the wake for group ${group} did not enter the session (${sent.drop}); it will be sent again`)
     return
   }
+  const isLineOnly = !isDone && !rows.some(r => r.hasFailed)
   for (const { run } of rows) {
-    await mark($, run, 'woken-end')
-    runs.delete(`${run.name}:${run.pid}`)
+    await mark($, run, isLineOnly ? 'woken-line' : 'woken-end')
+    if (!isLineOnly) runs.delete(runKey(run))
   }
 }
 
@@ -215,7 +220,7 @@ export const register: Register = on => {
         e.run_in_background !== true && [FINISHED, KILLED].includes((await statusOf($, run).catch(() => ({ code: ALIVE }))).code)
       if (hasEndedHere) {
         await mark($, run, 'woken-end')
-        runs.delete(`${run.name}:${run.pid}`)
+        runs.delete(runKey(run))
       } else watched.push(run.name)
     }
     // A refused call has no result to add the note to; its runs are watched all the same.
