@@ -14,11 +14,8 @@ in a throwaway repo, as a spec run's controller reaches them:
 What a green run does NOT cover (the seam is blind to it):
 - whether a model follows the merged `implement-spec/SKILL.md`: the first real
   spec run after landing is that check;
-- `implement-spec/retire_landing.py finish` against the real `gh`, `cargo` and
-  the three real repos: its own suite uses fakes, and its first real run is at
-  landing;
 - the slash-command menu in a fresh Claude Code session, and the skill symlink
-  and cache on this machine, which only that real `finish` changes.
+  and cache on this machine, which the retirement's landing changed.
 """
 import json
 import os
