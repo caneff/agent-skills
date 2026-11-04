@@ -20,6 +20,8 @@ import retire_landing as landing  # noqa: E402
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                       "retire_landing.py")
 OWN = "spec-1634-20261103"
+# Valid JSON and no run file, so `check` passes it and the move meets it.
+OTHER_RECORD = '{"other": true}'
 
 FAKE_JOB_RUN = """#!/bin/bash
 # job-run's --status contract: first word and exit code, off a state file.
@@ -146,7 +148,7 @@ def test_check_passes_when_only_its_own_run_is_alive(world):
 
 def test_check_refuses_a_live_drain(world):
     world.job("drain-sudoku-kit", "alive")
-    refused(world.check(), "drain-sudoku-kit")
+    refused(world.check(), "drain alive: job-run says drain-sudoku-kit")
 
 
 @pytest.mark.parametrize("state", ["finished", "killed"])
@@ -354,7 +356,7 @@ def test_finish_touches_nothing_while_a_drain_is_alive(land):
 
 def _cache_conflict(land):
     land.new_cache.mkdir()
-    (land.new_cache / "burn-old.json").write_text("other")
+    (land.new_cache / "burn-old.json").write_text(OTHER_RECORD)
     return lambda: (land.new_cache / "burn-old.json").unlink()
 
 
@@ -389,7 +391,7 @@ def _gh_fails(land):
 
 
 @pytest.mark.parametrize("fault, cause", [
-    (_cache_conflict, "burn-old.json"),
+    (_cache_conflict, "exist at both"),
     (_cargo_fails, "lane-install.sh"),
     (_link_is_a_directory, "not a symlink"),
     (_commit_refused, "sudokupad-art"),
@@ -502,7 +504,8 @@ def test_the_last_step_fails_until_the_word_is_gone_from_all_three(land):
     git(clone, "commit", "-q", "-am", "unforeseen citation")
     git(clone, "push", "-q", "origin", "main")
     result = land.finish()
-    refused(result, "unforeseen")
+    refused(result, "rg still finds")
+    assert "unforeseen" in result.stdout
     assert len(land.issues()) == 1
     text = (clone / "AGENTS.md").read_text()
     (clone / "AGENTS.md").write_text(text.replace(f"See {landing.RETIRED}, unforeseen.\n", ""))
@@ -538,9 +541,9 @@ def test_cache_files_that_reappear_at_the_old_path_are_moved_too(land):
 
 def test_a_cache_conflict_overwrites_and_deletes_nothing(land):
     land.new_cache.mkdir()
-    (land.new_cache / "burn-old.json").write_text("other")
-    refused(land.finish(), "burn-old.json")
-    assert (land.new_cache / "burn-old.json").read_text() == "other"
+    (land.new_cache / "burn-old.json").write_text(OTHER_RECORD)
+    refused(land.finish(), "burn-old.json exist at both")
+    assert (land.new_cache / "burn-old.json").read_text() == OTHER_RECORD
     assert (land.old_cache / "burn-old.json").read_text() == land.cache_before["burn-old.json"]
 
 
