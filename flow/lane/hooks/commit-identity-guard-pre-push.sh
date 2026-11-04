@@ -73,7 +73,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   done
 done
 if [ "$saw_a_ref" -eq 0 ]; then
-  echo "commit-identity guard (pre-push): refused — no ref updates were read on stdin; git's pre-push protocol always sends at least one, so refusing rather than reading silence as nothing to check." >&2
-  bad=1
+  # git lists only refs it will send: it leaves out a ref already equal to the
+  # remote's and one it is about to reject as non-fast-forward (#1618). An
+  # empty list is therefore a push with nothing to check, and a stale or
+  # diverged branch is reported by git itself ("rejected ... fetch first" /
+  # "non-fast-forward"). The hook is given no refspec, so it cannot name the
+  # branch; git's own message does. A starved stdin is closed one layer up:
+  # the lane's wrapper fails the push when it cannot buffer the list (#1006).
+  echo "commit-identity guard (pre-push): no ref updates on stdin — nothing to push, nothing to check (the branch is already up to date, or git will reject it itself as non-fast-forward)." >&2
 fi
 exit $bad

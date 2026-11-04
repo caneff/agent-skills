@@ -1559,8 +1559,8 @@ fn a_foreign_pre_push_hook_is_preserved_and_the_guard_still_refuses_a_replayed_c
     assert!(!bad.status.success(), "a replayed foreign-email commit was pushed over a taken-over foreign hook: {}", out_text(&bad));
     let bad_err = String::from_utf8_lossy(&bad.stderr);
     assert!(bad_err.contains("commit-identity guard (pre-push)"), "{bad_err}");
-    // Names the actual mismatched email, not just "no ref updates were read"
-    // (the zero-refs fallback) — proves the guard actually enumerated the
+    // Names the actual mismatched email, not just the empty-push note
+    // ("no ref updates on stdin") — proves the guard actually enumerated the
     // pushed commit through the stdin-draining foreign hook, rather than
     // merely refusing everything a foreign hook happens to consume stdin
     // from (which would be an availability bug of its own, not a fix).
