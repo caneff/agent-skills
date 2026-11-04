@@ -1049,7 +1049,7 @@ def test_run_file_md_usage_block_mirrors_the_runfile_docstring():
     subcommand the parser defines."""
     def usage(text):
         return [" ".join(ln.split()) for ln in text.splitlines()
-                if ln.lstrip().startswith("python3 burndown/runfile.py ")]
+                if ln.lstrip().startswith("python3 implement-spec/runfile.py ")]
     doc = os.path.join(os.path.dirname(RUNFILE), "references", "run-file.md")
     # The first fenced block only: later blocks are worked examples.
     block = open(doc).read().split("```")[1]

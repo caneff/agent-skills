@@ -38,7 +38,7 @@ The tickets of one connected component of a run's file-collision graph. It prove
 _Avoid_: component (the graph term), cluster
 
 **Clump**:
-The tickets inside one family whose closures are identical, at most three (`MAX_CLUMP` in `burndown/closure.py`); any other family member is a clump of one. One worker, one workspace, one PR that closes every ticket in it.
+The tickets inside one family whose closures are identical, at most three (`MAX_CLUMP` in `implement-spec/closure.py`); any other family member is a clump of one. One worker, one workspace, one PR that closes every ticket in it.
 _Avoid_: batch, group, cluster
 
 **Anchor**:

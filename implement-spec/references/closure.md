@@ -5,7 +5,7 @@ and a **clump** — one worker, one workspace, one PR — is the family members
 whose closures are identical (§ Families run as clumps). The graph is built
 on each candidate's **include closure**: the files a change to the
 candidate's target files actually regenerates. Reading it is
-`burndown/closure.py` — `python3 burndown/closure.py [--json] <repo-root>
+`implement-spec/closure.py` — `python3 implement-spec/closure.py [--json] <repo-root>
 <n>=<path>[,<path>]...`, or `clumps(root, candidates)` in process.
 
 Not on declared seams. A ticket's `## Seams under test` is prose typed by
@@ -109,7 +109,7 @@ blockers versus one that says nothing at all.
 A connected component proves one thing: two of its tickets that share a file
 cannot hold live workspaces at the same time. It does not prove they ship
 together. On `burn-2026-09-21-0930` the 27 remaining tickets chained through
-hub files — `implement/SKILL.md`, `burndown/loop.py`, `AGENTS.md`,
+hub files — `implement/SKILL.md`, `implement-spec/loop.py`, `AGENTS.md`,
 `tests/all.sh` — into one component of 34 files. Read as one clump, the loop's
 only move was one worker holding 27 tickets in one context, one branch and
 one PR (#970).

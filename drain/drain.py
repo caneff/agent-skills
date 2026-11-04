@@ -3,7 +3,7 @@
 [--anchor <n>]`: work the `ready-for-agent` queue unattended, serially, one PR
 at a time (#1403).
 
-The **anchor** is the oldest unblocked ready ticket (`burndown/frontier.py`)
+The **anchor** is the oldest unblocked ready ticket (`implement-spec/frontier.py`)
 or clear spec parent, whichever has the lower number, or, for the first bundle
 drain picks, the ticket or spec `--anchor <n>` names (refused unless `<n>` is
 open, ready, unblocked and without a kept workspace; a resumed bundle goes
@@ -114,7 +114,7 @@ import sys
 import tempfile
 import time
 
-for _dir in ("burndown", "implement"):
+for _dir in ("implement-spec", "implement"):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", _dir))
 
 import frontier  # noqa: E402

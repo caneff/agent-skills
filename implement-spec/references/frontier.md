@@ -2,7 +2,7 @@
 
 The **frontier** is the set of tickets a run may dispatch right now: open,
 carrying the run's label, unclaimed, and not waiting on anything. Reading it
-is `burndown/frontier.py` — `python3 burndown/frontier.py <owner/repo>
+is `implement-spec/frontier.py` — `python3 implement-spec/frontier.py <owner/repo>
 <label>`, or `frontier(repo, label)` in process — and it answers in five
 buckets, not two.
 
@@ -85,7 +85,7 @@ one. The route is offered only once the prerequisites are known and met.
 A spec parent reaches the `spec` bucket only when it carries the queried
 label. One left by an earlier spec run with `spec` alone never does, and its
 slices then read as ordinary `unblocked` tickets and are built one by one,
-which is the failure `references/spec-handoff.md` exists to stop (#1242,
+which is the failure `burndown/references/spec-handoff.md` exists to stop (#1242,
 seen on burn-2026-09-27). So the reader also looks at each candidate's
 **parent**: `gh api repos/<o>/<r>/issues/<n>/parent`, and where that answers
 404, the body's parent line: `Part of #<n>`, a `Part of` line linking this repo's issue URL (what

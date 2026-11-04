@@ -1,19 +1,19 @@
 # The run file: one run's state, and what a resume reads
 
 A run's state lives in **one JSON file per run**, at
-`~/.cache/burndown/<run-id>.json`, read and written by `burndown/runfile.py`.
+`~/.cache/burndown/<run-id>.json`, read and written by `implement-spec/runfile.py`.
 It is the only place a run's state lives: the controller's context is not
 state, and a per-repo log is not this run.
 
 ```
-python3 burndown/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
-python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
-python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
-python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
-python3 burndown/runfile.py close    <run-id> --clump 901 --reason <text>
-python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-python3 burndown/runfile.py show     <run-id>
-python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
+python3 implement-spec/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
+python3 implement-spec/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
+python3 implement-spec/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
+python3 implement-spec/runfile.py land     <run-id> --clump 901 --sha <sha>
+python3 implement-spec/runfile.py close    <run-id> --clump 901 --reason <text>
+python3 implement-spec/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
+python3 implement-spec/runfile.py show     <run-id>
+python3 implement-spec/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 ```
 
 ## What it holds

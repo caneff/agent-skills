@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The frontier of a ticket queue: `python3 burndown/frontier.py <owner/repo>
+"""The frontier of a ticket queue: `python3 implement-spec/frontier.py <owner/repo>
 <label>` prints the open, unclaimed, dispatchable tickets split six ways —
 
     unblocked   <n> <title>

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The closing report's counts:
 
-    python3 burndown/counts.py <run-id> (--repo <checkout> | --reviews-dir <dir>)
+    python3 implement-spec/counts.py <run-id> (--repo <checkout> | --reviews-dir <dir>)
                                 [--spec <n>]
 
 prints the closing report's two counts, fixed and moved, read from each

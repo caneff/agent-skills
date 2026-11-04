@@ -2,7 +2,7 @@
 
 `burndown/SKILL.md` § Liveness: that is the ranked list. This file is the evidence
 behind it — what each source was measured at on #781, and what it costs when
-it is read the other way. `burndown/loop.py`'s `sweep` is the reader that
+it is read the other way. `implement-spec/loop.py`'s `sweep` is the reader that
 applies the mechanical half.
 
 ## The wake, and why nothing replaces it

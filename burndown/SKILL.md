@@ -19,18 +19,18 @@ turns up inside a mixed queue is handed off to it whole —
 
 The dispatch loop — pick the next jobs, start them, wait, start more as slots
 free up — lives **here and nowhere else** (#779). Its mechanical steps are
-`burndown/loop.py`; why each rule reads the way it does, with the evidence it
-came from: [`references/loop.md`](references/loop.md).
+`implement-spec/loop.py`; why each rule reads the way it does, with the evidence it
+came from: [`implement-spec/references/loop.md`](../implement-spec/references/loop.md).
 
 **Where the controller runs.** Any primary checkout's **default branch** —
 read from `refs/remotes/origin/HEAD`, never assumed to be `main` — and not
 necessarily the target repo's checkout: the loop addresses the target with
-`--repo` on every tracker call. `python3 burndown/loop.py seat` refuses a
+`--repo` on every tracker call. `python3 implement-spec/loop.py seat` refuses a
 linked worktree and says why, because inside one `/implement`'s front-door
 rule reads the session as a **worker** and the same prompt would start a
 build instead of a run. It refuses a detached HEAD and a non-default branch
 too. The one linked worktree it accepts, and says so, is a `spec-<n>`
-branch (`references/loop.md` says why).
+branch (`implement-spec/references/loop.md` says why).
 
 **Open the run.**
 
@@ -90,7 +90,7 @@ branch (`references/loop.md` says why).
    a diff it cannot read refuses the tick. A clump sharing a file or a
    directory with a live workspace, or with a clump picked earlier the same
    tick, is **off the frontier**
-   (`references/loop.md` § The exclusion rule and what it costs):
+   (`implement-spec/references/loop.md` § The exclusion rule and what it costs):
    `loop.py dispatch` picks from what is left, **widest
    closure first** so a wide clump does not sit behind narrow ones and block
    them later (#1026), and prints a `held` line for the rest naming its live
@@ -134,7 +134,7 @@ branch (`references/loop.md` says why).
    ceiling is on the sum of the per-process `ulimit -v` caps. A slot the box
    cannot afford stays empty; that is not a reason to dispatch into it
    anyway. A slot is budgeted at its **peak**, not its steady state (#933):
-   `references/loop.md` § The box check, and `loop.py dispatch` prints the
+   `implement-spec/references/loop.md` § The box check, and `loop.py dispatch` prints the
    `peak:` line that goes in the status line below. `loop.py box` takes
    `--live <n>`, the workers already running; omitting it is refused.
 8. Dispatch and merge through
@@ -147,7 +147,7 @@ branch (`references/loop.md` says why).
    restates neither grammar. When two in-flight branches turn out to touch
    the same files, the collision procedure, the closure defect it implies,
    and the rule that every outstanding worker question is answered **before**
-   cleanup: [`references/merge-tail.md`](references/merge-tail.md). Register
+   cleanup: [`implement-spec/references/merge-tail.md`](../implement-spec/references/merge-tail.md). Register
    each dispatched clump with
    `runfile.py clump` — its workspace and its worker's herdr agent name, or
    step 1's resume has nothing to re-announce to — each landing with
@@ -156,7 +156,7 @@ branch (`references/loop.md` says why).
    run, once that run has finished and not at the hand-off) with
    `runfile.py close <run-id> --clump <n> --reason <text>`, never
    a `land` at `main`'s tip (why, and the recovery when one was recorded:
-   `references/run-file.md`), and each "PR up" with `runfile.py pr-up <run-id>
+   `implement-spec/references/run-file.md`), and each "PR up" with `runfile.py pr-up <run-id>
    --clump <n> --pr <n>` as it arrives, for this file's § Liveness, so a
    restart can pick the run back up with nothing transcribed by hand. The controller clears the
    PR-up record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever
@@ -182,7 +182,7 @@ finding's outcome from the dispositions sidecars into the ledger. The report
 carries two counts, **fixed** and **moved**,
 
 ```
-python3 burndown/counts.py <run-id> --repo <primary checkout>
+python3 implement-spec/counts.py <run-id> --repo <primary checkout>
 ```
 
 read from each landed clump's dispositions sidecar, which the worker writes
@@ -242,8 +242,8 @@ ticket's merge line, which Chris merges himself (`implement/SKILL.md` § The mer
 ## The frontier
 
 Which tickets a run may dispatch next — open, labelled, unclaimed, waiting on
-nothing — is read by `burndown/frontier.py`, not by a regex at the call site:
-`python3 burndown/frontier.py <owner/repo> <label>` prints the `unblocked`,
+nothing — is read by `implement-spec/frontier.py`, not by a regex at the call site:
+`python3 implement-spec/frontier.py <owner/repo> <label>` prints the `unblocked`,
 `blocked`, `unresolved`, `spec` and `slice` buckets. Native tracker dependencies
 first, the `## Blocked by` section as the fallback, and a ticket with neither
 is **unresolved** — never dispatched on the assumption that silence means
@@ -257,16 +257,16 @@ an ordinary ticket, whether or not the parent itself carries the queue label. Wh
 carries the queue label too, its `spec` line and its slices' `slice` lines
 are one handoff: run the `--spec <parent>` line once.
 The grammar and the three sources:
-[`references/frontier.md`](references/frontier.md).
+[`implement-spec/references/frontier.md`](../implement-spec/references/frontier.md).
 
 ## Clumping
 
 Which candidates are one clump — one worker, one workspace, one PR — is read
-by `burndown/closure.py`, not from the tickets' declared seams:
-`python3 burndown/closure.py <repo-root> <n>=<path>[,<path>]...` prints the
+by `implement-spec/closure.py`, not from the tickets' declared seams:
+`python3 implement-spec/closure.py <repo-root> <n>=<path>[,<path>]...` prints the
 mode and the **families** — the connected components of the collision graph
 over each candidate's **include closure** — each split into its **clumps**
-(`references/closure.md` § Families run as clumps); `--json` prints the clump
+(`implement-spec/references/closure.md` § Families run as clumps); `--json` prints the clump
 list `loop.py dispatch --candidates` reads. The repo declares its include
 directive and its generator command in `AGENTS.md`; the resolver follows
 that declaration one hop and **never runs the generator**. A repo that declares nothing is
@@ -275,12 +275,12 @@ carries the announcement line** the reader returns, so a controller can see
 which of the three modes it got. An in-flight clump's file set is wider than
 its closure by the time a dispatch reads it: the run loop's step 5 unions in
 its workspace's real diff. The grammar and the evidence:
-[`references/closure.md`](references/closure.md).
+[`implement-spec/references/closure.md`](../implement-spec/references/closure.md).
 
 ## Run state
 
 A run's state is **one JSON file per run** at `~/.cache/burndown/<run-id>.json`,
-read and written by `burndown/runfile.py` — not the controller's context, and
+read and written by `implement-spec/runfile.py` — not the controller's context, and
 not a per-repo log. It holds the run id, the slot budget (default 5, set by
 `runfile.py start --slots <k>`), the controller's herdr agent name, the target repo
 (`runfile.py start --repo <checkout>`, recorded as the absolute path of its
@@ -298,7 +298,7 @@ the machine, never off the file.
 A worker is addressed by its **herdr agent name** throughout, because a WSL
 restart renames every Claude session and every brief hard-codes
 `--controller "<name>"`. The contract, the JSON shape and the
-resume procedure: [`references/run-file.md`](references/run-file.md).
+resume procedure: [`implement-spec/references/run-file.md`](../implement-spec/references/run-file.md).
 
 A single spec's slices in one workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this
@@ -308,7 +308,7 @@ skill's.
 
 How a controller knows its workers are alive, in rank order. The measurements
 behind the ranking, and what each source costs when it is read the other way:
-[`references/liveness.md`](references/liveness.md).
+[`implement-spec/references/liveness.md`](../implement-spec/references/liveness.md).
 
 1. **The wake is primary.** A worker's `SendMessage` reaches an idle
    controller as its next turn, about a second after the send (#778). Nothing
@@ -319,7 +319,7 @@ behind the ranking, and what each source costs when it is read the other way:
    controller reads the pane the alert names and rules from what that pane
    says; it never parks a clump, holds a slot or calls a worker stalled on
    the alert alone.
-3. **The backstop is a bounded sweep.** `python3 burndown/loop.py sweep
+3. **The backstop is a bounded sweep.** `python3 implement-spec/loop.py sweep
    --run <run-id>` probes each live slot once through `herdr
    agent get` — no retry, no wait, one call per slot and none for a landed
    clump. Run it when the controller wakes for any reason and has **nothing
@@ -347,7 +347,7 @@ behind the ranking, and what each source costs when it is read the other way:
    `idle`. Its turn ended with no "PR up", so it either stopped mid-lane or
    is waiting on your answer to a question; the line says to read the pane,
    and the pane says which. The record is
-   the run file's `pr_up` (`references/run-file.md` § The PR-up record); with
+   the run file's `pr_up` (`implement-spec/references/run-file.md` § The PR-up record); with
    it, the sweep prints herdr's own word.
 
 **A worker declares its job size.** A worker that launches a parallel job

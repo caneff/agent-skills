@@ -2,7 +2,7 @@
 
 `burndown/SKILL.md` § The loop: that is the step list. This file is the evidence
 behind it — what a run got wrong by hand, and what the rule costs when it is
-read the other way. `burndown/loop.py` is the reader that applies the
+read the other way. `implement-spec/loop.py` is the reader that applies the
 mechanical half.
 
 ## Where the controller sits
