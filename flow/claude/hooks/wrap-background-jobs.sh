@@ -7,8 +7,9 @@
 # directory on disk holding what it printed and how it ended, whether or not it
 # survives. Read it back with `job-run --status <name>`.
 #
-# The name is derived from the call — the first word of the command plus a slice
-# of the tool_use_id — so it is stable for that call and unique across calls. The
+# The name is derived from the call — the Bash description (else the first word
+# of the command) plus a slice of the tool_use_id — so it is stable for that
+# call and unique across calls. The
 # caller learns it from the rewritten command, which the background task's own
 # completion notice echoes back verbatim; it is repeated in
 # permissionDecisionReason rather than in systemMessage, because a warning banner
@@ -66,10 +67,16 @@ skip() { # skip <why> — pass the call through, and say a record will not exist
 [ -n "$cmd" ] || skip "this call carries no command to wrap"
 command -v job-run >/dev/null 2>&1 || skip "job-run is not on PATH (run flow/install.sh)"
 
-# <first word, slugged> - <tail of the tool_use_id>. The id makes concurrent
-# runs of the same command distinct, so the wrapper's name-collision refusal
-# can never turn into a failed tool call.
-slug=$(printf '%s' "${cmd%%[ 	;|&]*}" | tr -c 'A-Za-z0-9' '-' | cut -c1-24)
+# <slug> - <tail of the tool_use_id>. The slug is the Bash call's description
+# (what the job is, which the job-wake prompt then shows), else the first word
+# of the command. The id makes concurrent runs of the same command distinct, so
+# the wrapper's name-collision refusal can never turn into a failed tool call.
+slugify() { # slugify <max-length> ; stdin -> legal name fragment, may be empty
+  tr -c 'A-Za-z0-9' '-' | tr -s '-' | sed 's/^-//' | cut -c1-"$1" | sed 's/-*$//'
+}
+desc=$(field '.tool_input.description // "" | if type == "string" then . else "" end')
+slug=$(printf '%s' "$desc" | slugify 40)
+[ -n "$slug" ] || slug=$(printf '%s' "${cmd%%[ 	;|&]*}" | tr -c 'A-Za-z0-9' '-' | cut -c1-24)
 slug=$(printf '%s' "$slug" | sed 's/-*$//'); slug=${slug:-job}
 # With no tool_use_id there is no stable key, and uniqueness has to win: two
 # concurrent jobs sharing a name would hit job-run's live-name refusal and fail

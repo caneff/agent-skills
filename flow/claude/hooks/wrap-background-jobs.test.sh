@@ -77,6 +77,35 @@ sn=$(fire withjr "$short"); sn=$(printf '%s' "${sn#*|}" | jq -r '.hookSpecificOu
   && ok "an id shorter than the slice still lands in the name" \
   || no "an id shorter than the slice still lands in the name" "$sn"
 
+# --- the run name says what the job is: the Bash description, else first word -
+name_for() { # name_for <command> <description-json-fragment, e.g. ,"description":"x">
+  local j
+  j='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AbCdEfGhIjKlMnOp","tool_input":{"command":'"$(printf '%s' "$1" | jq -Rs .)"$2',"run_in_background":true}}'
+  fire withjr "$j" | sed 's/^[^|]*|//' | jq -r '.hookSpecificOutput.updatedInput.command' \
+    | sed -n 's/.*--name \([^ ]*\).*/\1/p'
+}
+got=$(name_for 'cd /x && make test' ',"description":"Run the full test suite"')
+[ "$got" = "Run-the-full-test-suite-IjKlMnOp" ] \
+  && ok "the name is taken from the description when there is one" \
+  || no "the name is taken from the description when there is one" "$got"
+got=$(name_for 'cd /x && make test' ',"description":"Run the full test suite"')
+case "$got" in cd-*) no "the first word of the command is not the name when a description exists" "$got" ;;
+  *) ok "the first word of the command is not the name when a description exists" ;; esac
+got=$(name_for 'mkdir -p /x' ',"description":""')
+case "$got" in mkdir-*) ok "an empty description falls back to the first word" ;;
+  *) no "an empty description falls back to the first word" "$got" ;; esac
+got=$(name_for 'mkdir -p /x' ',"description":"  /// "')
+case "$got" in mkdir-*) ok "a description with nothing to slug falls back to the first word" ;;
+  *) no "a description with nothing to slug falls back to the first word" "$got" ;; esac
+got=$(name_for 'sleep 1' ',"description":"Build $(rm -rf x) & `id`; \"quoted\" / path"')
+case "$got" in *[!A-Za-z0-9._-]*|"") no "a description with shell metacharacters yields a legal name" "$got" ;;
+  *) ok "a description with shell metacharacters yields a legal name" ;; esac
+got=$(name_for 'sleep 1' ',"description":"A very long description that keeps going well past any sensible name length limit"')
+slug=${got%-*}
+[ "${#slug}" -le 40 ] && [ "${#slug}" -gt 24 ] \
+  && ok "a long description is cut to 40 characters" \
+  || no "a long description is cut to 40 characters" "$got"
+
 # --- the rest of the tool input survives the rewrite -------------------------
 extra='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AbCdEfGhIjKlMnOp","tool_input":{"command":"sleep 30","description":"a long job","timeout":600000,"run_in_background":true}}'
 got=$(fire withjr "$extra"); body2=${got#*|}
