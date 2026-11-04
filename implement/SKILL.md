@@ -288,8 +288,18 @@ No PR and no reviewer; Chris reads the log after.
   ```
   python3 ~/.agents/skills/implement/fanout-brief.py --repo <repo> --worktree <this workspace> \
     --ticket <n> --for <worker> --test-command "<covering test>" \
-    --assign <worker>=<file>,<file> --assign <other>=<file> ...
+    --assign <worker>=<file>,<file> --assign <other>=<file> ... \
+    [--finding <worker>:<id>=<text> ...] [--ruled <worker>:<id>=<text> ...] \
+    [--workers <k>] [--ceiling <seconds>]
   ```
+
+  A fix round passes every finding by id (#1620): `--finding` for each, and
+  `--ruled` for one the controller has ruled on (the brief marks it flag-if-you-
+  disagree). Each brief lists only its own worker's findings and asks for a
+  `fixed` or `disputed` line per id; an id given twice, a finding for an
+  unassigned worker, and a worker left with none are refused, so a split cannot
+  drop one. `--workers` (default 1) and `--ceiling` (default 600 seconds) cap
+  any test run the sub-worker makes.
 
   Every worker's `--assign` is passed on every render, so each brief names the
   whole split. It prints one line; send that line to `Agent` unedited, with

@@ -142,3 +142,103 @@ def test_a_malformed_assign_is_refused(wt):
 
 def test_a_repo_that_would_leave_the_cache_is_refused(wt):
     assert "repo" in refused(wt, "alpha=a.py", "beta=c.py", repo="/abs/outside")
+
+
+# --- the fix-round task (#1620) ---------------------------------------------
+
+def _run_with(wt, extra, worker):
+    args = ["python3", RENDER, "--repo", "skills", "--worktree", wt, "--ticket", "1550",
+            "--for", worker, "--test-command", TEST_COMMAND,
+            "--assign", "alpha=a.py", "--assign", "beta=c.py", *extra]
+    done = subprocess.run(args, capture_output=True, text=True)
+    return done.returncode, done.stdout, done.stderr
+
+
+def section(text, heading):
+    m = re.search(rf"^## {heading}[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    assert m, f"no '## {heading}' section: {text}"
+    return m.group(0)
+
+
+def test_findings_are_listed_by_id_for_their_own_worker_only(wt):
+    extra = ["--finding", "alpha:S1=rename the flag", "--finding", "beta:P2=drop the dead branch"]
+    code, out, err = _run_with(wt, extra, "alpha")
+    assert code == 0, err
+    text, _ = brief_at(out)
+    task = section(text, "Findings to fix")
+    assert "S1" in task and "rename the flag" in task, task
+    assert "P2" not in text and "drop the dead branch" not in text, text
+
+
+def test_a_ruled_finding_is_marked_flag_if_you_disagree_and_an_unruled_one_is_not(wt):
+    extra = ["--finding", "alpha:S1=plain finding", "--ruled", "alpha:C3=controller says use a set",
+             "--finding", "beta:P2=other"]
+    _, out, _ = _run_with(wt, extra, "alpha")
+    task = section(brief_at(out)[0], "Findings to fix")
+    lines = {l.split("`")[1]: l for l in task.splitlines() if l.startswith("- `")}
+    assert "flag if you disagree" in lines["C3"].lower(), task
+    assert "flag if you disagree" not in lines["S1"].lower(), task
+
+
+def test_the_report_asks_for_fixed_or_disputed_per_id(wt):
+    extra = ["--finding", "alpha:S1=x", "--finding", "beta:P2=y"]
+    _, out, _ = _run_with(wt, extra, "alpha")
+    text = brief_at(out)[0]
+    assert re.search(r"`S1`[^\n]*fixed[^\n]*disputed|fixed[^\n]*disputed[^\n]*per id", text, re.I), text
+
+
+def test_the_brief_caps_test_workers_and_wall_clock(wt):
+    extra = ["--finding", "alpha:S1=x", "--finding", "beta:P2=y", "--workers", "2", "--ceiling", "300"]
+    _, out, _ = _run_with(wt, extra, "alpha")
+    text = brief_at(out)[0]
+    assert "at most 2 workers" in text and "300 seconds" in text, text
+
+
+def test_the_default_caps_are_one_worker_and_600_seconds(wt):
+    _, out, _ = _run_with(wt, ["--finding", "alpha:S1=x", "--finding", "beta:P2=y"], "alpha")
+    text = brief_at(out)[0]
+    assert "at most 1 worker " in text and "600 seconds" in text, text
+
+
+def test_a_finding_id_given_twice_is_refused(wt):
+    err = refused_with(wt, "--finding", "alpha:S1=x", "--finding", "beta:S1=y")
+    assert "S1" in err and "twice" in err, err
+
+
+def refused_with(wt, *extra, worker="alpha"):
+    code, out, err = _run_with(wt, extra, worker)
+    assert code == 2 and out == "", (code, out, err)
+    return err
+
+
+def test_a_finding_for_an_unassigned_worker_is_refused(wt):
+    err = refused_with(wt, "--finding", "gamma:S1=x", "--finding", "alpha:S2=y", "--finding", "beta:S3=z")
+    assert "gamma" in err, err
+
+
+def test_a_worker_left_with_no_finding_is_refused_once_findings_are_given(wt):
+    err = refused_with(wt, "--finding", "alpha:S1=x")
+    assert "beta" in err and "no finding" in err, err
+
+
+def test_a_malformed_finding_is_refused(wt):
+    err = refused_with(wt, "--finding", "alpha S1 x", "--finding", "beta:P2=y")
+    assert "<worker>:<id>=<text>" in err, err
+
+
+def test_a_brief_without_findings_has_no_findings_section(wt):
+    _, out, _ = run(wt, "alpha=a.py", "beta=c.py")
+    text = brief_at(out)[0]
+    assert "Findings to fix" not in text, text
+
+
+def test_the_findings_text_with_markdown_headings_stays_inside_its_bullet(wt):
+    extra = ["--finding", "alpha:S1=line one\n## Report\nline two", "--finding", "beta:P2=y"]
+    _, out, _ = _run_with(wt, extra, "alpha")
+    text = brief_at(out)[0]
+    assert len(re.findall(r"^## Report", text, re.M)) == 1, text
+
+
+def test_a_zero_worker_cap_is_refused(wt):
+    err = refused_with(wt, "--workers", "0")
+    assert "at least 1" in err, err
