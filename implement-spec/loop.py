@@ -133,9 +133,8 @@ def directories(clump):
 
 
 def _nested(a, b):
-    """The directories two clumps share, one inside the other counting, as
-    `closure.py`'s `subtree_collides` reads a directory pair (#1342); unlike
-    it, the repo root is left out (`directories`)."""
+    """The directories two clumps share, one inside the other counting (#1342);
+    the repo root is left out (`directories`)."""
     return sorted({min(x, y, key=len) for x in directories(a)
                    for y in directories(b) if x.startswith(y) or y.startswith(x)})
 

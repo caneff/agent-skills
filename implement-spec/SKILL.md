@@ -123,14 +123,13 @@ ticket does.
 
 ## Slices are clumped one each
 
-Each slice is its own clump (#1542, ruling d). Blocked-by edges already
-order the slices, and `closure.py`'s subtree fallback once put all eleven
-slices of one spec in one clump. So step 2 of `burndown/SKILL.md` runs with
-the flag: `closure.py --json --one-each <repo-root> <n>=<path>...` over the
-frontier's `unblocked` tickets, which resolves each slice's own files and
-closure and clumps none together. The accepted cost is two slices that
-touch one file running at once; `loop.py dispatch`'s hold on files an
-in-flight workspace touches is the remaining guard.
+Each slice is its own clump, as is every candidate (#1542, ruling d;
+#1634, ruling 1): `closure.py` groups nothing and takes no `--one-each`
+flag. Step 2 of `burndown/SKILL.md` runs `closure.py --json <repo-root>
+<n>=<path>...` over the frontier's `unblocked` tickets, which resolves each
+slice's own files and closure. The accepted cost is two slices that touch
+one file running at once; `loop.py dispatch`'s hold on files an in-flight
+workspace touches is the remaining guard.
 
 The closing report's counts read the spec's one sidecar,
 `dispositions-<n>.jsonl` (`burndown/SKILL.md` § The closing report).
