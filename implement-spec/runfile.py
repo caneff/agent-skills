@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """One run's state, machine-readable, at `~/.cache/burndown/<run-id>.json`:
 
-    python3 burndown/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
-    python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
-    python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
-    python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
-    python3 burndown/runfile.py close    <run-id> --clump 901 --reason <text>
-    python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-    python3 burndown/runfile.py show     <run-id>
-    python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
+    python3 implement-spec/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
+    python3 implement-spec/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
+    python3 implement-spec/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
+    python3 implement-spec/runfile.py land     <run-id> --clump 901 --sha <sha>
+    python3 implement-spec/runfile.py close    <run-id> --clump 901 --reason <text>
+    python3 implement-spec/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
+    python3 implement-spec/runfile.py show     <run-id>
+    python3 implement-spec/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
 It holds the run id, the slot budget, the controller's herdr agent name, the
 **target repo** (the absolute path of the primary checkout of the repo the

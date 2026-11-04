@@ -17,7 +17,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 /// Slot budget a `--spec` dispatch briefs when `--slots` is omitted; the same
-/// default as `DEFAULT_SLOTS` in burndown/runfile.py.
+/// default as `DEFAULT_SLOTS` in implement-spec/runfile.py.
 const DEFAULT_SPEC_SLOTS: u32 = 5;
 
 /// OS-level bound for the two herdr calls that mutate state (`worktree
@@ -64,7 +64,7 @@ Chris merges its PR. --model defaults to sonnet.
 spec run's included, always passes its run id, so the worker knows a run file
 is under it, where it records a parallel job. A brief with no --run is a
 worker with no run file under it. The id
-follows burndown/runfile.py's grammar and must name a run file that exists,
+follows implement-spec/runfile.py's grammar and must name a run file that exists,
 <id>.json under $BURNDOWN_CACHE_DIR or else ~/.cache/burndown, as runfile.py
 reads it; either failing is refused before the claim. Spec mode
 refuses --run, since a spec run keeps its own run file.
@@ -606,7 +606,7 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `burndown/runfile.py`'s run-id grammar, `[A-Za-z0-9][A-Za-z0-9._-]*`
+/// `implement-spec/runfile.py`'s run-id grammar, `[A-Za-z0-9][A-Za-z0-9._-]*`
 /// with no `..`: the id names the run file, and it rides in a one-line brief
 /// where a space or quote would split it.
 fn valid_run_id(s: &str) -> bool {
@@ -616,7 +616,7 @@ fn valid_run_id(s: &str) -> bool {
         && !s.contains("..")
 }
 
-/// Where `burndown/runfile.py` keeps run `id`: `$BURNDOWN_CACHE_DIR` when
+/// Where `implement-spec/runfile.py` keeps run `id`: `$BURNDOWN_CACHE_DIR` when
 /// set and non-empty, with a leading `~` expanded, else `~/.cache/burndown`.
 fn run_file_path(id: &str) -> PathBuf {
     let home = env::var("HOME").unwrap_or_default();
@@ -778,7 +778,7 @@ fn parent_of(slug: &str, n: &str) -> Result<Option<String>, String> {
 /// frontier.py read one: a `Part of` line naming an issue, or an issue
 /// reference under a `Parent` heading. Fenced blocks are skipped; `None`
 /// under the heading names no issue, so it is no parent. A second reader of
-/// `burndown/frontier.py`'s `_parent_number` grammar, coarser on purpose: it
+/// `implement-spec/frontier.py`'s `_parent_number` grammar, coarser on purpose: it
 /// answers only whether a parent is declared. A change to one is a change to
 /// both.
 fn body_names_parent(body: &str) -> bool {
@@ -1515,7 +1515,7 @@ mod tests {
     use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
-    /// `valid_run_id` copies `burndown/runfile.py`'s grammar, and an id one
+    /// `valid_run_id` copies `implement-spec/runfile.py`'s grammar, and an id one
     /// accepts and the other refuses is a brief naming a run file the burn
     /// cannot open, or a burn id dispatch will not carry. Ask runfile.py.
     #[test]
@@ -1536,7 +1536,7 @@ for i in json.load(sys.stdin):
         out.append(False)
 print(json.dumps(out))
 "#;
-        let burndown = concat!(env!("CARGO_MANIFEST_DIR"), "/../../burndown");
+        let burndown = concat!(env!("CARGO_MANIFEST_DIR"), "/../../implement-spec");
         let mut child = std::process::Command::new("python3")
             .args(["-c", script, burndown])
             .stdin(std::process::Stdio::piped())

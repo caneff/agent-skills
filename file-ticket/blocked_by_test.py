@@ -2,7 +2,7 @@
 
 The seam is what the skill writes — the issue body — so this test takes the
 body template out of `file-ticket/SKILL.md` and classifies it with
-`burndown/frontier.py`, the reader that consumes it. A ticket this skill
+`implement-spec/frontier.py`, the reader that consumes it. A ticket this skill
 files must land in `unblocked` or `blocked`, never `unresolved` (one carve-out: a
 cross-repo blocker reads `unresolved` until its native edge exists, which
 the last cases pin): on
@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SKILL = ROOT / "file-ticket" / "SKILL.md"
 
-sys.path.insert(0, str(ROOT / "burndown"))
+sys.path.insert(0, str(ROOT / "implement-spec"))
 import frontier as F  # noqa: E402
 
 # The `gh issue create` heredoc in § Create it: the body runs from the quoted

@@ -279,7 +279,7 @@ def test_the_cli_fails_loud_when_no_seam_is_declared(repo):
 
 
 def test_a_fenced_example_is_not_a_declaration(repo):
-    # #890's rule, as `burndown/references/closure.md` states it for the
+    # #890's rule, as `implement-spec/references/closure.md` states it for the
     # include declaration: a grammar shown inside a fence is an example.
     # `references/closing-ticket.md` shows this very grammar in a fence, so
     # the first repo that pastes the doc would otherwise declare the sample.

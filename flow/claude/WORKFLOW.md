@@ -84,7 +84,7 @@ ticket labelled `needs-info` goes through `/grill-with-docs` before
 
 An agent files a ticket through `/file-ticket`, never a bare `gh issue
 create`. Why: the skill writes the `## Blocked by` section the frontier
-reader (`burndown/frontier.py`) parses; a body without one is `unresolved`
+reader (`implement-spec/frontier.py`) parses; a body without one is `unresolved`
 and never dispatched. 2026-09-20: ten tickets "filed from conversation" by
 hand the day the section became required, and the next burn's controller
 had to resolve all of them before it could dispatch.

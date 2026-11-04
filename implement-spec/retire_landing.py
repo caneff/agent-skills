@@ -84,7 +84,7 @@ the zero-reference suite holds for the script.
 # hold on files in flight, and there is no clumper grouping tickets by it.
 REPOS = {
     "sudokumaker-custom-constraints": [
-        ("The burn clumper (`~/.agents/skills/burndown/closure.py`) reads this section\n"
+        ("The burn clumper (`~/.agents/skills/implement-spec/closure.py`) reads this section\n"
          "to find which files",
          "`~/.agents/skills/implement-spec/closure.py` reads this section for the hold\n"
          "`loop.py dispatch` puts on files in flight, to find which files"),
@@ -93,7 +93,7 @@ REPOS = {
     ],
     "sudokupad-art": [
         ("None — the clumper only reports it,", "None — `closure.py` only reports it,"),
-        ("Read by `~/.agents/skills/burndown/closure.py`, not by agents. Without it, all\n"
+        ("Read by `~/.agents/skills/implement-spec/closure.py`, not by agents. Without it, all\n"
          "11 slices of spec #301 landed in one 42-file clump (agent-skills #1478).",
          "Read by `~/.agents/skills/implement-spec/closure.py` for the hold `loop.py\n"
          "dispatch` puts on files in flight, not by agents. Without it, the hold has\n"

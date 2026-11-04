@@ -184,7 +184,7 @@ record first. You write that record yourself, under the run-file lock, before
 you launch:
 
 ```
-python3 ~/.agents/skills/burndown/runfile.py job <run-id> --clump <n> --cores <k>
+python3 ~/.agents/skills/implement-spec/runfile.py job <run-id> --clump <n> --cores <k>
 ```
 
 `<run-id>` is the brief's `--run`, `<n>` the clump's lowest ticket, `<k>` the
@@ -998,7 +998,7 @@ closed.
    `merge-cleanup` closes the worker's pane, and an answer sent after that
    reaches nobody. What counts as outstanding, the incident behind the rule,
    and the procedure for two branches in the same files:
-   [`burndown/references/merge-tail.md`](~/.agents/skills/burndown/references/merge-tail.md) § Answer, then merge, then cleanup.
+   [`implement-spec/references/merge-tail.md`](~/.agents/skills/implement-spec/references/merge-tail.md) § Answer, then merge, then cleanup.
 
    ```
    cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>

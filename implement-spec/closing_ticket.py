@@ -28,10 +28,8 @@ import sys
 # by showing it. `visible()` rather than the bare `unfenced()` (#999): an
 # indented quotation is quoted material too, and this reader has no filter
 # of its own to drop it. The import is the same coupling this skill already
-# has — `implement-spec` is policy over `burndown`, and does not run without
-# it.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                os.pardir, "burndown"))
+# has — the readers it imports live beside it in `implement-spec`.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from frontier import key_line, unfenced, visible  # noqa: E402
 from loop import LoopError, origin_default  # noqa: E402
 
