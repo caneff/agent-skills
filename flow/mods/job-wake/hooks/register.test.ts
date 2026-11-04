@@ -11,7 +11,7 @@ const ME = 'S1'
 // One run as `job-run` leaves it on disk: who started it, the pid file's
 // text, the code and line `job-run --status` answers, the progress lines and
 // the mod's own markers.
-type Job = { session: string; pid: string; status: [number, string]; progress: string[]; markers: Record<string, string> }
+type Job = { session: string; pid: string; status: [number, string]; progress: string[]; markers: Record<string, string>; group?: string }
 const job = (pid: string, status: [number, string], more: Partial<Job> = {}): Job => ({ session: ME, pid, status, progress: [], markers: {}, ...more })
 
 const ALIVE: [number, string] = [10, 'alive hunt pid=100 last=x']
@@ -40,7 +40,7 @@ const world = (on: any) => {
   on('fs.read', (_$: any, e: any) => {
     const m = file(e.path)
     const j = m === null ? undefined : jobs[m[1]!]
-    const text = j === undefined ? undefined : m![2] === 'pid' ? j.pid : j.markers[m![2]!]
+    const text = j === undefined ? undefined : m![2] === 'pid' ? j.pid : m![2] === 'group' ? j.group : j.markers[m![2]!]
     return text === undefined ? { deny: `ENOENT ${e.path}` } : { value: `${text}\n` }
   })
   on('fs.write', (_$: any, e: any) => {
@@ -360,4 +360,118 @@ test('a refused Bash call is handed back as refused, and a run found beside it i
   expect(answer.context).toBe(undefined)
   await w.clock.advance(POLL)
   expect(w.wakes.length).toBe(1)
+})
+
+// A sharded run: several `job-run --group` members of one session, one wake.
+const shard = ($: any, w: ReturnType<typeof world>, names: string[], group = 'shards') =>
+  bash($, w, { command: 'for i in 0 1 2; do job-run --group shards -- hb & done', run_in_background: true }, () => {
+    names.forEach((n, i) => {
+      w.jobs[n] = job(String(100 + i), ALIVE, { group })
+    })
+  })
+const ended = (n: string, rc = 0): [number, string] => [0, `finished ${n} rc=${rc} cause=exit ended=t`]
+
+test('a group wakes once, when its last member ends, naming the group and every member', async ($, on) => {
+  const w = world(on)
+  await shard($, w, ['hb0', 'hb1', 'hb2'])
+  w.at('hb0').status = ended('hb0')
+  w.at('hb1').status = ended('hb1')
+  await w.clock.advance(POLL * 2)
+  expect(w.wakes).toEqual([])
+  w.at('hb2').status = ended('hb2')
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  expect(w.wakes[0]).toContain('job-wake: group shards: all 3 jobs ended')
+  for (const n of ['hb0', 'hb1', 'hb2']) expect(w.wakes[0]).toContain(`finished ${n} rc=0`)
+  for (const n of ['hb0', 'hb1', 'hb2']) expect(w.at(n).markers['woken-end']).toBe(w.at(n).pid)
+  await w.clock.advance(POLL * 3)
+  expect(w.wakes.length).toBe(1)
+})
+
+test('the first member to fail wakes the group at once, and the rest ending adds no wake', async ($, on) => {
+  const w = world(on)
+  await shard($, w, ['hb0', 'hb1', 'hb2'])
+  w.at('hb1').status = ended('hb1', 3)
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  expect(w.wakes[0]).toContain('job-wake: group shards: hb1 failed (1 of 3 jobs ended)')
+  expect(w.wakes[0]).toContain('finished hb1 rc=3')
+  expect(w.wakes[0]).toContain(`progress: ${JOBS}/hb1/progress`)
+  expect(w.at('hb0').markers['woken-end']).toBe('100')
+  w.at('hb0').status = ended('hb0')
+  w.at('hb2').status = ended('hb2', 1)
+  await w.clock.advance(POLL * 3)
+  expect(w.wakes.length).toBe(1)
+})
+
+test('a killed member wakes the group', async ($, on) => {
+  const w = world(on)
+  await shard($, w, ['hb0', 'hb1'])
+  w.at('hb0').status = [11, 'killed hb0 pid=100 gone with no exit record; last progress: x']
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  expect(w.wakes[0]).toContain('hb0 failed')
+  expect(w.wakes[0]).toContain('killed hb0')
+})
+
+test('a failure line in one member wakes the group once, naming the line', async ($, on) => {
+  const w = world(on)
+  await shard($, w, ['hb0', 'hb1'])
+  w.at('hb1').progress.push('t Traceback (most recent call last):')
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  expect(w.wakes[0]).toContain('hb1 failed')
+  expect(w.wakes[0]).toContain('matched line: t Traceback (most recent call last):')
+  w.at('hb0').status = ended('hb0')
+  w.at('hb1').status = ended('hb1', 1)
+  await w.clock.advance(POLL * 3)
+  expect(w.wakes.length).toBe(1)
+})
+
+test('two groups, and a run with no group, each wake on their own', async ($, on) => {
+  const w = world(on)
+  await bash($, w, START, () => {
+    w.jobs.a0 = job('100', ALIVE, { group: 'A' })
+    w.jobs.a1 = job('101', ALIVE, { group: 'A' })
+    w.jobs.b0 = job('102', ALIVE, { group: 'B' })
+    w.jobs.hunt = job('103', ALIVE)
+  })
+  w.at('a0').status = ended('a0')
+  w.at('b0').status = ended('b0')
+  w.at('hunt').status = DONE
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(2)
+  expect(w.wakes.some(t => t.startsWith('job-wake: group B: all 1 jobs ended'))).toBe(true)
+  expect(w.wakes.some(t => t.startsWith('job-wake: job hunt:'))).toBe(true)
+  w.at('a1').status = ended('a1')
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(3)
+  expect(w.wakes[2]).toContain('group A: all 2 jobs ended')
+})
+
+test('a group wake that does not enter the session is sent again, and marks no member until it has', async ($, on) => {
+  const w = world(on)
+  await shard($, w, ['hb0', 'hb1'])
+  w.at('hb0').status = ended('hb0', 2)
+  w.faults.drop = 'blocked by a hook'
+  await w.clock.advance(POLL * 2)
+  expect(w.wakes).toEqual([])
+  expect(w.at('hb0').markers['woken-end']).toBe(undefined)
+  expect(w.at('hb1').markers['woken-end']).toBe(undefined)
+  w.faults.drop = undefined
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  expect(w.at('hb1').markers['woken-end']).toBe('101')
+})
+
+test('after a reload a group whose wake was sent stays quiet, and one never sent wakes once', async ($, on) => {
+  const w = world(on)
+  w.jobs.told0 = job('100', ended('told0'), { group: 'T', markers: { 'woken-end': '100' } })
+  w.jobs.told1 = job('101', ALIVE, { group: 'T', markers: { 'woken-end': '101' } })
+  w.jobs.new0 = job('102', ended('new0'), { group: 'N' })
+  w.jobs.new1 = job('103', ended('new1'), { group: 'N' })
+  await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  expect(w.wakes[0]).toContain('group N: all 2 jobs ended')
 })

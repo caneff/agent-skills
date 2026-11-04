@@ -19,8 +19,9 @@ const NO_RUN = 12
 
 // One run of a job this session started: `job-run` wrote this session's id to
 // the run directory's `session` file. A rerun under the same name has another
-// pid, so it is another run.
-type Run = { name: string; pid: string }
+// pid, so it is another run. `group` is what `job-run --group` recorded: the
+// session is woken once for all the runs of a group, not once per run.
+type Run = { name: string; pid: string; group?: string }
 
 // Module state: a reload starts it over, and the next scan refills it from
 // the job directories, where the `woken-*` markers say what was already sent.
@@ -64,7 +65,7 @@ const scan = async ($: EngineInterface): Promise<Run[]> => {
     if (name === undefined) continue
     const pid = await firstLine($, `${dir}/${name}/pid`)
     if (pid === undefined || runs.has(`${name}:${pid}`)) continue
-    const run = { name, pid }
+    const run: Run = { name, pid, group: await firstLine($, `${dir}/${name}/group`) }
     if (await isMarked($, run, 'woken-end')) continue
     runs.set(`${name}:${pid}`, run)
     fresh.push(run)
@@ -114,13 +115,62 @@ const check = async ($: EngineInterface, run: Run) => {
   runs.delete(key)
 }
 
+// One wake for a group: when its last member has ended, or at the first one
+// that fails (killed, a non-zero rc, or a failure line in its output). Marking
+// every member, a still-running one included, is what keeps the rest of the
+// group quiet; a wake that did not enter the session marks none, so it is sent
+// again.
+const checkGroup = async ($: EngineInterface, group: string, members: Run[]) => {
+  const rows: { run: Run; line: string; hasEnded: boolean; hasFailed: boolean; matched?: string }[] = []
+  for (const run of members) {
+    // A rerun under this name replaced the run: its end can no longer be read.
+    if ((await firstLine($, `${await jobsDir($)}/${run.name}/pid`)) !== run.pid) {
+      runs.delete(`${run.name}:${run.pid}`)
+      continue
+    }
+    const { code, line } = await statusOf($, run)
+    if (code === NO_RUN) {
+      runs.delete(`${run.name}:${run.pid}`)
+      continue
+    }
+    const hasEnded = code === FINISHED || code === KILLED
+    if (!hasEnded && code !== ALIVE) throw new Error(`job-run --status ${run.name} exited ${code}: ${line}`)
+    const matched = await failureLine($, run)
+    const hasFailed = code === KILLED || (code === FINISHED && !/ rc=0 /.test(line)) || matched !== undefined
+    rows.push({ run, line, hasEnded, hasFailed, matched })
+  }
+  const failed = rows.find(r => r.hasFailed)
+  const endedCount = rows.filter(r => r.hasEnded).length
+  if (failed === undefined && (rows.length === 0 || endedCount < rows.length)) return
+  const lines = [
+    failed === undefined
+      ? `job-wake: group ${group}: all ${rows.length} jobs ended`
+      : `job-wake: group ${group}: ${failed.run.name} failed (${endedCount} of ${rows.length} jobs ended)`,
+  ]
+  for (const r of failed === undefined ? rows : [failed]) lines.push(r.line)
+  if (failed?.matched !== undefined) lines.push(`matched line: ${failed.matched}`)
+  if (failed !== undefined) lines.push(`progress: ${await jobsDir($)}/${failed.run.name}/progress`)
+  const sent = await $.prompt.submit({ text: lines.join('\n') })
+  if (sent.drop !== undefined) {
+    await logOnce($, `the wake for group ${group} did not enter the session (${sent.drop}); it will be sent again`)
+    return
+  }
+  for (const { run } of rows) {
+    await mark($, run, 'woken-end')
+    runs.delete(`${run.name}:${run.pid}`)
+  }
+}
+
 const tick = async ($: EngineInterface) => {
   if (isTicking) return
   isTicking = true
   try {
     const now = await $.clock.now()
     if (now < scanUntil) await scan($).catch(err => logOnce($, String((err as Error)?.message ?? err)))
-    for (const run of [...runs.values()]) await check($, run).catch(err => logOnce($, String((err as Error)?.message ?? err)))
+    const all = [...runs.values()]
+    for (const run of all.filter(r => r.group === undefined)) await check($, run).catch(err => logOnce($, String((err as Error)?.message ?? err)))
+    for (const group of new Set(all.flatMap(r => (r.group === undefined ? [] : [r.group]))))
+      await checkGroup($, group, all.filter(r => r.group === group)).catch(err => logOnce($, String((err as Error)?.message ?? err)))
     if (runs.size === 0 && now >= scanUntil) {
       timer?.cancel()
       timer = undefined

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # job-run — run a job so that its death leaves a record.
 #
-#   job-run --name <name> -- <command> [args...]
+#   job-run --name <name> [--group <group>] -- <command> [args...]
 #   job-run --status <name>
 #   job-run --wait <name>
 #
@@ -20,6 +20,12 @@
 #            ($CLAUDE_CODE_SESSION_ID), empty when none did; the job-wake mod
 #            (flow/mods/job-wake/) finds a session's own jobs by it, and keeps
 #            its own `woken-*` markers beside it
+#   group    the run's job group, present only when --group named one. The
+#            job-wake mod wakes the session once for a group — when the last
+#            member ends, or the first one fails — instead of once per member.
+#            Start every member in the same step: the mod counts the members it
+#            has seen, so one that ends before the next is launched is a group
+#            of its own. A name is the group; use another for another run.
 #   exit     written only when the wrapper observes the job end: rc, cause, ended
 #
 # The wrapper traps EXIT, TERM and INT. SIGKILL cannot be trapped, so a killed
@@ -67,10 +73,11 @@ alive() { # alive <run dir>
   [ -n "$p" ] && kill -0 "$p" 2>/dev/null
 }
 
-name="" status="" wait_for=""
+name="" status="" wait_for="" group=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --name)    [ $# -ge 2 ] || die "--name needs a value"; name="$2"; shift 2 ;;
+    --group)   [ $# -ge 2 ] || die "--group needs a value"; group="$2"; shift 2 ;;
     --status)  [ $# -ge 2 ] || die "--status needs a value"; status="$2"; shift 2 ;;
     --wait)    [ $# -ge 2 ] || die "--wait needs a value"; wait_for="$2"; shift 2 ;;
     -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
@@ -130,6 +137,8 @@ verdict() { # verdict <name> ; prints the line, returns the code
   return 11
 }
 
+[ -n "$group" ] && [ -n "$status" ] && die "--group cannot be combined with --status"
+[ -n "$group" ] && [ -n "$wait_for" ] && die "--group cannot be combined with --wait"
 [ -n "$status" ] && [ -n "$wait_for" ] && die "--wait cannot be combined with --status"
 if [ -n "$wait_for" ]; then
   [ -n "$name" ] && die "--wait cannot be combined with --name"
@@ -158,6 +167,13 @@ fi
 # --- a run ------------------------------------------------------------------
 [ -n "$name" ] || die "--name is required and is never auto-generated (a path you cannot predict is a path you lose to a context summary)"
 check_name "$name"
+if [ -n "$group" ]; then
+  # A group name is a name like any other, and for the same reason.
+  case "$group" in
+    *[!A-Za-z0-9._-]*) die "--group may hold only letters, digits, dot, dash and underscore: '$group'" ;;
+    .|..)              die "--group may not be '$group'" ;;
+  esac
+fi
 [ $# -gt 0 ] || die "no command: put it after --"
 
 dir="$jobs_dir/$name"
@@ -192,11 +208,12 @@ mkdir -p "$dir" || die "cannot create $dir"
 
 # The previous run's pid and exit record go together, then the new pid lands: a
 # `--wait` racing this start sees `starting`, never the old run's verdict.
-rm -f "$dir/exit" "$dir/pid"
+rm -f "$dir/exit" "$dir/pid" "$dir/group"
 # Everything a reader pairs with the pid lands before it, so a new pid never
 # sits beside the previous run's output or owner.
 : > "$dir/progress"
 printf '%s\n' "${CLAUDE_CODE_SESSION_ID:-}" > "$dir/session"
+[ -n "$group" ] && printf '%s\n' "$group" > "$dir/group"
 printf '%s\n' "$$" > "$dir/pid"
 printf '%s\n' "$*" > "$dir/cmd"
 # Pruned only now that this run is recorded alive, so the directory a waiter is
