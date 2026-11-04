@@ -133,7 +133,7 @@ def world(tmp_path):
     return World(tmp_path)
 
 
-def refused(result, cause):
+def assert_refused(result, cause):
     """Exit 1, for the named cause: a refusal for some other reason is not the
     behaviour a case claims."""
     assert result.returncode == 1, result.stdout + result.stderr
@@ -148,7 +148,7 @@ def test_check_passes_when_only_its_own_run_is_alive(world):
 
 def test_check_refuses_a_live_drain(world):
     world.job("drain-sudoku-kit", "alive")
-    refused(world.check(), "drain alive: job-run says drain-sudoku-kit")
+    assert_refused(world.check(), "drain alive: job-run says drain-sudoku-kit")
 
 
 @pytest.mark.parametrize("state", ["finished", "killed"])
@@ -161,7 +161,7 @@ def test_check_refuses_a_live_worker_of_another_run(world):
     world.run_file("spec-57-20261103", ["sudoku-kit-58"])
     world.panes("skills-1635", "sudoku-kit-58")
     result = world.check()
-    refused(result, "sudoku-kit-58")
+    assert_refused(result, "sudoku-kit-58")
     assert "spec-57-20261103" in result.stdout
 
 
@@ -169,19 +169,19 @@ def test_check_refuses_a_live_controller_of_another_run(world):
     world.run_file("spec-57-20261103", ["sudoku-kit-58"],
                    controller="sudoku-kit-spec-57")
     world.panes("skills-1635", "sudoku-kit-spec-57")
-    refused(world.check(), "sudoku-kit-spec-57")
+    assert_refused(world.check(), "sudoku-kit-spec-57")
 
 
 def test_check_reads_run_files_already_moved_to_the_new_cache(world):
     world.new_cache.mkdir()
     world.run_file("spec-57-20261103", ["sudoku-kit-58"], cache=world.new_cache)
     world.panes("skills-1635", "sudoku-kit-58")
-    refused(world.check(), "sudoku-kit-58")
+    assert_refused(world.check(), "sudoku-kit-58")
 
 
 def test_check_refuses_an_own_run_with_no_run_file(world):
     result = world.script("check", "--own-run", "spec-1-typo")
-    refused(result, "spec-1-typo")
+    assert_refused(result, "spec-1-typo")
 
 
 def test_check_ignores_cache_json_that_is_not_a_run_file(world):
@@ -194,7 +194,7 @@ def test_check_ignores_cache_json_that_is_not_a_run_file(world):
                                   '{"run_id": "x", "clumps": [{"tickets": [1]}]}'])
 def test_check_refuses_a_run_file_it_cannot_read(world, body):
     (world.old_cache / "spec-9.json").write_text(body)
-    refused(world.check(), "spec-9.json")
+    assert_refused(world.check(), "spec-9.json")
 
 
 @pytest.mark.parametrize("tool_body", [
@@ -207,12 +207,12 @@ def test_check_refuses_when_job_run_cannot_be_read(world, tool_body):
     (world.bin / "job-run").unlink()
     if tool_body:
         write_tool(world.bin / "job-run", tool_body)
-    refused(world.check(), "job-run")
+    assert_refused(world.check(), "job-run")
 
 
 def test_check_refuses_when_the_jobs_directory_is_absent(world):
     shutil.rmtree(world.home / landing.JOBS_DIR)
-    refused(world.check(), str(landing.JOBS_DIR))
+    assert_refused(world.check(), str(landing.JOBS_DIR))
 
 
 @pytest.mark.parametrize("answer", [
@@ -221,17 +221,17 @@ def test_check_refuses_when_the_jobs_directory_is_absent(world):
 ], ids=["not-json", "no-result", "not-a-list", "empty", "not-an-object"])
 def test_check_refuses_an_unusable_herdr_answer(world, answer):
     world.herdr_answers(answer)
-    refused(world.check(), "herdr")
+    assert_refused(world.check(), "herdr")
 
 
 def test_check_refuses_when_herdr_fails(world):
     write_tool(world.bin / "herdr", "#!/bin/bash\necho 'no server' >&2\nexit 1\n")
-    refused(world.check(), "no server")
+    assert_refused(world.check(), "no server")
 
 
 def test_check_refuses_when_herdr_is_missing(world):
     (world.bin / "herdr").unlink()
-    refused(world.check(), "herdr")
+    assert_refused(world.check(), "herdr")
 
 
 def git(path, *args):
@@ -347,7 +347,7 @@ def test_a_second_finish_changes_nothing(land):
 
 def test_finish_touches_nothing_while_a_drain_is_alive(land):
     land.job("drain-sudoku-kit", "alive")
-    refused(land.finish(), "drain-sudoku-kit")
+    assert_refused(land.finish(), "drain-sudoku-kit")
     assert land.tree(land.old_cache) == land.cache_before
     assert land.link.is_symlink()
     assert land.cargo_calls() == 0
@@ -401,7 +401,7 @@ def _gh_fails(land):
 def test_finish_rerun_after_a_stop_completes_without_repeating(land, fault, cause):
     clear = fault(land)
     stopped = land.finish()
-    refused(stopped, cause)
+    assert_refused(stopped, cause)
     clear()
     result = land.finish()
     assert result.returncode == 0, result.stdout + result.stderr
@@ -411,7 +411,7 @@ def test_finish_rerun_after_a_stop_completes_without_repeating(land, fault, caus
 
 def test_a_stop_before_the_repos_runs_no_later_step(land):
     _cargo_fails(land)
-    refused(land.finish(), "lane-install.sh")
+    assert_refused(land.finish(), "lane-install.sh")
     assert land.link.is_symlink()
     assert land.issues() == []
     assert land.origin_commits("sudokupad-art") == []
@@ -439,7 +439,7 @@ def test_a_dirty_checkout_stops_only_its_own_step(land):
     stray = land.clone("sudokupad-art") / "stray.txt"
     stray.write_text("work in progress")
     result = land.finish()
-    refused(result, "sudokupad-art")
+    assert_refused(result, "sudokupad-art")
     assert "stray.txt" in result.stdout
     assert land.origin_commits("sudokupad-art") == []
     assert stray.read_text() == "work in progress"
@@ -458,13 +458,13 @@ def test_a_dirty_checkout_whose_fix_already_landed_does_not_stop(land):
 
 def test_a_deleted_agents_file_counts_as_a_dirty_checkout(land):
     (land.clone("sudokupad-art") / "AGENTS.md").unlink()
-    refused(land.finish(), "dirty checkout")
+    assert_refused(land.finish(), "dirty checkout")
     assert land.origin_commits("sudokupad-art") == []
 
 
 def test_a_checkout_off_main_stops_its_step(land):
     git(land.clone("sudokupad-art"), "checkout", "-q", "-b", "other")
-    refused(land.finish(), "on branch other")
+    assert_refused(land.finish(), "on branch other")
     assert land.origin_commits("sudokupad-art") == []
 
 
@@ -473,7 +473,7 @@ def test_an_unpushed_commit_of_someone_elses_is_not_pushed(land):
     (clone / "other.txt").write_text("x")
     git(clone, "add", "other.txt")
     git(clone, "commit", "-q", "-m", "someone's work")
-    refused(land.finish(), "someone's work")
+    assert_refused(land.finish(), "someone's work")
     assert land.origin_commits("sudokupad-art") == []
 
 
@@ -494,7 +494,7 @@ def test_a_checkout_behind_origin_is_brought_up_first(land):
 
 def test_a_missing_checkout_stops_its_step_and_fails_the_last_step(land):
     shutil.rmtree(land.clone("sudokupad-art"))
-    refused(land.finish(), "sudokupad-art")
+    assert_refused(land.finish(), "sudokupad-art")
 
 
 def test_the_last_step_fails_until_the_word_is_gone_from_all_three(land):
@@ -504,7 +504,7 @@ def test_the_last_step_fails_until_the_word_is_gone_from_all_three(land):
     git(clone, "commit", "-q", "-am", "unforeseen citation")
     git(clone, "push", "-q", "origin", "main")
     result = land.finish()
-    refused(result, "rg still finds")
+    assert_refused(result, "rg still finds")
     assert "unforeseen" in result.stdout
     assert len(land.issues()) == 1
     text = (clone / "AGENTS.md").read_text()
@@ -519,7 +519,7 @@ def test_the_last_step_fails_until_the_word_is_gone_from_all_three(land):
 def test_the_last_step_fails_when_rg_cannot_answer(land):
     (land.bin / "rg").unlink()
     write_tool(land.bin / "rg", "#!/bin/bash\necho 'rg: boom' >&2\nexit 2\n")
-    refused(land.finish(), "rg: boom")
+    assert_refused(land.finish(), "rg: boom")
 
 
 def test_the_carried_wording_leaves_none_of_the_word_behind(land):
@@ -542,14 +542,14 @@ def test_cache_files_that_reappear_at_the_old_path_are_moved_too(land):
 def test_a_cache_conflict_overwrites_and_deletes_nothing(land):
     land.new_cache.mkdir()
     (land.new_cache / "burn-old.json").write_text(OTHER_RECORD)
-    refused(land.finish(), "burn-old.json exist at both")
+    assert_refused(land.finish(), "burn-old.json exist at both")
     assert (land.new_cache / "burn-old.json").read_text() == OTHER_RECORD
     assert (land.old_cache / "burn-old.json").read_text() == land.cache_before["burn-old.json"]
 
 
 def test_an_install_that_leaves_the_old_binary_fails(land):
     (land.home / "cargo-builds").write_text(landing.OLD_CACHE)
-    refused(land.finish(), landing.NEW_CACHE)
+    assert_refused(land.finish(), landing.NEW_CACHE)
 
 
 def test_the_ticket_is_not_filed_again_when_it_is_already_closed(land):
@@ -566,10 +566,10 @@ def test_the_ticket_is_not_filed_again_when_it_is_already_closed(land):
 ], ids=["not-json", "not-a-list", "truncated"])
 def test_a_listing_it_cannot_trust_files_nothing(land, listing, cause):
     (land.home / "gh-list-answer").write_text(listing)
-    refused(land.finish(), cause)
+    assert_refused(land.finish(), cause)
     assert land.issues() == []
 
 
 def test_a_create_with_no_issue_url_fails(land):
     land.env["FAKE_GH_URL"] = "nothing useful"
-    refused(land.finish(), "issue URL")
+    assert_refused(land.finish(), "issue URL")
