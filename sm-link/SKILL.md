@@ -47,10 +47,27 @@ The round trip preserves the **document**, not the link text: a link the app
 wrote and a link written here can compress differently and still open the same
 puzzle. Compare decoded documents, never link strings.
 
-## Write the link to a file
+## Hand over a short link, never a full one
 
-When asked for a link, write it to a file and give the path. A link is hundreds
-of characters; pasting one into a reply is unreadable and gets truncated.
+Any link handed to Chris — in chat, a PR body, a ticket, a README — is a
+SudokuMaker short link, `https://sudokumaker.app/p/<id>`, printed bare on its
+own line. A full link is a ~10 KB blob: unreadable, and truncated in a reply.
+A full link never appears in chat (Chris, 2026-10-22).
+
+Mint the short link from a full link or from a committed file holding one:
+
+```
+uv run --directory ~/src/sudoku-kit python -m sudoku_kit.link_codec shorten '<link-or-file>' ['<link-or-file>' ...]
+```
+
+It prints one short link per source and checks that the new id resolves back to
+the payload it sent. A non-zero exit prints the reason to stderr: report it,
+and hand over no link. Never type a short link from memory.
+
+A committed `PUZZLE_LINK*.txt` stays a full link: it is the source of truth,
+and the short link is minted from it at hand-off. A repo whose own ruling says
+otherwise wins for that repo (grid-hunts keeps short links only; its hunt
+record is the source).
 
 ## Before sharing a link
 
