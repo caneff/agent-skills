@@ -208,7 +208,7 @@ branch too.
    `runfile.py close <run-id> --clump <n> --reason <text>`, never
    a `land` at `main`'s tip (why, and the recovery when one was recorded:
    `references/run-file.md`), and each "PR up" with `runfile.py pr-up <run-id>
-   --clump <n> --pr <n>` as it arrives, for § Liveness, so a
+   --clump <n> --pr <n>` as it arrives, for § Liveness, in this file, so a
    restart can pick the run back up with nothing transcribed by hand. The controller clears the
    PR-up record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever
    it hands findings back to the worker (a red seam's failure, or any ruling
@@ -523,8 +523,9 @@ slices recorded no review rows at all, not skip rows.
 A run ends with one report, and no sweep ticket: every valid review
 finding was fixed in the PR that raised it, or moved onto the open ticket for
 its component (`implement/SKILL.md` § Review), so no run carries findings
-forward. It goes where a message for Chris goes (§ The dispatcher, in this
-file), and a run under `drain` leaves it in its pane. Before writing it, run `python3
+forward. It goes where a message for Chris goes
+(§ The dispatcher, in this file), and a run under `drain` leaves it in its
+pane. Before writing it, run `python3
 ~/.agents/skills/multi-axis-code-review/review_ledger.py harvest`, which joins each
 finding's outcome from the dispositions sidecars into the ledger. The report
 carries two counts, **fixed** and **moved**,
