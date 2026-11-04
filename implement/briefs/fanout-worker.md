@@ -19,3 +19,4 @@ Reply with, in this order:
 2. `Test:` the covering-test command and its result line.
 3. `Mutation:` the change you made on the scratch copy and the red message it produced, or why none applies.
 4. `Out of scope:` anything you saw in a file that is not yours, one line each.
+5. `Findings:` only when your brief has a "Findings to fix" section: the per-id lines its "Findings report" section asks for.
