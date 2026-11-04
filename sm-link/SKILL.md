@@ -1,6 +1,6 @@
 ---
 name: sm-link
-description: Inspect and edit SudokuMaker puzzle links (sudokumaker.app) — report a link's size, givens, ring state, entered cells, constraints and verdict, or decode a link to JSON, edit it, and encode it back. Use when asked to decode, inspect, check, edit, or rebuild a SudokuMaker link, or to check whether a link is safe to share.
+description: Inspect, edit and hand over SudokuMaker puzzle links (sudokumaker.app) — mint a short link to give Chris, report a link's size, givens, ring state, entered cells, constraints and verdict, or decode a link to JSON, edit it, and encode it back. Use when asked to decode, inspect, check, edit, or rebuild a SudokuMaker link, or to check whether a link is safe to share.
 ---
 
 # SudokuMaker links
@@ -51,10 +51,10 @@ puzzle. Compare decoded documents, never link strings.
 
 Any link handed to Chris — in chat, a PR body, a ticket, a README — is a
 SudokuMaker short link, `https://sudokumaker.app/p/<id>`, printed bare on its
-own line. A full link is a ~10 KB blob: unreadable, and truncated in a reply.
-A full link never appears in chat (Chris, 2026-10-22).
+own line (Chris, 2026-10-22). A full link is a ~10 KB blob: unreadable, and
+truncated in a reply, so one never appears in chat.
 
-Mint the short link from a full link or from a committed file holding one:
+Mint the short link from a full link or from a file holding one:
 
 ```
 uv run --directory ~/src/sudoku-kit python -m sudoku_kit.link_codec shorten '<link-or-file>' ['<link-or-file>' ...]
@@ -62,12 +62,13 @@ uv run --directory ~/src/sudoku-kit python -m sudoku_kit.link_codec shorten '<li
 
 It prints one short link per source and checks that the new id resolves back to
 the payload it sent. A non-zero exit prints the reason to stderr: report it,
-and hand over no link. Never type a short link from memory.
+and hand over no link. Sources before the failing one are already minted and
+printed: keep those links, and re-run only the failing source and those after
+it, since a second run mints a second record. Never type a short link from
+memory.
 
-A committed `PUZZLE_LINK*.txt` stays a full link: it is the source of truth,
-and the short link is minted from it at hand-off. A repo whose own ruling says
-otherwise wins for that repo (grid-hunts keeps short links only; its hunt
-record is the source).
+Which link files a repo commits, and whether they hold full or short links, is
+that repo's own `AGENTS.md` rule, not this skill's.
 
 ## Before sharing a link
 
