@@ -46,6 +46,15 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   # re-check (#1149). Do not simplify this back to $remote_sha..$local_sha.
   exclude=
   [ -n "${remote_sha:-}" ] && [ "$remote_sha" != "$zero" ] && exclude=$remote_sha
+  # A remote sha this checkout never fetched means the branch is behind or
+  # diverged: git lists such a ref (it only drops one it already knows to be
+  # non-fast-forward), and rev-list below would die on "bad object". Say the
+  # real cause. Refuse rather than pass: a forced push would send the commits.
+  if [ -n "$exclude" ] && ! git cat-file -e "${exclude}^{commit}" 2>/dev/null; then
+    echo "commit-identity guard (pre-push): refused — $remote_ref on $remote_name is at $exclude, a commit this checkout has not fetched, so $local_ref is behind or has diverged from it. Run git fetch $remote_name and rebase or merge, then push again." >&2
+    bad=1
+    continue
+  fi
   # $exclude unquoted: empty must vanish, not become an empty revision.
   range=$(git rev-list "$local_sha" --not $exclude --remotes="$remote_name") || {
     echo "commit-identity guard (pre-push): refused — could not enumerate the commits $local_ref is pushing (git rev-list $local_sha --not $exclude --remotes=$remote_name failed); refusing rather than reading that as nothing to check." >&2
@@ -73,7 +82,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   done
 done
 if [ "$saw_a_ref" -eq 0 ]; then
-  echo "commit-identity guard (pre-push): refused — no ref updates were read on stdin; git's pre-push protocol always sends at least one, so refusing rather than reading silence as nothing to check." >&2
-  bad=1
+  # git lists only refs it will send: it leaves out a ref already equal to the
+  # remote's and one it is about to reject as non-fast-forward (#1618). An
+  # empty list is therefore a push with nothing to check, and a stale or
+  # diverged branch is reported by git itself ("rejected ... fetch first" /
+  # "non-fast-forward"). The hook is given no refspec, so it cannot name the
+  # branch; git's own message does. A starved stdin is closed one layer up:
+  # the lane's wrapper fails the push when it cannot buffer the list (#1006).
+  echo "commit-identity guard (pre-push): no ref updates on stdin — nothing to push, nothing to check (the branch is already up to date, or git will reject it itself as non-fast-forward)." >&2
 fi
 exit $bad

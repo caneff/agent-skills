@@ -1429,8 +1429,8 @@ fn a_successful_push_leaves_no_stray_stdin_buffer_file_behind() {
 /// (Codex gate finding on #1006, PR #1068): a copy that fails partway —
 /// disk full, an I/O error — after writing one or more complete ref lines
 /// hands both the foreign hook and the guard a truncated-but-nonempty ref
-/// list, so the guard's zero-ref refusal never fires and the ref that got
-/// cut off pushes through unchecked. Simulated here with a stub `cat` ahead
+/// list, and the guard passes the cut-off ref unchecked (an empty list is a
+/// pass since #1618, so the wrapper's refusal is the only net). Simulated here with a stub `cat` ahead
 /// on PATH that writes one line then exits 1 — the wrapper must refuse
 /// before either the foreign hook or the guard ever runs, which a marker
 /// file from each proves.
@@ -1559,8 +1559,8 @@ fn a_foreign_pre_push_hook_is_preserved_and_the_guard_still_refuses_a_replayed_c
     assert!(!bad.status.success(), "a replayed foreign-email commit was pushed over a taken-over foreign hook: {}", out_text(&bad));
     let bad_err = String::from_utf8_lossy(&bad.stderr);
     assert!(bad_err.contains("commit-identity guard (pre-push)"), "{bad_err}");
-    // Names the actual mismatched email, not just "no ref updates were read"
-    // (the zero-refs fallback) — proves the guard actually enumerated the
+    // Names the actual mismatched email, not just the empty-push note
+    // ("no ref updates on stdin") — proves the guard actually enumerated the
     // pushed commit through the stdin-draining foreign hook, rather than
     // merely refusing everything a foreign hook happens to consume stdin
     // from (which would be an availability bug of its own, not a fix).

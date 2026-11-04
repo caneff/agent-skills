@@ -76,12 +76,53 @@ push main; check "no configured user.email is refused" 1 $?
 grep -q "no user.email is configured" "$tmp/out"; check "the no-configured-email refusal names itself" 0 $?
 git -C "$repo" config user.email t@example.com
 
-# zero ref updates on stdin: git's own protocol always sends at least one
-# when the hook runs at all, so this is either a starved stdin (#1006 S1) or
-# a hook invoked some other way — refuse rather than read silence as clean.
+# zero ref updates on stdin (#1618): the guard passes an empty push and says
+# why (rationale: the hook's own comment), rather than failing the lane step.
 : | "$here/commit-identity-guard-pre-push.sh" origin "$remote" >"$tmp/out" 2>&1
-check "zero ref updates on stdin is refused" 1 $?
-grep -q "no ref updates were read" "$tmp/out"; check "the zero-refs refusal names itself" 0 $?
+check "zero ref updates on stdin passes" 0 $?
+grep -q "nothing to push" "$tmp/out"; check "the empty-push pass names itself" 0 $?
+
+# earlier cases left an unpushed foreign-email commit on main: put main back
+# on what the remote holds so the next push really is up to date.
+git fetch -q origin && git reset -q --hard origin/main
+check "fixture: main equals the remote's" 0 $?
+
+# the same through a real `git push`: the hook must run (its note is in the
+# output) and the push must succeed. Guards against a pass that only works
+# because git never called the hook.
+git push origin HEAD:refs/heads/main >"$tmp/out" 2>&1
+check "a real up-to-date push passes" 0 $?
+grep -q "nothing to push" "$tmp/out"; check "the real up-to-date push ran the hook" 0 $?
+grep -q "refused" "$tmp/out"; check "the real up-to-date push is not refused" 1 $?
+
+# a diverged branch: the remote holds a commit this checkout lacks. Git, not
+# the guard, rejects it, and the output names the real cause.
+git checkout -qb stale
+git commit -q --allow-empty -m staleonly
+git push origin HEAD:refs/heads/stale-base >"$tmp/out" 2>&1
+check "fixture: stale-base reaches the remote" 0 $?
+git reset -q --hard HEAD~1
+git commit -q --allow-empty -m diverged
+git push origin HEAD:refs/heads/stale-base >"$tmp/out" 2>&1
+check "a non-fast-forward push fails" 1 $?
+grep -qi "non-fast-forward\|fetch first" "$tmp/out"; check "the failure names the non-fast-forward, git's own reason" 0 $?
+grep -q "commit-identity guard (pre-push): refused" "$tmp/out"; check "the identity guard is not the one refusing a non-fast-forward" 1 $?
+
+# the same branch, but the remote's new commit was made in another clone and
+# never fetched here (#1618 C1): git lists the ref, so the guard cannot read
+# the remote sha. It must refuse and say the branch is behind or diverged,
+# not leak a rev-list "bad object".
+other_clone="$tmp/other-clone"
+git clone -q "$remote" "$other_clone" >/dev/null 2>&1
+( cd "$other_clone" && git checkout -q stale-base && git -c user.name=o -c user.email=o@example.com commit -q --allow-empty -m elsewhere \
+  && COMMIT_IDENTITY_OVERRIDE="fixture: another clone" git push -q origin HEAD:refs/heads/stale-base ) >/dev/null 2>&1
+check "fixture: another clone advanced stale-base" 0 $?
+git push origin HEAD:refs/heads/stale-base >"$tmp/out" 2>&1
+check "an unfetched stale branch is refused" 1 $?
+grep -q "fetch" "$tmp/out" && grep -q "stale-base" "$tmp/out"; check "the refusal names the branch and says to fetch" 0 $?
+grep -q "bad object\|could not enumerate" "$tmp/out"; check "the refusal is not a rev-list failure" 1 $?
+git checkout -q main
+git branch -qD stale
 
 # a remote registered under a name other than "origin": the new-branch range
 # (`rev-list --not --remotes=$1`) must key off the hook's own $1, not a

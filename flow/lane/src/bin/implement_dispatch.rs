@@ -402,6 +402,10 @@ const PRE_COMMIT_FOREIGN: &str = "pre-commit.foreign";
 /// `git commit` at all, and slips past it. This re-checks every commit about
 /// to be pushed, on the same checkout-configured-email rule and the same
 /// `COMMIT_IDENTITY_OVERRIDE` escape.
+// Note (#1618): the installed wrapper text in `hook_wrapper` still says the
+// guard's "zero-ref refusal" backs up the buffering copy. That refusal is gone
+// (an empty ref list passes); the wrapper's own failed-copy exit is the net. The
+// text is left as is because `is_ours` matches it byte for byte.
 const PUSH_GUARD: &str = include_str!("../../hooks/commit-identity-guard-pre-push.sh");
 const PUSH_GUARD_NAME: &str = "commit-identity-guard-pre-push";
 /// The stable name a displaced foreign `pre-push` is moved to, same role as
