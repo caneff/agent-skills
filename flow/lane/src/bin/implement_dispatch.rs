@@ -323,6 +323,65 @@ fn git_query_timeout() -> std::time::Duration {
     env_ms_or("LANE_GIT_QUERY_TIMEOUT_MS", 10_000)
 }
 
+/// Whether git ignores `path` in the checkout at `primary`. `check-ignore`
+/// exits 0 (ignored) or 1 with no output (not ignored); anything else is git
+/// failing, reported in git's own words (#1254).
+fn path_is_ignored(primary: &str, path: &str) -> Result<bool, String> {
+    let out = run_timeout("git", &["-C", primary, "check-ignore", "--", path], git_query_timeout())
+        .map_err(|e| format!("git check-ignore {path} in {primary} could not run: {e}"))?;
+    if out.success {
+        Ok(true)
+    } else if out.combined.trim().is_empty() {
+        Ok(false)
+    } else {
+        Err(format!("git check-ignore {path} in {primary} failed: {}", out.combined.trim()))
+    }
+}
+
+/// Keeps `.claude/worktrees/` out of `git status` in the primary checkout
+/// (#1630). When git does not already ignore the workspace path, appends
+/// `/.claude/worktrees/` to the repo's `info/exclude`: no commit in the target
+/// repo, and it holds while another session edits `main`. A path already
+/// ignored, by the repo's `.gitignore` or a global one, leaves the file alone.
+/// A symlinked `.claude` is the untracked entry `git status` shows, and git
+/// will not answer for paths beyond it, so that case checks and excludes
+/// `/.claude` itself. Fails, rather than carrying on, when the path is still
+/// not ignored after the write: a later `.gitignore` negation outranks
+/// `info/exclude`, and a second dispatch finds the line already there.
+fn ensure_workspaces_ignored(primary: &str, branch: &str) -> Result<(), String> {
+    let symlinked = std::fs::symlink_metadata(Path::new(primary).join(".claude"))
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    let (path, line) = if symlinked {
+        (".claude".to_string(), "/.claude")
+    } else {
+        (format!(".claude/worktrees/{branch}"), "/.claude/worktrees/")
+    };
+    if path_is_ignored(primary, &path)? {
+        return Ok(());
+    }
+    let rel = stdout_bounded("git", &["-C", primary, "rev-parse", "--git-path", "info/exclude"], git_query_timeout())?;
+    let exclude = Path::new(primary).join(rel.trim());
+    let old = match std::fs::read_to_string(&exclude) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("could not read {}: {e}", exclude.display())),
+    };
+    if !old.lines().any(|l| l == line) {
+        if let Some(dir) = exclude.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+        }
+        let sep = if old.is_empty() || old.ends_with('\n') { "" } else { "\n" };
+        std::fs::write(&exclude, format!("{old}{sep}{line}\n")).map_err(|e| format!("could not write {}: {e}", exclude.display()))?;
+    }
+    // Prove it took rather than trust the write.
+    if path_is_ignored(primary, &path)? {
+        Ok(())
+    } else {
+        Err(format!("{} lists {line} but git still does not ignore {path}", exclude.display()))
+    }
+}
+
 /// OS-level bound for a `git` call that mutates the repo (`worktree add`) —
 /// looser than `git_query_timeout`, on the same reasoning as
 /// `HERDR_MUTATION_TIMEOUT` above: killing one mid-mutation risks a
@@ -1333,6 +1392,9 @@ fn run() -> Result<(), ExitCode> {
         Base::Slice { spec } => format!("origin/spec-{spec}"),
         _ => format!("origin/{default}"),
     };
+    if let Err(why) = ensure_workspaces_ignored(&primary, &branch) {
+        return Err(claim.fail("ignoring the workspace path", &why));
+    }
     let wa = run_in_timeout(
         None,
         "git",
