@@ -1,7 +1,7 @@
 # Operations detail (read when dispatching agents, running long jobs, or merging)
 
 Pointer target for `CLAUDE.md` § Work, for a session doing this with no
-`implement` or `burndown` skill loaded; those skills carry the dispatch,
+`implement` or `implement-spec` skill loaded; those skills carry the dispatch,
 review and merge procedure themselves. One lane: dispatch, control, wait,
 status, merge preconditions, end. Terms as `~/.agents/skills/GLOSSARY.md`
 defines them.
@@ -48,7 +48,8 @@ defines them.
   runs share one 32-core, 39 GB WSL box with other agents; count every
   working Claude session against a 28-session cap, sessions you did not
   start included (idle and done do not count — the cap protects cores).
-  burndown's counter is the reference: herdr's working panes plus every
+  `implement-spec/loop.py`'s counter is the reference: herdr's working panes
+  plus every
   `claude` pid no pane resolves to; without herdr, `ps -eo comm= | grep -cx
   claude` (`ps aux | grep -c '[c]laude'` over-counts more than 2×). Keep the
   sum of per-process `ulimit -v` caps under about 24 GB. A brief that asks an
@@ -213,7 +214,7 @@ defines them.
   controller is now <name>` — this session's herdr agent name, else its
   session name — for you to `SendMessage` to the worker; that message
   replaces the brief's controller (`implement/SKILL.md` § Control). Then the
-  worker is yours, merge included. A burn has its own path, `runfile.py
+  worker is yours, merge included. A spec run has its own path, `runfile.py
   resume`.
 
 ## Wait

@@ -121,7 +121,7 @@ learns, and each run pays this tail again.
 Every outstanding worker question is answered **before cleanup**, and
 **cleanup is the last act** of a landing. The order is exactly that:
 answer, then merge, then cleanup. `loop.landing_steps` returns it, and
-`python3 burndown/loop.py landing --clump <n> --agent <name> [--outstanding
+`python3 implement-spec/loop.py landing --clump <n> --agent <name> [--outstanding
 <question>]` prints what is owed and refuses cleanup while anything is.
 
 The rule is **not merely before the merge**. Merging with a question

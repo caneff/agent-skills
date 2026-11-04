@@ -28,10 +28,8 @@ import sys
 # by showing it. `visible()` rather than the bare `unfenced()` (#999): an
 # indented quotation is quoted material too, and this reader has no filter
 # of its own to drop it. The import is the same coupling this skill already
-# has — `implement-spec` is policy over `burndown`, and does not run without
-# it.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                os.pardir, "burndown"))
+# has — the readers it imports live beside it in `implement-spec`.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from frontier import key_line, unfenced, visible  # noqa: E402
 from loop import LoopError, origin_default  # noqa: E402
 
@@ -273,7 +271,7 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
 
 def default_branch(root):
     """`<default>` off the repo's `origin/HEAD` by `loop.origin_default`, the
-    burn's own reader, or None when git cannot say."""
+    run's own reader, or None when git cannot say."""
     def run(args):
         done = subprocess.run(["git", "-C", root, *args], capture_output=True,
                               text=True)

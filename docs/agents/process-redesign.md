@@ -18,7 +18,7 @@ and measuring what breaks, never by adding a part per incident.
 |---|---|---|---|
 | **1. Capture** | Reviews, controllers, workers and the weekly retro each file a ticket per observation. 295 filed in 14 days. | A ticket is something Chris wants built. Agents add to an open ticket for the same component rather than file (applied, 9599e2f). Friction goes in one log. The retro reports; it files nothing. | Prevention tickets; retro-filed tickets; per-PR sweeps. |
 | **2. Plan** | Non-trivial work: grill, spec, slice into 5-7 tickets plus a closing ticket. | A spec only when the work needs more than one session. Slice into tracer-bullet tickets, each sized for one worker. The closing check runs on the spec's integration PR, or in the only slice of a one-slice spec (#1461). Chris ruled 2026-10-06 (#1452) to reverse the one-ticket default: a single ticket carrying a whole plan came out too big for one worker. | Closing tickets. |
-| **3. Dispatch** | A burn controller per repo: frontier, closure, clumping, tiering, box check, run file, herdr naming, alerts, adoption after restarts. | One agent per ticket in its own worktree, started by one command. A burn only when there are 5+ independent tickets, and its controller does not relay anything to Chris except a real decision. | Most of burndown's run-file and liveness machinery, after ablation. |
+| **3. Dispatch** | A burn controller per repo: frontier, closure, clumping, tiering, box check, run file, herdr naming, alerts, adoption after restarts. | One agent per ticket in its own worktree, started by one command. `drain` for unrelated tickets, serially; parallel work only inside a spec run, whose controller does not relay anything to Chris except a real decision. | The burn and its command (#1634, ADR 0008). The loop, run file and liveness machinery moved under `implement-spec`. |
 | **4. Build** | Worker does TDD in a worktree. | Unchanged. This part works. | Nothing. |
 | **5. Review** | Up to five passes in sequence: three axes, verification, Codex, Codex again. Findings over a size bar become leftovers. | One wave: the axes, plus Codex on big PRs, in parallel. The worker fixes every finding. A script checks each fix is a real commit. The test suite is the last check. (Ruled; #1401.) | Verification pass; Codex pass 2; leftovers; sweeps; the adjacency checker; most of the review ledger. |
 | **6. Merge** | Controller: labels, CLEAN, verification check, Codex, seam in a scratch worktree, squash, merge-cleanup. | The same gate minus the removed passes: CLEAN, the fix check, the seam, squash, cleanup. Chris reads `/landed` after. | The Codex-at-merge step (moves into the wave). |
@@ -28,7 +28,7 @@ and measuring what breaks, never by adding a part per incident.
 ## What Chris sees
 
 - Today: denials, stop alerts, decisions about the process, questions about cleanup.
-- Proposed: a `/landed` read after merges, a decision only when a choice is contested or cannot be undone, and one short report when a burn closes.
+- Proposed: a `/landed` read after merges, a decision only when a choice is contested or cannot be undone, and one short report when a run closes.
 
 ## Order of work
 
@@ -36,7 +36,7 @@ and measuring what breaks, never by adding a part per incident.
 2. Stage 5: #1401 (already filed).
 3. Stage 2: a one-paragraph change to `to-tickets` and `implement-spec`.
 3a. Stage 3's everyday command is built: `drain/drain.py` (#1403) works the ready queue serially, one agent-chosen bundle of tickets per PR, and replaces the burn for everyday use.
-4. Stage 3: ablate the burn machinery last, once stages 1, 2 and 5 have cut the ticket flow. What survives is kept.
+4. Stage 3: ablate the burn machinery last, once stages 1, 2 and 5 have cut the ticket flow. What survives is kept. Done by #1634 (ADR 0008): the burn is retired, and `implement-spec` owns what survived.
 
 ## Ruled 2026-10-04 (Chris)
 

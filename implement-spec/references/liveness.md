@@ -1,8 +1,9 @@
 # Liveness: why the ranking reads the way it does
 
-`burndown/SKILL.md` § Liveness: that is the ranked list. This file is the evidence
+`implement-spec/SKILL.md` § Liveness: that is the ranked list. This file is
+the evidence
 behind it — what each source was measured at on #781, and what it costs when
-it is read the other way. `burndown/loop.py`'s `sweep` is the reader that
+it is read the other way. `implement-spec/loop.py`'s `sweep` is the reader that
 applies the mechanical half.
 
 ## The wake, and why nothing replaces it
@@ -34,8 +35,7 @@ worker:
 a signal whose true-positive rate was 0 in 6 is read as *read this pane*, and
 what the pane says is what the controller rules on. Parking a clump, holding
 a slot or calling a worker stalled on the alert alone is acting on the one
-thing the trial measured as noise, and `burndown/liveness.test.sh` asserts
-the skill never instructs it.
+thing the trial measured as noise, and the skill never instructs it.
 
 ## Why the backstop is a sweep, and why it is bounded
 
@@ -95,7 +95,8 @@ lives in the run file — `running` with its core count, `none` from the
 clump's registration on (its worker has launched nothing yet, #1311) or when
 the worker says it launched nothing, `done` when it reports the job
 finished — because a controller that restarts mid-run has only that file.
-The worker writes it before it launches the job; `burndown/SKILL.md` § Liveness
+The worker writes it before it launches the job; `implement-spec/SKILL.md` §
+Liveness
 "A worker declares its job size" has the rule (#1339).
 A hold that lived in one command line is a hold the resume cannot recover,
 and the free slot it then dispatches into is the 25.8 load above, reached a
@@ -107,5 +108,5 @@ same rule.
 The controller's attempted fix that day is the counter-example for how
 **not** to rule on this: it ordered the job down to one worker, applying an
 `AGENTS.md` rule to a tool that has no such knob and times out at one worker.
-That is `burndown/SKILL.md` § Before a controller rules, clause 2 —
+That is `implement-spec/SKILL.md` § Before a controller rules, clause 2 —
 a ruling about a tool's behaviour cites the tool's source.

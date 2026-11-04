@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""One run's state, machine-readable, at `~/.cache/burndown/<run-id>.json`:
+"""One run's state, machine-readable, at `~/.cache/spec-run/<run-id>.json`:
 
-    python3 burndown/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
-    python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
-    python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
-    python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
-    python3 burndown/runfile.py close    <run-id> --clump 901 --reason <text>
-    python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-    python3 burndown/runfile.py show     <run-id>
-    python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
+    python3 implement-spec/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
+    python3 implement-spec/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
+    python3 implement-spec/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
+    python3 implement-spec/runfile.py land     <run-id> --clump 901 --sha <sha>
+    python3 implement-spec/runfile.py close    <run-id> --clump 901 --reason <text>
+    python3 implement-spec/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
+    python3 implement-spec/runfile.py show     <run-id>
+    python3 implement-spec/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
 It holds the run id, the slot budget, the controller's herdr agent name, the
 **target repo** (the absolute path of the primary checkout of the repo the
@@ -38,7 +38,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-CACHE_DIR = "~/.cache/burndown"
+CACHE_DIR = "~/.cache/spec-run"
 # How long a writer waits for the run file's lock before refusing, matching the
 # `flock -w 30` the dispatch lane already waits with.
 LOCK_TIMEOUT = 30.0
@@ -78,7 +78,7 @@ _JOB_STATES = ("running", "none", "done")
 NEW_CLUMP_JOB = {"state": "none", "cores": 0}
 # The outcomes `implement/SKILL.md` § Review's dispositions sidecar can carry;
 # why any other is refused, not skipped: `references/run-file.md`. The LEGACY
-# ones are what pre-#1401 workers wrote: `counts.py` still reads them, so a burn
+# ones are what pre-#1401 workers wrote: `counts.py` still reads them, so a run
 # that was running when the review changed can close, and the merge check never
 # accepts them.
 SIDECAR_OUTCOMES = ("fixed", "moved", "disputed")
@@ -177,10 +177,10 @@ def cache_root(root=None):
 
 
 def env_root():
-    """The root a CLI passes down: `BURNDOWN_CACHE_DIR`, `~` expanded, or
-    None for the default. Every burndown CLI resolves the environment here
+    """The root a CLI passes down: `SPEC_RUN_CACHE_DIR`, `~` expanded, or
+    None for the default. Every run CLI resolves the environment here
     once and hands the result to in-process calls as `root`."""
-    override = os.environ.get("BURNDOWN_CACHE_DIR")
+    override = os.environ.get("SPEC_RUN_CACHE_DIR")
     return os.path.expanduser(override) if override else None
 
 
@@ -199,7 +199,7 @@ def locked(run_id, root=None):
     The lock lives beside the run file as `<run-id>.json.lock`, because the run
     file itself does not exist yet when `start` takes the lock."""
     lock_path = path(run_id, root) + ".lock"
-    timeout = env_number("BURNDOWN_RUNFILE_LOCK_TIMEOUT", LOCK_TIMEOUT)
+    timeout = env_number("SPEC_RUN_RUNFILE_LOCK_TIMEOUT", LOCK_TIMEOUT)
     try:
         os.makedirs(os.path.dirname(lock_path), exist_ok=True)
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -220,7 +220,7 @@ def locked(run_id, root=None):
         # Only ever set by a test, to hold this critical section open past
         # another writer's read: nothing else can witness the lock rather than
         # pass on how two processes happen to interleave.
-        delay = env_number("BURNDOWN_RUNFILE_DELAY_MS", 0)
+        delay = env_number("SPEC_RUN_RUNFILE_DELAY_MS", 0)
         if delay:
             time.sleep(delay / 1000)
         yield
@@ -485,7 +485,7 @@ def job(run_id, lowest, state, cores=0, root=None):
 
 def pr_up(run_id, lowest, pr, root=None):
     """Record the PR a clump's worker reported "PR up" on, which the sweep
-    reads (`burndown/SKILL.md` § Liveness). It lives here and not in the
+    reads (`implement-spec/SKILL.md` § Liveness). It lives here and not in the
     controller's context, because a resumed controller's sweep has only this
     file. A later "PR up" naming another PR replaces it: unlike a squash sha,
     a PR number is not final — a worker can close one and open another.
@@ -593,8 +593,7 @@ def close_reason(reason):
 
 def close(run_id, lowest, reason, root=None):
     """Record that a clump closed with no landing of its own — its ticket
-    found already fixed on the default branch, or handed to a nested spec run
-    whose landings live in that run's own file (#1310). A landed clump is
+    found already fixed on the default branch (#1310). A landed clump is
     refused; closing again with the same reason is a no-op, with another
     reason is refused. Why a close and not a `land` at `main`'s tip, and the
     hand recovery when one was recorded anyway: `references/run-file.md`."""
@@ -734,7 +733,7 @@ def main(argv):
 
     parser = argparse.ArgumentParser(
         prog="runfile.py",
-        description="One burn run's state at ~/.cache/burndown/<run-id>.json")
+        description="One run's state at ~/.cache/spec-run/<run-id>.json")
     subs = parser.add_subparsers(dest="command", required=True)
 
     new = subs.add_parser("start", help="create the run file")
@@ -766,7 +765,7 @@ def main(argv):
                       help="the clump's lowest ticket")
     shut.add_argument("--reason", required=True,
                       help="why, on one line: e.g. already fixed on main as "
-                           "#1202, or a nested spec run under its own run file")
+                           "#1202")
 
     work = subs.add_parser("job", help="record a clump's parallel-job state")
     work.add_argument("run_id")

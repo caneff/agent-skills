@@ -8,7 +8,7 @@
 //! tier costs one review and a wrong light tier lands code unreviewed, so it
 //! errs toward code wherever a body's tokens let it. A token with a `/` is a
 //! path, and is code unless its extension is prose (`.md .markdown .txt
-//! .rst`): a whitelist, as in `burndown/tier.py`. A bare token is the
+//! .rst`): a whitelist. A bare token is the
 //! exception. It is code only by a fixed list of extensions, a blacklist,
 //! because prose is full of dotted words that are not files (`i.e`, `v1.2`,
 //! `user.email`), so a bare token with an unlisted extension (`re.compile`)
@@ -16,11 +16,7 @@
 //! listed basename is code whatever its extension (`build.gradle`).
 //! Extensionless, a token is code by basename (`Makefile`, `Gemfile`) or
 //! under a script directory (`bin/`, `hooks/`); any other extensionless name
-//! reads as prose too. `tier.py` strips the label
-//! for both gaps before dispatch, from the clumper's file list. `tier.py` also
-//! copies the lists below to read a body as this does (#1211), and
-//! `burndown/tier_test.py` fails when a list here changes and its copy doesn't, and
-//! both suites run `tests/fixtures/body_targets.json` (#1239).
+//! reads as prose too.
 
 /// Extensions read as code: § Gate 2's, the ones that wire the harness or CI
 /// (its "hooks, CI config"), and other scripting and config languages.
@@ -31,7 +27,7 @@ const CODE_EXTENSIONS: &[&str] = &[
 ];
 /// A directory whose extensionless entries are scripts: `bin/implement-dispatch`, a git hook.
 const CODE_DIRS: &[&str] = &["bin", "sbin", "hooks", ".githooks", ".husky"];
-/// Extensions `burndown/tier.py` reads as prose; on a path (a token with a `/`),
+/// Extensions read as prose; on a path (a token with a `/`),
 /// any other extension is code.
 const PROSE_EXTENSIONS: &[&str] = &["md", "markdown", "txt", "rst"];
 /// Product names that end in a code extension but are prose. Only the one
@@ -47,7 +43,7 @@ const CODE_BASENAMES: &[&str] = &["skill.md", "makefile", "dockerfile", "justfil
 /// trailing sentence punctuation is dropped. It is code by extension, by
 /// filename, or as an extensionless entry under a script directory.
 pub fn first_code_target(body: &str) -> Option<String> {
-    // A Windows path separator is a path separator, as `tier.py` reads it.
+    // A Windows path separator is a path separator.
     body.replace('\\', "/")
         .split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
         .map(|t| t.trim_end_matches('.'))
@@ -65,7 +61,7 @@ fn is_code_path(token: &str) -> bool {
     }
     match name.rsplit_once('.') {
         Some((stem, ext)) => {
-            // On a path, a dotfile's name is its extension (`config/.env`), as in `tier.py`.
+            // On a path, a dotfile's name is its extension (`config/.env`).
             (!stem.is_empty() && CODE_EXTENSIONS.contains(&ext))
                 || (token.contains('/') && ext.chars().any(|c| c.is_alphabetic()) && !PROSE_EXTENSIONS.contains(&ext))
         }
@@ -77,11 +73,9 @@ fn is_code_path(token: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// One fixture of body-to-verdict cases, read by this suite and by
-    /// `burndown/tier_test.py`: a case added for one reader is asserted
-    /// against the other, so the two tokenisers cannot drift apart (#1239).
+    /// Each body in the fixture reads as the code target it names, or as none.
     #[test]
-    fn the_shared_fixture_cases_hold() {
+    fn the_body_target_fixture_cases_hold() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/body_targets.json");
         let cases: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         // A fixture that parsed to nothing would pass the loop below for no reason.
@@ -102,20 +96,5 @@ mod tests {
             };
             assert_eq!(first_code_target(body).as_deref(), want, "{body:?}");
         }
-    }
-
-    /// The prose whitelist is written twice, here and in `burndown/tier.py`,
-    /// and a file one reader calls prose and the other calls code dispatches
-    /// at a tier the other never agreed to. Read tier.py's literal and compare.
-    #[test]
-    fn the_prose_whitelist_matches_tier_py() {
-        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../burndown/tier.py")).unwrap();
-        let line = src.lines().find(|l| l.starts_with("PROSE_EXTENSIONS = {")).expect("tier.py defines PROSE_EXTENSIONS on one line");
-        let mut theirs: Vec<&str> = line.split('"').skip(1).step_by(2).collect();
-        let mut ours = PROSE_EXTENSIONS.to_vec();
-        theirs.sort_unstable();
-        ours.sort_unstable();
-        assert!(!theirs.is_empty(), "no extensions parsed from: {line}");
-        assert_eq!(ours, theirs, "targets.rs PROSE_EXTENSIONS and burndown/tier.py's disagree");
     }
 }

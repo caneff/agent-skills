@@ -83,7 +83,7 @@ from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "docs", "research"))
 sys.path.insert(0, os.path.join(HERE, "..", "multi-axis-code-review"))
-sys.path.insert(0, os.path.join(HERE, "..", "burndown"))
+sys.path.insert(0, os.path.join(HERE, "..", "implement-spec"))
 import review_ledger  # noqa: E402
 import runfile  # noqa: E402
 

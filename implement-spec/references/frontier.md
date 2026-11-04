@@ -2,7 +2,7 @@
 
 The **frontier** is the set of tickets a run may dispatch right now: open,
 carrying the run's label, unclaimed, and not waiting on anything. Reading it
-is `burndown/frontier.py` — `python3 burndown/frontier.py <owner/repo>
+is `implement-spec/frontier.py` — `python3 implement-spec/frontier.py <owner/repo>
 <label>`, or `frontier(repo, label)` in process — and it answers in five
 buckets, not two.
 
@@ -47,7 +47,7 @@ bucket of its own (#910).
 
 It is not a drop: `implement-dispatch` refuses it in plain mode *while
 naming the route that takes it* — `implement-dispatch --spec <n> --slots
-<k>`, the nested run #897 landed. It is dispatchable work, and dropping it
+<k>`, the spec run #897 landed. It is dispatchable work, and dropping it
 hides real work from the only reader that surfaces it.
 
 It is not `unresolved` either: nothing about its blocking state is in doubt,
@@ -69,7 +69,7 @@ prerequisites first: one with an open blocker — native edge or stated
 section — reads `blocked`, not `spec`. Both would be true claims about the
 entry, and that is exactly the trap. Only `spec` carries a dispatch verb,
 and a controller copies a line like that; the cost of being wrong here is a
-whole nested run over blocked work, against a controller seeing `blocked`
+whole spec run over blocked work, against a controller seeing `blocked`
 and having no line to copy, which is the correct experience for a ticket
 that is not ready.
 
@@ -85,7 +85,7 @@ one. The route is offered only once the prerequisites are known and met.
 A spec parent reaches the `spec` bucket only when it carries the queried
 label. One left by an earlier spec run with `spec` alone never does, and its
 slices then read as ordinary `unblocked` tickets and are built one by one,
-which is the failure `references/spec-handoff.md` exists to stop (#1242,
+which is the failure this bucket exists to stop (#1242,
 seen on burn-2026-09-27). So the reader also looks at each candidate's
 **parent**: `gh api repos/<o>/<r>/issues/<n>/parent`, and where that answers
 404, the body's parent line: `Part of #<n>`, a `Part of` line linking this repo's issue URL (what

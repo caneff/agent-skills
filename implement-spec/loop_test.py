@@ -1,8 +1,7 @@
-"""Tests for the burn loop (#893). The seams the ticket names: a fixture run
+"""Tests for the dispatch loop (#893). The seams the ticket names: a fixture run
 over a stub tracker and a stub agent list, and the resume announce against a
 stub messenger. The loop's prose — its step list, its refusals, its stated
-consequences — is guarded in `burndown/loop-steps.test.sh`; there is no
-harness that runs a skill's own text.
+consequences — has no test: there is no harness that runs a skill's own text.
 """
 import json
 import os
@@ -62,7 +61,7 @@ def test_seat_refuses_a_worktree_and_says_why():
 
 
 def test_seat_accepts_a_spec_run_worktree_and_says_so():
-    # #1312: `implement-dispatch --spec <n>` starts the nested run in
+    # #1312: `implement-dispatch --spec <n>` starts the spec run in
     # `.claude/worktrees/spec-<n>`, a linked worktree on branch `spec-<n>`.
     run = git_stub(branch="spec-1262",
                    git_dir="/repo/.git/worktrees/spec-1262")
@@ -185,12 +184,12 @@ def test_picks_names_a_same_tick_collision_past_the_free_slot_cut():
 
 
 def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
-    # #1342: #1337 and #1338 named disjoint files in `burndown/` and both
-    # diffs reached `burndown/loop.py`. A body under-names its targets, so
+    # #1342: #1337 and #1338 named disjoint files in one directory and both
+    # diffs reached `implement-spec/loop.py`. A body under-names its targets, so
     # two clumps whose lists share a directory are not picked in one tick.
     candidates = [
-        {"tickets": [1311], "files": ["burndown/runfile.py", "burndown/SKILL.md"]},
-        {"tickets": [1312, 1313], "files": ["burndown/loop.py"]},
+        {"tickets": [1311], "files": ["implement-spec/runfile.py", "implement-spec/SKILL.md"]},
+        {"tickets": [1312, 1313], "files": ["implement-spec/loop.py"]},
         {"tickets": [1400], "files": ["implement/SKILL.md"]},
     ]
     picked, held = loop.picks(loop.frontier(candidates, []), 3)
@@ -198,7 +197,7 @@ def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
     assert len(held) == 1
     assert held[0]["clump"]["tickets"] == [1312, 1313]
     assert held[0]["holder"] == 1311
-    assert held[0]["over"] == ["burndown/"]
+    assert held[0]["over"] == ["implement-spec/"]
     assert held[0]["same_tick"] is True
 
 
@@ -957,7 +956,7 @@ def loop_py(*args, cwd=None, env=None, real_workspaces=False):
         args.append("--no-workspace-diff")
     if args[:1] == ["dispatch"] and "--run" not in args and "--in-flight" in args:
         tmp = tempfile.TemporaryDirectory()
-        env = {**(env or {}), "BURNDOWN_CACHE_DIR": tmp.name}
+        env = {**(env or {}), "SPEC_RUN_CACHE_DIR": tmp.name}
         args += ["--run", fixture_run(tmp.name, args[args.index("--in-flight") + 1])]
     try:
         return subprocess.run([sys.executable, LOOP, *args],
@@ -1677,7 +1676,7 @@ def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live(tmp):
         json.dump(in_flight_clumps(), fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
                   "--free", "1", "--processes", "4", "--committed-gb", "4",
-                  "--run", "burn-close", env={"BURNDOWN_CACHE_DIR": cache})
+                  "--run", "burn-close", env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got.stderr
     assert "dispatch  #500" in got.stdout, got.stdout
     assert "held" not in got.stdout, got.stdout
@@ -1702,7 +1701,7 @@ def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed(tmp, 
     got = loop_py("dispatch", "--candidates", cand, "--in-flight",
                   empty_live, "--free", "4", "--processes", "4",
                   "--committed-gb", "4", "--run", "burn-skip",
-                  env={"BURNDOWN_CACHE_DIR": cache})
+                  env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got.stderr
     for n in (1258, 1293):
         assert f"landed #{n}: skipped" in got.stdout, got.stdout
@@ -1853,7 +1852,7 @@ def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id(tmp):
     runfile.land("burn-sweep-run-fixture", 4, "a1b2c3d", root=cache)
     calls = os.path.join(tmp, "calls")
     env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
-               CALLS=calls, BURNDOWN_CACHE_DIR=cache)
+               CALLS=calls, SPEC_RUN_CACHE_DIR=cache)
     got = subprocess.run([sys.executable, LOOP, "sweep", "--run",
                           "burn-sweep-run-fixture"], capture_output=True, text=True,
                          timeout=60, env=env)
@@ -2024,7 +2023,7 @@ def test_the_cli_sweep_of_several_hung_panes_returns_within_one_deadline(tmp):
         json.dump([{"tickets": [n], "workspace": f"/w/{n}",
                     "agent": f"skills-{n}"} for n in (1, 2, 3, 4)], fh)
     env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
-               BURNDOWN_SWEEP_BUDGET="1")
+               SPEC_RUN_SWEEP_BUDGET="1")
     started = time.monotonic()
     got = subprocess.run([sys.executable, LOOP, "sweep", "--workers",
                           workers], capture_output=True, text=True,
@@ -2077,7 +2076,7 @@ def run_file_dispatch(tmp, recorded, repo=REPO, legacy=False):
         del clump["job"]
     with open(live, "w") as fh:
         json.dump(clumps, fh)
-    return cand, live, {"BURNDOWN_CACHE_DIR": cache}
+    return cand, live, {"SPEC_RUN_CACHE_DIR": cache}
 
 
 def test_dispatch_reads_the_job_record_from_the_run_file_1107(tmp):
@@ -2103,7 +2102,7 @@ def test_dispatch_does_not_wait_for_pr_up_on_a_freshly_registered_clump_1311(tmp
     # A clump registered and never declared (the worker has sent nothing yet)
     # charges nothing, so the free slot is dispatched into at once.
     cand, live, env = run_file_dispatch(tmp, ("none",))
-    cache = env["BURNDOWN_CACHE_DIR"]
+    cache = env["SPEC_RUN_CACHE_DIR"]
     runfile.clump("burn-t", [777], "/w/777", "sm-777", root=cache)
     with open(live) as fh:
         clumps = json.load(fh)
@@ -2146,7 +2145,7 @@ def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126(tmp):
     # registered, so the refusal must name `runfile.py clump`, not `job`.
     import runfile
     cand, live, env = run_file_dispatch(tmp, ("none",))
-    cache = env["BURNDOWN_CACHE_DIR"]
+    cache = env["SPEC_RUN_CACHE_DIR"]
     with open(live) as fh:
         clumps = json.load(fh)
     clumps.append({"tickets": [777], "workspace": "/w/777",
@@ -2229,7 +2228,7 @@ def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107(tmp):
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
                   "--run", "burn-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4",
-                  env={"BURNDOWN_CACHE_DIR": cache})
+                  env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got
     assert "#351 declared 8 cores" in got.stdout, got.stdout
 

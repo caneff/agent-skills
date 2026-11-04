@@ -18,17 +18,17 @@ implement-dispatch <n> [<n>...] [--model sonnet|opus] [--run <run-id>]
 implement-dispatch --spec <n> [--slots <k>] [--model sonnet|opus]
 ```
 
-`--slots` defaults to 5 and goes into the nested brief either way.
-A burn's controller always passes `--run <run-id>` on a plain dispatch, and
-it goes into the brief: that is how the worker knows a run file is under
-it, where § Control's job record goes. A spec run is a burn to its own slices, so it passes its own run
-id to them; a dispatch outside any run passes none. `--spec` refuses the flag,
+`--slots` defaults to 5 and goes into the spec run's brief either way.
+A spec run's controller always passes `--run <run-id>` on a plain dispatch of
+a slice, and it goes into the brief: that is how the worker knows a run file
+is under it, where § Control's job record goes. A dispatch outside any run
+passes none. `--spec` refuses the flag,
 since the spec run keeps its own run file.
 
 `sonnet` for an ordinary ticket, `opus` for a subtle seam — `--spec` mode
 defaults to `opus` instead. Plain mode refuses an issue labelled `spec`,
 naming `--spec <n> --slots <k>` as the way to dispatch it; that hands the
-issue to a nested `/implement-spec` run instead of a worker. For
+issue to an `/implement-spec` run instead of a worker. For
 `/implement next`, resolve the lowest-numbered open `ready-for-agent` issue
 first and pass that number:
 
@@ -51,7 +51,7 @@ ticket lands, and on a repo Chris owns you merge its PR (§ The merge).
 
 The worker starts with `/implement <n> [<n>...] --tier light|heavy
 --controller "<name>" [--run <run-id>]`, plus `--chris-merges` on a
-`ready-for-human` ticket. `--run <run-id>` means a burn dispatched you and its
+`ready-for-human` ticket. `--run <run-id>` means a spec run dispatched you and its
 run file is under you, where § Control's job record goes; its absence means
 none is.
 Every ticket named is `in-progress` and assigned to you already (a
@@ -172,8 +172,8 @@ build and hands to Chris. Everything else in this skill applies unchanged.
 **Your turn ends mid-lane only on a message to the controller**: a question,
 a job declaration, or "PR up". A summary in your own pane reaches no one.
 herdr shows such a pane `done` while review, the fix round and the PR sit
-undone. The stop hook alerts the controller on such a stop, and a burn's
-sweep reads the pane as `stalled`, but both are backstops that fire after
+undone. The stop hook alerts the controller on such a stop, and a spec
+run's sweep reads the pane as `stalled`, but both are backstops that fire after
 the time is lost; the send is the report.
 
 **Declare a parallel job before you launch it** (#1311, #1339). The controller
@@ -184,7 +184,7 @@ record first. You write that record yourself, under the run-file lock, before
 you launch:
 
 ```
-python3 ~/.agents/skills/burndown/runfile.py job <run-id> --clump <n> --cores <k>
+python3 ~/.agents/skills/implement-spec/runfile.py job <run-id> --clump <n> --cores <k>
 ```
 
 `<run-id>` is the brief's `--run`, `<n>` the clump's lowest ticket, `<k>` the
@@ -998,7 +998,7 @@ closed.
    `merge-cleanup` closes the worker's pane, and an answer sent after that
    reaches nobody. What counts as outstanding, the incident behind the rule,
    and the procedure for two branches in the same files:
-   [`burndown/references/merge-tail.md`](~/.agents/skills/burndown/references/merge-tail.md) § Answer, then merge, then cleanup.
+   [`implement-spec/references/merge-tail.md`](~/.agents/skills/implement-spec/references/merge-tail.md) § Answer, then merge, then cleanup.
 
    ```
    cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>
@@ -1013,7 +1013,7 @@ closed.
    closed at all.
 6. Record "merged, sha X" for the closing report, X being the squash commit on
    the default branch (`gh pr view <pr> --repo <owner/name> --json
-   mergeCommit`). Chris is sent nothing per merge (`burndown/SKILL.md` § What
+   mergeCommit`). Chris is sent nothing per merge (`implement-spec/SKILL.md` § What
    the controller says to Chris): he reads `/landed` after.
 
 **The one exception: a `ready-for-human` ticket** ("Chris merges"). Nothing

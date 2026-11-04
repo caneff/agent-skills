@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""The include closure of a change, and the families and clumps it implies.
+"""The include closure of a change, and the clumps it implies.
 
-A **family** is one connected component of a run's file-collision graph; a
-**clump** inside it — one worker, one workspace, one PR — is the tickets whose
-closures are identical, at most `MAX_CLUMP` of them. Built from each
-candidate's *declared seams* —
-prose typed by whoever filed the ticket — the graph lies. On #781 ticket #451
-named each component's `update` and `validate` and nothing about skyscraper;
+A **clump** — one worker, one workspace, one PR — is one candidate: each
+candidate is its own clump, in every mode (spec #1634, ruling 1). What the
+closure is for is `loop.py dispatch`'s hold, which keeps a clump off the
+frontier while a live workspace shares a file with it. Read from each
+candidate's *declared seams* — prose typed by whoever filed the ticket — that
+file set lies. On #781 ticket #451 named each component's `update` and `validate` and nothing about skyscraper;
 its diff touched 41 files across six example families through a shared
 `#include ../_shared/line-kind.js`, and collided with a worker already
 committing to four of them.
 
-So the graph is built from the **include closure** instead: the files a change
+So the file set is the **include closure** instead: the files a change
 to a candidate's target files actually regenerates. The repo declares its
 include directive and its generator command in `AGENTS.md` and this resolver
 follows that declaration one hop. It never runs the generator — resolving the
@@ -385,7 +385,7 @@ def resolve_closure(root, files, decl=None, edges=None):
 
     Returns the files themselves when the repo declares it has no include
     graph, and raises `ClosureError` when it declares nothing at all — the
-    caller falls back to subtree clumping, which is a decision above this
+    caller falls back to the named files alone, which is a decision above this
     function.
     """
     decl = decl if decl is not None else declaration(root)
@@ -404,25 +404,19 @@ def resolve_closure(root, files, decl=None, edges=None):
 # The three states the opening report must tell apart. A controller reading
 # "conservative" needs to know whether the repo said nothing — a gap someone
 # should close — or said None, which is the truth about that repo.
-# Each line also says whether a family splits, since that turns on the mode.
 ANNOUNCEMENTS = {
     "closure": ("clumping: include closure, from AGENTS.md "
                 "(directive `{directive}`, generator `{generator}`); each "
-                "family runs as clumps of identical closures"),
+                "candidate is its own clump"),
     "no-include-graph": ("clumping: include closure, from AGENTS.md "
                          "(declared None: this repo has no include graph, so "
                          "each candidate closes over its own files); each "
-                         "family runs as clumps of identical closures"),
-    "subtree": ("clumping: conservative, by directory subtree \u2014 AGENTS.md "
-                "declares no include closure, so any two candidates touching "
-                "the same directory subtree are one clump, and a family is "
-                "never split"),
+                         "candidate is its own clump"),
+    "subtree": ("clumping: no closure \u2014 AGENTS.md declares no include "
+                "closure, so the hold reads only the files each candidate "
+                "names and their directories, the repo root left out; each "
+                "candidate is its own clump"),
 }
-
-
-# Appended to the announcement under `--one-each`, so the opening report
-# cannot read a per-ticket clumping as the mode's own.
-ONE_EACH_NOTE = "; one clump per ticket (--one-each: a spec run's slices)"
 
 
 def mode(decl):
@@ -442,157 +436,58 @@ def announcement(decl):
         generator=(decl.generator if decl else None) or "none declared")
 
 
-def subtree_collides(left, right):
-    """The conservative rule for a repo that declares nothing: two candidates
-    collide when either one's directory contains the other's. A candidate
-    touching a file at the repo root therefore collides with everything,
-    which is the point — conservative means clumping too much, never too
-    little."""
-    for a in {posixpath.dirname(f) for f in left}:
-        for b in {posixpath.dirname(f) for f in right}:
-            if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
-                return True
-            if b == "" or a == "":
-                return True
-    return False
-
-
-def components(candidates, collides):
-    """Connected components of the collision graph, each sorted by ticket
-    number, the components ordered by their lowest — which is the ticket a
-    clump's branch and workspace are named for."""
-    parent = {c["number"]: c["number"] for c in candidates}
-
-    def find(n):
-        while parent[n] != n:
-            parent[n] = parent[parent[n]]
-            n = parent[n]
-        return n
-
-    for i, left in enumerate(candidates):
-        for right in candidates[i + 1:]:
-            if collides(left, right):
-                parent[find(left["number"])] = find(right["number"])
-    groups = {}
-    for c in candidates:
-        groups.setdefault(find(c["number"]), []).append(c["number"])
-    return sorted((sorted(g) for g in groups.values()), key=lambda g: g[0])
-
-
-# The most tickets one clump of identical closures holds. It keeps the clump
-# inside one worker's context: a heavy build is TDD plus three review axes
-# and a Codex pass per ticket. The value is a controller's
-# guess from 2026-09-21 with no measurement behind it — a run that hits it
-# should move it with evidence, not work around it. `render` says when it
-# split a family, so the cap is visible when it bites.
-MAX_CLUMP = 3
-
-
-def split(family, closures):
-    """`(clumps, capped)`: a family's tickets with identical closures, lowest
-    first, cut into runs of at most `MAX_CLUMP` — and whether that cap cut
-    any of them. Identical closures would only rebase onto each other;
-    closures that merely overlap wait on each other instead, through
-    `loop.py dispatch`'s hold."""
-    same = {}
-    for n in family:
-        same.setdefault(frozenset(closures[n]), []).append(n)
-    out = [g[i:i + MAX_CLUMP] for g in same.values()
-           for i in range(0, len(g), MAX_CLUMP)]
-    return (sorted(out, key=lambda g: g[0]),
-            any(len(g) > MAX_CLUMP for g in same.values()))
-
-
-def clumps(root, candidates, decl=None, one_each=False):
-    """`(candidates) -> families`: one family per connected component of the
-    collision graph over the candidates' closures, and inside each family its
-    clumps.
-
-    A family's members may not share a file while both are live, which is
-    all a component proves — not that they ship together. So a family runs
-    as clumps, lowest first, each held by `loop.py dispatch` while a live
-    workspace shares a file with it. In `subtree` mode a family is one
-    clump: collisions there are by directory, and that hold compares files.
+def clumps(root, candidates, decl=None):
+    """`(candidates) -> clumping`: every candidate its own clump, lowest ticket
+    first, with the mode and the announcement line.
 
     A candidate is `{"number": <n>, "files": [...]}` — the files its ticket
     targets. The answer carries the mode and the announcement line as well as
-    the families, because a controller reading them has to know whether it
-    was clumped precisely or conservatively.
+    the clumps, because a controller reading them has to know whether the
+    closures were resolved precisely or not at all.
+
+    Two candidates that share a file are two clumps: `loop.py dispatch` holds
+    one off the frontier while the other's workspace is live, and that hold
+    reads the `closure` each clump carries here. In `subtree` mode no closure
+    is resolved and a clump carries only its files.
 
     The whole queue is resolved against one repo scan, not one per
     candidate: that scan is the entire reason the declaration exists.
-
-    `one_each` makes every candidate its own clump, in every mode, with the
-    files and closure it resolved to (#1542): a spec run's slices are ordered
-    by their blocked-by edges, and `loop.py dispatch`'s file hold stays the
-    guard between two that touch one file.
     """
     decl = decl if decl is not None else declaration(root)
     how = mode(decl)
     named = {c["number"]: {canonical(root, f) for f in c["files"]}
              for c in candidates}
     closures = {}
-    if how == "subtree":
-        def collides(left, right):
-            return subtree_collides(named[left["number"]], named[right["number"]])
-    else:
+    if how != "subtree":
         edges = include_edges(root, decl) if decl.directive else {}
         for c in candidates:
             closures[c["number"]] = resolve_closure(root, c["files"], decl, edges)
 
-        def collides(left, right):
-            return bool(closures[left["number"]] & closures[right["number"]])
-
-    def clump(tickets):
-        out = {"tickets": tickets,
-               "files": sorted(set().union(*(named[n] for n in tickets)))}
+    def clump(number):
+        out = {"tickets": [number], "files": sorted(named[number])}
         if how != "subtree":
             # Only where a closure was resolved. In subtree mode there is no
             # closure, and a `closure` key holding the tickets' declared files
             # would hand a consumer the declared seams this reader exists to
             # stop trusting.
-            out["closure"] = sorted(set().union(*(closures[n] for n in tickets)))
+            out["closure"] = sorted(closures[number])
         return out
 
-    families = []
-    for family in components(list(candidates), collides):
-        if one_each:
-            parts, capped = [[n] for n in sorted(family)], False
-        else:
-            parts, capped = (([family], False) if how == "subtree"
-                             else split(family, closures))
-        families.append({"tickets": family,
-                         "clumps": [clump(p) for p in parts],
-                         "capped": capped})
-    line = announcement(decl)
-    if one_each:
-        line += ONE_EACH_NOTE
-    return {"mode": how, "announcement": line, "families": families}
-
-
-def clump_list(clumping):
-    """Every family's clumps as one list — the candidates file
-    `loop.py dispatch --candidates` reads through `read_clumps`."""
-    return [c for f in clumping["families"] for c in f["clumps"]]
+    return {"mode": how, "announcement": announcement(decl),
+            "clumps": [clump(n) for n in sorted(named)]}
 
 
 def render(clumping):
     lines = [clumping["announcement"]]
-    for family in clumping["families"]:
-        count = len(family["clumps"])
-        why = (f"; identical closures split at MAX_CLUMP={MAX_CLUMP}"
-               if family["capped"] else "")
-        lines.append(f"family {', '.join(f'#{n}' for n in family['tickets'])}"
-                     f"  ({count} {'clump' if count == 1 else 'clumps'}{why})")
-        for clump in family["clumps"]:
-            tickets = ", ".join(f"#{n}" for n in clump["tickets"])
-            paths = clump.get("closure")
-            what = ("in the closure" if paths is not None
-                    else "named, no closure resolved")
-            paths = clump["files"] if paths is None else paths
-            noun = "file" if len(paths) == 1 else "files"
-            lines.append(f"  clump {tickets}  ({len(paths)} {noun} {what})")
-            lines.extend(f"      {path}" for path in paths)
+    for clump in clumping["clumps"]:
+        tickets = ", ".join(f"#{n}" for n in clump["tickets"])
+        paths = clump.get("closure")
+        what = ("in the closure" if paths is not None
+                else "named, no closure resolved")
+        paths = clump["files"] if paths is None else paths
+        noun = "file" if len(paths) == 1 else "files"
+        lines.append(f"clump {tickets}  ({len(paths)} {noun} {what})")
+        lines.extend(f"    {path}" for path in paths)
     return "\n".join(lines)
 
 
@@ -613,19 +508,22 @@ def main(argv):
     # and the announcement to stderr, so a redirect to the candidates file
     # does not take the line the opening report carries with it.
     as_json = "--json" in argv[1:]
-    one_each = "--one-each" in argv[1:]
-    argv = [a for a in argv if a not in ("--json", "--one-each")]
+    unknown = [a for a in argv[1:] if a.startswith("--") and a != "--json"]
+    if unknown:
+        print(f"closure.py: unknown option {unknown[0]}", file=sys.stderr)
+        return 2
+    argv = [a for a in argv if a != "--json"]
     if len(argv) < 3:
-        print("usage: closure.py [--json] [--one-each] <repo-root> "
+        print("usage: closure.py [--json] <repo-root> "
               "<n>=<path>[,<path>]...",
               file=sys.stderr)
         return 2
     try:
         candidates = [parse_candidate(spec) for spec in argv[2:]]
-        clumping = clumps(argv[1], candidates, one_each=one_each)
+        clumping = clumps(argv[1], candidates)
         if as_json:
             print(clumping["announcement"], file=sys.stderr)
-            print(json.dumps(clump_list(clumping), indent=2))
+            print(json.dumps(clumping["clumps"], indent=2))
         else:
             print(render(clumping))
     except ClosureError as exc:

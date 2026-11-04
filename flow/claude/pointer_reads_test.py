@@ -4,6 +4,7 @@ re-count 14 days after #1413 closes. Every test runs the script's command
 line. `gh` and `crontab` are fakes on PATH, the repo is a scratch clone with a
 bare origin, and the transcripts are synthetic, so nothing here reads the
 real ~/.claude/projects or the real crontab."""
+import importlib.util
 import json
 import os
 import subprocess
@@ -81,6 +82,30 @@ def test_count_tables(projects):
     assert "| SHELL-SAFETY | `pkill\\|kill -\\|kill [0-9]` | 0 | 0 |" in text
     assert "| OPERATIONS | 2 | 1 | 1 |" in text
     assert "| WORKFLOW | 1 | 1 | 0 |" in text
+
+
+def test_every_covering_skill_is_a_skill_in_the_tree():
+    # A skill named here that no longer exists can never cover a session, so
+    # the "not covered" column would silently stop meaning what it says.
+    spec = importlib.util.spec_from_file_location("pointer_reads", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root = SCRIPT.parents[2]
+    missing = [name for _doc, _trigger, skills in module.DOCS for name in skills.split("|")
+               if not (root / name / "SKILL.md").is_file()]
+    assert missing == []
+
+
+def test_a_spec_run_session_counts_as_covered(tmp_path):
+    # A spec run's controller merges and dispatches under `implement-spec`,
+    # which carries the procedure, so its session is not a bare one.
+    skill = {"message": {"content": "Base directory for this skill: /home/u/.claude/skills/implement-spec"}}
+    when = "2026-10-01T00:00:00Z"
+    (tmp_path / "run.jsonl").write_text(line(when, **skill) + line(when, **bash("gh pr merge 5 --repo o/r")))
+    out = subprocess.run([sys.executable, str(SCRIPT), "count", "--end", "2026-10-04T12:00:00Z",
+                          "--projects", str(tmp_path)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert "| OPERATIONS | 1 | 0 | 0 |" in out.stdout, out.stdout
 
 
 class Recount:

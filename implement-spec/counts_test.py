@@ -1,4 +1,4 @@
-"""Tests for `burndown/counts.py`, the closing report's fixed and moved counts.
+"""Tests for `implement-spec/counts.py`, the closing report's fixed and moved counts.
 Two seams: `counts` over a fixture run file and sidecar directory, and the CLI.
 """
 import json
@@ -21,7 +21,7 @@ COUNTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "counts.py")
 
 @pytest.fixture
 def root(tmp_path):
-    """The run-file cache directory (`BURNDOWN_CACHE_DIR`)."""
+    """The run-file cache directory (`SPEC_RUN_CACHE_DIR`)."""
     d = tmp_path / "cache"
     d.mkdir()
     return str(d)
@@ -63,7 +63,7 @@ def landed_run(root):
 
 
 def cli(root, *args, cwd=None, home=None, extra_env=None):
-    env = dict(os.environ, BURNDOWN_CACHE_DIR=root, **(extra_env or {}))
+    env = dict(os.environ, SPEC_RUN_CACHE_DIR=root, **(extra_env or {}))
     if home:
         env["HOME"] = home
     return subprocess.run([sys.executable, COUNTS, *args], env=env, cwd=cwd,

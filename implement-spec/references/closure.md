@@ -1,12 +1,11 @@
 # The include closure: what a change really touches
 
-A **family** is one connected component of a run's file-collision graph,
-and a **clump** — one worker, one workspace, one PR — is the family members
-whose closures are identical (§ Families run as clumps). The graph is built
-on each candidate's **include closure**: the files a change to the
-candidate's target files actually regenerates. Reading it is
-`burndown/closure.py` — `python3 burndown/closure.py [--json] <repo-root>
-<n>=<path>[,<path>]...`, or `clumps(root, candidates)` in process.
+A **clump** — one worker, one workspace, one PR — is one candidate; nothing
+groups candidates (§ Every candidate is its own clump). The hold in
+`loop.py dispatch` is built on each candidate's **include closure**: the files
+a change to the candidate's target files actually regenerates. Reading it is
+`implement-spec/closure.py` — `python3 implement-spec/closure.py [--json]
+<repo-root> <n>=<path>[,<path>]...`, or `clumps(root, candidates)` in process.
 
 Not on declared seams. A ticket's `## Seams under test` is prose typed by
 whoever filed it, and the shared snippet nobody mentioned is exactly what two
@@ -44,7 +43,8 @@ repo's convention.
   when the template ends there.
 - **`python imports`** is the one directive that is not a template (#1478): a
   Python import names a module, not a path, so no `<path>` template can match
-  it. Written ``- **Directive**: `python imports` ``, it makes the scan read each
+  it. Written ``- **Directive**: `python imports` ``, it makes the scan read
+  each
   tracked `.py` file's syntax tree and take `import a`, `import a.b`,
   `import a as x`, `import a, b` and `from a import x` (absolute only; a
   relative import is out of scope) as edges to `a.py` or `a/__init__.py`, and
@@ -53,7 +53,8 @@ repo's convention.
   A name that resolves to no tracked file drops out, which is what stdlib and
   third-party modules must do. Imports inside a string or comment are not
   edges, and a `.py` file that does not parse fails the resolve by name rather
-  than reading as "imports nothing"; so does a `.py` file that does not read as text. `importlib.util.spec_from_file_location`
+  than reading as "imports nothing"; so does a `.py` file that does not read
+  as text. `importlib.util.spec_from_file_location`
   loads are not read. **Paths** picks the base: `repo-root` for scripts that
   put the repo root on `sys.path`, the default (the including file's
   directory) otherwise; only one base is tried. One hop and never empirical,
@@ -84,7 +85,7 @@ repo's convention.
 |---|---|---|
 | declares a directive | `closure` | the candidate's files, plus every file that includes one of them |
 | states `None` | `no-include-graph` | the candidate's own files, and nothing else |
-| has no such section | `subtree` | not resolvable; clumping falls back to directory subtree |
+| has no such section | `subtree` | not resolvable; the hold reads the named files and their directories, the repo root left out |
 
 In `subtree` mode a clump carries **no closure at all** — only the files its
 tickets named. Handing a consumer those files under the name `closure` would
@@ -93,51 +94,32 @@ hand back the declared seams this whole reader exists to stop trusting.
 The opening report carries the announcement line for whichever it got, in
 stated words:
 
-- ``clumping: include closure, from AGENTS.md (directive `#include <path>`, generator `make examples`); each family runs as clumps of identical closures``
-- `clumping: include closure, from AGENTS.md (declared None: this repo has no include graph, so each candidate closes over its own files); each family runs as clumps of identical closures`
-- `clumping: conservative, by directory subtree — AGENTS.md declares no include closure, so any two candidates touching the same directory subtree are one clump, and a family is never split`
+- ``clumping: include closure, from AGENTS.md (directive `#include <path>`, generator `make examples`); each candidate is its own clump``
+- `clumping: include closure, from AGENTS.md (declared None: this repo has no include graph, so each candidate closes over its own files); each candidate is its own clump`
+- `clumping: no closure — AGENTS.md declares no include closure, so the hold reads only the files each candidate names and their directories, the repo root left out; each candidate is its own clump`
 
 A stated `None` and silence clump the same way on a repo that really has no
 include graph, and they are still two different answers. Silence is a gap
 somebody should close; `None` is the truth about that repo. A controller
-reading "conservative" has to know which one it is looking at, so the report
+reading "no closure" has to know which one it is looking at, so the report
 never collapses them — the same rule #890 set for a ticket that states no
 blockers versus one that says nothing at all.
 
-## Families run as clumps
+## Every candidate is its own clump
 
-A connected component proves one thing: two of its tickets that share a file
-cannot hold live workspaces at the same time. It does not prove they ship
-together. On `burn-2026-09-21-0930` the 27 remaining tickets chained through
-hub files — `implement/SKILL.md`, `burndown/loop.py`, `AGENTS.md`,
-`tests/all.sh` — into one component of 34 files. Read as one clump, the loop's
-only move was one worker holding 27 tickets in one context, one branch and
-one PR (#970).
+Spec #1634, ruling 1: nothing runs unrelated tickets side by side any more,
+so `closure.py` no longer groups. The `components`, `split` and `MAX_CLUMP`
+code and the `--one-each` flag are gone (the flag is refused, exit 2), and a
+candidate is a clump in every mode, identical closures included. The
+closure stays because `loop.py dispatch` holds a clump sharing a file or a
+directory with a live workspace or an earlier pick
+(`loop.md` § The exclusion rule and what it costs), and it reads each
+clump's `closure` for that. The invariant is "no two live workspaces share a
+file", within what the hold can see: a closure and a workspace's diff. The hold
+leaves the repo root out of its directories, so two candidates naming different
+root-level files run at once.
 
-So a component is a **family**, and it is split:
-
-- A **clump** is the family members whose closures are **identical**, lowest
-  ticket first, at most `MAX_CLUMP` (3) of them. Identical closures would
-  only rebase onto each other, so one worker takes them. The cap keeps that
-  worker inside one context: a heavy build is TDD plus three review axes
-  and a Codex pass per ticket. The 3 is a controller's
-  guess from 2026-09-21 with no measurement behind it. A run that hits it
-  should move it with evidence, not work around it. The render says
-  `identical closures split at MAX_CLUMP=3` on any family it cut.
-- Every other member is a clump of one.
-- **Serializing needs no new mechanism.** `loop.py dispatch` holds a clump
-  sharing a file or a directory with a live workspace or an earlier pick
-  (`loop.md` § The exclusion rule and what it costs). So the
-  loop dispatches the lowest free clump of a family, and that hold keeps back
-  every clump that shares a file with it. Two family members that share no
-  file and no directory can run together. The invariant is "no two live
-  workspaces share a file", not "one live member per family".
-- **A `subtree`-mode family is never split.** There, two tickets are in a
-  family because their directories overlap, the repo root included. The
-  dispatch hold leaves the root out, so splitting would let two workers
-  into the root's files.
-
-`--json` prints every family's clumps as one list, in the shape `loop.py
+`--json` prints the clumps as one list, in the shape `loop.py
 dispatch --candidates` reads, and the announcement on stderr. That way a
 redirect into the candidates file leaves the report line on the terminal.
 
@@ -156,8 +138,10 @@ direction. A file that does not read as text, the directories in `SKIP_DIRS`
 hold no directives. The file list comes from `git ls-files` (tracked plus
 untracked-not-ignored, #1178), so `repo_files` needs a git repository and a
 `git` on `PATH`: without either, the resolve fails rather than reading an empty
-list as an empty closure. Git's exit status decides that, not its stderr (a config
-warning is stderr on a good run); the one stderr line that refuses is git skipping
+list as an empty closure. Git's exit status decides that, not its stderr (a
+config
+warning is stderr on a good run); the one stderr line that refuses is git
+skipping
 an unreadable directory.
 
 Everything else about the scan **fails closed**, because the direction it
@@ -207,7 +191,8 @@ running the declared generator would answer exactly, and it would cost one
 regeneration per candidate per wave — the whole queue, re-explored on every
 refill. The declaration exists so that one scan of the repo answers for every
 candidate at once. `closure.py` does run one subprocess, `git ls-files`, to
-list the tracked plus untracked-not-ignored files it scans (`repo_files`); it never runs
+list the tracked plus untracked-not-ignored files it scans (`repo_files`); it
+never runs
 the generator. `test_no_code_path_runs_the_declared_generator` in
 `closure_test.py` witnesses that: it declares a generator that touches a marker
 file, runs `resolve_closure`, `clumps` and the CLI, and asserts the marker is

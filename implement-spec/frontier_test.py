@@ -265,7 +265,7 @@ def test_a_spec_parent_with_a_native_open_blocker_is_blocked():
     # `blocked` outranks `spec` on one entry: the frontier checks
     # prerequisites before it offers a route. The entry is true either way,
     # but `spec` carries a dispatch verb and a controller copies lines like
-    # that — onto a whole nested run over blocked work.
+    # that — onto a whole spec run over blocked work.
     got = read([issue(1, labels=("ready-for-agent", "spec"), blocked_by=1)])
     assert numbers(got["blocked"]) == [1], got
     assert numbers(got["spec"]) == [], got
@@ -831,7 +831,7 @@ def test_a_blocked_slice_stays_blocked():
 
 
 def test_a_silent_slice_is_a_slice_not_unresolved():
-    # The handoff removes the slice from the burn's candidate set whatever
+    # The handoff removes the slice from a queue's candidate set whatever
     # its own blockers say; the spec run orders its slices itself.
     got = read([issue(491, body="")], parents={491: spec_parent()})
     assert numbers(got["slice"]) == [491], got

@@ -22,23 +22,23 @@ _Avoid_: prompt, instructions, task description
 
 **Controller**:
 The session a worker reports to: the dispatcher that started it, or the session that adopted it once that dispatcher's process exited (`controller-adopt`, #1098), named in its brief by its herdr agent name when it has one (else its session name). A worker resolves that name to the controller's current session name with `resolve-controller` before every send — the two-hop mechanism is `implement/SKILL.md` § Control, the one place that states it. It rules on the worker's questions, merges the worker's PR and runs `merge-cleanup` on a repo Chris owns (a `ready-for-human` ticket's merge goes to Chris instead), and escalates to Chris only six things: a spec-ruling change, a new dependency, an irreversible deletion, a repo Chris does not own, a spec gap (the spec is silent on something the user needs), and a lane-mandated step the harness refuses. The last is the one escalation where the controller structurally cannot act.
-Everything else it rules on itself, against `burndown/SKILL.md` § Before a controller rules.
+Everything else it rules on itself, against `implement-spec/SKILL.md` § Before a controller rules.
 _Avoid_: coordinator, driver, parent session, owner
 
 **Run**:
-One controller session driving N workers, each in its own workspace via `implement-dispatch`, until its queue is empty or it stops. A burn (`/burndown`) and a spec run (`/implement-spec`) are the two kinds.
-_Avoid_: burn (one kind of run), batch, session
+One controller session driving N workers, each in its own workspace via `implement-dispatch`, until its queue is empty or it stops. A spec run (`/implement-spec`) is the only kind; `drain` works unrelated tickets serially and is no run.
+_Avoid_: burn (retired), batch, session
 
 **Slot**:
-One live worker a run may hold. `--slots` caps a run's slots; the box rule bounds the sum across every run on the machine. A nested spec run's slots are debited from the burn that dispatched it.
+One live worker a run may hold. `--slots` caps a run's slots; the box rule bounds the sum across every run on the machine.
 _Avoid_: builder, lane, parallelism
 
 **Family**:
-The tickets of one connected component of a run's file-collision graph. It proves only that clumps sharing a file cannot be live at the same time, not that they ship together: a family runs as its clumps, each held off the frontier while a live workspace shares a file with it. In subtree mode a family is one clump.
+Retired with the grouping code (spec #1634, ruling 1): `closure.py` no longer computes connected components. Prose that says "family" means the clumps one hot file holds off the frontier together.
 _Avoid_: component (the graph term), cluster
 
 **Clump**:
-The tickets inside one family whose closures are identical, at most three (`MAX_CLUMP` in `burndown/closure.py`); any other family member is a clump of one. One worker, one workspace, one PR that closes every ticket in it.
+One slice's slot in a run: `closure.py` makes each candidate its own clump in every mode. One worker, one workspace, one PR; a ticket-list clump from an older run file may still hold several tickets.
 _Avoid_: batch, group, cluster
 
 **Anchor**:
@@ -46,8 +46,8 @@ The oldest unblocked `ready-for-agent` ticket or clear spec parent (or the one `
 _Avoid_: seed, lead ticket
 
 **Bundle**:
-The anchor plus the tickets the agent chose to fix with it, at most `--bundle-max` (8): one agent, one worktree, one PR that closes every one, one review wave. A one-turn session chooses it after reading the queue; `drain` groups nothing by directory or closure. A spec parent is a bundle of its own: the spec and all its slices, built by one `implement-dispatch --spec` run. Unlike a clump, which the burn's controller computes from file closures before dispatch.
-_Avoid_: clump (the burn's term), batch
+The anchor plus the tickets the agent chose to fix with it, at most `--bundle-max` (8): one agent, one worktree, one PR that closes every one, one review wave. A one-turn session chooses it after reading the queue; `drain` groups nothing by directory or closure. A spec parent is a bundle of its own: the spec and all its slices, built by one `implement-dispatch --spec` run. Unlike a clump, which is one slice's slot in a spec run.
+_Avoid_: clump (a spec run's term), batch
 
 **Tier**:
 How much process a ticket's build gets, set at dispatch by its `documentation` label: light (label present; the worker pushes to the default branch, no PR, no reviewer) or heavy (no label; TDD, one review wave and the fix round, PR). A worker may raise light to heavy, never the reverse.
@@ -74,5 +74,5 @@ _Avoid_: sweep (that is every repo under a root), clean up, garbage collect
 _Avoid_: feature branch, spec branch, staging branch
 
 **Run file**:
-One JSON file per run at `~/.cache/burndown/<run-id>.json` holding that run's whole state: run id, slot budget, controller, and per clump its tickets, workspace, herdr agent name and squash sha. What a resumed controller reads instead of its own context.
+One JSON file per run at `~/.cache/spec-run/<run-id>.json` holding that run's whole state: run id, slot budget, controller, and per clump its tickets, workspace, herdr agent name and squash sha. What a resumed controller reads instead of its own context.
 _Avoid_: progress file, state file, log

@@ -3,7 +3,7 @@
 [--anchor <n>]`: work the `ready-for-agent` queue unattended, serially, one PR
 at a time (#1403).
 
-The **anchor** is the oldest unblocked ready ticket (`burndown/frontier.py`)
+The **anchor** is the oldest unblocked ready ticket (`implement-spec/frontier.py`)
 or clear spec parent, whichever has the lower number, or, for the first bundle
 drain picks, the ticket or spec `--anchor <n>` names (refused unless `<n>` is
 open, ready, unblocked and without a kept workspace; a resumed bundle goes
@@ -28,7 +28,7 @@ reviewer is 22 minutes). `drain` does no directory or closure grouping.
 A **spec parent** is a bundle of its own (#1477). The frontier's `spec` bucket
 holds the parents `implement-dispatch --spec` accepts (`ready-for-agent`, not
 claimed, not blocked), so only they anchor: a spec without the ready label, or
-one a burn already runs, leaves its slices unbuilt, as a slice never is built as
+one a session already runs, leaves its slices unbuilt, as a slice never is built as
 a lone ticket. `drain` starts it with `implement-dispatch --spec <n>` (that
 command's own slot default) and no chooser, since the spec's slices are its
 bundle. When nothing else is startable, a `waiting:` line names each spec whose
@@ -114,7 +114,7 @@ import sys
 import tempfile
 import time
 
-for _dir in ("burndown", "implement"):
+for _dir in ("implement-spec", "implement"):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", _dir))
 
 import frontier  # noqa: E402
@@ -366,8 +366,8 @@ def put_first(queue, want):
 
 @contextlib.contextmanager
 def claim_lock(ctx):
-    """The lock `implement-dispatch` holds around its own claims, so a burn
-    dispatching at the same moment cannot claim the same ticket."""
+    """The lock `implement-dispatch` holds around its own claims, so a spec
+    run dispatching at the same moment cannot claim the same ticket."""
     path = os.path.expanduser("~/.implement-dispatch-claim-" + ctx.repo.replace("/", "__") + ".lock")
     with open(path, "a") as lock:
         for _ in range(30):
@@ -861,7 +861,7 @@ def close_outcome(ctx, n):
 
 def finish_closed(ctx, branch, tickets):
     """The worker closed every ticket and opened no PR: `merge-cleanup` is all
-    that is left, the controller's step in a burn. Each ticket is recorded as
+    that is left, the controller's step in a spec run. Each ticket is recorded as
     what closed it (`close_outcome`), never as main's current tip: a ticket
     closed as moot has no landing, and the tip is another ticket's commit.
     One result per distinct outcome; the cleanup note rides on the first."""

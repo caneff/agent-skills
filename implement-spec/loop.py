@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The burn loop's mechanical steps, so the prose in `burndown/SKILL.md`
+"""The run loop's mechanical steps, so the prose in `implement-spec/SKILL.md`
 § The loop has a reader behind it instead of a rule a controller applies from
 memory:
 
-    python3 burndown/loop.py seat
-    python3 burndown/loop.py box [--processes <n>] --committed-gb <g> [--add-gb <g>]
-    python3 burndown/loop.py sweep --run <run-id> | --workers <clumps.json>
+    python3 implement-spec/loop.py seat
+    python3 implement-spec/loop.py box [--processes <n>] --committed-gb <g> [--add-gb <g>]
+    python3 implement-spec/loop.py sweep --run <run-id> | --workers <clumps.json>
 
 The judgment steps stay in the skill. What lives here is what a run got wrong
 by hand: which clumps are dispatchable once the live workspaces are excluded,
@@ -133,9 +133,8 @@ def directories(clump):
 
 
 def _nested(a, b):
-    """The directories two clumps share, one inside the other counting, as
-    `closure.py`'s `subtree_collides` reads a directory pair (#1342); unlike
-    it, the repo root is left out (`directories`)."""
+    """The directories two clumps share, one inside the other counting (#1342);
+    the repo root is left out (`directories`)."""
     return sorted({min(x, y, key=len) for x in directories(a)
                    for y in directories(b) if x.startswith(y) or y.startswith(x)})
 
@@ -1188,7 +1187,7 @@ def herdr_get(agent, timeout):
 def render_dispatch(picked, held, run_id, repo):
     """One `dispatch` line per pick and the `implement-dispatch` command
     under it — carrying `--run <run-id>`, so
-    the flag a burn owes every plain dispatch (`burndown/SKILL.md` § The
+    the flag a run owes every plain dispatch (`implement-spec/SKILL.md` § The
     loop step 8) is in the line the controller runs rather than in prose, and
     `--repo <checkout>`, the run's recorded target: `implement-dispatch`
     resolves issue numbers against a checkout, and the controller's cwd may be
@@ -1214,7 +1213,7 @@ def render_dispatch(picked, held, run_id, repo):
 def run(argv):
     parser = argparse.ArgumentParser(
         prog="loop.py", description=(
-            "The burn loop's mechanical steps. `announce` has no subcommand: "
+            "The run loop's mechanical steps. `announce` has no subcommand: "
             "sending is SendMessage, which the controller calls itself — and "
             "so is `landing`'s answer step, which is why `landing` reports "
             "what is owed and gates cleanup rather than answering anything."))
@@ -1390,7 +1389,7 @@ def run(argv):
                     "herdr is not on PATH, so the sweep has nothing to ask — "
                     "this is a broken controller box, not a roster of dead "
                     "workers")
-            budget = float(os.environ.get("BURNDOWN_SWEEP_BUDGET")
+            budget = float(os.environ.get("SPEC_RUN_SWEEP_BUDGET")
                            or SWEEP_BUDGET)
             if args.run:
                 workers = load_run(args.run, runfile.env_root())["clumps"]

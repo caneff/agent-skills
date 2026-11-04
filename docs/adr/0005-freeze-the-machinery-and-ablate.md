@@ -35,3 +35,12 @@ Chris's 2026-10-06 rulings on #1457, which outrank this ADR's freeze on new
 machinery tickets. The Codex kill switch still governs the one
 integration-branch pass, so the running ablation (`docs/agents/ablations.md`)
 is not ended early.
+
+## Note, 2026-11-03: the burn retired
+
+ADR 0008 removes the burn and `/burndown`, and `implement-spec` now owns the
+dispatch loop. Several parts go at once with no ablation, which this ADR's
+one-at-a-time rule would not allow, and #1634's slices are tickets against the
+machinery. Both were built under Chris's 2026-11-03 rulings on #1634, which
+outrank this ADR on those two points. The friction log and the review ledger
+stand.

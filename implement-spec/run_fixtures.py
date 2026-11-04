@@ -1,4 +1,4 @@
-"""Fixtures the burndown suites share; not a suite itself."""
+"""Fixtures the run suites share; not a suite itself."""
 import json
 import os
 import subprocess

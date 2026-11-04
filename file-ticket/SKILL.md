@@ -68,7 +68,7 @@ guess and do not create an issue until the target is confirmed.
   native edge below exists; that is the true answer, and the edge is what
   carries the gate.
   The grammar and what each answer means:
-  `~/.agents/skills/burndown/references/frontier.md`.
+  `~/.agents/skills/implement-spec/references/frontier.md`.
 
 ## Create it
 

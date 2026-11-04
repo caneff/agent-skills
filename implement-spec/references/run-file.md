@@ -1,19 +1,19 @@
 # The run file: one run's state, and what a resume reads
 
 A run's state lives in **one JSON file per run**, at
-`~/.cache/burndown/<run-id>.json`, read and written by `burndown/runfile.py`.
+`~/.cache/spec-run/<run-id>.json`, read and written by `implement-spec/runfile.py`.
 It is the only place a run's state lives: the controller's context is not
 state, and a per-repo log is not this run.
 
 ```
-python3 burndown/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
-python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
-python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
-python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
-python3 burndown/runfile.py close    <run-id> --clump 901 --reason <text>
-python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-python3 burndown/runfile.py show     <run-id>
-python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
+python3 implement-spec/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
+python3 implement-spec/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
+python3 implement-spec/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
+python3 implement-spec/runfile.py land     <run-id> --clump 901 --sha <sha>
+python3 implement-spec/runfile.py close    <run-id> --clump 901 --reason <text>
+python3 implement-spec/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
+python3 implement-spec/runfile.py show     <run-id>
+python3 implement-spec/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 ```
 
 ## What it holds
@@ -61,11 +61,7 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   final, so a second one is a stale writer rather than a correction.
 - **`closed`** is the one-line reason a clump finished with **no landing of
   its own**, or `null` (#1310): its ticket was found already fixed on the
-  default branch, or it was handed to a nested spec run whose landings live in
-  that run's own file. A nested run's clump is closed once that run has
-  finished, never at the hand-off: a closed clump's files are free to this
-  run's dispatch, which never reads the nested run's file, so closing early
-  dispatches into files its workers are still editing. `runfile.py close <run-id> --clump <n> --reason <text>`
+  default branch. `runfile.py close <run-id> --clump <n> --reason <text>`
   writes it. A clump is landed or closed, never both: `close` refuses a landed
   clump and `land` a closed one. Recording `main`'s tip as a landing instead is
   a sha with no PR behind it, and `counts.py` then refuses the run over
@@ -78,7 +74,7 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   command: `close` refuses a landed clump, `land` refuses a second sha, and
   `load` refuses a clump that is both. The recovery is a hand edit under the
   run file's lock, while the controller writes nothing else: `flock
-  ~/.cache/burndown/<run-id>.json.lock $EDITOR ~/.cache/burndown/<run-id>.json`,
+  ~/.cache/spec-run/<run-id>.json.lock $EDITOR ~/.cache/spec-run/<run-id>.json`,
   set that clump's `landed` back to `null`, save, then `runfile.py show
   <run-id>` to see it load and `runfile.py close <run-id> --clump <n> --reason
   <text>`.
@@ -94,7 +90,7 @@ Each clump carries what parallel job its worker has out: `{"state": "none",
 nothing on record and appears only in a file written before jobs existed.
 `runfile.py job <run-id> --clump <n> --cores <k> | --none | --done` writes it.
 The worker writes it before launching its job (#1339), and who writes it when
-that is refused is `burndown/SKILL.md` § Liveness.
+that is refused is `implement-spec/SKILL.md` § Liveness.
 
 Three states and not a bare number. `null` and `none` are different facts: a
 worker nobody recorded and a worker that declared nothing read alike to a
@@ -115,7 +111,7 @@ Each clump carries `pr_up`: the PR number its worker's "PR up" named, or
 resets it to `null` when the controller hands findings back: the PR stays
 open through a fix round, and only the clear lets a worker that stops
 mid-fix read `stalled` again. The sweep
-reads it, and what it reads it for is `burndown/SKILL.md` § Liveness. A file
+reads it, and what it reads it for is `implement-spec/SKILL.md` § Liveness. A file
 written before this field existed loads with it as `null`, which reads a
 finished pane as `stalled`: the loud reading, and the controller's read of
 the pane settles it.
@@ -146,9 +142,9 @@ A burn that was running when #1401 landed has sidecars in the old vocabulary.
 the sweep is gone; the run file's own `leftovers` list is ignored by this code
 and left in the file. The merge check never accepts those outcomes.
 
-## Why `~/.cache/burndown/<run-id>.json`
+## Why `~/.cache/spec-run/<run-id>.json`
 
-**Per run, not per repo.** The retired `~/.cache/burndown/<repo>.progress` was
+**Per run, not per repo.** The retired per-repo `<repo>.progress` file was
 an append-only prose log for a whole repo. On #781 it already held five
 earlier burns, each ending in `done`, before that run appended its first line
 — so "is this run finished" and "which tickets are out" were questions a
@@ -217,7 +213,7 @@ closed       #907  duplicate of #880, already fixed on main
 Every command that changes the file holds an advisory `flock` on
 `<run-id>.json.lock` across its read-modify-replace — the same lock the
 dispatch lane waits on, with the same 30-second ceiling before it refuses
-(`BURNDOWN_RUNFILE_LOCK_TIMEOUT` moves it). The lock sits beside the run file
+(`SPEC_RUN_RUNFILE_LOCK_TIMEOUT` moves it). The lock sits beside the run file
 rather than on it, because `start` takes the lock before the run file exists.
 
 Without it, two commands racing both read and both replace, and the second
@@ -245,7 +241,7 @@ name — because a `slots` that is a string reaches arithmetic in `resume` two
 calls later, and a controller recovering from a restart needs the diagnostic
 rather than the traceback.
 
-`BURNDOWN_CACHE_DIR` moves the whole directory, which is how the tests stay
+`SPEC_RUN_CACHE_DIR` moves the whole directory, which is how the tests stay
 off the real one. The CLI resolves it once and passes it down; an in-process
 caller passes `root` instead.
 
