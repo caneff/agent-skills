@@ -1,4 +1,4 @@
-"""Tests for the burn loop (#893). The seams the ticket names: a fixture run
+"""Tests for the dispatch loop (#893). The seams the ticket names: a fixture run
 over a stub tracker and a stub agent list, and the resume announce against a
 stub messenger. The loop's prose — its step list, its refusals, its stated
 consequences — has no test: there is no harness that runs a skill's own text.
@@ -61,7 +61,7 @@ def test_seat_refuses_a_worktree_and_says_why():
 
 
 def test_seat_accepts_a_spec_run_worktree_and_says_so():
-    # #1312: `implement-dispatch --spec <n>` starts the nested run in
+    # #1312: `implement-dispatch --spec <n>` starts the spec run in
     # `.claude/worktrees/spec-<n>`, a linked worktree on branch `spec-<n>`.
     run = git_stub(branch="spec-1262",
                    git_dir="/repo/.git/worktrees/spec-1262")
@@ -184,7 +184,7 @@ def test_picks_names_a_same_tick_collision_past_the_free_slot_cut():
 
 
 def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
-    # #1342: #1337 and #1338 named disjoint files in `implement-spec/` and both
+    # #1342: #1337 and #1338 named disjoint files in one directory and both
     # diffs reached `implement-spec/loop.py`. A body under-names its targets, so
     # two clumps whose lists share a directory are not picked in one tick.
     candidates = [

@@ -12,12 +12,18 @@ the cache earlier strands the run's own file. `finish` runs `check` first.
 Exit 0: clear (`check`) or every step done (`finish`). Exit 1: refused, or a
 step stopped; each line says which and why. Exit 2: a bad command line.
 
-Alive means a `drain-<repo>` job alive under `job-run`, or a herdr pane whose
-`name` is an agent a run file names, as a worker or as its controller, except
-for `--own-run`. A finished run's file names agents too, so a pane left open
-from one refuses until it is closed. Anything that cannot be read refuses:
-"nothing is alive" is an answer only `job-run` and herdr can give
-(`docs/agents/defect-classes.md`, class 1).
+Alive means a `drain-<repo>` job alive under `job-run`, or a herdr pane that
+belongs to a run other than `--own-run`: its `name` is an agent a run file
+names, as a worker or as its controller; its `name` is a dispatched spec run's,
+`<repo>-spec-<n>`, which exists before that run's file does; or its cwd is
+another spec run's workspace. A finished run's file names agents too, so a pane
+left open from one refuses until it is closed. Anything that cannot be read
+refuses: "nothing is alive" is an answer only `job-run` and herdr can give
+(`docs/agents/defect-classes.md`, class 1). That includes a listing that shows
+none of `--own-run`'s own panes by name, which says the names cannot be read.
+
+What this cannot see: a run typed by hand into an unnamed pane on a primary
+checkout, with no worker out and no spec workspace. Say so to Chris at landing.
 
 The script's removal ticket also removes `retire_landing_test.py` and the
 exact-path exemption the zero-reference suite holds for this file.
@@ -41,6 +47,8 @@ PROBE_TIMEOUT = 30
 # nothing), so it reads as no answer.
 ENDED = {0: "finished", 11: "killed", 12: "unknown"}
 ALIVE = 10
+SPEC_PANE = re.compile(r"-spec-\d+$")
+SPEC_WORKSPACE = re.compile(r"/\.claude/worktrees/spec-\d+(/|$)")
 SKILL_LINK = ".claude/skills/burndown"
 RETIRED = "burndown"
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,11 +59,7 @@ COMMIT_BODY = f"Part of {AGENT_SKILLS}#1634, which retired the burn."
 # short, and the ticket looked for may be past the cut.
 ISSUE_LIMIT = 5000
 REMOVAL_TITLE = "Remove the burndown retirement's landing script"
-REMOVAL_BODY = """## Parent
-
-#1634
-
-## TL;DR
+REMOVAL_BODY = """## TL;DR
 
 The landing script has run and is dead code, so delete it.
 
@@ -84,7 +88,7 @@ the zero-reference suite holds for the script.
 # hold on files in flight, and there is no clumper grouping tickets by it.
 REPOS = {
     "sudokumaker-custom-constraints": [
-        ("The burn clumper (`~/.agents/skills/implement-spec/closure.py`) reads this section\n"
+        ("The burn clumper (`~/.agents/skills/burndown/closure.py`) reads this section\n"
          "to find which files",
          "`~/.agents/skills/implement-spec/closure.py` reads this section for the hold\n"
          "`loop.py dispatch` puts on files in flight, to find which files"),
@@ -93,7 +97,7 @@ REPOS = {
     ],
     "sudokupad-art": [
         ("None — the clumper only reports it,", "None — `closure.py` only reports it,"),
-        ("Read by `~/.agents/skills/implement-spec/closure.py`, not by agents. Without it, all\n"
+        ("Read by `~/.agents/skills/burndown/closure.py`, not by agents. Without it, all\n"
          "11 slices of spec #301 landed in one 42-file clump (agent-skills #1478).",
          "Read by `~/.agents/skills/implement-spec/closure.py` for the hold `loop.py\n"
          "dispatch` puts on files in flight, not by agents. Without it, the hold has\n"
@@ -149,10 +153,10 @@ def live_drains():
     return alive
 
 
-def pane_names():
-    """The `name` of every pane herdr lists. A listing of no agents at all is
-    refused too: this script runs beside its own run's panes, so an empty
-    answer says herdr's registry is not what it looks like."""
+def panes():
+    """Every pane herdr lists. A listing of no agents at all is refused too:
+    this script runs beside its own run's panes, so an empty answer says
+    herdr's registry is not what it looks like."""
     status, out, err = run("herdr", "agent", "list")
     if status != 0:
         raise Refused(f"cannot read herdr agent list: exit {status}: "
@@ -164,7 +168,21 @@ def pane_names():
     if not isinstance(agents, list) or not agents \
             or not all(isinstance(a, dict) for a in agents):
         raise Refused(f"cannot read herdr agent list: agents is {agents!r}")
-    return {a["name"] for a in agents if a.get("name")}
+    return agents
+
+
+def foreign_workspaces(listing, own_agents):
+    """The panes not of this run whose cwd is a spec run's workspace other
+    than the one this script runs from. A pane can have no name, so a run in
+    one shows only here."""
+    found = []
+    for pane in listing:
+        if pane.get("name") in own_agents:
+            continue
+        for cwd in {pane.get("cwd"), pane.get("foreground_cwd")} - {None}:
+            if SPEC_WORKSPACE.search(cwd) and not Path(cwd).is_relative_to(ROOT):
+                found.append(cwd)
+    return sorted(set(found))
 
 
 def run_agents():
@@ -202,15 +220,25 @@ def alive_problems(own_run):
     except Refused as exc:
         problems.append(str(exc))
     try:
-        panes = pane_names()
+        listing = panes()
+        names = {a["name"] for a in listing if a.get("name")}
         runs = run_agents()
+        own = runs.get(own_run, set())
         if own_run not in runs:
             problems.append(f"no run file names run {own_run}, so nothing here "
                             "knows which run to ignore")
+        elif not own & names:
+            problems.append(f"cannot read herdr agent list: it shows no pane of "
+                            f"run {own_run} by name, so its names cannot be read")
         for run_id, agents in sorted(runs.items()):
             if run_id != own_run:
-                problems += [f"spec run alive: run {run_id} names pane {name}"
-                             for name in sorted(agents & panes)]
+                problems += [f"pane open: run {run_id} names pane {name}; that "
+                             "run is alive, or its pane is left to close"
+                             for name in sorted(agents & names)]
+        problems += [f"pane open: {name} is a spec run's pane"
+                     for name in sorted(names - own) if SPEC_PANE.search(name)]
+        problems += [f"pane open in another spec run's workspace: {cwd}"
+                     for cwd in foreign_workspaces(listing, own)]
     except Refused as exc:
         problems.append(str(exc))
     return problems
@@ -259,8 +287,7 @@ def rebuild_dispatch():
                       f"{(out + err).strip()[-500:] or 'no output'}")
     if not dispatch_reads_new_cache():
         raise Refused("flow/lane-install.sh succeeded, but implement-dispatch "
-                      f"--help does not name {NEW_CACHE}: {ROOT} holds no cache "
-                      "rename")
+                      f"--help does not name {NEW_CACHE}")
     print("implement-dispatch: rebuilt")
 
 
@@ -283,11 +310,6 @@ def git(path, *args):
     return out
 
 
-def pending(text, edits):
-    """The carried replacements this text has not had yet."""
-    return [edit for edit in edits if edit[0] in text]
-
-
 def reword(text, edits):
     for old, new in edits:
         text = text.replace(old, new)
@@ -295,17 +317,19 @@ def reword(text, edits):
 
 
 def fix_repo(repo, edits):
-    """One commit on `main`, pushed. Origin says whether it is owed, so a
-    fix already landed is done whatever state the checkout has moved on to.
+    """One commit on `main`, pushed, and only one that takes the word out: a
+    file the carried text would leave half reworded gets no commit at all.
+    Origin says whether it is owed, so a fix already landed is done whatever
+    state the checkout has moved on to.
     An unpushed commit of ours is pushed, not remade, and our own wording left
     uncommitted by a failed commit is committed, not read as a dirty tree."""
     path = Path.home() / "src" / repo
     git(path, "fetch", "-q", "origin", "main")
     landed = git(path, "show", "origin/main:AGENTS.md")
-    if not pending(landed, edits):
-        if RETIRED in landed.lower():
-            raise Refused(f"AGENTS.md on origin/main says {RETIRED} in text this "
-                          "script does not carry; a person words it")
+    if RETIRED in reword(landed, edits).lower():
+        raise Refused(f"AGENTS.md on origin/main says {RETIRED} in text this "
+                      "script does not carry; a person words it")
+    if not any(old in landed for old, _ in edits):
         print(f"{repo}: already landed")
         return
     branch = git(path, "rev-parse", "--abbrev-ref", "HEAD").strip()
@@ -345,14 +369,14 @@ def file_removal_ticket():
     if status != 0:
         raise Refused(f"gh issue list exited {status}: {(err + out).strip() or 'no output'}")
     try:
-        filed = [i["number"] for i in json.loads(out) if i["title"] == REMOVAL_TITLE]
-        listed = len(json.loads(out))
+        listing = json.loads(out)
+        filed = [i["number"] for i in listing if i["title"] == REMOVAL_TITLE]
     except (ValueError, KeyError, TypeError) as exc:
         raise Refused(f"gh issue list answered something unusable: {exc!r}") from exc
     if filed:
         print(f"removal ticket: already filed as #{filed[0]}")
         return
-    if listed >= ISSUE_LIMIT:
+    if len(listing) >= ISSUE_LIMIT:
         raise Refused(f"gh issue list reached its limit of {ISSUE_LIMIT}, so the "
                       "ticket may exist past the cut")
     status, out, err = run("gh", "issue", "create", "--repo", AGENT_SKILLS,
@@ -379,7 +403,9 @@ def word_is_gone():
 
 def finish(own_run):
     """The moves in order, stopping at the first that fails. A repo's failure
-    stops that repo's step only, and the last step still reports."""
+    stops that repo's step only, and the `rg` gate still reports. The removal
+    ticket is filed only when all of it passed: it deletes this script, which
+    an unfinished landing still needs."""
     if check(own_run) != 0:
         return 1
     try:
@@ -391,7 +417,7 @@ def finish(own_run):
         return 1
     steps = [(repo, lambda r=repo, e=edits: fix_repo(r, e))
              for repo, edits in REPOS.items()]
-    steps += [("removal ticket", file_removal_ticket), ("last step", word_is_gone)]
+    steps += [("rg gate", word_is_gone)]
     failed = False
     for name, step in steps:
         try:
@@ -399,7 +425,14 @@ def finish(own_run):
         except (Refused, OSError) as exc:
             print(f"stopped: {name}: {exc}")
             failed = True
-    return 1 if failed else 0
+    if failed:
+        return 1
+    try:
+        file_removal_ticket()
+    except (Refused, OSError) as exc:
+        print(f"stopped: removal ticket: {exc}")
+        return 1
+    return 0
 
 
 def check(own_run):

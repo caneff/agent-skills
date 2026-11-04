@@ -47,7 +47,7 @@ bucket of its own (#910).
 
 It is not a drop: `implement-dispatch` refuses it in plain mode *while
 naming the route that takes it* — `implement-dispatch --spec <n> --slots
-<k>`, the nested run #897 landed. It is dispatchable work, and dropping it
+<k>`, the spec run #897 landed. It is dispatchable work, and dropping it
 hides real work from the only reader that surfaces it.
 
 It is not `unresolved` either: nothing about its blocking state is in doubt,
@@ -69,7 +69,7 @@ prerequisites first: one with an open blocker — native edge or stated
 section — reads `blocked`, not `spec`. Both would be true claims about the
 entry, and that is exactly the trap. Only `spec` carries a dispatch verb,
 and a controller copies a line like that; the cost of being wrong here is a
-whole nested run over blocked work, against a controller seeing `blocked`
+whole spec run over blocked work, against a controller seeing `blocked`
 and having no line to copy, which is the correct experience for a ticket
 that is not ready.
 

@@ -15,6 +15,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frontier  # noqa: E402
 import retire_landing as landing  # noqa: E402
 
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -22,6 +23,36 @@ SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 OWN = "spec-1634-20261103"
 # Valid JSON and no run file, so `check` passes it and the move meets it.
 OTHER_RECORD = '{"other": true}'
+# The cited lines of each real `AGENTS.md`, copied from its `origin/main` on
+# 2026-11-04 and held apart from `landing.REPOS`, with `{word}` for the retired
+# word. A fixture built from the script's own search text matches whatever that
+# text says, which is how a path rename of it once passed every test (C6).
+REAL_CITATIONS = {
+    "sudokumaker-custom-constraints": """## Include closure
+
+The burn clumper (`~/.agents/skills/{word}/closure.py`) reads this section
+to find which files a change really regenerates; `docs/example-layout.md` § The shared
+frame reader explains the directive itself.
+
+- **Directive**: `// #include <path>`
+- **Paths**: relative to the including file
+- **Generator**: each example's own `build_link.py` or `build_size.py` (reported by the clumper, never run by it)
+""",
+    "sudokupad-art": """- **Paths**: repo-root
+- **Generator**: None — the clumper only reports it, and builds regenerate their own goldens.
+
+Read by `~/.agents/skills/{word}/closure.py`, not by agents. Without it, all
+11 slices of spec #301 landed in one 42-file clump (agent-skills #1478).
+""",
+    "twitch-rules-scroller": """- **Live e2e is batched: once per burn, on merged `main`, at run close** — not
+  per PR.
+
+and bare specifiers resolve to no file and drop out. This section exists so a
+{word} clumps by what a change actually reaches rather than by directory
+subtree — with the repo's root-level layout, the subtree fallback puts every
+candidate in one clump (measured 2026-09-20: 13 candidates, one clump).
+""",
+}
 
 FAKE_JOB_RUN = """#!/bin/bash
 # job-run's --status contract: first word and exit code, off a state file.
@@ -56,7 +87,8 @@ if os.path.exists(os.path.join(home, "gh-fails")):
 if args[:2] == ["issue", "list"]:
     canned = os.path.join(home, "gh-list-answer")
     print(open(canned).read() if os.path.exists(canned) else json.dumps(
-        [{{"number": i["number"], "title": i["title"]}} for i in issues]))
+        [{{"number": i["number"], "title": i["title"]}} for i in issues
+         if i.get("state", "open") == "open" or "all" in args]))
 elif args[:2] == ["issue", "create"]:
     number = 2000 + len(issues)
     issues.append({{"number": number, "args": args, "body": sys.stdin.read(),
@@ -172,6 +204,36 @@ def test_check_refuses_a_live_controller_of_another_run(world):
     assert_refused(world.check(), "sudoku-kit-spec-57")
 
 
+def test_check_refuses_a_spec_pane_with_no_run_file_yet(world):
+    world.panes("skills-1635", "sudoku-kit-spec-99")
+    assert_refused(world.check(), "sudoku-kit-spec-99")
+
+
+def test_check_refuses_an_unnamed_pane_in_another_spec_workspace(world):
+    workspace = "/home/x/.agents/skills/.claude/worktrees/spec-99"
+    world.herdr_answers(json.dumps({"result": {"agents": [
+        {"name": "skills-1635", "cwd": "/w"},
+        {"agent": "claude", "cwd": "/w", "foreground_cwd": workspace + "/sub"}]}}))
+    assert_refused(world.check(), workspace)
+
+
+def test_check_passes_a_pane_in_the_workspace_it_runs_from(world):
+    world.herdr_answers(json.dumps({"result": {"agents": [
+        {"name": "skills-1635"}, {"agent": "claude", "cwd": str(landing.ROOT)}]}}))
+    assert world.check().returncode == 0
+
+
+def test_check_refuses_a_listing_that_shows_none_of_its_own_panes(world):
+    world.panes(None, None)
+    assert_refused(world.check(), "its names cannot be read")
+
+
+def test_check_refuses_a_missing_job_run_with_no_drain_directory(world):
+    shutil.rmtree(world.home / landing.JOBS_DIR / "drain-skills")
+    (world.bin / "job-run").unlink()
+    assert_refused(world.check(), "cannot read job-run --status")
+
+
 def test_check_reads_run_files_already_moved_to_the_new_cache(world):
     world.new_cache.mkdir()
     world.run_file("spec-57-20261103", ["sudoku-kit-58"], cache=world.new_cache)
@@ -254,10 +316,10 @@ def clone_with_identity(origin, clone):
 
 @pytest.fixture(scope="session")
 def seeded(tmp_path_factory):
-    """Each repo as a bare origin and a clone, its citations pushed. Built once
+    """Each repo as a bare origin and a clone, its real citations pushed. Built once
     and copied per test: a real build per test costs the suite its CPU budget."""
     root = tmp_path_factory.mktemp("seeded")
-    for repo, edits in landing.REPOS.items():
+    for repo, cited in REAL_CITATIONS.items():
         origin = root / "origins" / f"{repo}.git"
         origin.mkdir(parents=True)
         git(origin, "init", "-q", "--bare", "-b", "main")
@@ -265,7 +327,7 @@ def seeded(tmp_path_factory):
         clone_with_identity(origin, clone)
         git(clone, "checkout", "-q", "-B", "main")
         (clone / "AGENTS.md").write_text(
-            "# Repo\n\n" + "\n\n".join(old for old, _ in edits) + "\n")
+            "# Repo\n\n" + cited.format(word=landing.RETIRED))
         git(clone, "add", "AGENTS.md")
         git(clone, "commit", "-q", "-m", "seed")
         git(clone, "push", "-q", "origin", "main")
@@ -332,6 +394,8 @@ class Landing(World):
             assert self.origin_commits(repo) == [landing.COMMIT_SUBJECT], repo
             on_origin = git(self.origins / f"{repo}.git", "show", "main:AGENTS.md")
             assert landing.RETIRED not in on_origin.lower(), repo
+            assert "clumper" not in on_origin.lower(), repo
+            assert "once per burn" not in on_origin, repo
             assert git(self.clone(repo), "status", "--porcelain") == "", repo
         assert len(self.issues()) == 1
 
@@ -354,8 +418,19 @@ def test_finish_files_a_removal_ticket_a_queue_can_pick_up(land):
     assert ticket["title"] == landing.REMOVAL_TITLE
     assert ticket["args"][ticket["args"].index("--label") + 1] == "ready-for-agent"
     assert ticket["args"][ticket["args"].index("--repo") + 1] == "caneff/agent-skills"
-    assert "## Blocked by\n\n- #1634" in ticket["body"]
     assert "implement-spec/retire_landing.py" in ticket["body"]
+    # The real reader, with the spec closed as the integration merge leaves it.
+    issue = {"number": ticket["number"], "body": ticket["body"], "title": ticket["title"],
+             "labels": [{"name": "ready-for-agent"}]}
+    def parent_of(item):
+        declared = frontier._parent_number(item["body"], "caneff/agent-skills")
+        return declared and {"number": declared, "state": "closed",
+                             "labels": [{"name": "spec"}],
+                             "repository_url": "https://api.github.com/repos/caneff/agent-skills"}
+    closed = frontier.classify([issue], lambda n: "closed", parent_of)
+    assert [e["number"] for e in closed["unblocked"]] == [ticket["number"]], closed
+    still_open = frontier.classify([issue], lambda n: "open", parent_of)
+    assert [e["number"] for e in still_open["blocked"]] == [ticket["number"]], still_open
 
 
 def test_a_second_finish_changes_nothing(land):
@@ -460,7 +535,7 @@ def test_a_dirty_checkout_stops_only_its_own_step(land):
     stray = land.clone("sudokupad-art") / "stray.txt"
     stray.write_text("work in progress")
     result = land.finish()
-    assert_refused(result, "sudokupad-art")
+    assert_refused(result, "sudokupad-art: dirty checkout")
     assert "stray.txt" in result.stdout
     assert land.origin_commits("sudokupad-art") == []
     assert stray.read_text() == "work in progress"
@@ -513,7 +588,46 @@ def test_a_checkout_behind_origin_is_brought_up_first(land):
 
 def test_a_missing_checkout_stops_its_step_and_fails_the_last_step(land):
     shutil.rmtree(land.clone("sudokupad-art"))
-    assert_refused(land.finish(), "sudokupad-art")
+    result = land.finish()
+    assert_refused(result, "stopped: sudokupad-art")
+    assert "stopped: rg gate: rg exited" in result.stdout
+
+
+def test_our_wording_beside_a_stray_file_is_a_dirty_checkout(land):
+    restore = _commit_refused(land)
+    assert land.finish().returncode == 1
+    restore()
+    (land.clone("sudokupad-art") / "stray.txt").write_text("work in progress")
+    assert_refused(land.finish(), "sudokupad-art: dirty checkout")
+    assert land.origin_commits("sudokupad-art") == []
+
+
+def test_text_the_script_does_not_carry_gets_no_commit_at_all(land):
+    clone = land.clone("sudokupad-art")
+    with (clone / "AGENTS.md").open("a") as fh:
+        fh.write(f"\nSee {landing.RETIRED}, unforeseen.\n")
+    git(clone, "commit", "-q", "-am", "unforeseen citation")
+    git(clone, "push", "-q", "origin", "main")
+    result = land.finish()
+    assert_refused(result, "a person words it")
+    assert land.origin_commits("sudokupad-art") == ["unforeseen citation"]
+    assert land.issues() == []
+
+
+def test_a_failed_finish_files_no_removal_ticket(land):
+    (land.clone("sudokupad-art") / "stray.txt").write_text("work in progress")
+    assert land.finish().returncode == 1
+    assert land.issues() == []
+
+
+def test_the_real_citations_hold_what_the_script_carries(land):
+    """Against the independent capture: each carried search text matches, and
+    what is left names neither the word nor the clumper."""
+    for repo, edits in landing.REPOS.items():
+        real = REAL_CITATIONS[repo].format(word=landing.RETIRED)
+        assert all(old in real for old, _ in edits), repo
+        left = landing.reword(real, edits).lower()
+        assert landing.RETIRED not in left and "clumper" not in left, repo
 
 
 def test_the_last_step_fails_until_the_word_is_gone_from_all_three(land):
@@ -525,7 +639,7 @@ def test_the_last_step_fails_until_the_word_is_gone_from_all_three(land):
     result = land.finish()
     assert_refused(result, "rg still finds")
     assert "unforeseen" in result.stdout
-    assert len(land.issues()) == 1
+    assert land.issues() == []
     text = (clone / "AGENTS.md").read_text()
     (clone / "AGENTS.md").write_text(text.replace(f"See {landing.RETIRED}, unforeseen.\n", ""))
     git(clone, "commit", "-q", "-am", "worded by a person")
@@ -573,7 +687,7 @@ def test_an_install_that_leaves_the_old_binary_fails(land):
 
 def test_the_ticket_is_not_filed_again_when_it_is_already_closed(land):
     (land.home / "gh-issues.json").write_text(json.dumps(
-        [{"number": 7, "title": landing.REMOVAL_TITLE}]))
+        [{"number": 7, "title": landing.REMOVAL_TITLE, "state": "closed"}]))
     assert land.finish().returncode == 0
     assert len(land.issues()) == 1
 

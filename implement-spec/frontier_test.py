@@ -831,7 +831,7 @@ def test_a_blocked_slice_stays_blocked():
 
 
 def test_a_silent_slice_is_a_slice_not_unresolved():
-    # The handoff removes the slice from the burn's candidate set whatever
+    # The handoff removes the slice from a queue's candidate set whatever
     # its own blockers say; the spec run orders its slices itself.
     got = read([issue(491, body="")], parents={491: spec_parent()})
     assert numbers(got["slice"]) == [491], got

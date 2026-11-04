@@ -4,15 +4,14 @@
 A **clump** — one worker, one workspace, one PR — is one candidate: each
 candidate is its own clump, in every mode (spec #1634, ruling 1). What the
 closure is for is `loop.py dispatch`'s hold, which keeps a clump off the
-frontier while a live workspace shares a file with it. Built from each
-candidate's *declared seams* —
-prose typed by whoever filed the ticket — the graph lies. On #781 ticket #451
-named each component's `update` and `validate` and nothing about skyscraper;
+frontier while a live workspace shares a file with it. Read from each
+candidate's *declared seams* — prose typed by whoever filed the ticket — that
+file set lies. On #781 ticket #451 named each component's `update` and `validate` and nothing about skyscraper;
 its diff touched 41 files across six example families through a shared
 `#include ../_shared/line-kind.js`, and collided with a worker already
 committing to four of them.
 
-So the graph is built from the **include closure** instead: the files a change
+So the file set is the **include closure** instead: the files a change
 to a candidate's target files actually regenerates. The repo declares its
 include directive and its generator command in `AGENTS.md` and this resolver
 follows that declaration one hop. It never runs the generator — resolving the
@@ -386,7 +385,7 @@ def resolve_closure(root, files, decl=None, edges=None):
 
     Returns the files themselves when the repo declares it has no include
     graph, and raises `ClosureError` when it declares nothing at all — the
-    caller falls back to subtree clumping, which is a decision above this
+    caller falls back to the named files alone, which is a decision above this
     function.
     """
     decl = decl if decl is not None else declaration(root)
@@ -413,9 +412,9 @@ ANNOUNCEMENTS = {
                          "(declared None: this repo has no include graph, so "
                          "each candidate closes over its own files); each "
                          "candidate is its own clump"),
-    "subtree": ("clumping: conservative, by directory subtree \u2014 AGENTS.md "
-                "declares no include closure, so any two candidates touching "
-                "the same directory subtree hold each other off, and each "
+    "subtree": ("clumping: no closure \u2014 AGENTS.md declares no include "
+                "closure, so the hold reads only the files each candidate "
+                "names and their directories, the repo root left out; each "
                 "candidate is its own clump"),
 }
 
@@ -478,12 +477,6 @@ def clumps(root, candidates, decl=None):
             "clumps": [clump(n) for n in sorted(named)]}
 
 
-def clump_list(clumping):
-    """The clumps as one list — the candidates file
-    `loop.py dispatch --candidates` reads through `read_clumps`."""
-    return list(clumping["clumps"])
-
-
 def render(clumping):
     lines = [clumping["announcement"]]
     for clump in clumping["clumps"]:
@@ -530,7 +523,7 @@ def main(argv):
         clumping = clumps(argv[1], candidates)
         if as_json:
             print(clumping["announcement"], file=sys.stderr)
-            print(json.dumps(clump_list(clumping), indent=2))
+            print(json.dumps(clumping["clumps"], indent=2))
         else:
             print(render(clumping))
     except ClosureError as exc:

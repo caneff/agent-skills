@@ -30,7 +30,8 @@ only bound across runs.
   Chris goes to that session, which rules or relays.
 - **Started by `drain`.** A controller named `drain` is no session
   (`drain/drain.py` dispatches spec runs too, #1477):
-  `implement/SKILL.md` § Control's rule for it governs, with the integration PR up and this run idle
+  `implement/SKILL.md` § Control's rule for it governs, with the integration
+  PR up and this run idle
   as its stop.
 - **Started by typing `/implement-spec` in a session.** No controller sits
   above it. That session merges the integration PR by
@@ -91,10 +92,12 @@ branch too.
    budget (5 when `--slots` is omitted), the controller's own herdr
    agent name, and `--repo <primary checkout>`, required: the run's target,
    which every printed `implement-dispatch` command carries and
-   `counts.py --repo` is checked against (§ Run state). Resuming an existing run instead:
+   `counts.py --repo` is checked against (§ Run state). Resuming an existing
+   run instead:
    `runfile.py resume`, and then **one message per live, unsettled worker**
    — its `announce` bucket and only that one, via `loop.announce`. A
-   landed or closed clump's worker gets none however its agent looks; a vanished one
+   landed or closed clump's worker gets none however its agent looks; a
+   vanished one
    gets none either, and is reconciled or parked by hand. The bucket
    names each worker by its **herdr agent name**, which is
    the durable key and not an address: resolve it to a reachable session at
@@ -111,7 +114,7 @@ branch too.
 3. The **opening report** carries `closure.py`'s announcement line verbatim,
    so the reader can tell all three declaration states apart: a declared
    directive, a **declared None** — the repo has no include graph — and
-   **silence**, which reads closures conservatively by directory subtree. A
+   **silence**, where the hold reads only the files each candidate names. A
    controller reading "conservative" has to know which of the last two it
    got.
 
@@ -124,7 +127,8 @@ branch too.
    step 2) and added to the candidates file; it was explored, so it is no
    ticket filed since (#1542).
 5. **At each dispatch, re-resolve the closures** — the clump's own and
-   every **in-flight** clump's, through `closure.py` against current `main`,
+   every **in-flight** clump's, through `closure.py` against current
+   `origin/spec-<n>`,
    **one hop**; an in-flight clump's tickets and workspace come from the run
    file, its closure from that re-resolution, and the two together are
    `loop.py dispatch`'s `--in-flight`; its job record is in neither, and
@@ -151,7 +155,8 @@ branch too.
    once. Two consequences,
    because neither is visible from the frontier's own definition — a run drains
    **out of ticket order**, and one parked worker can hold every clump
-   sharing its files off the frontier until it lands. A controller reading only "open,
+   sharing its files off the frontier until it lands. A controller reading
+   only "open,
    unblocked, unclaimed" would dispatch into the collision.
 6. **Full re-exploration fires on one trigger**: a landing whose diff touched
    a **hub** — a file two or more candidates' closures share
@@ -209,7 +214,8 @@ branch too.
    a `land` at `main`'s tip (why, and the recovery when one was recorded:
    `references/run-file.md`), and each "PR up" with `runfile.py pr-up <run-id>
    --clump <n> --pr <n>` as it arrives, for § Liveness, in this file, so a
-   restart can pick the run back up with nothing transcribed by hand. The controller clears the
+   restart can pick the run back up with nothing transcribed by hand. The
+   controller clears the
    PR-up record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever
    it hands findings back to the worker (a red seam's failure, or any ruling
    that sends it back to work), since the PR stays open through the fix round,
@@ -220,14 +226,16 @@ branch too.
    backstop it runs when it wakes with nothing else to do: § Liveness. A
    clump that cannot go on parks, and a run that parks twice with no landing
    between stops: § Parking and escalation.
-10. **When the last slice has landed**, finish the spec (§ The integration branch), and
+10. **When the last slice has landed**, finish the spec (§
+    The integration branch), and
     **at run close send the closing report** (§ The closing report).
 
 ## The frontier
 
 Which slices a run may dispatch next — open, labelled, unclaimed, waiting on
 nothing — is read by `frontier.py`, not by a regex at the call site:
-`python3 implement-spec/frontier.py <owner/repo> <label>` prints the `unblocked`,
+`python3 implement-spec/frontier.py <owner/repo> <label>` prints the
+`unblocked`,
 `blocked`, `unresolved`, `spec`, `slice` and `stranded` buckets. Native tracker
 dependencies first, the `## Blocked by` section as the fallback.
 
@@ -242,21 +250,23 @@ it is clear. The grammar and the sources:
 ## Clumping
 
 Each slice is its own clump — one worker, one workspace, one PR (#1542, ruling
-d; #1634, ruling 1). `closure.py` groups nothing, and it reads the files each
-one holds off the frontier from, not from the tickets' declared seams:
-`python3 implement-spec/closure.py <repo-root> <n>=<path>[,<path>]...` prints the
-mode and each clump with its **include closure**
-(`references/closure.md` § Every candidate is its own clump); `--json` prints the clump
-list `loop.py dispatch --candidates` reads. The repo declares its include
-directive and its generator command in `AGENTS.md`; the resolver follows
-that declaration one hop and **never runs the generator**. A repo that declares
-nothing has its closures read conservatively by directory subtree, and the run's **opening report
-carries the announcement line** the reader returns, so a controller can see
-which of the three modes it got. An in-flight clump's file set is wider than
-its closure by the time a dispatch reads it: § The loop step 5 unions in
-its workspace's real diff. The accepted cost is two slices that touch one file
-running at once, and that hold is the remaining guard. The grammar and the
-evidence:
+d; #1634, ruling 1). `closure.py` groups nothing. It resolves the files each
+clump holds off the
+frontier, from the include closure and not from the tickets' declared seams:
+`python3 implement-spec/closure.py <repo-root> <n>=<path>[,<path>]...` prints
+the mode and each clump with its **include closure**
+(`references/closure.md` § Every candidate is its own clump); `--json` prints
+the clump list `loop.py dispatch --candidates` reads. The repo declares its
+include directive and its generator command in `AGENTS.md`; the resolver
+follows that declaration one hop and **never runs the generator**. In a repo
+that declares nothing the hold reads only the files each candidate names, and
+the run's **opening report carries the announcement line** the reader returns,
+so a controller can see which of the three modes it got. An in-flight clump's
+file set is wider than its closure by the time a dispatch reads it: § The loop
+step 5 unions in its workspace's real diff. The accepted cost is what the hold
+cannot see: two slices can reach one file through a path no closure and no
+diff names yet, and two candidates naming different root-level files run at
+once. The grammar and the evidence:
 [`references/closure.md`](references/closure.md).
 
 ## Run state
@@ -264,7 +274,8 @@ evidence:
 A run's state is **one JSON file per run** at `~/.cache/spec-run/<run-id>.json`,
 read and written by `runfile.py` — not the controller's context, and
 not a per-repo log. It holds the run id, the slot budget (default 5, set by
-`runfile.py start --slots <k>`), the controller's herdr agent name, the target repo
+`runfile.py start --slots <k>`), the controller's herdr agent name, the target
+repo
 (`runfile.py start --repo <checkout>`, recorded as the absolute path of its
 primary checkout, so a linked worktree names the same target; a
 run file from before the field makes `loop.py dispatch` and `counts.py
@@ -338,7 +349,8 @@ it (#1311). That default would charge a later job nothing, so a worker
 declares a job past one core before it launches it. Writing the record
 itself removes the controller's turn from the send-to-record interval
 (#1339); a tick that has already loaded the run file when the write lands
-still dispatches on what it read, and the next tick holds the slots. The worker's
+still dispatches on what it read, and the next tick holds the slots. The
+worker's
 `job: <k> cores` message is a notice. The controller's own `runfile.py job` is
 the fallback, for a worker whose write was refused (its clump not yet
 registered, or the lock timed out) and who is waiting on the reply: record the
@@ -526,7 +538,8 @@ its component (`implement/SKILL.md` § Review), so no run carries findings
 forward. It goes where a message for Chris goes
 (§ The dispatcher, in this file), and a run under `drain` leaves it in its
 pane. Before writing it, run `python3
-~/.agents/skills/multi-axis-code-review/review_ledger.py harvest`, which joins each
+~/.agents/skills/multi-axis-code-review/review_ledger.py
+harvest`, which joins each
 finding's outcome from the dispositions sidecars into the ledger. The report
 carries two counts, **fixed** and **moved**,
 
@@ -583,4 +596,5 @@ above"), and the one closing report. A routine reversible choice is applied on
 the controller's recommendation and listed in the closing report. A worker's
 idle or stop notice and its "PR up" are never relayed, and a duplicate idle
 notification gets no reply at all. The one hand-off is a `ready-for-human`
-ticket's merge line, which Chris merges himself (`implement/SKILL.md` § The merge).
+ticket's merge line, which Chris merges himself (`implement/SKILL.md` §
+The merge).

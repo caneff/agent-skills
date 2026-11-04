@@ -73,9 +73,9 @@ fn is_code_path(token: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// One fixture of body-to-verdict cases.
+    /// Each body in the fixture reads as the code target it names, or as none.
     #[test]
-    fn the_shared_fixture_cases_hold() {
+    fn the_body_target_fixture_cases_hold() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/body_targets.json");
         let cases: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         // A fixture that parsed to nothing would pass the loop below for no reason.

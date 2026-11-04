@@ -61,11 +61,7 @@ python3 implement-spec/runfile.py resume   <run-id> --live a,b [--controller <ag
   final, so a second one is a stale writer rather than a correction.
 - **`closed`** is the one-line reason a clump finished with **no landing of
   its own**, or `null` (#1310): its ticket was found already fixed on the
-  default branch, or it was handed to a nested spec run whose landings live in
-  that run's own file. A nested run's clump is closed once that run has
-  finished, never at the hand-off: a closed clump's files are free to this
-  run's dispatch, which never reads the nested run's file, so closing early
-  dispatches into files its workers are still editing. `runfile.py close <run-id> --clump <n> --reason <text>`
+  default branch. `runfile.py close <run-id> --clump <n> --reason <text>`
   writes it. A clump is landed or closed, never both: `close` refuses a landed
   clump and `land` a closed one. Recording `main`'s tip as a landing instead is
   a sha with no PR behind it, and `counts.py` then refuses the run over
@@ -148,7 +144,7 @@ and left in the file. The merge check never accepts those outcomes.
 
 ## Why `~/.cache/spec-run/<run-id>.json`
 
-**Per run, not per repo.** The retired `~/.cache/spec-run/<repo>.progress` was
+**Per run, not per repo.** The retired per-repo `<repo>.progress` file was
 an append-only prose log for a whole repo. On #781 it already held five
 earlier burns, each ending in `done`, before that run appended its first line
 — so "is this run finished" and "which tickets are out" were questions a

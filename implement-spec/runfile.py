@@ -593,8 +593,7 @@ def close_reason(reason):
 
 def close(run_id, lowest, reason, root=None):
     """Record that a clump closed with no landing of its own — its ticket
-    found already fixed on the default branch, or handed to a nested spec run
-    whose landings live in that run's own file (#1310). A landed clump is
+    found already fixed on the default branch (#1310). A landed clump is
     refused; closing again with the same reason is a no-op, with another
     reason is refused. Why a close and not a `land` at `main`'s tip, and the
     hand recovery when one was recorded anyway: `references/run-file.md`."""
@@ -766,7 +765,7 @@ def main(argv):
                       help="the clump's lowest ticket")
     shut.add_argument("--reason", required=True,
                       help="why, on one line: e.g. already fixed on main as "
-                           "#1202, or a nested spec run under its own run file")
+                           "#1202")
 
     work = subs.add_parser("job", help="record a clump's parallel-job state")
     work.add_argument("run_id")

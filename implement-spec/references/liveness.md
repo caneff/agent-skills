@@ -1,6 +1,7 @@
 # Liveness: why the ranking reads the way it does
 
-`implement-spec/SKILL.md` § Liveness: that is the ranked list. This file is the evidence
+`implement-spec/SKILL.md` § Liveness: that is the ranked list. This file is
+the evidence
 behind it — what each source was measured at on #781, and what it costs when
 it is read the other way. `implement-spec/loop.py`'s `sweep` is the reader that
 applies the mechanical half.
@@ -94,7 +95,8 @@ lives in the run file — `running` with its core count, `none` from the
 clump's registration on (its worker has launched nothing yet, #1311) or when
 the worker says it launched nothing, `done` when it reports the job
 finished — because a controller that restarts mid-run has only that file.
-The worker writes it before it launches the job; `implement-spec/SKILL.md` § Liveness
+The worker writes it before it launches the job; `implement-spec/SKILL.md` §
+Liveness
 "A worker declares its job size" has the rule (#1339).
 A hold that lived in one command line is a hold the resume cannot recover,
 and the free slot it then dispatches into is the 25.8 load above, reached a

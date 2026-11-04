@@ -163,7 +163,7 @@ def candidate(number, *files):
 
 
 def numbers(clumping):
-    return [c["tickets"] for c in C.clump_list(clumping)]
+    return [c["tickets"] for c in clumping["clumps"]]
 
 
 def test_two_candidates_sharing_an_include_are_two_clumps(repo):
@@ -230,7 +230,7 @@ def test_the_json_output_round_trips_through_read_clumps(repo):
     specs = [f"{n}=hub.md,c{n}/own.md" for n in (1, 2)] + ["3=c3/own.md"]
     path, out = closure_json(root, *specs)
     got = loop.read_clumps(path)
-    want = C.clump_list(C.clumps(root, [C.parse_candidate(s) for s in specs]))
+    want = C.clumps(root, [C.parse_candidate(s) for s in specs])["clumps"]
     assert got == want, (got, want)
     assert [c["tickets"] for c in got] == [[1], [2], [3]], got
     # The announcement is not dropped: it goes where the redirect does not.
@@ -276,7 +276,7 @@ def test_the_hold_reads_a_closure_the_named_files_do_not_show(repo):
 
 # --- The conservative fallback, and what the report says it got ------------
 
-def test_a_repo_declaring_nothing_clumps_by_directory_subtree(repo):
+def test_a_repo_declaring_nothing_keeps_each_candidate_its_own_clump(repo):
     root = repo({"a/one.js": "x\n", "a/two.js": "x\n", "b/three.js": "x\n"},
                 agents=None)
     got = C.clumps(root, [candidate(1, "a/one.js"), candidate(2, "a/two.js"),
@@ -299,9 +299,9 @@ def test_the_fallback_is_announced_in_stated_words(repo):
     root = repo(SHARED, agents=None)
     got = C.clumps(root, [candidate(1, "docs/notes.md")])
     assert got["announcement"] == (
-        "clumping: conservative, by directory subtree \u2014 AGENTS.md declares "
-        "no include closure, so any two candidates touching the same "
-        "directory subtree hold each other off, and each candidate is its own "
+        "clumping: no closure \u2014 AGENTS.md declares no include closure, so "
+        "the hold reads only the files each candidate names and their "
+        "directories, the repo root left out; each candidate is its own "
         "clump"), got
 
 
@@ -417,7 +417,7 @@ def test_the_command_line_says_when_no_closure_was_resolved(repo):
     out = subprocess.run([sys.executable, CLOSURE, root, "1=a/one.js", "2=b/two.js"],
                          capture_output=True, text=True)
     assert out.returncode == 0, out
-    assert "conservative, by directory subtree" in out.stdout, out.stdout
+    assert "clumping: no closure" in out.stdout, out.stdout
     assert "named, no closure resolved" in out.stdout, out.stdout
     assert "in the closure" not in out.stdout, out.stdout
 
@@ -438,7 +438,7 @@ def test_a_dot_slash_spelling_is_the_bare_file(repo):
     # hold in `loop.py dispatch` compares paths as strings.
     root = repo({"a/one.js": "x\n"}, agents=None)
     got = C.clumps(root, [candidate(1, "./a/one.js")])
-    assert C.clump_list(got)[0]["files"] == ["a/one.js"], got
+    assert got["clumps"][0]["files"] == ["a/one.js"], got
 
 
 def test_an_absolute_candidate_path_is_the_file_it_names(repo):
@@ -571,14 +571,14 @@ def test_a_subtree_clump_carries_no_closure_key(repo):
     # this reader exists to stop trusting.
     root = repo({"a/one.js": "x\n"}, agents=None)
     got = C.clumps(root, [candidate(1, "a/one.js")])
-    assert "closure" not in C.clump_list(got)[0], got
-    assert C.clump_list(got)[0]["files"] == ["a/one.js"], got
+    assert "closure" not in got["clumps"][0], got
+    assert got["clumps"][0]["files"] == ["a/one.js"], got
 
 
 def test_a_resolved_clump_carries_both_its_files_and_its_closure(repo):
     root = repo(SHARED)
     got = C.clumps(root, [candidate(451, "examples/_shared/line-kind.js")])
-    clump = C.clump_list(got)[0]
+    clump = got["clumps"][0]
     assert clump["files"] == ["examples/_shared/line-kind.js"], clump
     assert "examples/thermo/component.js" in clump["closure"], clump
 
@@ -881,5 +881,5 @@ def test_python_imports_give_each_clump_the_importers_of_its_target(repo):
              "one.py": "import codec\n", "two.py": "from toolkit import y\n"}
     got = C.clumps(repo(files, agents=PY_ROOT),
                    [candidate(1, "codec.py"), candidate(2, "toolkit.py")])
-    assert [c["closure"] for c in C.clump_list(got)] == [
+    assert [c["closure"] for c in got["clumps"]] == [
         ["codec.py", "one.py"], ["toolkit.py", "two.py"]], got

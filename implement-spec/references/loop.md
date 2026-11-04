@@ -1,6 +1,7 @@
 # The loop: why each rule reads the way it does
 
-`implement-spec/SKILL.md` § The loop: that is the step list. This file is the evidence
+`implement-spec/SKILL.md` § The loop: that is the step list. This file is the
+evidence
 behind it — what a run got wrong by hand, and what the rule costs when it is
 read the other way. `implement-spec/loop.py` is the reader that applies the
 mechanical half.
@@ -68,7 +69,8 @@ origin/<default>...HEAD`, uncommitted edits and untracked files into it
 candidate list named. A slice workspace (its branch's recorded
 `branch.<name>.base` reads `spec-<p>`) is diffed against `origin/spec-<p>`
 instead (#1486), since its branch already holds every slice landed there;
-if that ref is gone the tick refuses. An unreadable diff refuses the tick rather than reading
+if that ref is gone the tick refuses. An unreadable diff refuses the tick
+rather than reading
 as no change; `--no-workspace-diff` exists for fixtures without real
 checkouts and a controller never passes it. That is cheap and it is enough
 for the one question a dispatch asks: does *this* clump collide with anyone
@@ -194,10 +196,13 @@ run's.
 ## What resume owes each worker
 
 A WSL restart renames every Claude session, and every worker's brief
-names its controller in `--controller "<name>"`, a session name that a restart invalidates when the controller had no herdr agent name. So on resume the controller re-announces
+names its controller in `--controller "<name>"`, a session name that a restart
+invalidates when the controller had no herdr agent name. So on resume the
+controller re-announces
 itself — **exactly one message per live, unsettled worker**, which is
 `runfile.reconcile`'s `announce` bucket and only that one. A landed or
-closed clump's worker is finished however its agent looks. A vanished one is reconciled or
+closed clump's worker is finished however its agent looks. A vanished one is
+reconciled or
 parked by hand; messaging an agent nobody can find is not reconciliation.
 
 `loop.announce` takes the messenger as an argument because sending is

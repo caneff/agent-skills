@@ -41,6 +41,12 @@ The friction log and the review ledger of ADR 0005 stand unchanged.
 
 - The change reaches the default branch in one merge, while no drain or spec
   run is alive (`implement-spec/retire_landing.py`).
+- The landing order is the merging controller's to follow, once: from the
+  integration workspace, `retire_landing.py check --own-run <run-id>`, then the
+  integration PR's merge, then `retire_landing.py finish --own-run <run-id>`,
+  and only then `merge-cleanup` on that workspace. `finish` before the merge
+  strands the run's own file, because the tools on `main` still read the old
+  cache; cleanup before `finish` removes the tree it runs from.
 - A queue of independent tickets drains serially. Getting parallel work means
   writing a spec.
 - A spec run's dispatcher can no longer budget a run's slots against its own.

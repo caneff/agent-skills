@@ -1,4 +1,4 @@
-"""Tests for the burn run file (#892). Two seams: the read/write contract,
+"""Tests for the run file (#892). Two seams: the read/write contract,
 round-tripped through a re-read that stands in for a restart, and the resume
 path's re-announce step against a stub agent list.
 
