@@ -234,16 +234,49 @@ def test_check_refuses_when_herdr_is_missing(world):
     assert_refused(world.check(), "herdr")
 
 
+# Every fixture git call: no HOME and no system config to inherit. Commits take
+# their identity from each clone's own config.
+GIT_ENV = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+           "HOME": "/nonexistent", "GIT_CONFIG_NOSYSTEM": "1"}
+
+
 def git(path, *args):
-    return subprocess.run(["git", "-C", str(path), *args], text=True,
+    return subprocess.run(["git", "-C", str(path), *args], text=True, env=GIT_ENV,
                           capture_output=True, check=True).stdout.strip()
+
+
+def clone_with_identity(origin, clone):
+    clone.parent.mkdir(parents=True, exist_ok=True)
+    git(clone.parent, "clone", "-q", str(origin), str(clone))
+    git(clone, "config", "user.email", "t@example.test")
+    git(clone, "config", "user.name", "t")
+
+
+@pytest.fixture(scope="session")
+def seeded(tmp_path_factory):
+    """Each repo as a bare origin and a clone, its citations pushed. Built once
+    and copied per test: a real build per test costs the suite its CPU budget."""
+    root = tmp_path_factory.mktemp("seeded")
+    for repo, edits in landing.REPOS.items():
+        origin = root / "origins" / f"{repo}.git"
+        origin.mkdir(parents=True)
+        git(origin, "init", "-q", "--bare", "-b", "main")
+        clone = root / "src" / repo
+        clone_with_identity(origin, clone)
+        git(clone, "checkout", "-q", "-B", "main")
+        (clone / "AGENTS.md").write_text(
+            "# Repo\n\n" + "\n\n".join(old for old, _ in edits) + "\n")
+        git(clone, "add", "AGENTS.md")
+        git(clone, "commit", "-q", "-m", "seed")
+        git(clone, "push", "-q", "origin", "main")
+    return root
 
 
 class Landing(World):
     """A World ready for `finish`: a cache to move, an old binary, the skill
     link, three checkouts with their citations pushed, and no ticket yet."""
 
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, seeded):
         super().__init__(tmp_path)
         (self.old_cache / "burn-old.json").write_text('{"run_id": "burn-old", "clumps": []}')
         (self.old_cache / "burn-old.d").mkdir()
@@ -257,24 +290,12 @@ class Landing(World):
         self.link.parent.mkdir(parents=True)
         self.link.symlink_to(self.home)
         (self.home / "gh-issues.json").write_text("[]")
-        self.origins.mkdir()
-        for repo, edits in landing.REPOS.items():
-            self.checkout(repo, "# Repo\n\n" + "\n\n".join(old for old, _ in edits) + "\n")
-
-    def checkout(self, repo, agents_md):
-        origin = self.origins / f"{repo}.git"
-        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
-        clone = self.clone(repo)
-        clone.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "clone", "-q", str(origin), str(clone)],
-                       check=True, capture_output=True)
-        git(clone, "checkout", "-q", "-b", "main")
-        git(clone, "config", "user.email", "t@example.test")
-        git(clone, "config", "user.name", "t")
-        (clone / "AGENTS.md").write_text(agents_md)
-        git(clone, "add", "AGENTS.md")
-        git(clone, "commit", "-q", "-m", "seed")
-        git(clone, "push", "-q", "origin", "main")
+        shutil.copytree(seeded / "origins", self.origins)
+        shutil.copytree(seeded / "src", self.home / "src")
+        for repo in landing.REPOS:
+            config = self.clone(repo) / ".git/config"
+            config.write_text(config.read_text().replace(
+                str(seeded / "origins"), str(self.origins)))
 
     def clone(self, repo):
         return self.home / "src" / repo
@@ -316,8 +337,8 @@ class Landing(World):
 
 
 @pytest.fixture
-def land(tmp_path):
-    return Landing(tmp_path)
+def land(tmp_path, seeded):
+    return Landing(tmp_path, seeded)
 
 
 def test_finish_does_every_step_once(land):
@@ -480,9 +501,7 @@ def test_an_unpushed_commit_of_someone_elses_is_not_pushed(land):
 def test_a_checkout_behind_origin_is_brought_up_first(land):
     origin = land.origins / "sudokupad-art.git"
     other = land.home / "other-clone"
-    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True, capture_output=True)
-    git(other, "config", "user.email", "t@example.test")
-    git(other, "config", "user.name", "t")
+    clone_with_identity(origin, other)
     (other / "new.txt").write_text("x")
     git(other, "add", "new.txt")
     git(other, "commit", "-q", "-m", "newer")
