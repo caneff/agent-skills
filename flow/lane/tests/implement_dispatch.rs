@@ -226,7 +226,11 @@ fn dispatch_keeps_its_worktree_out_of_git_status_1630() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    assert!(!git_out(&repo, &["check-ignore", ".claude/worktrees/implement-395"]).contains(".claude"), "fixture already ignores the path");
+    assert_eq!(git_out(&repo, &["status", "--porcelain"]), "", "fixture is not clean");
+    std::fs::create_dir_all(repo.join(".claude/worktrees/probe")).unwrap();
+    std::fs::write(repo.join(".claude/worktrees/probe/f"), "x").unwrap();
+    assert!(git_out(&repo, &["status", "--porcelain"]).contains(".claude"), "fixture already ignores the path");
+    std::fs::remove_dir_all(repo.join(".claude")).unwrap();
 
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
     assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
@@ -254,6 +258,37 @@ fn dispatch_leaves_the_exclude_alone_when_the_path_is_already_ignored_1630() {
 
     let after = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap_or_default();
     assert_eq!(before, after);
+}
+
+#[test]
+fn dispatch_refuses_twice_when_a_gitignore_negation_defeats_the_exclude_1630() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    std::fs::write(repo.join(".gitignore"), "!/.claude/worktrees/\n").unwrap();
+    let r = repo.to_str().unwrap();
+    for n in ["395", "396"] {
+        let out = f.dispatch(&["--repo", r, n], &default_scenario());
+        assert!(!out.status.success(), "dispatch #{n} went ahead: {}", out_text(&out));
+        assert!(out_text(&out).contains("still does not ignore"), "{}", out_text(&out));
+        assert!(!repo.join(format!(".claude/worktrees/implement-{n}")).exists());
+    }
+    let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+    assert_eq!(exclude.lines().filter(|l| *l == "/.claude/worktrees/").count(), 1, "exclude: {exclude}");
+}
+
+#[test]
+fn dispatch_excludes_a_symlinked_claude_dir_from_git_status_1630() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let real_claude = repo.parent().unwrap().join("real-claude");
+    std::fs::create_dir_all(real_claude.join("worktrees")).unwrap();
+    std::os::unix::fs::symlink(&real_claude, repo.join(".claude")).unwrap();
+    assert!(git_out(&repo, &["status", "--porcelain"]).contains(".claude"), "precondition: the symlink shows");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "415"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(git_out(&repo, &["status", "--porcelain"]), "");
 }
 
 #[test]
