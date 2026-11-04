@@ -74,5 +74,5 @@ _Avoid_: sweep (that is every repo under a root), clean up, garbage collect
 _Avoid_: feature branch, spec branch, staging branch
 
 **Run file**:
-One JSON file per run at `~/.cache/burndown/<run-id>.json` holding that run's whole state: run id, slot budget, controller, and per clump its tickets, workspace, herdr agent name and squash sha. What a resumed controller reads instead of its own context.
+One JSON file per run at `~/.cache/spec-run/<run-id>.json` holding that run's whole state: run id, slot budget, controller, and per clump its tickets, workspace, herdr agent name and squash sha. What a resumed controller reads instead of its own context.
 _Avoid_: progress file, state file, log

@@ -261,7 +261,7 @@ evidence:
 
 ## Run state
 
-A run's state is **one JSON file per run** at `~/.cache/burndown/<run-id>.json`,
+A run's state is **one JSON file per run** at `~/.cache/spec-run/<run-id>.json`,
 read and written by `runfile.py` — not the controller's context, and
 not a per-repo log. It holds the run id, the slot budget (default 5, set by
 `runfile.py start --slots <k>`), the controller's herdr agent name, the target repo
