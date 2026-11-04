@@ -65,7 +65,7 @@ always passes its run id, so the worker knows a run file
 is under it, where it records a parallel job. A brief with no --run is a
 worker with no run file under it. The id
 follows implement-spec/runfile.py's grammar and must name a run file that exists,
-<id>.json under $BURNDOWN_CACHE_DIR or else ~/.cache/burndown, as runfile.py
+<id>.json under $SPEC_RUN_CACHE_DIR or else ~/.cache/spec-run, as runfile.py
 reads it; either failing is refused before the claim. Spec mode
 refuses --run, since a spec run keeps its own run file.
 
@@ -616,15 +616,15 @@ fn valid_run_id(s: &str) -> bool {
         && !s.contains("..")
 }
 
-/// Where `implement-spec/runfile.py` keeps run `id`: `$BURNDOWN_CACHE_DIR` when
-/// set and non-empty, with a leading `~` expanded, else `~/.cache/burndown`.
+/// Where `implement-spec/runfile.py` keeps run `id`: `$SPEC_RUN_CACHE_DIR` when
+/// set and non-empty, with a leading `~` expanded, else `~/.cache/spec-run`.
 fn run_file_path(id: &str) -> PathBuf {
     let home = env::var("HOME").unwrap_or_default();
-    let dir = match env::var("BURNDOWN_CACHE_DIR") {
+    let dir = match env::var("SPEC_RUN_CACHE_DIR") {
         Ok(d) if d == "~" => home,
         Ok(d) if d.starts_with("~/") => format!("{home}{}", &d[1..]),
         Ok(d) if !d.is_empty() => d,
-        _ => format!("{home}/.cache/burndown"),
+        _ => format!("{home}/.cache/spec-run"),
     };
     Path::new(&dir).join(format!("{id}.json"))
 }

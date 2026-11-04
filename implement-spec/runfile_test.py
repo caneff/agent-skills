@@ -2,8 +2,8 @@
 round-tripped through a re-read that stands in for a restart, and the resume
 path's re-announce step against a stub agent list.
 
-The `cache` fixture points `BURNDOWN_CACHE_DIR` at a per-test directory, which
-keeps every case off the real `~/.cache/burndown`.
+The `cache` fixture points `SPEC_RUN_CACHE_DIR` at a per-test directory, which
+keeps every case off the real `~/.cache/spec-run`.
 """
 import fcntl
 import json
@@ -27,13 +27,13 @@ REPO = runfile.checkout_top(os.path.join(os.path.dirname(os.path.abspath(__file_
 
 @pytest.fixture
 def cache(tmp_path, monkeypatch):
-    """An empty cache dir standing in for `~/.cache/burndown`, named by
-    `BURNDOWN_CACHE_DIR` for the test. Two tests take a directory's read or
+    """An empty cache dir standing in for `~/.cache/spec-run`, named by
+    `SPEC_RUN_CACHE_DIR` for the test. Two tests take a directory's read or
     write permission away, so teardown opens the tree back up before pytest's
     own cleanup reaches it."""
     root = tmp_path / "cache"
     root.mkdir()
-    monkeypatch.setenv("BURNDOWN_CACHE_DIR", str(root))
+    monkeypatch.setenv("SPEC_RUN_CACHE_DIR", str(root))
     yield str(root)
     reopen_permissions(root)
 
@@ -43,7 +43,7 @@ def cli(cache):
     def run(*args):
         return subprocess.run(
             [sys.executable, RUNFILE, *args], capture_output=True, text=True,
-            env={**os.environ, "BURNDOWN_CACHE_DIR": cache})
+            env={**os.environ, "SPEC_RUN_CACHE_DIR": cache})
     return run
 
 
@@ -588,9 +588,9 @@ def test_the_default_home_is_the_cache_dir_that_survives_a_wsl_restart(monkeypat
     # Nothing here writes: the default path is asserted, not exercised. It is
     # `~/.cache` and not `/tmp` or a session scratchpad, both of which a WSL
     # restart wipes — the event the run file exists for.
-    monkeypatch.delenv("BURNDOWN_CACHE_DIR", raising=False)
+    monkeypatch.delenv("SPEC_RUN_CACHE_DIR", raising=False)
     got = runfile.path("burn-1", root=None)
-    assert got == os.path.expanduser("~/.cache/burndown/burn-1.json"), got
+    assert got == os.path.expanduser("~/.cache/spec-run/burn-1.json"), got
 
 
 def test_a_trailing_newline_does_not_sneak_through_a_run_id_or_a_sha(cache):
@@ -729,7 +729,7 @@ def test_the_cli_refuses_a_ticket_list_python_would_read_creatively(cache, cli, 
 
 
 def test_the_cli_expands_a_tilde_in_the_cache_dir_override(tmp_path):
-    # `BURNDOWN_CACHE_DIR='~/.cache/x'` must not create a literal `./~/`
+    # `SPEC_RUN_CACHE_DIR='~/.cache/x'` must not create a literal `./~/`
     # directory in whatever the controller's cwd happens to be.
     root = tmp_path / "cwd"
     home = root / "home"
@@ -737,7 +737,7 @@ def test_the_cli_expands_a_tilde_in_the_cache_dir_override(tmp_path):
     got = subprocess.run(
         [sys.executable, RUNFILE, "start", "--repo", REPO, "burn-1", "--slots", "1"],
         capture_output=True, text=True,
-        env={**os.environ, "HOME": str(home), "BURNDOWN_CACHE_DIR": "~/cachedir"},
+        env={**os.environ, "HOME": str(home), "SPEC_RUN_CACHE_DIR": "~/cachedir"},
         cwd=root)
     assert got.returncode == 0, got.stderr
     assert os.path.isfile(os.path.join(home, "cachedir", "burn-1.json")), \
@@ -764,8 +764,8 @@ def test_two_concurrent_writers_do_not_lose_an_update(cache, cli):
     # rather than pass on how two processes happen to interleave (the same
     # device flow/lane's two_concurrent_dispatches test uses).
     cli("start", "--repo", REPO, "burn-1", "--slots", "4")
-    env = {**os.environ, "BURNDOWN_CACHE_DIR": cache,
-           "BURNDOWN_RUNFILE_DELAY_MS": "400"}
+    env = {**os.environ, "SPEC_RUN_CACHE_DIR": cache,
+           "SPEC_RUN_RUNFILE_DELAY_MS": "400"}
     procs = [subprocess.Popen(
         [sys.executable, RUNFILE, "clump", "burn-1", "--tickets", str(n),
          "--workspace", f"/w/{n}", "--agent", f"agent-{n}"],
@@ -791,8 +791,8 @@ def test_a_lock_someone_else_holds_times_out_as_a_refusal(cache, cli):
             [sys.executable, RUNFILE, "clump", "burn-1", "--tickets", "901",
              "--workspace", "/w/a", "--agent", "agent-a"],
             capture_output=True, text=True, timeout=20,
-            env={**os.environ, "BURNDOWN_CACHE_DIR": cache,
-                 "BURNDOWN_RUNFILE_LOCK_TIMEOUT": "1"})
+            env={**os.environ, "SPEC_RUN_CACHE_DIR": cache,
+                 "SPEC_RUN_RUNFILE_LOCK_TIMEOUT": "1"})
     except subprocess.TimeoutExpired:
         pytest.fail("the writer never gave up waiting for the lock")
     finally:
@@ -807,13 +807,13 @@ def test_a_lock_someone_else_holds_times_out_as_a_refusal(cache, cli):
 # --- The environment reads: the same clean-refusal boundary -----------------
 
 @pytest.mark.parametrize("name, value", [
-    ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "30s"),
-    ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "inf"),
-    ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "nan"),
-    ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "-5"),
-    ("BURNDOWN_RUNFILE_DELAY_MS", "abc"),
-    ("BURNDOWN_RUNFILE_DELAY_MS", "-1"),
-    ("BURNDOWN_RUNFILE_DELAY_MS", "nan")])
+    ("SPEC_RUN_RUNFILE_LOCK_TIMEOUT", "30s"),
+    ("SPEC_RUN_RUNFILE_LOCK_TIMEOUT", "inf"),
+    ("SPEC_RUN_RUNFILE_LOCK_TIMEOUT", "nan"),
+    ("SPEC_RUN_RUNFILE_LOCK_TIMEOUT", "-5"),
+    ("SPEC_RUN_RUNFILE_DELAY_MS", "abc"),
+    ("SPEC_RUN_RUNFILE_DELAY_MS", "-1"),
+    ("SPEC_RUN_RUNFILE_DELAY_MS", "nan")])
 def test_a_malformed_environment_value_is_a_refusal_not_a_traceback(cache, cli, name, value):
     # Round 1's F4 was malformed persisted state escaping the clean-refusal
     # path; an unguarded `float()` on an inherited env value is the same
@@ -824,7 +824,7 @@ def test_a_malformed_environment_value_is_a_refusal_not_a_traceback(cache, cli, 
         [sys.executable, RUNFILE, "clump", "burn-1", "--tickets", "901",
          "--workspace", "/w/a", "--agent", "agent-a"],
         capture_output=True, text=True, timeout=30,
-        env={**os.environ, "BURNDOWN_CACHE_DIR": cache, name: value})
+        env={**os.environ, "SPEC_RUN_CACHE_DIR": cache, name: value})
     assert got.returncode == 1, (name, value, got.stdout, got.stderr)
     assert "Traceback" not in got.stderr, got.stderr
     assert len(got.stderr.strip().splitlines()) == 1, got.stderr
@@ -838,9 +838,9 @@ def test_an_empty_environment_value_reads_as_unset(cache):
     got = subprocess.run(
         [sys.executable, RUNFILE, "start", "--repo", REPO, "burn-1", "--slots", "1"],
         capture_output=True, text=True, timeout=30,
-        env={**os.environ, "BURNDOWN_CACHE_DIR": cache,
-             "BURNDOWN_RUNFILE_LOCK_TIMEOUT": "",
-             "BURNDOWN_RUNFILE_DELAY_MS": ""})
+        env={**os.environ, "SPEC_RUN_CACHE_DIR": cache,
+             "SPEC_RUN_RUNFILE_LOCK_TIMEOUT": "",
+             "SPEC_RUN_RUNFILE_DELAY_MS": ""})
     assert got.returncode == 0, got.stderr
     assert runfile.load("burn-1", root=cache)["slots"] == 1
 

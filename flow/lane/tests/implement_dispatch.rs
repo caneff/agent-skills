@@ -2114,9 +2114,9 @@ fn an_unreadable_body_dispatches_heavy_and_keeps_the_documentation_label() {
 // --- #1146: a run's id reaches the brief ---------------------------------
 
 /// Writes `<dir>/<id>.json`, the run file `--run <id>` must name, under the
-/// fixture HOME's default `~/.cache/burndown` unless `dir` is given.
+/// fixture HOME's default `~/.cache/spec-run` unless `dir` is given.
 fn seed_run_file(f: &Fixture, dir: Option<&std::path::Path>, id: &str) {
-    let dir = dir.map(std::path::Path::to_path_buf).unwrap_or_else(|| f.home().join(".cache/burndown"));
+    let dir = dir.map(std::path::Path::to_path_buf).unwrap_or_else(|| f.home().join(".cache/spec-run"));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(format!("{id}.json")), "{}").unwrap();
 }
@@ -2195,7 +2195,7 @@ fn a_run_id_naming_no_run_file_is_refused_before_the_claim_and_the_prompt() {
     // A run file under the default dir does not count once the override
     // names another: the override is the only place looked.
     seed_run_file(&f, None, "burn-typo");
-    let scenario = with(&default_scenario(), &[("BURNDOWN_CACHE_DIR", runs.to_str().unwrap())]);
+    let scenario = with(&default_scenario(), &[("SPEC_RUN_CACHE_DIR", runs.to_str().unwrap())]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-typo", "414"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "414", "no run file"), "{}", out_text(&out));
     assert!(!f.calls().contains("herdr agent prompt"), "{}", f.calls());
@@ -2207,18 +2207,18 @@ fn a_directory_where_the_run_file_should_be_is_refused() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    std::fs::create_dir_all(f.home().join(".cache/burndown/burn-dir.json")).unwrap();
+    std::fs::create_dir_all(f.home().join(".cache/spec-run/burn-dir.json")).unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-dir", "415"], &default_scenario());
     assert!(refused(&out, &f.calls(), &repo, "415", "no run file"), "{}", out_text(&out));
 }
 
 #[test]
-fn the_run_file_is_found_under_a_tilde_burndown_cache_dir() {
+fn the_run_file_is_found_under_a_tilde_spec_run_cache_dir() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     seed_run_file(&f, Some(&f.home().join("runs")), "burn-2026-09-23-0700");
-    let scenario = with(&default_scenario(), &[("BURNDOWN_CACHE_DIR", "~/runs")]);
+    let scenario = with(&default_scenario(), &[("SPEC_RUN_CACHE_DIR", "~/runs")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-2026-09-23-0700", "416"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(prompt_line(&f).contains("--run burn-2026-09-23-0700"), "{}", prompt_line(&f));

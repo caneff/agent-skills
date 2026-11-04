@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One run's state, machine-readable, at `~/.cache/burndown/<run-id>.json`:
+"""One run's state, machine-readable, at `~/.cache/spec-run/<run-id>.json`:
 
     python3 implement-spec/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
     python3 implement-spec/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
@@ -38,7 +38,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-CACHE_DIR = "~/.cache/burndown"
+CACHE_DIR = "~/.cache/spec-run"
 # How long a writer waits for the run file's lock before refusing, matching the
 # `flock -w 30` the dispatch lane already waits with.
 LOCK_TIMEOUT = 30.0
@@ -177,10 +177,10 @@ def cache_root(root=None):
 
 
 def env_root():
-    """The root a CLI passes down: `BURNDOWN_CACHE_DIR`, `~` expanded, or
+    """The root a CLI passes down: `SPEC_RUN_CACHE_DIR`, `~` expanded, or
     None for the default. Every run CLI resolves the environment here
     once and hands the result to in-process calls as `root`."""
-    override = os.environ.get("BURNDOWN_CACHE_DIR")
+    override = os.environ.get("SPEC_RUN_CACHE_DIR")
     return os.path.expanduser(override) if override else None
 
 
@@ -199,7 +199,7 @@ def locked(run_id, root=None):
     The lock lives beside the run file as `<run-id>.json.lock`, because the run
     file itself does not exist yet when `start` takes the lock."""
     lock_path = path(run_id, root) + ".lock"
-    timeout = env_number("BURNDOWN_RUNFILE_LOCK_TIMEOUT", LOCK_TIMEOUT)
+    timeout = env_number("SPEC_RUN_RUNFILE_LOCK_TIMEOUT", LOCK_TIMEOUT)
     try:
         os.makedirs(os.path.dirname(lock_path), exist_ok=True)
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -220,7 +220,7 @@ def locked(run_id, root=None):
         # Only ever set by a test, to hold this critical section open past
         # another writer's read: nothing else can witness the lock rather than
         # pass on how two processes happen to interleave.
-        delay = env_number("BURNDOWN_RUNFILE_DELAY_MS", 0)
+        delay = env_number("SPEC_RUN_RUNFILE_DELAY_MS", 0)
         if delay:
             time.sleep(delay / 1000)
         yield
@@ -734,7 +734,7 @@ def main(argv):
 
     parser = argparse.ArgumentParser(
         prog="runfile.py",
-        description="One run's state at ~/.cache/burndown/<run-id>.json")
+        description="One run's state at ~/.cache/spec-run/<run-id>.json")
     subs = parser.add_subparsers(dest="command", required=True)
 
     new = subs.add_parser("start", help="create the run file")

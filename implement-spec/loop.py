@@ -1389,7 +1389,7 @@ def run(argv):
                     "herdr is not on PATH, so the sweep has nothing to ask — "
                     "this is a broken controller box, not a roster of dead "
                     "workers")
-            budget = float(os.environ.get("BURNDOWN_SWEEP_BUDGET")
+            budget = float(os.environ.get("SPEC_RUN_SWEEP_BUDGET")
                            or SWEEP_BUDGET)
             if args.run:
                 workers = load_run(args.run, runfile.env_root())["clumps"]
