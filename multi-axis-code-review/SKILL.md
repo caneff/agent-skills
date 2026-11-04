@@ -254,19 +254,19 @@ also writes the `OE` findings' row). It writes the ledger row for that run,
 cost read from the reviewer's subagent transcript up to that call. Its
 findings' outcomes are `unknown` then, since no dispositions exist yet;
 `review_ledger.py harvest` joins them from the dispositions sidecar, and the
-controller runs it in the closing report (`burndown/SKILL.md` § The closing
-report). It exits non-zero,
+controller runs it in the closing report
+(`implement-spec/SKILL.md` § The closing report). It exits non-zero,
 naming what is missing, when the findings sidecar is absent, and then writes
 nothing. An axis whose subagent transcript cannot be attributed or has no usage
 is still appended, its cost marked `unknown` with the reason (#1374); `report`
 counts it beside the known costs, never as zero. A refusal is reported, never
 skipped: the reviewer puts the command's stderr on the first line of its
 summary, and the caller repeats it in its own report. An `append` that never
-ran leaves a row only if a burn's closing report runs `harvest` while the
+ran leaves a row only if a spec run's closing report runs `harvest` while the
 sidecar still exists: that `harvest` writes one per axis sidecar, costed from
 the reviewer's transcript (`unknown` when none can be attributed, never
 zero), and rebuilds it on every later `harvest`. A sidecar is pruned after 13
-days, and a run outside a burn has no closing report, so that row is gone.
+days, and a review outside a spec run has no closing report, so that row is gone.
 
 **A witness check ends with one `append` per mutation** (#1270). The script
 under *Isolation* below runs `review_ledger.py append --type witness-mutation`

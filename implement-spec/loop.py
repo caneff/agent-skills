@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The burn loop's mechanical steps, so the prose in `burndown/SKILL.md`
+"""The run loop's mechanical steps, so the prose in `implement-spec/SKILL.md`
 § The loop has a reader behind it instead of a rule a controller applies from
 memory:
 
@@ -1187,7 +1187,7 @@ def herdr_get(agent, timeout):
 def render_dispatch(picked, held, run_id, repo):
     """One `dispatch` line per pick and the `implement-dispatch` command
     under it — carrying `--run <run-id>`, so
-    the flag a burn owes every plain dispatch (`burndown/SKILL.md` § The
+    the flag a run owes every plain dispatch (`implement-spec/SKILL.md` § The
     loop step 8) is in the line the controller runs rather than in prose, and
     `--repo <checkout>`, the run's recorded target: `implement-dispatch`
     resolves issue numbers against a checkout, and the controller's cwd may be
@@ -1213,7 +1213,7 @@ def render_dispatch(picked, held, run_id, repo):
 def run(argv):
     parser = argparse.ArgumentParser(
         prog="loop.py", description=(
-            "The burn loop's mechanical steps. `announce` has no subcommand: "
+            "The run loop's mechanical steps. `announce` has no subcommand: "
             "sending is SendMessage, which the controller calls itself — and "
             "so is `landing`'s answer step, which is why `landing` reports "
             "what is owed and gates cleanup rather than answering anything."))

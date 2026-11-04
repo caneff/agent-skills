@@ -1541,7 +1541,7 @@ def test_a_rerun_resumes_a_spec_it_started_and_never_dispatches_it_twice(sb):
 
 
 def test_a_spec_the_run_did_not_start_is_never_taken(sb):
-    # A burn's spec run: in-progress, no `drain anchor:` comment, and its
+    # A session's spec run: in-progress, no `drain anchor:` comment, and its
     # slices still read `slice` on the frontier.
     sb.write_state({1: {**SPEC, "labels": ["spec", "in-progress"]}, 2: {"parent": 1}})
     r = sb.drain()

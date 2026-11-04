@@ -1,6 +1,6 @@
 # The loop: why each rule reads the way it does
 
-`burndown/SKILL.md` § The loop: that is the step list. This file is the evidence
+`implement-spec/SKILL.md` § The loop: that is the step list. This file is the evidence
 behind it — what a run got wrong by hand, and what the rule costs when it is
 read the other way. `implement-spec/loop.py` is the reader that applies the
 mechanical half.
@@ -11,7 +11,7 @@ The loop refuses to run from a linked worktree, and says so. Inside one,
 `/implement`'s front-door rule reads the session as a **worker**: the same
 prompt that starts a controller starts a build instead, on the branch that
 worktree holds. The one linked worktree it accepts is the `spec-<n>` branch
-`implement-dispatch --spec <n>` makes for the nested `implement-spec` run,
+`implement-dispatch --spec <n>` makes for the `implement-spec` run,
 which is a controller's by construction (#1312). The check is
 `--absolute-git-dir` against `--git-common-dir`, not the path's spelling, and
 the branch is checked against `refs/remotes/origin/HEAD` rather than against

@@ -94,7 +94,7 @@ Each clump carries what parallel job its worker has out: `{"state": "none",
 nothing on record and appears only in a file written before jobs existed.
 `runfile.py job <run-id> --clump <n> --cores <k> | --none | --done` writes it.
 The worker writes it before launching its job (#1339), and who writes it when
-that is refused is `burndown/SKILL.md` § Liveness.
+that is refused is `implement-spec/SKILL.md` § Liveness.
 
 Three states and not a bare number. `null` and `none` are different facts: a
 worker nobody recorded and a worker that declared nothing read alike to a
@@ -115,7 +115,7 @@ Each clump carries `pr_up`: the PR number its worker's "PR up" named, or
 resets it to `null` when the controller hands findings back: the PR stays
 open through a fix round, and only the clear lets a worker that stops
 mid-fix read `stalled` again. The sweep
-reads it, and what it reads it for is `burndown/SKILL.md` § Liveness. A file
+reads it, and what it reads it for is `implement-spec/SKILL.md` § Liveness. A file
 written before this field existed loads with it as `null`, which reads a
 finished pane as `stalled`: the loud reading, and the controller's read of
 the pane settles it.

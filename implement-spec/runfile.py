@@ -78,7 +78,7 @@ _JOB_STATES = ("running", "none", "done")
 NEW_CLUMP_JOB = {"state": "none", "cores": 0}
 # The outcomes `implement/SKILL.md` § Review's dispositions sidecar can carry;
 # why any other is refused, not skipped: `references/run-file.md`. The LEGACY
-# ones are what pre-#1401 workers wrote: `counts.py` still reads them, so a burn
+# ones are what pre-#1401 workers wrote: `counts.py` still reads them, so a run
 # that was running when the review changed can close, and the merge check never
 # accepts them.
 SIDECAR_OUTCOMES = ("fixed", "moved", "disputed")
@@ -178,7 +178,7 @@ def cache_root(root=None):
 
 def env_root():
     """The root a CLI passes down: `BURNDOWN_CACHE_DIR`, `~` expanded, or
-    None for the default. Every burndown CLI resolves the environment here
+    None for the default. Every run CLI resolves the environment here
     once and hands the result to in-process calls as `root`."""
     override = os.environ.get("BURNDOWN_CACHE_DIR")
     return os.path.expanduser(override) if override else None
@@ -485,7 +485,7 @@ def job(run_id, lowest, state, cores=0, root=None):
 
 def pr_up(run_id, lowest, pr, root=None):
     """Record the PR a clump's worker reported "PR up" on, which the sweep
-    reads (`burndown/SKILL.md` § Liveness). It lives here and not in the
+    reads (`implement-spec/SKILL.md` § Liveness). It lives here and not in the
     controller's context, because a resumed controller's sweep has only this
     file. A later "PR up" naming another PR replaces it: unlike a squash sha,
     a PR number is not final — a worker can close one and open another.
@@ -734,7 +734,7 @@ def main(argv):
 
     parser = argparse.ArgumentParser(
         prog="runfile.py",
-        description="One burn run's state at ~/.cache/burndown/<run-id>.json")
+        description="One run's state at ~/.cache/burndown/<run-id>.json")
     subs = parser.add_subparsers(dest="command", required=True)
 
     new = subs.add_parser("start", help="create the run file")
