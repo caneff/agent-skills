@@ -94,12 +94,12 @@ branch (`implement-spec/references/loop.md` says why).
    `loop.py dispatch` picks from what is left, **widest
    closure first** so a wide clump does not sit behind narrow ones and block
    them later (#1026), and prints a `held` line for the rest naming its live
-   workspace or the earlier pick. That hold is what keeps a **family's
-   clumps** apart: family members sharing no file and no directory run at
+   workspace or the earlier pick. That hold is what keeps clumps that
+   share a file apart: clumps sharing no file and no directory run at
    once. Two consequences,
    because neither is visible from the frontier's own definition — a run drains
-   **out of ticket order**, and one parked worker can hold a **whole family**
-   off the frontier until it lands. A controller reading only "open,
+   **out of ticket order**, and one parked worker can hold every clump
+   sharing its files off the frontier until it lands. A controller reading only "open,
    unblocked, unclaimed" would dispatch into the collision.
 6. **Full re-exploration fires on one trigger**: a landing whose diff touched
    a **hub** — a file two or more candidates' closures share
@@ -261,12 +261,12 @@ The grammar and the three sources:
 
 ## Clumping
 
-Which candidates are one clump — one worker, one workspace, one PR — is read
-by `implement-spec/closure.py`, not from the tickets' declared seams:
+Each candidate is its own clump — one worker, one workspace, one PR — and
+`implement-spec/closure.py` reads the files each one holds off the frontier
+from, not from the tickets' declared seams:
 `python3 implement-spec/closure.py <repo-root> <n>=<path>[,<path>]...` prints the
-mode and the **families** — the connected components of the collision graph
-over each candidate's **include closure** — each split into its **clumps**
-(`implement-spec/references/closure.md` § Families run as clumps); `--json` prints the clump
+mode and each clump with its **include closure**
+(`implement-spec/references/closure.md` § Every candidate is its own clump); `--json` prints the clump
 list `loop.py dispatch --candidates` reads. The repo declares its include
 directive and its generator command in `AGENTS.md`; the resolver follows
 that declaration one hop and **never runs the generator**. A repo that declares nothing is
