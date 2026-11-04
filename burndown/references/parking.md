@@ -24,8 +24,7 @@ Everything else — a spec reading, a tool's behaviour, a review finding's
 disposition, a collision, an ordering — is a **controller ruling**, made
 under a stated assumption and reported. A fourth cause is how "the controller
 decides" turns back into the hand-run coordination the lane was rebuilt to
-replace, so `burndown/parking.test.sh` counts the causes rather than only
-matching them.
+replace.
 
 ## Why a parked clump keeps everything
 

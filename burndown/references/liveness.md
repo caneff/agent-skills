@@ -34,8 +34,7 @@ worker:
 a signal whose true-positive rate was 0 in 6 is read as *read this pane*, and
 what the pane says is what the controller rules on. Parking a clump, holding
 a slot or calling a worker stalled on the alert alone is acting on the one
-thing the trial measured as noise, and `burndown/liveness.test.sh` asserts
-the skill never instructs it.
+thing the trial measured as noise, and the skill never instructs it.
 
 ## Why the backstop is a sweep, and why it is bounded
 

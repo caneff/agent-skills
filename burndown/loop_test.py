@@ -1,8 +1,7 @@
 """Tests for the burn loop (#893). The seams the ticket names: a fixture run
 over a stub tracker and a stub agent list, and the resume announce against a
 stub messenger. The loop's prose — its step list, its refusals, its stated
-consequences — is guarded in `burndown/loop-steps.test.sh`; there is no
-harness that runs a skill's own text.
+consequences — has no test: there is no harness that runs a skill's own text.
 """
 import json
 import os
