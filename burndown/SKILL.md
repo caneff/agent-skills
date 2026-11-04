@@ -56,24 +56,13 @@ branch (`references/loop.md` says why).
    **frozen** candidate set: a ticket filed while the run is going waits for
    the next run. The one exception is a ticket filed *during* the run
    **because the run is stuck on what it fixes** — `loop.admit` takes it only
-   with the clump it unblocks named. Then **tag the tier before any
-   dispatch** (§ Tier tagging): `python3 burndown/tier.py <owner/repo>
-   <n>=<path>[,<path>]...` writes the missing `documentation` label onto
-   every docs-only candidate and strips it from every candidate targeting
-   code, because the tier is read off the ticket at dispatch and a label
-   changed after that is a label that came too late.
+   with the clump it unblocks named.
 3. The **opening report** carries `closure.py`'s announcement line verbatim,
    so the reader can tell all three declaration states apart: a declared
    directive, a **declared None** — the repo has no include graph — and
    **silence**, which clumps conservatively by directory subtree. A
    controller reading "conservative" has to know which of the last two it
-   got. It also carries `tier.py`'s lines (§ Tier tagging), which **name
-   every label the exploration pass wrote**, every label it stripped and
-   every ticket it withheld the label from because its body names code, and
-   say `labels written: none`, `labels stripped: none` and
-   `labels withheld: none` when it did none of them — a report silent about labels reads the same from a
-   pass that wrote nothing and a pass that never ran, and the difference
-   between those two is a ticket dispatched at the wrong tier.
+   got.
 
 **Then, until the queue and the slots are both empty:**
 
@@ -287,32 +276,6 @@ which of the three modes it got. An in-flight clump's file set is wider than
 its closure by the time a dispatch reads it: the run loop's step 5 unions in
 its workspace's real diff. The grammar and the evidence:
 [`references/closure.md`](references/closure.md).
-
-## Tier tagging
-
-A candidate's **tier** is read off its `documentation` label at dispatch, so
-a docs-only ticket whose author forgot the label takes TDD, a three-axis
-review and a PR for a page of prose (#781's `#371`), and a labelled ticket
-whose candidate targets a `SKILL.md` goes out light (#969). After clumping and
-**before the first dispatch**, `burndown/tier.py` writes that missing label
-onto the ticket, and removes `documentation` from a candidate whose targets
-include code (#1118: dispatch reads only the body's paths, so this pass is
-the one that sees the clumper's) — `python3 burndown/tier.py <owner/repo>
-<n>=<path>[,<path>]... [--dry-run]`, the clumper's own candidate grammar. The
-label, not a flag: `merge-cleanup`, `/landed` and a resumed controller all
-read the ticket, and a flag is gone the moment dispatch returns.
-
-It **touches one label, `documentation`**: it adds it when every target
-is prose and the body names no code the way dispatch reads it (a body that
-does is reported under `labels withheld:`, #1211), and removes it when any
-target is code. A candidate is docs-only when every file it targets is
-prose — `.md`, `.markdown`, `.txt`, `.rst`, and never a `SKILL.md` — and
-anything else it cannot read as prose counts as code, which is deliberately
-stricter than `flow/claude/WORKFLOW.md` § Gate 2: light tier lands with no PR
-and no reviewer, so a wrong label there ships code unreviewed. A worker's
-right to raise light to heavy is untouched, and nothing lowers heavy to
-light. The grammar, the divergence and the evidence:
-[`references/tier.md`](references/tier.md).
 
 ## Run state
 
