@@ -364,7 +364,7 @@ cat "$tmp/parallel" "$tmp/serial" >"$tmp/ordered"
 # not a quiet tax on every merge. A suite that needs more is named below with
 # its own budget and a one-line reason; adding a line is the visible diff.
 # 25, not 15: pytest suites that cost ~10.5s CPU alone measured 15.1-15.7s in a
-# full parallel run (backstop_test, fix_check_test, retire_landing_test failed
+# full parallel run (backstop_test, fix_check_test, retire_landing_test (since removed, #1649) failed
 # the 15s line on a loaded box, 2026-11-04, #1615). Still far under a suite that
 # re-runs the repo.
 default_cpu_budget=25
