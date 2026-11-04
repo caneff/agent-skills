@@ -19,8 +19,9 @@ const NO_RUN = 12
 
 // One run of a job this session started: `job-run` wrote this session's id to
 // the run directory's `session` file. A rerun under the same name has another
-// pid, so it is another run.
-type Run = { name: string; pid: string }
+// pid, so it is another run. `group` is what `job-run --group` recorded: the
+// session is woken once for all the runs of a group, not once per run.
+type Run = { name: string; pid: string; group?: string }
 
 // Module state: a reload starts it over, and the next scan refills it from
 // the job directories, where the `woken-*` markers say what was already sent.
@@ -63,10 +64,10 @@ const scan = async ($: EngineInterface): Promise<Run[]> => {
     const name = /\/([^/]+)\/session$/.exec(path)?.[1]
     if (name === undefined) continue
     const pid = await firstLine($, `${dir}/${name}/pid`)
-    if (pid === undefined || runs.has(`${name}:${pid}`)) continue
-    const run = { name, pid }
+    if (pid === undefined || runs.has(runKey({ name, pid }))) continue
+    const run: Run = { name, pid, group: await firstLine($, `${dir}/${name}/group`) }
     if (await isMarked($, run, 'woken-end')) continue
-    runs.set(`${name}:${pid}`, run)
+    runs.set(runKey(run), run)
     fresh.push(run)
   }
   return fresh
@@ -96,14 +97,24 @@ const wake = async ($: EngineInterface, run: Run, status: string, matched?: stri
   return false
 }
 
-const check = async ($: EngineInterface, run: Run) => {
-  const key = `${run.name}:${run.pid}`
-  // A rerun under this name replaced the run: its end can no longer be read.
-  if ((await firstLine($, `${await jobsDir($)}/${run.name}/pid`)) !== run.pid) return runs.delete(key)
+const runKey = (run: Run) => `${run.name}:${run.pid}`
+
+// A run's state now, or undefined (and the run forgotten) when a rerun under
+// its name replaced it or its directory is gone: its end can no longer be read.
+const readState = async ($: EngineInterface, run: Run) => {
+  if ((await firstLine($, `${await jobsDir($)}/${run.name}/pid`)) !== run.pid) return void runs.delete(runKey(run))
   const { code, line } = await statusOf($, run)
+  if (code === NO_RUN) return void runs.delete(runKey(run))
   const hasEnded = code === FINISHED || code === KILLED
-  if (code === NO_RUN) return runs.delete(key)
   if (!hasEnded && code !== ALIVE) throw new Error(`job-run --status ${run.name} exited ${code}: ${line}`)
+  return { code, line, hasEnded }
+}
+
+const check = async ($: EngineInterface, run: Run) => {
+  const key = runKey(run)
+  const state = await readState($, run)
+  if (state === undefined) return
+  const { line, hasEnded } = state
   const matched = (await isMarked($, run, 'woken-line')) ? undefined : await failureLine($, run)
   if (!hasEnded && matched === undefined) return
   const status = hasEnded ? line : 'still running, and its output matched a failure signature'
@@ -114,13 +125,57 @@ const check = async ($: EngineInterface, run: Run) => {
   runs.delete(key)
 }
 
+// One wake for a group (the rule is in flow/bin/job-run's header). A failure
+// line alone, in a member still running, wakes but ends no watch: the group
+// still wakes at its last end or an ended failure, as a run with no group does.
+// Marking every member, a running one included, is what silences the rest; a
+// wake that did not enter the session marks none, so it is sent again.
+const checkGroup = async ($: EngineInterface, group: string, members: Run[]) => {
+  const rows: { run: Run; line: string; hasEnded: boolean; hasFailed: boolean; matched?: string }[] = []
+  for (const run of members) {
+    const state = await readState($, run)
+    if (state === undefined) continue
+    const { code, line, hasEnded } = state
+    rows.push({ run, line, hasEnded, hasFailed: code === KILLED || (code === FINISHED && !/ rc=0 /.test(line)) })
+  }
+  // Failure lines are searched until one has woken the group.
+  let isLineWoken = false
+  for (const r of rows) isLineWoken ||= await isMarked($, r.run, 'woken-line')
+  if (!isLineWoken) for (const r of rows) r.matched = await failureLine($, r.run)
+  const failed = rows.find(r => r.hasFailed) ?? rows.find(r => r.matched !== undefined)
+  const endedCount = rows.filter(r => r.hasEnded).length
+  const isDone = rows.length > 0 && endedCount === rows.length
+  if (failed === undefined && !isDone) return
+  const lines = [
+    failed === undefined
+      ? `job-wake: group ${group}: all ${rows.length} jobs ended`
+      : `job-wake: group ${group}: ${failed.run.name} failed (${endedCount} of ${rows.length} jobs ended)`,
+  ]
+  for (const r of failed === undefined ? rows : [failed]) lines.push(r.line)
+  if (failed?.matched !== undefined) lines.push(`matched line: ${failed.matched}`)
+  if (failed !== undefined) lines.push(`progress: ${await jobsDir($)}/${failed.run.name}/progress`)
+  const sent = await $.prompt.submit({ text: lines.join('\n') })
+  if (sent.drop !== undefined) {
+    await logOnce($, `the wake for group ${group} did not enter the session (${sent.drop}); it will be sent again`)
+    return
+  }
+  const isLineOnly = !isDone && !rows.some(r => r.hasFailed)
+  for (const { run } of rows) {
+    await mark($, run, isLineOnly ? 'woken-line' : 'woken-end')
+    if (!isLineOnly) runs.delete(runKey(run))
+  }
+}
+
 const tick = async ($: EngineInterface) => {
   if (isTicking) return
   isTicking = true
   try {
     const now = await $.clock.now()
     if (now < scanUntil) await scan($).catch(err => logOnce($, String((err as Error)?.message ?? err)))
-    for (const run of [...runs.values()]) await check($, run).catch(err => logOnce($, String((err as Error)?.message ?? err)))
+    const all = [...runs.values()]
+    for (const run of all.filter(r => r.group === undefined)) await check($, run).catch(err => logOnce($, String((err as Error)?.message ?? err)))
+    for (const group of new Set(all.flatMap(r => (r.group === undefined ? [] : [r.group]))))
+      await checkGroup($, group, all.filter(r => r.group === group)).catch(err => logOnce($, String((err as Error)?.message ?? err)))
     if (runs.size === 0 && now >= scanUntil) {
       timer?.cancel()
       timer = undefined
@@ -165,7 +220,7 @@ export const register: Register = on => {
         e.run_in_background !== true && [FINISHED, KILLED].includes((await statusOf($, run).catch(() => ({ code: ALIVE }))).code)
       if (hasEndedHere) {
         await mark($, run, 'woken-end')
-        runs.delete(`${run.name}:${run.pid}`)
+        runs.delete(runKey(run))
       } else watched.push(run.name)
     }
     // A refused call has no result to add the note to; its runs are watched all the same.

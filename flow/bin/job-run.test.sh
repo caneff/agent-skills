@@ -478,5 +478,28 @@ wait "$rpid" 2>/dev/null
   && ok "--wait creates no run directory" \
   || no "--wait creates no run directory"
 
+# --- a run may name a job group ----------------------------------------------
+# The job-wake mod wakes a group once; it finds a run's group in this file.
+"$job_run" --name g1 --group shard -- true >/dev/null 2>&1
+[ "$(cat "$jobs_dir/g1/group" 2>&1)" = "shard" ] \
+  && ok "group records the run's group name" \
+  || no "group records the run's group name" "$(cat "$jobs_dir/g1/group" 2>&1)"
+"$job_run" --name g1 -- true >/dev/null 2>&1
+[ ! -e "$jobs_dir/g1/group" ] \
+  && ok "a rerun without --group drops the previous run's group" \
+  || no "a rerun without --group drops the previous run's group" "$(cat "$jobs_dir/g1/group" 2>&1)"
+"$job_run" --name g2 -- true >/dev/null 2>&1
+[ ! -e "$jobs_dir/g2/group" ] \
+  && ok "a run with no --group leaves no group file" \
+  || no "a run with no --group leaves no group file"
+refuse "--group may hold only" --name g3 --group ../x -- true
+refuse "--group needs a value" --group
+refuse "--group may not be empty" --name g3 --group "" -- true
+refuse "--group cannot be combined with --status" --status a --group b
+refuse "--group cannot be combined with --wait" --wait a --group b
+[ ! -e "$jobs_dir/g3" ] \
+  && ok "a refused --group creates no run directory" \
+  || no "a refused --group creates no run directory"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
