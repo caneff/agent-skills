@@ -374,7 +374,7 @@ round follows steps 2–3 below keyed on the spec number:
      can read. A finding whose failure cannot occur here is disputed under the
      reachability bar below, whatever its rating.
 
-   Fanning the fixes out across sub-workers: § Build's `fanout-brief.py` with
+   Fanning the fixes out across sub-workers: the Build bullet on fanning out sub-workers (§ Build) renders it with `fanout-brief.py`,
    `--finding` per id (#1620), never a hand-typed task.
 
    **The reachability bar.** Stated here once, applied before a finding is
