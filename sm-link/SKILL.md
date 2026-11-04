@@ -1,6 +1,6 @@
 ---
 name: sm-link
-description: Inspect and edit SudokuMaker puzzle links (sudokumaker.app) — report a link's size, givens, ring state, entered cells, constraints and verdict, or decode a link to JSON, edit it, and encode it back. Use when asked to decode, inspect, check, edit, or rebuild a SudokuMaker link, or to check whether a link is safe to share.
+description: Inspect, edit and hand over SudokuMaker puzzle links (sudokumaker.app) — mint a short link to give Chris, report a link's size, givens, ring state, entered cells, constraints and verdict, or decode a link to JSON, edit it, and encode it back. Use when asked to decode, inspect, check, edit, or rebuild a SudokuMaker link, or to check whether a link is safe to share.
 ---
 
 # SudokuMaker links
@@ -47,10 +47,28 @@ The round trip preserves the **document**, not the link text: a link the app
 wrote and a link written here can compress differently and still open the same
 puzzle. Compare decoded documents, never link strings.
 
-## Write the link to a file
+## Hand over a short link, never a full one
 
-When asked for a link, write it to a file and give the path. A link is hundreds
-of characters; pasting one into a reply is unreadable and gets truncated.
+Any link handed to Chris — in chat, a PR body, a ticket, a README — is a
+SudokuMaker short link, `https://sudokumaker.app/p/<id>`, printed bare on its
+own line (Chris, 2026-10-22). A full link is a ~10 KB blob: unreadable, and
+truncated in a reply, so one never appears in chat.
+
+Mint the short link from a full link or from a file holding one:
+
+```
+uv run --directory ~/src/sudoku-kit python -m sudoku_kit.link_codec shorten '<link-or-file>' ['<link-or-file>' ...]
+```
+
+It prints one short link per source and checks that the new id resolves back to
+the payload it sent. A non-zero exit prints the reason to stderr: report it,
+and hand over no link. Sources before the failing one are already minted and
+printed: keep those links, and re-run only the failing source and those after
+it, since a second run mints a second record. Never type a short link from
+memory.
+
+Which link files a repo commits, and whether they hold full or short links, is
+that repo's own `AGENTS.md` rule, not this skill's.
 
 ## Before sharing a link
 
