@@ -4,9 +4,7 @@
 
 The name is built from two halves so this file does not carry it. The scan
 reads file contents and paths, case-insensitively, over `git ls-files`.
-Exempt: the dated records (`docs/research`, `docs/adr`, the friction log) and
-the landing script, which still names what it moves; its removal ticket
-removes that last exemption.
+Exempt: the dated records (`docs/research`, `docs/adr`, the friction log).
 """
 import os
 import subprocess
@@ -16,7 +14,7 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORD = b"burn" + b"down"
 EXEMPT_DIRS = ("docs/research/", "docs/adr/")
-EXEMPT_FILES = ("docs/agents/friction-log.md", "implement-spec/retire_landing.py")
+EXEMPT_FILES = ("docs/agents/friction-log.md",)
 # A leaked GIT_DIR would point these at the caller's index; a home of ours keeps
 # a global excludes file from deciding what `add -A` tracks.
 GIT_ENV = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
@@ -70,20 +68,16 @@ def test_the_word_in_a_tracked_path_is_found(repo):
     assert offenders(root) == ["x/" + WORD.decode() + ".md"]
 
 
-def test_exempt_paths_pass_and_their_removal_leaves_the_rest_green(repo):
+def test_exempt_paths_pass(repo):
     w = WORD.decode()
     files = {p: w + "\n" for p in ("docs/research/r.md", "docs/adr/0001.md",
-                                    "docs/agents/friction-log.md", "implement-spec/retire_landing.py")}
-    root = repo(files)
-    assert offenders(root) == []
-    subprocess.run(["git", "rm", "-q", "-f", "implement-spec/retire_landing.py"], cwd=root,
-                   env=GIT_ENV, check=True)
-    assert offenders(root) == []
+                                    "docs/agents/friction-log.md")}
+    assert offenders(repo(files)) == []
 
 
-def test_an_exempt_name_elsewhere_is_not_exempt(repo):
-    root = repo({"other/retire_landing.py": WORD.decode() + "\n"})
-    assert offenders(root) == ["other/retire_landing.py"]
+def test_the_landing_script_is_no_longer_exempt(repo):
+    root = repo({"implement-spec/retire_landing.py": WORD.decode() + "\n"})
+    assert offenders(root) == ["implement-spec/retire_landing.py"]
 
 
 def test_a_live_file_under_docs_is_not_exempt(repo):
