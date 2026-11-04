@@ -110,9 +110,9 @@ so `closure.py` no longer groups. The `components`, `split` and `MAX_CLUMP`
 code and the `--one-each` flag are gone (the flag is refused, exit 2), and a
 candidate is a clump in every mode, identical closures included. The
 closure stays because `loop.py dispatch` holds a clump sharing a file or a
-directory with a live workspace or an earlier pick (`loop.md` § The
-exclusion rule and what it costs), and it reads each clump's `closure` for
-that. The invariant is "no two live workspaces share a file".
+directory with a live workspace or an earlier pick (`loop.md`
+§ The exclusion rule and what it costs), and it reads each clump's `closure`
+for that. The invariant is "no two live workspaces share a file".
 
 `--json` prints the clumps as one list, in the shape `loop.py
 dispatch --candidates` reads, and the announcement on stderr. That way a
