@@ -76,11 +76,8 @@ push main; check "no configured user.email is refused" 1 $?
 grep -q "no user.email is configured" "$tmp/out"; check "the no-configured-email refusal names itself" 0 $?
 git -C "$repo" config user.email t@example.com
 
-# zero ref updates on stdin (#1618): git runs the hook with an empty list for a
-# push that sends nothing — a branch already equal to origin, or one git is
-# about to reject as non-fast-forward (git skips up-to-date and rejected refs
-# when it builds the list). Nothing is being pushed, so nothing is unchecked:
-# the guard passes and says why, rather than failing the lane step.
+# zero ref updates on stdin (#1618): the guard passes an empty push and says
+# why (rationale: the hook's own comment), rather than failing the lane step.
 : | "$here/commit-identity-guard-pre-push.sh" origin "$remote" >"$tmp/out" 2>&1
 check "zero ref updates on stdin passes" 0 $?
 grep -q "nothing to push" "$tmp/out"; check "the empty-push pass names itself" 0 $?
@@ -110,6 +107,20 @@ git push origin HEAD:refs/heads/stale-base >"$tmp/out" 2>&1
 check "a non-fast-forward push fails" 1 $?
 grep -qi "non-fast-forward\|fetch first" "$tmp/out"; check "the failure names the non-fast-forward, git's own reason" 0 $?
 grep -q "commit-identity guard (pre-push): refused" "$tmp/out"; check "the identity guard is not the one refusing a non-fast-forward" 1 $?
+
+# the same branch, but the remote's new commit was made in another clone and
+# never fetched here (#1618 C1): git lists the ref, so the guard cannot read
+# the remote sha. It must refuse and say the branch is behind or diverged,
+# not leak a rev-list "bad object".
+other_clone="$tmp/other-clone"
+git clone -q "$remote" "$other_clone" >/dev/null 2>&1
+( cd "$other_clone" && git checkout -q stale-base && git -c user.name=o -c user.email=o@example.com commit -q --allow-empty -m elsewhere \
+  && COMMIT_IDENTITY_OVERRIDE="fixture: another clone" git push -q origin HEAD:refs/heads/stale-base ) >/dev/null 2>&1
+check "fixture: another clone advanced stale-base" 0 $?
+git push origin HEAD:refs/heads/stale-base >"$tmp/out" 2>&1
+check "an unfetched stale branch is refused" 1 $?
+grep -q "fetch" "$tmp/out" && grep -q "stale-base" "$tmp/out"; check "the refusal names the branch and says to fetch" 0 $?
+grep -q "bad object\|could not enumerate" "$tmp/out"; check "the refusal is not a rev-list failure" 1 $?
 git checkout -q main
 git branch -qD stale
 

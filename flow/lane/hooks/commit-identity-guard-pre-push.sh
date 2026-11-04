@@ -46,6 +46,15 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   # re-check (#1149). Do not simplify this back to $remote_sha..$local_sha.
   exclude=
   [ -n "${remote_sha:-}" ] && [ "$remote_sha" != "$zero" ] && exclude=$remote_sha
+  # A remote sha this checkout never fetched means the branch is behind or
+  # diverged: git lists such a ref (it only drops one it already knows to be
+  # non-fast-forward), and rev-list below would die on "bad object". Say the
+  # real cause. Refuse rather than pass: a forced push would send the commits.
+  if [ -n "$exclude" ] && ! git cat-file -e "${exclude}^{commit}" 2>/dev/null; then
+    echo "commit-identity guard (pre-push): refused — $remote_ref on $remote_name is at $exclude, a commit this checkout has not fetched, so $local_ref is behind or has diverged from it. Run git fetch $remote_name and rebase or merge, then push again." >&2
+    bad=1
+    continue
+  fi
   # $exclude unquoted: empty must vanish, not become an empty revision.
   range=$(git rev-list "$local_sha" --not $exclude --remotes="$remote_name") || {
     echo "commit-identity guard (pre-push): refused — could not enumerate the commits $local_ref is pushing (git rev-list $local_sha --not $exclude --remotes=$remote_name failed); refusing rather than reading that as nothing to check." >&2

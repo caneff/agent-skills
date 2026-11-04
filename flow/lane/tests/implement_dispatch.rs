@@ -1429,8 +1429,8 @@ fn a_successful_push_leaves_no_stray_stdin_buffer_file_behind() {
 /// (Codex gate finding on #1006, PR #1068): a copy that fails partway —
 /// disk full, an I/O error — after writing one or more complete ref lines
 /// hands both the foreign hook and the guard a truncated-but-nonempty ref
-/// list, so the guard's zero-ref refusal never fires and the ref that got
-/// cut off pushes through unchecked. Simulated here with a stub `cat` ahead
+/// list, and the guard passes the cut-off ref unchecked (an empty list is a
+/// pass since #1618, so the wrapper's refusal is the only net). Simulated here with a stub `cat` ahead
 /// on PATH that writes one line then exits 1 — the wrapper must refuse
 /// before either the foreign hook or the guard ever runs, which a marker
 /// file from each proves.
