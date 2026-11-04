@@ -184,11 +184,11 @@ def test_picks_names_a_same_tick_collision_past_the_free_slot_cut():
 
 
 def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
-    # #1342: #1337 and #1338 named disjoint files in `burndown/` and both
+    # #1342: #1337 and #1338 named disjoint files in `implement-spec/` and both
     # diffs reached `implement-spec/loop.py`. A body under-names its targets, so
     # two clumps whose lists share a directory are not picked in one tick.
     candidates = [
-        {"tickets": [1311], "files": ["implement-spec/runfile.py", "burndown/SKILL.md"]},
+        {"tickets": [1311], "files": ["implement-spec/runfile.py", "implement-spec/SKILL.md"]},
         {"tickets": [1312, 1313], "files": ["implement-spec/loop.py"]},
         {"tickets": [1400], "files": ["implement/SKILL.md"]},
     ]
@@ -197,7 +197,7 @@ def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
     assert len(held) == 1
     assert held[0]["clump"]["tickets"] == [1312, 1313]
     assert held[0]["holder"] == 1311
-    assert held[0]["over"] == ["burndown/"]
+    assert held[0]["over"] == ["implement-spec/"]
     assert held[0]["same_tick"] is True
 
 
