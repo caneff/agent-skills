@@ -12,7 +12,8 @@ docs/research/2026-10-04-claude-md-pointer-reads.md for a window ending at
 replayable: a transcript is in the window when its mtime or any top-level
 `timestamp` falls in it, and only its lines up to --end are searched. With
 --end 2026-10-04T17:52:01Z it reproduces that note's first table, and with
-17:54:33Z its second (the two were run two minutes apart).
+17:54:33Z its second (the two were run two minutes apart), but for the sessions
+of the skill #1634 retired, which now read as not covered.
 
 `recount` is the one-shot cron job Chris ruled on 2026-10-04 (option a). It
 asks `gh` for #1413's closedAt and exits silently while the ticket is open or
@@ -55,11 +56,12 @@ def cron_line() -> str:
             f">> {Path.home()}/.cache/pointer-reads-recount.log 2>&1  {CRON_TAG}")
 
 # (doc, trigger regex, skills that already carry the procedure): the
-# 2026-10-04 note's rows, in its order.
+# 2026-10-04 note's rows, in its order, less the skill #1634 retired. `implement`
+# also matches `implement-spec`: the pattern ends on a word boundary.
 DOCS = [
-    ("OPERATIONS", "gh pr merge|implement-dispatch|merge-cleanup", "burndown|implement"),
+    ("OPERATIONS", "gh pr merge|implement-dispatch|merge-cleanup", "implement"),
     ("WORKFLOW", "gh issue create|gh issue edit",
-     "burndown|implement|file-ticket|to-tickets|to-spec|wayfinder|grilling"),
+     "implement|file-ticket|to-tickets|to-spec|wayfinder|grilling"),
     ("VISUAL-INSPECTION", "shot-scraper|zed ", "computer-use|visual-teach|prototype"),
     ("SHELL-SAFETY", "pkill|kill -|kill [0-9]", "diagnosing-bugs"),
 ]

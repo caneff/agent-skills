@@ -271,7 +271,7 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
 
 def default_branch(root):
     """`<default>` off the repo's `origin/HEAD` by `loop.origin_default`, the
-    burn's own reader, or None when git cannot say."""
+    run's own reader, or None when git cannot say."""
     def run(args):
         done = subprocess.run(["git", "-C", root, *args], capture_output=True,
                               text=True)

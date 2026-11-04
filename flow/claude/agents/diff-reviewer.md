@@ -1,6 +1,6 @@
 ---
 name: diff-reviewer
-description: Review one diff along one named axis — standards, spec, or correctness — for a caller that already pinned the fixed point. Spawned by multi-axis-code-review and burndown; not for general use.
+description: Review one diff along one named axis — standards, spec, or correctness — for a caller that already pinned the fixed point. Spawned by multi-axis-code-review and implement-spec; not for general use.
 model: opus
 tools: Read, Grep, Glob, Bash, Write
 ---

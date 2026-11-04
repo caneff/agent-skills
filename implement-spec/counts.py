@@ -46,7 +46,7 @@ def counts(run, reviews_dir, spec=None):
     `moved` line (a finding added to the open ticket for its component).
     `disputed` lands in neither: a disputed finding shipped nothing.
 
-    A sidecar written before #1401 is still read, so a burn that was running
+    A sidecar written before #1401 is still read, so a run that was going
     when the review changed can close: its `filed` lines count as moved, and
     its `leftover` and `handed-back` lines are returned as `carried`, which
     `render_counts` prints. Nothing sweeps them any more; the run file's own

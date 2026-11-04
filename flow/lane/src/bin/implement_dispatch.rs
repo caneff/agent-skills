@@ -60,8 +60,8 @@ merges by PR into its spec's integration branch. A ready-for-human issue
 among them puts --chris-merges in the brief: the worker builds the clump and
 Chris merges its PR. --model defaults to sonnet.
 
---run <run-id> puts `--run <run-id>` in the brief. A burn's controller, a
-spec run's included, always passes its run id, so the worker knows a run file
+--run <run-id> puts `--run <run-id>` in the brief. A spec run's controller
+always passes its run id, so the worker knows a run file
 is under it, where it records a parallel job. A brief with no --run is a
 worker with no run file under it. The id
 follows implement-spec/runfile.py's grammar and must name a run file that exists,
@@ -75,7 +75,7 @@ for the lowest number named, whatever order they are typed in, and the brief
 carries the whole list, lowest first. The same number twice is refused.
 
 Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
-"<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
+"<name>"`, a run over a spec issue. Branch and workspace are spec-<n>,
 the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
 positive integer, 5 when omitted, and refused without --spec.
 
@@ -150,7 +150,7 @@ struct Args {
     repo: Option<String>,
     model: Option<String>,
     controller: Option<String>,
-    /// The burn run this dispatch belongs to, put in the brief as `--run
+    /// The run this dispatch belongs to, put in the brief as `--run
     /// <id>` so the worker knows a run file is under it (#1146).
     run: Option<String>,
     /// The clump: every ticket named on the command line, in the order
@@ -161,7 +161,7 @@ struct Args {
 }
 
 /// Which run the worker is briefed for: a plain `/implement` ticket, or a
-/// nested `/implement-spec` run over a spec issue with its slot count.
+/// `/implement-spec` run over a spec issue with its slot count.
 #[derive(Clone, Copy)]
 enum Mode {
     Plain,
@@ -233,7 +233,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
             s if s.starts_with('-') => return Parsed::Err(format!("unknown flag: {s}")),
             _ => {
                 // A clump is several tickets in plain mode; a spec run is
-                // one nested run over one spec issue, and never a clump.
+                // one run over one spec issue, and never a clump.
                 if spec {
                     return Parsed::Err("one ticket at a time".into());
                 }
@@ -998,7 +998,7 @@ fn run() -> Result<(), ExitCode> {
     };
     if let Some(id) = &args.run {
         // A spec run keeps its own run file and passes its own id to the
-        // slices it dispatches; the burn's id would reach no one there.
+        // slices it dispatches; its dispatcher's id would reach no one there.
         if let Mode::Spec { .. } = mode {
             return Err(die("--run only goes with a plain dispatch; a spec run keeps its own run file"));
         }
@@ -1516,8 +1516,8 @@ mod tests {
     use tempfile::TempDir;
 
     /// `valid_run_id` copies `implement-spec/runfile.py`'s grammar, and an id one
-    /// accepts and the other refuses is a brief naming a run file the burn
-    /// cannot open, or a burn id dispatch will not carry. Ask runfile.py.
+    /// accepts and the other refuses is a brief naming a run file the run
+    /// cannot open, or a run id dispatch will not carry. Ask runfile.py.
     #[test]
     fn run_id_grammar_matches_runfile_py() {
         let ids = [
@@ -1536,9 +1536,9 @@ for i in json.load(sys.stdin):
         out.append(False)
 print(json.dumps(out))
 "#;
-        let burndown = concat!(env!("CARGO_MANIFEST_DIR"), "/../../implement-spec");
+        let runfile_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../implement-spec");
         let mut child = std::process::Command::new("python3")
-            .args(["-c", script, burndown])
+            .args(["-c", script, runfile_dir])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()

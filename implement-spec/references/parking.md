@@ -1,6 +1,6 @@
 # Parking, escalation and the ruling bar: where each rule came from
 
-`burndown/SKILL.md` § Parking and escalation, and § Before a controller
+`implement-spec/SKILL.md` § Parking and escalation, and § Before a controller
 rules: those two are the policy. This file is the evidence — every clause below is a ruling or
 a stall that happened on #781, and the cost it carried.
 
@@ -30,7 +30,7 @@ replace.
 
 A park is not a release. The clump keeps its workspace, and its include
 closure stays off the frontier while it is parked, because a second worker
-dispatched into those files is the collision `burndown/SKILL.md` § The loop
+dispatched into those files is the collision `implement-spec/SKILL.md` § The loop
 step 5 exists to prevent — and the parked worker may still be holding uncommitted work in
 that workspace. The cost is stated out loud in the loop: one parked worker
 can hold a whole include family off the frontier until it lands. That is

@@ -642,7 +642,7 @@ fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
 }
 
 
-// --- #787: --spec dispatches a nested /implement-spec run -------------------
+// --- #787: --spec dispatches an /implement-spec run -------------------
 
 #[test]
 fn spec_mode_briefs_implement_spec_in_a_spec_workspace() {
@@ -2111,7 +2111,7 @@ fn an_unreadable_body_dispatches_heavy_and_keeps_the_documentation_label() {
     assert!(out_text(&out).contains("body unreadable, dispatched heavy: #403"), "{}", out_text(&out));
 }
 
-// --- #1146: a burn's run id reaches the brief ---------------------------------
+// --- #1146: a run's id reaches the brief ---------------------------------
 
 /// Writes `<dir>/<id>.json`, the run file `--run <id>` must name, under the
 /// fixture HOME's default `~/.cache/burndown` unless `dir` is given.

@@ -78,7 +78,7 @@ Either way, give each ticket exactly one of three triage roles — its label on 
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
-When the source was a tracker issue — a spec or plan these tickets now decompose — keep its `ready-for-agent` label and add `spec`. The `spec` label marks the issue as a parent reference for a burn to hand to `/implement-spec`; plain `implement-dispatch` refuses a `spec`-labelled issue, so the label does not send an ordinary agent to build it unsliced. Leave the issue open as the tickets' parent reference; don't otherwise edit its contents.
+When the source was a tracker issue — a spec or plan these tickets now decompose — keep its `ready-for-agent` label and add `spec`. The `spec` label marks the issue as a parent reference for `/implement-spec`; plain `implement-dispatch` refuses a `spec`-labelled issue, so the label does not send an ordinary agent to build it unsliced. Leave the issue open as the tickets' parent reference; don't otherwise edit its contents.
 
 <local-ticket-template>
 

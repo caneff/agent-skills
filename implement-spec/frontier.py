@@ -82,7 +82,7 @@ CLAIMED_LABEL = "in-progress"
 NON_DISPATCHABLE_LABELS = frozenset({"needs-info"})
 
 # A spec parent is neither of those things. `implement-dispatch` refuses it
-# in plain mode while naming the route that does take it — a nested run,
+# in plain mode while naming the route that does take it — a spec run,
 # `--spec <n> --slots <k>` (#897) — so it is dispatchable work in a
 # different mode. Dropping it hides real work from the only reader that
 # surfaces it, and calling it `unresolved` says a human must determine its
@@ -392,7 +392,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             # The prerequisites are checked *first*, so `blocked` outranks
             # `spec` on one entry: both are true claims, but only `spec`
             # carries a dispatch verb, and a controller copies lines like
-            # that — onto a whole nested run over blocked work.
+            # that — onto a whole spec run over blocked work.
             #
             # An unreadable declaration stays `unresolved` for the same
             # reason. Silence is the case ruled into `spec`; a stated
@@ -455,7 +455,7 @@ def fetch_issues(repo, label, run=gh_json):
     `--slurp` wraps the pages in an outer array, which this flattens. Without
     it `gh` merges array pages itself (measured on 2.95.0), but that is
     behaviour its own help does not promise — and a queue past one page is
-    exactly where a burn needs the reader to work."""
+    exactly where a run needs the reader to work."""
     path = (f"repos/{quote(repo, safe='/')}/issues"
             f"?state=open&per_page=100&labels={quote(label, safe='')}")
     pages = run(["api", "--paginate", "--slurp", path]) or []
