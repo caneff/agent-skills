@@ -88,18 +88,32 @@ got=$(name_for 'cd /x && make test' ',"description":"Run the full test suite"')
 [ "$got" = "Run-the-full-test-suite-IjKlMnOp" ] \
   && ok "the name is taken from the description when there is one" \
   || no "the name is taken from the description when there is one" "$got"
-got=$(name_for 'cd /x && make test' ',"description":"Run the full test suite"')
-case "$got" in cd-*) no "the first word of the command is not the name when a description exists" "$got" ;;
-  *) ok "the first word of the command is not the name when a description exists" ;; esac
 got=$(name_for 'mkdir -p /x' ',"description":""')
 case "$got" in mkdir-*) ok "an empty description falls back to the first word" ;;
   *) no "an empty description falls back to the first word" "$got" ;; esac
 got=$(name_for 'mkdir -p /x' ',"description":"  /// "')
 case "$got" in mkdir-*) ok "a description with nothing to slug falls back to the first word" ;;
   *) no "a description with nothing to slug falls back to the first word" "$got" ;; esac
-got=$(name_for 'sleep 1' ',"description":"Build $(rm -rf x) & `id`; \"quoted\" / path"')
-case "$got" in *[!A-Za-z0-9._-]*|"") no "a description with shell metacharacters yields a legal name" "$got" ;;
-  *) ok "a description with shell metacharacters yields a legal name" ;; esac
+# The name sits unquoted in the rewritten command, so the whole command must
+# still read as `job-run --name <one legal token> -- bash -c <original>`; a
+# metacharacter that survived into the name would split or inject there.
+meta_desc='Build $(rm -rf x) & `id`; "quoted" / path'
+mj=$(jq -nc --arg d "$meta_desc" '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_use_id:"toolu_01AbCdEfGhIjKlMnOp",tool_input:{command:"sleep 1",description:$d,run_in_background:true}}')
+mc=$(fire withjr "$mj" | sed 's/^[^|]*|//' | jq -r '.hookSpecificOutput.updatedInput.command')
+case "$mc" in
+  "job-run --name "[A-Za-z0-9._-]*" -- bash -c 'sleep 1'") 
+    tok=${mc#job-run --name }; tok=${tok%% -- bash -c *}
+    case "$tok" in *[!A-Za-z0-9._-]*|"") no "a description with shell metacharacters yields a legal name" "$mc" ;;
+      *) ok "a description with shell metacharacters yields a legal name" ;; esac ;;
+  *) no "a description with shell metacharacters yields a legal name" "$mc" ;;
+esac
+got=$(name_for 'sleep 1' ',"description":"--- dashes   and   gaps ---"')
+[ "$got" = "dashes-and-gaps-IjKlMnOp" ] \
+  && ok "leading dashes are stripped and runs of separators squeezed to one dash" \
+  || no "leading dashes are stripped and runs of separators squeezed to one dash" "$got"
+got=$(name_for 'mkdir -p /x' ',"description":{"a":1}')
+case "$got" in mkdir-*) ok "a non-string description falls back to the first word" ;;
+  *) no "a non-string description falls back to the first word" "$got" ;; esac
 got=$(name_for 'sleep 1' ',"description":"A very long description that keeps going well past any sensible name length limit"')
 slug=${got%-*}
 [ "${#slug}" -le 40 ] && [ "${#slug}" -gt 24 ] \

@@ -9,11 +9,11 @@
 #
 # The name is derived from the call — the Bash description (else the first word
 # of the command) plus a slice of the tool_use_id — so it is stable for that
-# call and unique across calls. The
-# caller learns it from the rewritten command, which the background task's own
-# completion notice echoes back verbatim; it is repeated in
-# permissionDecisionReason rather than in systemMessage, because a warning banner
-# on every background job would be noise, and nothing here is a warning.
+# call and unique across calls. The caller learns it from the rewritten command,
+# which the background task's own completion notice echoes back verbatim; it is
+# repeated in permissionDecisionReason rather than in systemMessage, because a
+# warning banner on every background job would be noise, and nothing here is a
+# warning.
 #
 # It degrades, it never blocks. A call it cannot wrap — no command, or `job-run`
 # not on PATH — passes through unchanged *and* says so, because the one failure
@@ -76,8 +76,8 @@ slugify() { # slugify <max-length> ; stdin -> legal name fragment, may be empty
 }
 desc=$(field '.tool_input.description // "" | if type == "string" then . else "" end')
 slug=$(printf '%s' "$desc" | slugify 40)
-[ -n "$slug" ] || slug=$(printf '%s' "${cmd%%[ 	;|&]*}" | tr -c 'A-Za-z0-9' '-' | cut -c1-24)
-slug=$(printf '%s' "$slug" | sed 's/-*$//'); slug=${slug:-job}
+[ -n "$slug" ] || slug=$(printf '%s' "${cmd%%[ 	;|&]*}" | slugify 24)
+slug=${slug:-job}
 # With no tool_use_id there is no stable key, and uniqueness has to win: two
 # concurrent jobs sharing a name would hit job-run's live-name refusal and fail
 # the very tool call this hook promises never to fail.
