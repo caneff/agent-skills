@@ -13,6 +13,8 @@ per-review-type value table.
     review_ledger.py append  --repo R --type codex-audit (--record PATH [--refusal WHY] | --skip-reason WHY)
                              [--ledger PATH]
     review_ledger.py append  --repo R --ticket N --type standards|spec|correctness --skip-reason WHY [--ledger PATH]
+    review_ledger.py correct --repo R --ticket N --row ROW_ID --outcome red|green|unknown --reason WHY
+                             [--ledger PATH]
     review_ledger.py escapes --repo-dir CHECKOUT [--ledger PATH] [--days 14] [--fix-pattern RE] [--no-fetch]
                              [--format md|json]
     review_ledger.py cache-dir [--repo NAME]
@@ -41,6 +43,10 @@ message name the axis and round. Tokens by kind come from each message's `usage`
 with no attributable transcript, or a transcript with no `usage`, is `unknown` with the
 reason, never zero; over-engineering's cost stays inside its standards row. A transcript
 no row holds becomes a row with unknown findings; one that cannot be attributed is listed.
+A mutation row written with a wrong outcome is corrected, never edited (#1658): `correct` appends a
+`correction` row naming it by id, and `read_ledger` (every reader's door: `report`, `escapes`,
+`fix_check`, the audit range) serves the named row with the correction's outcome, the highest-numbered
+correction of a row winning. The false row's line stays in the file; `update_ledger` alone reads it raw.
 A verification pass never counts toward overlap. Severity weights, the overlap split and
 the price table (`--prices`, dollars per million tokens by model) live in `report`, never
 in the ledger, so changing any of them needs no reharvest. `report` sums cost over known
@@ -1004,9 +1010,13 @@ def review_file_text(facts: dict) -> str:
         bullets(facts["unattributed"]), ""])
 
 
-def read_ledger(path: Path) -> list[dict]:
-    """Every row of a ledger; a line that is not a JSON object fails loud, since
-    the ledger also holds rows no harvest can rebuild."""
+CORRECTION_TYPE = "correction"
+
+
+def read_ledger_raw(path: Path) -> list[dict]:
+    """Every line of a ledger as written, correction rows included; a line that is not a JSON
+    object fails loud, since the ledger also holds rows no harvest can rebuild. Only the writer
+    (`update_ledger`) and `correct` read this; every other reader wants `read_ledger`."""
     rows = []
     for n, line in enumerate(path.read_text().splitlines(), 1):
         if not line.strip():
@@ -1021,6 +1031,39 @@ def read_ledger(path: Path) -> list[dict]:
     return rows
 
 
+def fold_corrections(rows: list[dict]) -> list[dict]:
+    """The ledger as every reader sees it (#1658): each `correction` row supersedes the mutation
+    row it names by id, the highest-numbered correction of a row winning. The superseded row's
+    outcome is replaced and the row keeps a `corrected` note; the correction rows themselves are
+    not returned. A correction whose target is absent or is not a mutation row raises ValueError,
+    never reads as nothing: the false row would then stand unnoticed."""
+    held = {r["row_id"]: r for r in rows if r.get("type") != CORRECTION_TYPE}
+    latest: dict[str, dict] = {}
+    for c in rows:
+        if c.get("type") != CORRECTION_TYPE:
+            continue
+        target = held.get(c.get("corrects"))
+        if target is None or target.get("type") not in MUTATION_TYPES:
+            raise ValueError(f"correction {c.get('row_id')} names {c.get('corrects')!r}, "
+                             "which is not a mutation row in this ledger")
+        if c.get("outcome") not in MUTATION_OUTCOMES:
+            raise ValueError(f"correction {c.get('row_id')} has outcome {c.get('outcome')!r}, "
+                             f"not one of {', '.join(MUTATION_OUTCOMES)}")
+        if c["corrects"] not in latest or c.get("seq", 0) >= latest[c["corrects"]].get("seq", 0):
+            latest[c["corrects"]] = c
+    return [{**r, "outcome": latest[r["row_id"]]["outcome"],
+             "corrected": {"from": r.get("outcome"), "by": latest[r["row_id"]]["row_id"],
+                           "reason": latest[r["row_id"]].get("reason")}}
+            if r["row_id"] in latest else r
+            for r in rows if r.get("type") != CORRECTION_TYPE]
+
+
+def read_ledger(path: Path) -> list[dict]:
+    """The rows every reader of the ledger sees: `read_ledger_raw` with corrections folded in
+    (`fold_corrections`)."""
+    return fold_corrections(read_ledger_raw(path))
+
+
 def update_ledger(path: Path, change) -> None:
     """The one writer of the ledger: `change` edits {row_id: row} in place, under a lock, and the
     result replaces the file whole. `harvest` and `append` both come through here because three
@@ -1029,7 +1072,7 @@ def update_ledger(path: Path, change) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path.with_name(path.name + ".lock"), "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        rows = {r["row_id"]: r for r in read_ledger(path)} if path.exists() else {}
+        rows = {r["row_id"]: r for r in read_ledger_raw(path)} if path.exists() else {}
         change(rows)
         tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
         tmp.write_text("".join(json.dumps(rows[k], sort_keys=True) + "\n" for k in sorted(rows)))
@@ -1440,6 +1483,45 @@ def cmd_append(args) -> int:
     return _write_appended(args, mine, refresh)
 
 
+def cmd_correct(args) -> int:
+    """Append a `correction` row that supersedes one mutation row's outcome (#1658). Nothing is
+    rewritten or deleted: the false row stays, and `read_ledger` serves the correction in its
+    place. The named row must exist, belong to `--repo` and `--ticket`, and be a mutation row."""
+    if not args.reason.strip():
+        print("review_ledger correct: --reason must say why the row was wrong", file=sys.stderr)
+        return 2
+    repo = fold_repo(args.repo)
+    made: list[str] = []
+
+    def add(ledger: dict) -> None:
+        target = ledger.get(args.row)
+        if target is None:
+            raise ValueError(f"no row {args.row} in {args.ledger}")
+        if target.get("type") not in MUTATION_TYPES:
+            raise ValueError(f"{args.row} is a {target.get('type')} row; only a mutation row's outcome is corrected")
+        if target.get("repo") != repo or target.get("ticket") != args.ticket:
+            raise ValueError(f"{args.row} belongs to {target.get('repo')} #{target.get('ticket')}, "
+                             f"not {repo} #{args.ticket}")
+        seq = 1 + max((r.get("seq", 0) for r in ledger.values()
+                       if r.get("type") == CORRECTION_TYPE and r.get("corrects") == args.row), default=0)
+        row_id = f"{args.row}/correction/{seq}"
+        ledger[row_id] = {"row_id": row_id, "origin": "append", "type": CORRECTION_TYPE, "repo": repo,
+                          "ticket": args.ticket, "tickets": [args.ticket], "corrects": args.row, "seq": seq,
+                          "outcome": args.outcome, "reason": args.reason.strip(),
+                          "was": target.get("outcome")}
+        made.append(row_id)
+
+    try:
+        if not args.ledger.exists():
+            raise ValueError(f"no ledger at {args.ledger}")
+        update_ledger(args.ledger, add)
+    except ValueError as e:
+        print(f"review_ledger correct: {e}", file=sys.stderr)
+        return 2
+    print(f"appended 1 row to {args.ledger}: {made[0]} ({args.row} -> {args.outcome})")
+    return 0
+
+
 def _row_value(row: dict, weights: dict, split: str) -> tuple[float, int]:
     """(weighted value, findings whose severity has no weight) of one row."""
     value, unweighted = 0.0, 0
@@ -1841,6 +1923,14 @@ def main(argv=None) -> int:
     e.add_argument("--no-fetch", action="store_true", help="read origin as it stands, without `git fetch origin`")
     e.add_argument("--format", choices=("md", "json"), default="md")
     e.set_defaults(func=cmd_escapes)
+    k = sub.add_parser("correct", help="append a row superseding one mutation row's outcome; nothing is rewritten (#1658)")
+    k.add_argument("--repo", required=True)
+    k.add_argument("--ticket", type=int, required=True)
+    k.add_argument("--row", required=True, help="the row_id of the mutation row that is wrong")
+    k.add_argument("--outcome", choices=MUTATION_OUTCOMES, required=True, help="what it should read")
+    k.add_argument("--reason", required=True, help="why the row was wrong")
+    k.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    k.set_defaults(func=cmd_correct)
     r = sub.add_parser("report")
     r.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     r.add_argument("--weights", type=Path)
