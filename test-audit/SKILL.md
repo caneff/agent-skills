@@ -421,10 +421,12 @@ vocabulary, and metabar:
   a duplicate-coverage cut carries `owner` (the stronger test's `file:line`);
   a `documented-intent` row carries the comment it defers to in
   `extra.author_intent`.
-- **Summary** — the verdict, the `N judged · C cut · R rewrite · K kept`
-  metabar, and the findings grouped by bucket then category with counts. No
-  per-test cards. Call out the standouts in a `vt-callout`: the interaction-only
-  tests that are green today, the highest-value find.
+- **Summary** — the verdict, the `C cut · R rewrite` metabar, and the
+  findings grouped by bucket then category with counts. The actionable buckets
+  are `cut` and `rewrite`; `keep` is not one (`findings-schema.md`, *Actionable
+  only*). The number of tests judged may appear as coverage wording in the
+  Scope line. No per-test cards. Call out the standouts in a `vt-callout`: the
+  interaction-only tests that are green today, the highest-value find.
 
 ## Applying the changes (opt-in)
 

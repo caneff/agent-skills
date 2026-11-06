@@ -210,9 +210,11 @@ vocabulary, and metabar:
   `commented-out-code`, `stale` for cuts; `why`, `warning`, `workaround`,
   `domain-rule`, `api-contract` for keepers. A cut carries `before`/`after`
   (`"— gone —"` for a whole delete, the tightened clause for a salvage).
-- **Summary** — the verdict, the `N judged · M cut · K kept` metabar, and the
-  findings grouped by bucket then category with counts (the shape a reader
-  wants: "80 restatement, 21 banner, 11 citation"). No per-comment cards. Close
+- **Summary** — the verdict, the `M cut` metabar, and the findings grouped by
+  category with counts (the shape a reader wants: "80 restatement, 21 banner,
+  11 citation"). The one actionable bucket is `cut`; `keep` and `load-bearing`
+  are not (`findings-schema.md`, *Actionable only*). The number of comments
+  judged may appear as coverage wording. No per-comment cards. Close
   with a `vt-callout` for the load-bearing lines left untouched (directives,
   pragmas, license headers), so the reader sees they were considered, not missed.
 

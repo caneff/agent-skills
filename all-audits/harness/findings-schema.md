@@ -63,8 +63,14 @@ repo's `all-audits/harness/`) for the scaffold and asset delivery — same
 overview, not cards.
 
 - **Header** — `vt-kicker` skill label, `<h1>` repo, `vt-lede` one-line verdict,
-  then a `vt-metabar` with the count (`N judged · C cut · R rewrite · K kept`).
-- **Grouped overview** — for each bucket, a compact per-`category` count with a
+  then a `vt-metabar` with the count of each actionable bucket (`C cut · R
+  rewrite`).
+- **Actionable only.** Every total counts only the buckets that call for
+  action; a bucket that needs none (`keep`, `load-bearing`) has no metabar
+  tile, no count table and no part in any total, and its rows stay in
+  `findings.jsonl`. The number judged is coverage: wording on the page, never a
+  findings total. Each skill's `SKILL.md` names its actionable buckets.
+- **Grouped overview** — for each actionable bucket, a compact per-`category` count with a
   one-line gloss, and, when the audit is large, a per-file roll-up (top files by
   finding count). Tables or lists, not cards. This is where a reader sees the
   shape — "80 restatement, 21 banner, 11 citation" — without scrolling a hundred
@@ -90,7 +96,7 @@ report; it never scans the process's stdout (see
 - `report_path` — absolute path to the report's `.html` file. For an audit
   that writes `findings.jsonl`, this is the grouped summary page above, not a
   card-per-finding report.
-- `count` — how many findings.
+- `count` — how many actionable findings (see *Actionable only* above).
 - `headline` — the one-line verdict from the report.
 
 See `all-audits/SKILL.md` for how the driver collects these into
