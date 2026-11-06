@@ -422,12 +422,11 @@ vocabulary, and metabar:
   a `documented-intent` row carries the comment it defers to in
   `extra.author_intent`.
 - **Summary** — the verdict, the `C cut · R rewrite` metabar, and the
-  findings grouped by bucket then category with counts. Only the actionable
-  buckets (`cut`, `rewrite`) count: a Keep needs no action, so it has no tile,
-  no count table and no place in any total. The number of tests judged is
-  coverage, stated once in the lede as wording, never as a findings total. The
-  `keep` rows stay in `findings.jsonl`. No per-test cards. Call out the standouts in a `vt-callout`: the interaction-only
-  tests that are green today, the highest-value find.
+  findings grouped by bucket then category with counts. The actionable buckets
+  are `cut` and `rewrite`; `keep` is not one (`findings-schema.md`, *Actionable
+  only*). The number of tests judged may appear as coverage wording in the
+  Scope line. No per-test cards. Call out the standouts in a `vt-callout`: the
+  interaction-only tests that are green today, the highest-value find.
 
 ## Applying the changes (opt-in)
 
