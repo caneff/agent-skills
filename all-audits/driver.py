@@ -11,6 +11,11 @@ the report folders under one `collection/` dir, and builds `index.html`.
 A run is three steps: plan (ask the staleness cache what still needs a run),
 execute (the only step that spawns audits), collect (assemble the collection
 and render the index). `--index` calls collect alone.
+
+Environment: `SWEEP_JOBS` (#1666) caps how many audits a sweep runs at once
+after the smoke test (a positive integer, default 4; anything else exits 2
+before any audit starts). `MUTATION_JOBS` (#1588) does the same for the
+modules of a `--mutation` run (default 4).
 """
 import argparse
 import collections
@@ -748,6 +753,25 @@ def plan_sweep(repo, selected, force, base=None):
     return plan
 
 
+def _jobs_from_env(name, default="4"):
+    """A positive-integer concurrency cap from the environment, else exit 2."""
+    raw = os.environ.get(name, default)
+    try:
+        jobs = int(raw)
+    except ValueError:
+        jobs = 0
+    if jobs < 1:
+        print(f"{name} must be a positive integer, got {raw!r}", file=sys.stderr)
+        sys.exit(2)
+    return jobs
+
+
+def sweep_jobs():
+    """`SWEEP_JOBS` (#1666): how many audits a sweep runs at once. Validated as
+    `mutation_jobs` is: a bad value stops the run, never a silent default."""
+    return _jobs_from_env("SWEEP_JOBS")
+
+
 def execute(repo, plan, run):
     """Run the planned audits — the only place a sweep spawns a process.
 
@@ -756,6 +780,7 @@ def execute(repo, plan, run):
     same way, so the sweep aborts instead of fanning thirteen failures out.
     Returns the names of the audits that failed (#1278).
     """
+    jobs = sweep_jobs()
     if not plan.to_run:
         return []
     smoke = plan.to_run[0]
@@ -768,7 +793,7 @@ def execute(repo, plan, run):
     print("smoke test passed; fanning out the rest\n" if not failed else f"smoke audit {smoke} failed (not the guard); fanning out the rest anyway\n")
     rest = plan.to_run[1:]
     if rest:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(rest)) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(rest))) as ex:
             results = list(ex.map(lambda n: run_one(n, repo, run.logs, run.manifests), rest))
         failed += [n for n, reason in zip(rest, results) if reason]
     return failed
@@ -933,15 +958,7 @@ def rebuild_index(repo, out):
 def mutation_jobs():
     """`MUTATION_JOBS` (#1588): how many modules run at once. A value that is
     not a positive integer stops the run; it is never rounded to a default."""
-    raw = os.environ.get("MUTATION_JOBS", "4")
-    try:
-        jobs = int(raw)
-    except ValueError:
-        jobs = 0
-    if jobs < 1:
-        print(f"MUTATION_JOBS must be a positive integer, got {raw!r}", file=sys.stderr)
-        sys.exit(2)
-    return jobs
+    return _jobs_from_env("MUTATION_JOBS")
 
 
 def mutation_cost_estimate(n, jobs=1, timeout_s=None):

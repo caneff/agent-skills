@@ -257,6 +257,40 @@ def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, extra_args=(), **extr
     )
 
 
+def _max_inflight(inflight):
+    """The most audits the fake `claude` saw in flight at once (#1666)."""
+    return max(int(n) for n in open(os.path.join(inflight, "counts")).read().split())
+
+
+def test_sweep_runs_at_most_sweep_jobs_audits_at_once(tmp_path):
+    """#1666: with SWEEP_JOBS=2 and five audits, the smoke test runs alone and the
+    other four overlap two at a time; SWEEP_JOBS=1 never overlaps."""
+    only = "dead-code,duplication,test-audit,comment-audit,error-handling"
+    for jobs, expected in (("2", 2), ("1", 1)):
+        (tmp_path / jobs).mkdir()
+        tmp, cache_dir, bin_dir, inflight = _mkdirs(tmp_path / jobs, "tmp", "cache_dir", "bin_dir", "inflight")
+        _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, SWEEP_JOBS=jobs, FAKE_CLAUDE_INFLIGHT=inflight)
+        counts = open(os.path.join(inflight, "counts")).read().split()
+        assert len(counts) == 5, counts
+        assert _max_inflight(inflight) == expected, (jobs, counts)
+
+
+def test_sweep_jobs_defaults_to_four(tmp_path):
+    only = "dead-code,duplication,test-audit,comment-audit,error-handling,type-tightness,domain-drift,docstring-coverage"
+    tmp, cache_dir, bin_dir, inflight = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir", "inflight")
+    _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, FAKE_CLAUDE_INFLIGHT=inflight)
+    assert _max_inflight(inflight) == 4
+
+
+def test_sweep_jobs_must_be_a_positive_integer(tmp_path):
+    for bad in ("0", "many", "-1"):
+        (tmp_path / bad).mkdir()
+        tmp, cache_dir, bin_dir = _mkdirs(tmp_path / bad, "tmp", "cache_dir", "bin_dir")
+        r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", SWEEP_JOBS=bad)
+        assert r.returncode == 2 and "SWEEP_JOBS must be a positive integer" in r.stderr, r.stdout + r.stderr
+        assert "smoke test" not in r.stdout
+
+
 def test_audit_claude_gets_the_unlimited_bg_wait_ceiling(tmp_path):
     """#1278: `claude -p` kills itself after 600 s of background tasks unless
     the ceiling variable is 0; the audit's own log records what it received."""
@@ -726,7 +760,7 @@ def test_help_prints_the_docstring_and_an_unknown_flag_exits_2():
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.startswith("usage:"), r.stdout
     assert driver.__doc__.splitlines()[0] in r.stdout
-    for flag in ("--out", "--only", "--short", "--index", "--force", "--mutation"):
+    for flag in ("--out", "--only", "--short", "--index", "--force", "--mutation", "SWEEP_JOBS"):
         assert flag in r.stdout, flag
 
     bad = subprocess.run([sys.executable, driver_py, "--nope"], capture_output=True, text=True)
