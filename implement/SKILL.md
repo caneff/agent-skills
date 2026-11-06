@@ -277,6 +277,10 @@ No PR and no reviewer; Chris reads the log after.
   `<repo>` is the review cache's directory name, as in § The PR. A mutation
   that never reached its suite is `unknown`, never `red`. `<id>` is letters,
   digits, `.`, `-` or `_`. A refusal goes to the controller, never skipped.
+  A row already written with the wrong outcome is never edited: `review_ledger.py
+  correct --repo <repo> --ticket <n> --row <row_id> --outcome red|green|unknown
+  --reason <why>` appends a row that supersedes it (#1658), and every reader of
+  the ledger serves the correction.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the

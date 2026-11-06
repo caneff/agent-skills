@@ -665,6 +665,15 @@ def test_a_codex_run_with_no_findings_needs_no_dispositions(clean):
     assert_fix_check(clean, 0, "0 findings")
 
 
+def test_a_mutation_correction_row_in_the_ledger_is_no_row_for_a_review(clean):
+    """#1658: a `correction` row has no `status`; the check reads the folded ledger, not the raw one."""
+    clean.ledger_row("worker-mutation", "known", top={"row_id": "r/5/worker-mutation/1/m", "outcome": "red"})
+    clean.ledger_row("correction", "known", top={"row_id": "r/5/worker-mutation/1/m/correction/1",
+                                                  "corrects": "r/5/worker-mutation/1/m", "outcome": "green",
+                                                  "target_sha256": "stale", "status": None})
+    assert_fix_check(clean, 0, "0 findings")
+
+
 def test_no_codex_record_and_no_ledger_row_saying_why_the_pass_neither_ran_nor_was_skipped_on_record(clean):
     ledger = os.path.join(clean.home, ".cache", "agent-reviews", "ledger.jsonl")
     os.rename(ledger, ledger + ".off")
