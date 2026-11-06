@@ -81,7 +81,7 @@ def _saved_page(link=True):
     """What live LMD answered "Create" with (#1659's closing check, Check-In, puzzle 000VX4): it stays on
     einstellen.php, says the puzzle was saved, links its edit and puzzle pages, and shows the form again."""
     to_page = f'<a href="{PUZZLE_PATH}?id={NEW_PUZZLE_ID}">To the puzzle page</a>' if link else ""
-    notice = (f'<p>{SAVED}</p><p><a href="/Raetselportal/Eigene/bearbeiten.php?id={NEW_PUZZLE_ID}">Edit Puzzle '
+    notice = (f'<p>{SAVED}</p><p><a href="{SUBMIT_PATH}?id={NEW_PUZZLE_ID}">Edit Puzzle '
               f'{NEW_PUZZLE_ID}</a> {to_page}</p>')
     return re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + notice, SUBMIT_PAGE, count=1)
 FORM_ERROR = "Please enter a name for the puzzle."

@@ -4,11 +4,12 @@ Usage (Pillow and the renderer's deps come from the sudokupad-art project):
     uv run --project ~/src/sudokupad-art python ~/.agents/skills/create-lmd-page/board_png.py "<sudokupad-link>" <out.png>
 
 Loads the puzzle (a short id, any link), saves its scl beside <out.png>, has sudokupad-art's
-`render_real.js` draw it, then shrinks the PNG in place when either side is over 800 px. A smaller
-board is left alone. Any failure exits non-zero with the error and leaves no PNG.
+`render_real.js` draw it (with SudokuPad's grid unless the link sets `setting-nogrid`), then shrinks
+the PNG in place when either side is over 800 px. A smaller board is left alone. Any failure exits non-zero with the error and leaves no PNG.
 """
 import sys
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 LIMIT = 800
 ART = Path.home() / "src" / "sudokupad-art"
@@ -27,6 +28,13 @@ def fit(png):
     return small.size
 
 
+def keeps_grid(link):
+    """False when the link turns SudokuPad's grid off (`?setting-nogrid=true` or `=1`). render_real honours
+    a link's own setting only on its link path, and this renders the saved scl, so the link's must be passed."""
+    values = parse_qs(urlsplit(link).query).get("setting-nogrid", [])
+    return not any(v.lower() in ("true", "1") for v in values)
+
+
 def render(link, out):
     sys.path.insert(0, str(ART))
     import codec
@@ -36,7 +44,7 @@ def render(link, out):
     scl.parent.mkdir(parents=True, exist_ok=True)
     scl.write_text(codec.dump_scl(codec.load(link)))
     try:
-        render_real.screenshot([(scl, out)], grid=True)
+        render_real.screenshot([(scl, out)], grid=keeps_grid(link))
         return fit(out)
     except BaseException:
         out.unlink(missing_ok=True)

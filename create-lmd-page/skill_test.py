@@ -120,6 +120,19 @@ def renderer(monkeypatch):
     return calls
 
 
+@pytest.mark.parametrize("link, grid", [
+    ("https://sudokupad.app/x", True),
+    ("https://sudokupad.app/x?setting-nogrid=true", False),
+    ("https://sudokupad.app/x?setting-nogrid=1", False),
+    ("https://sudokupad.app/x?setting-nogrid=false", True),
+])
+def test_the_grid_follows_the_links_nogrid_setting(renderer, monkeypatch, tmp_path, link, grid):
+    # Check-In's ?setting-nogrid=true link rendered with SudokuPad's grid over its frame (#1659's closing check).
+    monkeypatch.setattr(board_png, "fit", lambda png: (1, 1))
+    board_png.render(link, tmp_path / "board.png")
+    assert renderer.grid is grid
+
+
 def test_render_draws_the_link_with_its_grid_and_returns_the_fitted_size(renderer, monkeypatch, tmp_path):
     monkeypatch.setattr(board_png, "fit", lambda png: (700, 650))
     out = tmp_path / "work" / "board.png"
