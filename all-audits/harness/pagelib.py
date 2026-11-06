@@ -13,8 +13,11 @@ so a caller can put markup in a heading. Escape untrusted text with
 `html.escape` before passing it.
 """
 import html
+import json
 import os
 import shutil
+import subprocess
+import sys
 
 VISUAL_TEACH_ASSETS = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "visual-teach", "assets")
@@ -70,3 +73,54 @@ def _replace_tree(src, dest):
         shutil.rmtree(dest)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     shutil.copytree(src, dest)
+
+
+# Polls until every `.vt-mermaid` holds an svg (mermaid renders async) or the
+# budget runs out, then reports each block that is not a clean render. A block
+# with no svg counts as failed: a bridge that never ran must not read as clean.
+_MERMAID_JS = """(async () => {
+  const blocks = [...document.querySelectorAll('.vt-mermaid')];
+  const end = Date.now() + %d;
+  while (Date.now() < end && blocks.some(b => !b.querySelector('svg'))) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return {total: blocks.length,
+          failed: blocks.flatMap((b, i) =>
+            !b.querySelector('svg') || b.textContent.includes('Syntax error') ? [i] : [])};
+})()"""
+
+
+def check_mermaid(report_path, *, timeout=20):
+    """Render `report_path` headless and return `{"total": n, "failed": [i, ...]}`.
+
+    `failed` holds the 0-based index of every `.vt-mermaid` block that shows
+    Mermaid's "Syntax error" box or never rendered an svg. Mermaid fails at
+    parse time in the browser, so only a render sees it (#1665). Raises if
+    `shot-scraper` is missing or answers something unreadable: a check that
+    could not run is not a clean report.
+    """
+    js = _MERMAID_JS % (timeout * 1000)
+    proc = subprocess.run(["shot-scraper", "javascript", report_path, js],
+                          capture_output=True, text=True, timeout=timeout + 60)
+    if proc.returncode != 0:
+        raise RuntimeError(f"shot-scraper failed ({proc.returncode}): {proc.stderr.strip()}")
+    result = json.loads(proc.stdout)
+    if not isinstance(result, dict) or set(result) != {"total", "failed"}:
+        raise RuntimeError(f"unreadable shot-scraper answer: {proc.stdout[:200]!r}")
+    return result
+
+
+def main(argv):
+    if len(argv) != 3 or argv[1] != "check-mermaid":
+        print("usage: pagelib.py check-mermaid <report.html>", file=sys.stderr)
+        return 2
+    result = check_mermaid(argv[2])
+    for i in result["failed"]:
+        print(f"block {i + 1} of {result['total']}: Mermaid syntax error or not rendered")
+    if not result["failed"]:
+        print(f"{result['total']} mermaid blocks rendered clean")
+    return 1 if result["failed"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
