@@ -236,6 +236,31 @@ suite isn't watching it at all.
    `~/.agents/skills/all-audits/harness/AUDIT-RUN.md#the-manifest`)
    and says not to open anything.
 
+## Plain Node path (`node --test`, no vitest/jest)
+
+A repo whose tests run on `node --test` has no `crap-typescript` runner. Never
+write your own coverage hook: ship `~/.agents/skills/crap-audit/node-coverage-hook.cjs`
+(tested by `node_hook_test.py`). It instruments the listed source files through
+`istanbul-lib-instrument` as Node loads them and dumps Istanbul hit counters per
+process. It sets `esModules` from `result.format === 'module'`, so an ES module
+saved as `.js` instruments correctly (an extension guess blew a suite up to 4 GB
+in 8 s, #1667), and an instrument error fails the import loudly naming the file.
+
+1. Install `istanbul-lib-instrument` into a scratch tools dir (not the repo) and
+   write the in-scope source files, root-relative, one per line, to a list file.
+2. Set `CRAP_TOOLS` (that dir), `CRAP_ROOT` (repo root), `CRAP_FILES` (the list),
+   `CRAP_HITS` (an empty scratch dir), and
+   `NODE_OPTIONS=--require ~/.agents/skills/crap-audit/node-coverage-hook.cjs`.
+3. **Run the suite under a memory cap, always**, with
+   `bash ~/.agents/skills/crap-audit/capped-run.sh 6G -- node --test <files>`
+   (`systemd-run --user --wait -p MemoryMax=… -p MemorySwapMax=0`). A runaway
+   suite then dies as an OOM kill of its own unit, which you report, not as a
+   dead VM. `capped-run.sh` refuses to run when `systemd-run` is absent; do not
+   fall back to an uncapped run. Keep `--test-concurrency` low: the cap is per
+   unit, so concurrent files share it.
+4. Merge the dumps in `CRAP_HITS` into one Istanbul `coverage-final.json` and
+   feed it to the Istanbul fallback join under "TypeScript path" below.
+
 ## TypeScript path
 
 `@barney-media/crap-typescript-core`'s coverage rule was verified against
