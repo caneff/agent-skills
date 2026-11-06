@@ -129,7 +129,9 @@ def test_inputs_are_asked_one_per_message_in_order():
 
 def test_stream_gate_runs_before_the_driver_call():
     out = section("Output")
-    gate_at, driver_at = out.index("install-preflight.mjs obs"), out.index("lmd_driver.mjs")
+    cmd = "layout/install-preflight.mjs obs\n"
+    assert out.count(cmd) == 1, "the gate command must appear exactly once, as its own line"
+    gate_at, driver_at = out.index(cmd), out.index("lmd_driver.mjs")
     assert gate_at < driver_at
     assert "Before any driver call" in out
 
