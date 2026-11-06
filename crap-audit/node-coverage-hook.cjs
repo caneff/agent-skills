@@ -14,9 +14,21 @@ const { registerHooks } = require('node:module')
 const { fileURLToPath } = require('node:url')
 const path = require('node:path')
 const fs = require('node:fs')
+const die = (msg) => { throw new Error(`crap-audit hook: ${msg}`) }
+// registerHooks needs Node 22.15+ (or 23.5+); an older Node would otherwise fail with an unrelated error.
+if (typeof registerHooks !== 'function') die(`needs Node 22.15+ for module.registerHooks, running ${process.version}`)
+for (const v of ['CRAP_TOOLS', 'CRAP_ROOT', 'CRAP_FILES', 'CRAP_HITS']) {
+  if (!process.env[v]) die(`${v} is not set (is it passed through to this process?)`)
+}
 const { createInstrumenter } = require(path.join(process.env.CRAP_TOOLS, 'node_modules/istanbul-lib-instrument'))
-const ROOT = process.env.CRAP_ROOT
-const SOURCES = new Set(fs.readFileSync(process.env.CRAP_FILES, 'utf8').split('\n').filter(Boolean).map(r => path.join(ROOT, r)))
+// Node reports real paths, so compare against real paths: a relative or symlinked
+// CRAP_ROOT, or a CRLF list, would otherwise match nothing and score every file 0%.
+const ROOT = fs.realpathSync(process.env.CRAP_ROOT)
+const listed = fs.readFileSync(process.env.CRAP_FILES, 'utf8').split(/\r?\n/).filter(Boolean)
+if (listed.length === 0) die(`${process.env.CRAP_FILES} lists no source files`)
+const SOURCES = new Set(listed.map(r => {
+  try { return fs.realpathSync(path.resolve(ROOT, r)) } catch { return die(`listed file ${r} does not exist under ${ROOT}`) }
+}))
 registerHooks({
   load (url, context, nextLoad) {
     const result = nextLoad(url, context)
