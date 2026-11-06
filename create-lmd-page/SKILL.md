@@ -1,28 +1,43 @@
 ---
 name: create-lmd-page
-description: Generate a Logic Masters Deutschland puzzle page (HTML) from a ruleset, a SudokuPad link, and an image id.
+description: Post a Logic Masters Deutschland puzzle from a SudokuPad link: render the image, create the inactive puzzle through the driver, archive it, and hand back the puzzle page link.
 disable-model-invocation: true
 ---
 
 # Create LMD Page
 
-Generate the HTML for a Logic Masters Deutschland puzzle post from three inputs.
+Make a Logic Masters Deutschland puzzle page from a SudokuPad link: render the board
+image, post the puzzle to LMD as an inactive draft, write the page HTML, archive the
+puzzle, and hand Chris the puzzle page link. **Chris reviews the page and clicks
+"Aktivieren" himself; the skill never does.**
+
+**A failure stops the skill.** Any step that fails (the extractor after its one
+fallback, the stream gate, the render, the driver, the archive) stops the run, and the
+failure is reported to the user with the command's output. There is no fallback to the
+manual flow: do not hand over a page to paste, and never say the puzzle is posted or
+archived after a failure. Facts about the LMD forms and the driver's contract:
+`docs/research/2026-11-06-lmd-upload-and-submit-forms.md`, `create-lmd-page/lmd_driver.mjs`.
 
 ## Inputs
 
-Collect from the user **one at a time** — ask for each missing input in its own
-message and wait for the reply before asking the next. Do not batch them into a
-single prompt. Skip any input the user already supplied. Order:
+Collect from the user **one at a time**, each in its own message, waiting for the reply
+before asking the next. Skip any input the user already supplied. Order:
 
-1. **SudokuPad link** — e.g. `https://sudokupad.app/abc123`. This *also supplies
-   the ruleset*: run the extractor (below) to pull the rules straight from the
-   puzzle. Only ask for rules text if extraction fails.
-2. **Image id** — e.g. `001344`, used in the `<img:ID>` placeholder
-3. **Notes** (optional) — intro/flavor text shown at the *top* of the page, above the image, with no header. If not given, omit the intro block entirely.
+1. **SudokuPad link** — e.g. `https://sudokupad.app/abc123`. It *also supplies the
+   ruleset*: run the extractor (below) and show the rules for the user to correct.
+2. **Notes** (optional) — intro/flavor text shown at the *top* of the page, above the
+   image, with no header. If not given, omit the intro block entirely.
+3. **Solution code description** — what the code is, e.g. "row 5, left to right".
+4. **Difficulty** — 1 to 5 (default 3).
 
-**Linking a setter's name in the notes.** When the user says "link to <name>'s LMD page" (or asks to link a name mentioned in the notes), wrap that name in an anchor to their LMD user page: `https://logic-masters.de/Raetselportal/Benutzer/eingestellt.php?name=<NAME>` (substitute the name, URL-encoding it if needed). Don't ask for the URL — build it from this template.
+There is no image id to ask for: the driver reads it from LMD.
 
-### Auto-extract rules from the link
+**Linking a setter's name in the notes.** When the user says "link to <name>'s LMD page"
+(or asks to link a name mentioned in the notes), wrap that name in an anchor to their LMD
+user page: `https://logic-masters.de/Raetselportal/Benutzer/eingestellt.php?name=<NAME>`
+(substitute the name, URL-encoding it if needed). Don't ask for the URL.
+
+### Auto-extract rules and solution from the link
 
 After the link, run:
 
@@ -30,27 +45,94 @@ After the link, run:
 ~/.agents/skills/create-lmd-page/extract_puzzle.py "<sudokupad-url-or-id>"
 ```
 
-(needs `uv`, shebang pulls `lzstring`). It prints JSON `{title, author, rules, layout}` pulled
-from the puzzle's `metadata`. The `rules` field is the ruleset — one named rule
-per paragraph, `\n\n`-separated — use it as if the user pasted it. Show the
-extracted rules and let the user correct them before building. `layout`
-(`"two"`/`"one"`) picks the template column count — see the Template section.
+(needs `uv`, shebang pulls `lzstring`). It prints JSON `{title, author, rules, solution,
+layout}` pulled from the puzzle's `metadata`. `rules` is the ruleset — one named rule per
+paragraph, `\n\n`-separated. `solution` is the puzzle's embedded solution (digits,
+row-major), or `null` when it carries none. `layout` (`"two"`/`"one"`) picks the template
+column count — see the Template section.
 
-If the script errors (non-zero exit: fetch failed, unknown blob format, or no
-rules field), fall back to asking the user for the ruleset as plain text (and
-judge `layout` by eye: one column if the rules would run taller than the ~450px
-image). Do not block on the extractor.
+If the script errors (fetch failed, unknown blob format, no rules field), ask the user
+for the ruleset as plain text, and judge `layout` by eye: one column if the rules would
+run taller than the ~450px image. That one fallback is the extractor's only; `solution`
+is then `null`.
+
+### Solution code
+
+The code is what the solver enters on LMD. Derive it, then show it for confirmation:
+
+- The description is a plain readout (a row, a column or a diagonal, in a stated
+  direction) and `solution` is not `null`: read those cells off `solution` and show the
+  code. Chris confirms or corrects it.
+- Anything else, or `solution` is `null`: ask the user for the code.
+
+LMD silently strips characters outside letters, digits and ``()<>~+-*= /\|!#$%&``, so
+the code uses only those.
+
+### Tags, and the Sudoku question
+
+Propose all three from the ruleset and show them in **one** message for the user to
+confirm or change (tag list and field names: the research note's *Labels* and *Free
+tags*):
+
+- **Labels** — the fixed checkboxes `label_<n>` (62 of them, e.g. `3` Puzzle variant,
+  `131` Latin Square). Send the numbers.
+- **Free tags** — the `freetags` text, suggestions from the research note's list
+  (e.g. `Sudoku`, `Killer (Variant)`).
+- **Sudoku_JaNein** — "Is your puzzle in essence a Sudoku (this includes variants)?"
+  Default `Ja`; the user may flip it to `Nein`.
 
 ## Output
 
-Fill the template below, then:
+Work in `~/lmd-pages/work/<slug>/`; `<slug>` comes from the puzzle/rule name, e.g.
+`scell-squish`. Create the directory. Then, in order:
 
-1. Write it to `~/lmd-pages/<puzzle-slug>.html` (create the dir if needed; slug from the puzzle/rule name, e.g. `scell-squish.html`).
-2. Load it onto the clipboard: `clip.exe < FILE` (WSL) / `pbcopy < FILE` (macOS) / `xclip -selection clipboard < FILE` (Linux).
-3. Tell the user it's on the clipboard AND state the file path, so they can re-copy it later without regenerating.
-4. Archive the puzzle: run § Archive, below. The run is not finished until that step has run.
+1. **Fill the template** (§ Template, formatting rules below) with `{{IMAGE_ID}}` left as
+   the literal text `{{IMAGE_ID}}`, and write it to `~/lmd-pages/work/<slug>/page.html`.
+2. **Render the board image** that fits inside 800×800. The `<img:ID>` display width stays
+   420 (two-column) or 600 (one-column), whatever the file's size:
 
-**Never have the user copy the HTML out of the terminal.** Drag-selecting long soft-wrapped lines in the TUI silently drops chunks mid-line (screen-cell copy during redraws) — this corrupted rule text and tags repeatedly before the clipboard workflow was adopted. **Never print the HTML to the terminal at all** — not even in a code block for review. The clipboard and the saved file are the whole deliverable; point the user at the file path if they want to read it.
+   ```
+   uv run --project ~/src/sudokupad-art python ~/.agents/skills/create-lmd-page/board_png.py "<sudokupad-link>" ~/lmd-pages/work/<slug>/board.png
+   ```
+
+   It runs sudokupad-art's `render_real.js` on the puzzle and shrinks the PNG when a side
+   is over 800 px. Its last line prints the size; if either side is over 800, stop.
+3. **Stream gate.** Before any driver call, run the check and stop on a non-zero exit,
+   showing its output:
+
+   ```
+   node ~/.agents/skills/create-lmd-page/stream_gate.mjs
+   ```
+
+   It exits 0 only when OBS is neither streaming nor recording (or is not running). It
+   refuses when OBS is streaming or recording, and when it cannot read the status.
+4. **Write the driver values** to `~/lmd-pages/work/<slug>/values.json`, from what the user
+   confirmed: `{"slug", "title", "code", "difficulty", "sudoku", "labels": [<n>...],
+   "freetags", "codedescr_en"}`. `title` is the extractor's; `codedescr_en` is the
+   description the user gave.
+5. **Post.** Run the driver through Windows `node.exe`, against the stream browser on
+   9334. It uploads the image, fills the template's image id, fills the English-only form
+   and clicks "Create", which saves the puzzle inactive:
+
+   ```
+   cd ~/lmd-pages/work/<slug> && node.exe "$(wslpath -w ~/.agents/skills/create-lmd-page/lmd_driver.mjs)" --endpoint http://127.0.0.1:9334 --png "$(wslpath -w board.png)" --template "$(wslpath -w page.html)" --values "$(wslpath -w values.json)" > driver.json
+   ```
+
+   `driver.json` holds one JSON line `{"image_id", "puzzle_id", "puzzle_url", "html"}`.
+   Any non-zero exit (a refusal) is a failure: report its output and stop. The driver
+   reads the puzzle id from the page "Create" lands on; if it refuses there, that is
+   reported as it stands.
+6. **Write the page file.** Write `html` from `driver.json` to `~/lmd-pages/<slug>.html`
+   and load it onto the clipboard: `clip.exe < FILE` (WSL). State the file path.
+7. **Archive** (§ Archive), with the puzzle id from `driver.json`.
+8. **Hand-off.** Give Chris `puzzle_url` from `driver.json`, the puzzle page link, bare on
+   its own line. Say the puzzle is saved inactive; he reviews the page and clicks
+   "Aktivieren" himself.
+
+**Never have the user copy the HTML out of the terminal.** Drag-selecting long soft-wrapped
+lines in the TUI silently drops chunks mid-line. **Never print the HTML to the terminal at
+all** — not even in a code block for review. The page file and the clipboard copy are for
+reference; the post itself carries the page.
 
 Formatting rules:
 
@@ -71,7 +153,7 @@ The template is styled to blend into the Logic Masters Deutschland site (logic-m
 
 **LMD embeds pasted HTML verbatim — there is no sanitizer.** Verified by extracting a live puzzle's source (search the page source for `HTML-Code des Raetsels: Anfang`; the raw HTML follows). Divs, inline styles, `<hr>`, headings all pass through untouched. If the rendered page loses tags or text, the paste was corrupted (see Output section) — do not redesign the HTML around it. LMD's own docs recommend `<div style="clear:both;text-align:center">` as the image wrapper.
 
-The image is referenced with LMD's custom syntax `<img:XXXXXX>` where XXXXXX is the uploaded file's id — beware stray spaces inside it. Extra attributes are passed through to the rendered `<img>` tag: `width="420"` (two-column) / `width="600"` (one-column) sets the display size; `max-width: 100%` keeps it from overflowing (it shrinks to full width when the columns stack on mobile).
+The image is referenced with LMD's custom syntax `<img:XXXXXX>` where XXXXXX is the uploaded file's id, which the driver fills in for `{{IMAGE_ID}}` — beware stray spaces inside it. Extra attributes are passed through to the rendered `<img>` tag: `width="420"` (two-column) / `width="600"` (one-column) sets the display size; `max-width: 100%` keeps it from overflowing (it shrinks to full width when the columns stack on mobile).
 
 Layout — pick by the `layout` field (see the two variants under Template):
 - **Two-column** (`"two"`, shorter rulesets): a centered italic epigraph on top, then a flex row — image left (`flex: 3`), Rules card right (`flex: 2 1 280px`, `#eef`/`#ddf` with a `#ddf` header bar). The ~3:2 split keeps short rules beside the image.
@@ -81,24 +163,19 @@ Layout — pick by the `layout` field (see the two variants under Template):
 
 ## Archive
 
-Closing step, once the page file is written and on the clipboard (§ Output): back the puzzle up at once, then ask for its LMD id (the user's ruling, sudokupad-art `docs/research/2026-09-30-lmd-archive-facts.md`, rulings 13 and 18). `<slug>` is the page file's name without `.html`; `<sudokupad-link>` is the link exactly as the page uses it, any `?setting-...` query included.
+Back the puzzle up once, with its LMD id from the driver (the user's ruling, sudokupad-art
+`docs/research/2026-09-30-lmd-archive-facts.md`, rulings 13 and 18). `<slug>` is the page
+file's name without `.html`; `<sudokupad-link>` is the link exactly as the page uses it,
+any `?setting-...` query included; `<id>` is `puzzle_id` from `driver.json`.
 
-1. Archive it:
+```
+uv run --project ~/src/sudokupad-art ~/src/sudokupad-art/lmd_archive.py archive "<sudokupad-link>" --archive ~/src/lmd-archive --slug <slug> --lmd <id>
+```
 
-   ```
-   uv run --project ~/src/sudokupad-art ~/src/sudokupad-art/lmd_archive.py archive "<sudokupad-link>" --archive ~/src/lmd-archive --slug <slug>
-   ```
-
-2. Ask the user for the puzzle's LMD id once he has posted it, in its own message. When he gives it, re-run with the id added, still passing `--slug`:
-
-   ```
-   uv run --project ~/src/sudokupad-art ~/src/sudokupad-art/lmd_archive.py archive "<sudokupad-link>" --archive ~/src/lmd-archive --slug <slug> --lmd <id>
-   ```
-
-   That fills the LMD fields and renames the folder to the id.
-3. The user may skip the id. Say that the next `backfill` will match the puzzle by its SudokuPad link, and stop.
-
-A non-zero exit, or any `FAILED` line on stderr, is reported to the user with the command's output, for either call. Never skip a failure, and never say the puzzle is archived after one. The page and clipboard are already done, so a failed archive does not undo them.
+That archives the puzzle and its LMD page and names the folder by the id. A non-zero exit,
+or any `FAILED` line on stderr, is reported to the user with the command's output; never
+skip a failure, and never say the puzzle is archived after one. The puzzle is already
+posted, so a failed archive does not undo it: report that too, and stop.
 
 ## Template
 
