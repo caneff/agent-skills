@@ -43,10 +43,12 @@ message name the axis and round. Tokens by kind come from each message's `usage`
 with no attributable transcript, or a transcript with no `usage`, is `unknown` with the
 reason, never zero; over-engineering's cost stays inside its standards row. A transcript
 no row holds becomes a row with unknown findings; one that cannot be attributed is listed.
-A mutation row written with a wrong outcome is corrected, never edited (#1658): `correct` appends a
-`correction` row naming it by id, and `read_ledger` (every reader's door: `report`, `escapes`,
-`fix_check`, the audit range) serves the named row with the correction's outcome, the highest-numbered
-correction of a row winning. The false row's line stays in the file; `update_ledger` alone reads it raw.
+A mutation row written with a wrong outcome is corrected, never edited (#1658): `correct`
+appends a `correction` row naming it by id, and `read_ledger` (every reader's door: `report`,
+`escapes`, `fix_check`, the audit range) serves the named row with the correction's outcome,
+the highest-numbered correction of a row winning. The false row's line stays in the file;
+`update_ledger` alone reads it raw. A correction holds the digest of the row it was made
+against, so a mutation re-run under the same id is not read as already corrected.
 A verification pass never counts toward overlap. Severity weights, the overlap split and
 the price table (`--prices`, dollars per million tokens by model) live in `report`, never
 in the ledger, so changing any of them needs no reharvest. `report` sums cost over known
@@ -1031,31 +1033,59 @@ def read_ledger_raw(path: Path) -> list[dict]:
     return rows
 
 
+def row_digest(row: dict) -> str:
+    """The sha256 of a row as written: what a correction is made against."""
+    return hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
+
+
+def check_correctable(target: dict | None, row_id: str) -> None:
+    """Raise ValueError unless `target` is a mutation row: the one rule of what a correction can
+    name, shared by the writer (`cmd_correct`) and the reader (`fold_corrections`)."""
+    if target is None:
+        raise ValueError(f"no row {row_id} in the ledger")
+    if target.get("type") not in MUTATION_TYPES:
+        raise ValueError(f"{row_id} is a {target.get('type')} row; only a mutation row's outcome is corrected")
+
+
 def fold_corrections(rows: list[dict]) -> list[dict]:
     """The ledger as every reader sees it (#1658): each `correction` row supersedes the mutation
     row it names by id, the highest-numbered correction of a row winning. The superseded row's
     outcome is replaced and the row keeps a `corrected` note; the correction rows themselves are
-    not returned. A correction whose target is absent or is not a mutation row raises ValueError,
-    never reads as nothing: the false row would then stand unnoticed."""
+    not returned. A correction applies only to the row as it stood when it was written
+    (`target_sha256`): a mutation re-run under the same id replaces that row, and a correction
+    made against the old one is listed in the new row's `stale_corrections` and changes nothing,
+    since the new run's outcome is the newer fact. A correction whose target is absent, is not a
+    mutation row or carries an outcome no mutation has raises ValueError, never reads as nothing:
+    the false row would then stand unnoticed."""
     held = {r.get("row_id"): r for r in rows if r.get("type") != CORRECTION_TYPE}
     latest: dict[str, dict] = {}
+    stale: dict[str, list[str]] = {}
     for c in rows:
         if c.get("type") != CORRECTION_TYPE:
             continue
-        target = held.get(c.get("corrects"))
-        if target is None or target.get("type") not in MUTATION_TYPES:
-            raise ValueError(f"correction {c.get('row_id')} names {c.get('corrects')!r}, "
-                             "which is not a mutation row in this ledger")
+        try:
+            check_correctable(held.get(c.get("corrects")), c.get("corrects"))
+        except ValueError as e:
+            raise ValueError(f"correction {c.get('row_id')}: {e}") from None
         if c.get("outcome") not in MUTATION_OUTCOMES:
             raise ValueError(f"correction {c.get('row_id')} has outcome {c.get('outcome')!r}, "
                              f"not one of {', '.join(MUTATION_OUTCOMES)}")
-        if c["corrects"] not in latest or c.get("seq", 0) >= latest[c["corrects"]].get("seq", 0):
+        if c.get("target_sha256") != row_digest(held[c["corrects"]]):
+            stale.setdefault(c["corrects"], []).append(c["row_id"])
+        elif c["corrects"] not in latest or c.get("seq", 0) >= latest[c["corrects"]].get("seq", 0):
             latest[c["corrects"]] = c
-    return [{**r, "outcome": latest[r["row_id"]]["outcome"],
-             "corrected": {"from": r.get("outcome"), "by": latest[r["row_id"]]["row_id"],
-                           "reason": latest[r["row_id"]].get("reason")}}
-            if r.get("row_id") in latest else r
-            for r in rows if r.get("type") != CORRECTION_TYPE]
+    folded = []
+    for r in rows:
+        if r.get("type") == CORRECTION_TYPE:
+            continue
+        won = latest.get(r.get("row_id"))
+        if won:
+            r = {**r, "outcome": won["outcome"],
+                 "corrected": {"from": r.get("outcome"), "by": won["row_id"], "reason": won.get("reason")}}
+        if r.get("row_id") in stale:
+            r = {**r, "stale_corrections": stale[r["row_id"]]}
+        folded.append(r)
+    return folded
 
 
 def read_ledger(path: Path) -> list[dict]:
@@ -1495,10 +1525,7 @@ def cmd_correct(args) -> int:
 
     def add(ledger: dict) -> None:
         target = ledger.get(args.row)
-        if target is None:
-            raise ValueError(f"no row {args.row} in {args.ledger}")
-        if target.get("type") not in MUTATION_TYPES:
-            raise ValueError(f"{args.row} is a {target.get('type')} row; only a mutation row's outcome is corrected")
+        check_correctable(target, args.row)
         if target.get("repo") != repo or target.get("ticket") != args.ticket:
             raise ValueError(f"{args.row} belongs to {target.get('repo')} #{target.get('ticket')}, "
                              f"not {repo} #{args.ticket}")
@@ -1508,7 +1535,7 @@ def cmd_correct(args) -> int:
         ledger[row_id] = {"row_id": row_id, "origin": "append", "type": CORRECTION_TYPE, "repo": repo,
                           "ticket": args.ticket, "tickets": [args.ticket], "corrects": args.row, "seq": seq,
                           "outcome": args.outcome, "reason": args.reason.strip(),
-                          "was": target.get("outcome")}
+                          "target_sha256": row_digest(target)}
         made.append(row_id)
 
     try:

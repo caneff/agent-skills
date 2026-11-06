@@ -127,3 +127,75 @@ def test_a_hand_built_row_with_no_row_id_still_reads(tmp_path):
     ledger = tmp_path / "ledger.jsonl"
     ledger.write_text(json.dumps({"repo": "skills", "ticket": 1, "type": "spec"}) + "\n")
     assert review_ledger.read_ledger(ledger) == [{"repo": "skills", "ticket": 1, "type": "spec"}]
+
+
+def test_a_mutation_re_run_under_the_same_id_is_not_read_as_corrected(tmp_path):
+    ledger = ledger_with_false_red(tmp_path)
+    assert correct(tmp_path, ledger, "green").returncode == 0
+    r = run(tmp_path, "append", "--repo", "skills", "--ticket", 130, "--type", "worker-mutation",
+            "--mutation-id", "fixm2", "--outcome", "red", "--seconds", 6, "--ledger", ledger)
+    assert r.returncode == 0, r.stderr
+    [row] = review_ledger.read_ledger(ledger)
+    assert row["outcome"] == "red" and "corrected" not in row
+    assert row["stale_corrections"] == [FALSE_ROW + "/correction/1"]
+    assert report(tmp_path, ledger)["red_rate"] == 1.0
+
+
+def test_the_eleventh_correction_wins_over_the_second_whatever_the_file_order(tmp_path):
+    ledger = ledger_with_false_red(tmp_path)
+    outcomes = ["green", "red", "unknown"]
+    for k in range(11):
+        assert correct(tmp_path, ledger, outcomes[k % 3], reason=f"round {k}").returncode == 0
+    lines = ledger.read_text().splitlines()
+    assert len(lines) == 12  # no correction overwrote another
+    ids = [json.loads(x)["row_id"][len(FALSE_ROW):] for x in lines]
+    assert ids.index("/correction/10") < ids.index("/correction/2")  # text order: 10 sorts before 2
+    assert [r["outcome"] for r in review_ledger.read_ledger(ledger)] == [outcomes[10 % 3]]
+
+
+def write_rows(ledger, *rows):
+    with open(ledger, "a") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+
+
+def test_a_correction_of_a_row_that_is_not_a_mutation_row_fails_the_reader_loud(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    write_rows(ledger, {"row_id": "skills/1/spec/1/x", "type": "spec"},
+               {"row_id": "c1", "type": "correction", "corrects": "skills/1/spec/1/x", "outcome": "green",
+                "reason": "r", "target_sha256": "x"})
+    try:
+        review_ledger.read_ledger(ledger)
+    except ValueError as e:
+        assert "only a mutation row" in str(e)
+    else:
+        raise AssertionError("a correction of a spec row was read as nothing")
+
+
+def test_a_correction_with_an_outcome_no_mutation_has_fails_the_reader_loud(tmp_path):
+    ledger = ledger_with_false_red(tmp_path)
+    target = review_ledger.read_ledger_raw(ledger)[0]
+    write_rows(ledger, {"row_id": "c1", "type": "correction", "corrects": FALSE_ROW, "outcome": "fixed",
+                        "reason": "r", "target_sha256": review_ledger.row_digest(target)})
+    try:
+        review_ledger.read_ledger(ledger)
+    except ValueError as e:
+        assert "'fixed'" in str(e)
+    else:
+        raise AssertionError("a bad correction outcome was read as nothing")
+
+
+def test_harvest_keeps_the_correction_row(tmp_path):
+    ledger = ledger_with_false_red(tmp_path)
+    assert correct(tmp_path, ledger).returncode == 0
+    cache, transcripts = tmp_path / "cache", tmp_path / "tr"
+    (cache / "skills").mkdir(parents=True)
+    transcripts.mkdir()
+    (cache / "skills" / "findings-standards-9.jsonl").write_text(json.dumps(
+        {"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "t"}) + "\n")
+    r = run(tmp_path, "harvest", "--cache", cache, "--transcripts", transcripts, "--ledger", ledger,
+            "--review-file", tmp_path / "review.md")
+    assert r.returncode == 0, r.stderr
+    raw = review_ledger.read_ledger_raw(ledger)
+    assert sorted(r["type"] for r in raw) == ["correction", "standards", "worker-mutation"]  # harvest ran
+    assert [r["outcome"] for r in review_ledger.read_ledger(ledger) if r["type"] == "worker-mutation"] == ["green"]
