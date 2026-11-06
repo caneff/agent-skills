@@ -1,0 +1,613 @@
+<html lang="en"><head><title>Rätsel einstellen — Rätselportal — Logic Masters Deutschland</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Die Webseite des Vereins Logic Masters Deutschland e.V.">
+<meta name="keywords" content="Raetsel, Rätsel, Logik, Sudoku, Meisterschaft, Monatsrätsel, Rätselportal">
+<link rel="alternate" type="application/rss+xml" title="Logic Masters Deutschland e.V." href="http://logic-masters.de/feed.php">
+<link rel="alternate" type="application/rss+xml" title="Rätselportal - new Puzzles" href="http://logic-masters.de/Raetselportal/Feed/feed.php?lang=en">
+<link title="Grundversion" href="/css/base.css" type="text/css" rel="stylesheet">
+<style type="text/css"><!--
+html { background: #fff url("/images/hashi.jpg") repeat; }
+--></style>
+<link href="/css/rp.css" type="text/css" rel="stylesheet">
+<link rel="SHORTCUT ICON" href="/favicon.ico">
+</head><body><h1 style="display:none">Logic Masters Deutschland e.V.</h1>
+<div class="centercolumn">
+<div class="box">
+<h2>Create a New Puzzle</h2>
+<p>
+<b>To create a new puzzle please fill in the following form. After saving the puzzle you can preview and correct it without other users being notified. To make the puzzle available to the puzzle solver community you have to choose <i>Activate</i> on the puzzle page.</b>
+</p>
+<p>
+If this is the first time that you try to publish a puzzle we recommend that you read the <a href="/Raetselportal/Hilfe/einstellen.php#tippsundtricks">hints</a> section on the instructions page. This will help you avoid frequent beginner's mistakes.
+</p>
+<p>
+Please choose significant labels and tags (see below) for your puzzle. They make it easier for the other users of the portal to find the puzzle types they are looking for. The labels and tags are supposed to designate puzzle types or variants, not just repeat keywords from the puzzle title.
+</p>
+<form action="einstellen.php" method="POST">
+<p>
+First things first: Ist your puzzle in essence a <b>Sudoku</b> (this includes variants)?<br>
+<input type="radio" name="Sudoku_JaNein" id="Sudoku_Ja" value="Ja" required=""><label for="Sudoku_Ja">Yes</label><br>
+<input type="radio" name="Sudoku_JaNein" id="Sudoku_Nein" value="Nein" required=""><label for="Sudoku_Nein">No</label>
+</p>
+<p>
+Name:<br><input type="text" name="name" value="" size="60" required="">
+</p>
+<p>
+Puzzle (German):<br><textarea name="htmlcode" cols="60" rows="15"></textarea>
+</p>
+<p>
+Solution code description (German):<br><textarea name="codedescr" cols="60" rows="5"></textarea>
+</p>
+<p>
+Puzzle (English):<br><textarea name="htmlcode_en" cols="60" rows="15"></textarea>
+</p>
+<p>
+Solution code description (English):<br><textarea name="codedescr_en" cols="60" rows="5"></textarea>
+</p>
+<p>
+Solution code: (Allowed characters: Letters, numbers and ()&lt;&gt;~+-*= /\|!#$%&amp;)<br><input type="text" name="code" value="" size="60">
+</p>
+<p>
+Difficulty:<select name="dif">
+<option value="1">very easy</option>
+<option value="2">easy</option>
+<option value="3" selected="">average</option>
+<option value="4">hard</option>
+<option value="5">very hard</option>
+</select>
+</p><p>
+Do you want to activate this puzzle at a certain point in time? <sup>(*)</sup><br>
+<select name="frei">
+<option value="ja">Yes, on:</option>
+<option value="nein" selected="">No</option>
+</select><br>
+Date: <input type="text" name="day" size="2" value="06">
+. <input type="text" name="month" size="2" value="11">
+ <input type="text" name="year" size="4" value="2026"><br>
+Time: <input type="text" name="hour" size="2" value="15">
+: <input type="text" name="min" size="2" value="45">
+: <input type="text" name="sec" size="2" value="04">
+</p>
+<p>
+Here you can mark your puzzle with additional Labels and Tags. Please observe in this regard the guidelines on the following <a href="/Raetselportal/Hilfe/tags.php" target="_blank">Help page</a>.
+</p>
+<p>
+Labels:<br>
+</p>
+<table width="90%"><tbody><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_1" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/standard.png" alt="Standard puzzle" title="Standard puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_1" target="_blank">Standard puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_2" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/kombi.png" alt="Puzzle combination" title="Puzzle combination"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_2" target="_blank">Puzzle combination</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_3" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/variante.png" alt="Puzzle variant" title="Puzzle variant"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_3" target="_blank">Puzzle variant</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_4" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/varkombi.png" alt="Variant combination" title="Variant combination"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_4" target="_blank">Variant combination</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_5" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/neu.png" alt="New" title="New"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_5" target="_blank">New</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_11" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/deutsch.png" alt="German knowledge" title="German knowledge"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_11" target="_blank">German knowledge</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_12" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/englisch.png" alt="English knowledge" title="English knowledge"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_12" target="_blank">English knowledge</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_13" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/mathematik.png" alt="Math knowledge" title="Math knowledge"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_13" target="_blank">Math knowledge</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_14" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/wissen.png" alt="Special knowledge" title="Special knowledge"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_14" target="_blank">Special knowledge</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_21" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/anfaenger.png" alt="Beginners" title="Beginners"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_21" target="_blank">Beginners</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_22" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/tipp.png" alt="Solving hints" title="Solving hints"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_22" target="_blank">Solving hints</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_23" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/computer.png" alt="Computer generated" title="Computer generated"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_23" target="_blank">Computer generated</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_24" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/comphilfe.png" alt="Computer assistance" title="Computer assistance"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_24" target="_blank">Computer assistance</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_25" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/online.png" alt="Online solving tool" title="Online solving tool"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_25" target="_blank">Online solving tool</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_26" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/gross.png" alt="Large" title="Large"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_26" target="_blank">Large</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_27" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/klein.png" alt="Small" title="Small"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_27" target="_blank">Small</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_31" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/optimierer.png" alt="Optimizer" title="Optimizer"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_31" target="_blank">Optimizer</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_32" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/meta.png" alt="Meta puzzle" title="Meta puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_32" target="_blank">Meta puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_33" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/mystery.png" alt="Mystery puzzle" title="Mystery puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_33" target="_blank">Mystery puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_34" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/geheimschrift.png" alt="Cipher" title="Cipher"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_34" target="_blank">Cipher</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_35" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/folge.png" alt="Sequence" title="Sequence"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_35" target="_blank">Sequence</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_36" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/instructionless.png" alt="Instructionless" title="Instructionless"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_36" target="_blank">Instructionless</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_41" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/mehrgitter.png" alt="Multi-grid puzzle" title="Multi-grid puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_41" target="_blank">Multi-grid puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_42" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/team.png" alt="Team puzzle" title="Team puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_42" target="_blank">Team puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_43" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/perma.png" alt="Permaculture" title="Permaculture"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_43" target="_blank">Permaculture</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_44" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/geisterbahn.png" alt="Geisterbahn" title="Geisterbahn"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_44" target="_blank">Geisterbahn</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_45" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/matchmaker.png" alt="Matchmaker" title="Matchmaker"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_45" target="_blank">Matchmaker</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_51" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/nureinfeld.png" alt="Just one cell" title="Just one cell"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_51" target="_blank">Just one cell</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_101" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/hexagonal.png" alt="Hexagonal" title="Hexagonal"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_101" target="_blank">Hexagonal</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_102" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/triangular.png" alt="Triangular" title="Triangular"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_102" target="_blank">Triangular</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_103" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/irregular.png" alt="Irregular grid" title="Irregular grid"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_103" target="_blank">Irregular grid</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_111" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/wraparound.png" alt="Wraparound" title="Wraparound"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_111" target="_blank">Wraparound</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_112" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/3d.png" alt="Three-dimensional" title="Three-dimensional"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_112" target="_blank">Three-dimensional</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_121" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/fuell.png" alt="Filling puzzle" title="Filling puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_121" target="_blank">Filling puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_122" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/arithmetik.png" alt="Arithmetic puzzle" title="Arithmetic puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_122" target="_blank">Arithmetic puzzle</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_123" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/wege.png" alt="Path puzzle" title="Path puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_123" target="_blank">Path puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_124" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/platzierung.png" alt="Placement puzzle" title="Placement puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_124" target="_blank">Placement puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_125" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/faerbe.png" alt="Shading puzzle" title="Shading puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_125" target="_blank">Shading puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_126" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/zerlegung.png" alt="Dissection puzzle" title="Dissection puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_126" target="_blank">Dissection puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_127" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/labyrinth.png" alt="Maze" title="Maze"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_127" target="_blank">Maze</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_128" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/wort.png" alt="Word puzzle" title="Word puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_128" target="_blank">Word puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_129" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/bewegung.png" alt="Movement puzzle" title="Movement puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_129" target="_blank">Movement puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_131" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/latq.png" alt="Latin Square" title="Latin Square"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_131" target="_blank">Latin Square</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_132" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/eulerq.png" alt="Euler Square" title="Euler Square"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_132" target="_blank">Euler Square</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_141" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/knappdaneben.png" alt="Knapp daneben" title="Knapp daneben"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_141" target="_blank">Knapp daneben</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_142" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/krypto.png" alt="Coded puzzle" title="Coded puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_142" target="_blank">Coded puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_143" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/eokrypto.png" alt="Even/Odd coded puzzle" title="Even/Odd coded puzzle"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_143" target="_blank">Even/Odd coded puzzle</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_151" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/dominos.png" alt="Dominoes" title="Dominoes"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_151" target="_blank">Dominoes</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_152" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/trominos.png" alt="Trominoes" title="Trominoes"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_152" target="_blank">Trominoes</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_153" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/tetrominos.png" alt="Tetrominoes" title="Tetrominoes"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_153" target="_blank">Tetrominoes</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_154" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/pentominos.png" alt="Pentominoes" title="Pentominoes"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_154" target="_blank">Pentominoes</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_155" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/hexominos.png" alt="Hexominoes" title="Hexominoes"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_155" target="_blank">Hexominoes</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_156" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/polyominos.png" alt="Polyominoes" title="Polyominoes"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_156" target="_blank">Polyominoes</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_157" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/slicy.png" alt="SLICY" title="SLICY"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_157" target="_blank">SLICY</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_158" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/pentakuben.png" alt="Pentacubes" title="Pentacubes"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_158" target="_blank">Pentacubes</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_161" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/schach.png" alt="Chess" title="Chess"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_161" target="_blank">Chess</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_162" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/spielkarten.png" alt="Playing cards" title="Playing cards"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_162" target="_blank">Playing cards</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_201" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/neandertal.png" alt="Neandertal" title="Neandertal"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_201" target="_blank">Neandertal</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_202" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/alien.png" alt="Alien" title="Alien"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_202" target="_blank">Alien</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_211" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/mehrdeutig.png" alt="Multiple solutions" title="Multiple solutions"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_211" target="_blank">Multiple solutions</a></font>
+</td></tr><tr><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_221" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/2358.png" alt="2358" title="2358"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_221" target="_blank">2358</a></font>
+</td><td width="16%"><nobr><input style="vertical-align:middle" type="checkbox" name="label_222" value="1"><img style="vertical-align:middle" src="/Raetselportal/bilder/labels/portal.png" alt="Portal Special" title="Portal Special"></nobr>
+<br><font size="2"><a href="/Raetselportal/Hilfe/tags.php#tag_222" target="_blank">Portal Special</a></font>
+</td></tr></tbody></table><p>
+Additional tags (see the list on the right-hand side for possible entries):<br>
+</p>
+<input type="text" id="freetags" name="freetags" value="" size="50" class="ui-autocomplete-input" autocomplete="off">
+<p>
+<input type="submit" name="einstellen" value="Create">
+</p>
+</form>
+<hr>
+<div style="font-size:80%">
+<p>
+<sup>(*)</sup> In order to publish the puzzle automatically you have to activate it on the puzzle page!
+</p>
+</div>
+<link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+<link rel="stylesheet" href="/resources/demos/style.css">
+<script src="https://code.jquery.com/jquery-1.12.4.js"></script>
+<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+<script>
+$(function() {
+  var freeRawTags = [
+    "#Impl",
+    "10-in-9 (Variant)",
+    "159 (Variant)",
+    "A 38",
+    "ABC Box",
+    "ABCD",
+    "ABCtje",
+    "Achtelwenden",
+    "Akari",
+    "All or Nothing",
+    "Alphametic",
+    "Anglers",
+    "Anti-Diagonal (Variant)",
+    "Anti-Factor Lines (Variant)",
+    "Anti-Knight (Variant)",
+    "Anti-Queen (Variant)",
+    "Aquarium",
+    "Araf",
+    "Arrows",
+    "Arrows (Variant)",
+    "Battenburg (Variant)",
+    "Battlefield (Variant)",
+    "Battleships",
+    "Between (Variant)",
+    "Binairo (Variant)",
+    "Blackout Dominoes",
+    "Brick Wall",
+    "Broken 159 (Variant)",
+    "Candles",
+    "Capsules",
+    "Carpet (Variant)",
+    "Castle Wall",
+    "Cave",
+    "Chaos Construction (Variant)",
+    "Chatroom",
+    "Checkered Fillomino",
+    "Clone (Variant)",
+    "Clouds",
+    "Combi Block",
+    "Compass",
+    "Compass (Variant)",
+    "Confetti Sums (Variant)",
+    "Congruence Loop",
+    "Consecutive (Variant)",
+    "Consecutive Pairs (Variant)",
+    "Coral",
+    "Corridors",
+    "Country Road",
+    "Cross the Streams",
+    "Crossword Construction (empty)",
+    "Crossword Construction (fixed)",
+    "Crossword Puzzle",
+    "Daisho",
+    "Darts",
+    "Diagonal (Variant)",
+    "Diagonal Chains",
+    "Difference (Variant)",
+    "Digital (Variant)",
+    "Disjoint Groups (Variant)",
+    "Distance (Variant)",
+    "Dominion",
+    "Domino Castle",
+    "Domino Search",
+    "Dots (Theme)",
+    "Double Trouble (Variant)",
+    "Earthquake (Variant)",
+    "Easy as ABC",
+    "Entropy (Theme)",
+    "Equality",
+    "Even Neighbours",
+    "Even/Odd (Variant)",
+    "Every Second Turn",
+    "Extra Regions (Variant)",
+    "Fibonacci (Theme)",
+    "Fillomino",
+    "Fish Pairs",
+    "Fortress (Variant)",
+    "Four Winds",
+    "Friendly (Variant)",
+    "Futoshiki",
+    "Fuzuli",
+    "Galaxies",
+    "Gaps",
+    "Geradeweg",
+    "German Whispers (Variant)",
+    "Greater Than (Variant)",
+    "Greener Grasses",
+    "Haisu",
+    "Hakyuu",
+    "Half Dominoes",
+    "Hamle",
+    "Hashiwokakero",
+    "Haus-Baum-Tier",
+    "Heki",
+    "Herugolf",
+    "Heyawake",
+    "Hidato",
+    "Hitori",
+    "Hungarian Tapa",
+    "Icebarn",
+    "Infection",
+    "Irregular (Variant)",
+    "Japanese Sums",
+    "Just One Cell (Variant)",
+    "Kakuro",
+    "Killer (Variant)",
+    "Knickwege",
+    "Knight Move (Theme)",
+    "Kojun",
+    "Kreuzzahlrätsel",
+    "Kropki",
+    "Kropki Pairs (Variant)",
+    "Kuromasu",
+    "Kurotto",
+    "Kyudoku",
+    "LITS",
+    "Landvermessung",
+    "Laser",
+    "Letter Puzzle",
+    "Lighthouses",
+    "Linesweeper",
+    "Little Killer (Variant)",
+    "Lockout Lines (Variant)",
+    "Logical",
+    "Lookouts",
+    "Magic Labyrinth",
+    "Magic Square",
+    "Magnets",
+    "Masterword",
+    "Masyu",
+    "Mathrax",
+    "Maximum (Variant)",
+    "Median (Variant)",
+    "Mid-loop",
+    "Milky Way",
+    "MinMax (Variant)",
+    "Minesweeper",
+    "Mini Coral",
+    "Mini Islands",
+    "Mochikoro",
+    "Modifier Cells (Variant)",
+    "Molecule (Variant)",
+    "Moon-or-Sun",
+    "Mosaic",
+    "Myopia",
+    "Nanro",
+    "Neighbours",
+    "Non-Consecutive (Variant)",
+    "Non-Touching (Variant)",
+    "Nonogram",
+    "Norinori",
+    "Number Link",
+    "Number Maze",
+    "Nuribou",
+    "Nurikabe",
+    "Nurimisaki",
+    "Odd Pairs (Variant)",
+    "Offset (Variant)",
+    "Outside (Variant)",
+    "Palindrome (Variant)",
+    "Parity (Theme)",
+    "Parity Party (Variant)",
+    "Particle Zoo",
+    "Partiti",
+    "Pathway (Variant)",
+    "Pentominous",
+    "Pentopia",
+    "Persistence of Memory",
+    "Pfeilblöcke",
+    "Pills",
+    "Pipes",
+    "Pivot (Variant)",
+    "Point a Star",
+    "Position Sums (Variant)",
+    "Primes (Theme)",
+    "Product (Theme)",
+    "Products",
+    "Putteria",
+    "Pyramid",
+    "Quadruple (Variant)",
+    "Quattroquadri (Variant)",
+    "Railroads",
+    "Ratio (Variant)",
+    "Ratio Pairs (Variant)",
+    "Region Sum Lines (Variant)",
+    "Regional Sums",
+    "Remote (Variant)",
+    "Renban (Variant)",
+    "Renkatsu",
+    "Roller Coaster",
+    "Roman Numerals (Variant)",
+    "Roman Sums",
+    "Rossini (Variant)",
+    "Samurai (Variant)",
+    "Sandwich (Variant)",
+    "Sashigane",
+    "Satogaeri",
+    "Schlingerpfad",
+    "Schräge Räume",
+    "Shakashaka",
+    "Shikaku",
+    "Shimaguni",
+    "Skyscraper Clusters",
+    "Skyscrapers",
+    "Slant",
+    "Slingshot (Variant)",
+    "Slitherlink",
+    "Smashed Sums",
+    "Snake",
+    "Snake (Variant)",
+    "Snake Pit",
+    "Spiegelkabinett",
+    "Spokes",
+    "Star Battle",
+    "Statue Park",
+    "Stellwände im Büro",
+    "Sternenhimmel",
+    "Stostone",
+    "Sudoku",
+    "Suguru",
+    "Sukoro",
+    "Summon",
+    "Suraromu",
+    "Switcheroo",
+    "Takumi",
+    "Tapa",
+    "Tapaeske Dreiecke",
+    "Tasukuea",
+    "Taxicab (Variant)",
+    "Tents",
+    "Thermo (Variant)",
+    "Thermometers",
+    "Three is a Crowd (Variant)",
+    "TomTom",
+    "Top Heavy Number Place",
+    "Touching Pentominoes",
+    "Transporter",
+    "Treasure Map",
+    "Tren",
+    "Trid",
+    "Trio Cut",
+    "Tsutan",
+    "Um die Ecke gedacht",
+    "Umbrellas",
+    "Underground",
+    "Urnenrätsel",
+    "Variables Tapasyu",
+    "WIndows",
+    "Walls",
+    "Windoku (Variant)",
+    "Wittgenstein Briquet",
+    "Word Search",
+    "Word Snakes",
+    "X-Sums (Variant)",
+    "XV (Variant)",
+    "XV Pairs (Variant)",
+    "XY-Differences (Variant)",
+    "Yajilin",
+    "Yajisan-Kazusan",
+    "Yin and Yang",
+    "Yonbun"
+  ];
+  function split(val) {
+    return val.split( /,\s*/ );
+  }
+  function extractLast(term) {
+    return split(term).pop();
+  }
+  $("#freetags")
+    .on("keydown", function(event) {
+      if (event.keyCode === $.ui.keyCode.TAB && $(this).autocomplete("instance").menu.active) {
+        event.preventDefault();
+      }
+    })
+    .autocomplete({
+      search: function() {
+        var term = extractLast(this.value);
+        if (term.length<3) {
+          return false;
+        }
+      },
+      source: function(request, response) {
+      response($.ui.autocomplete.filter(freeRawTags, extractLast(request.term)));
+    },
+    focus: function() {
+      return false;
+    },
+    select: function(event, ui) {
+      var terms = split(this.value);
+      terms.pop();
+      terms.push(ui.item.value);
+      terms.push("");
+      this.value = terms.join(", ");
+      return false;
+    }
+  });
+} );
+</script>
+</div></div>
+<div class="rightcolumn">
+<div class="box">
+<h2>Create a new puzzle</h2>
+<div class="menu">
+<ul>
+<li><a href="/Raetselportal/Eigene/bearbeiten.php">Edit puzzles</a></li><li><a href="/Raetselportal/Eigene/kommentare.php">Comments on your puzzles</a></li><li><a href="/Raetselportal/Eigene/statistik.php">Statistics</a></li><li><a href="/Raetselportal/Eigene/loeschen.php">Delete puzzle</a></li></ul>
+</div></div><div class="box">
+<h2>Datei hochladen</h2>
+<form class="upload" action="/Raetselportal/Eigene/einstellen.php" enctype="multipart/form-data" method="POST">
+<p>Die hochzuladende Datei:<br>
+<input type="file" name="datei" size="10">
+<input type="hidden" name="MAX_FILE_SIZE" value="4194304">
+</p><p>Name:<br><input type="text" size="50" name="name">
+</p><p>Anmerkung:<br><textarea name="anmerkung" cols="50" rows="3"></textarea>
+</p><p>Bitte schreiben Sie bei der Anmerkung rein, ob Sie die Datei selbst erstellt haben, oder wenn nicht, dass derjenige, der die Datei erstellt hat, Ihnen die Erlaubnis gegeben hat, sie hier hochzuladen.</p><p><input type="checkbox" name="offen"> Die Datei darf auch von Anderen genutzt werden.
+</p><p class="upload_submit"><input type="submit" name="dateiupload" value="Hochladen">
+</p></form>
+<p class="upload_link"><a href="/Dateien/index.php">Alle Dateien bearbeiten</a>
+</p></div><div class="box">
+<h2>List of tags</h2><ul><li>10-in-9 (Variant)</li><li>159 (Variant)</li><li>A 38</li><li>ABC Box</li><li>ABCD</li><li>ABCtje</li><li>Achtelwenden</li><li>Akari</li><li>All or Nothing</li><li>Alphametic</li><li>Anglers</li><li>Anti-Diagonal (Variant)</li><li>Anti-Factor Lines (Variant)</li><li>Anti-Knight (Variant)</li><li>Anti-Queen (Variant)</li><li>Aquarium</li><li>Araf</li><li>Arrows</li><li>Arrows (Variant)</li><li>Battenburg (Variant)</li><li>Battlefield (Variant)</li><li>Battleships</li><li>Between (Variant)</li><li>Binairo (Variant)</li><li>Blackout Dominoes</li><li>Brick Wall</li><li>Broken 159 (Variant)</li><li>Candles</li><li>Capsules</li><li>Carpet (Variant)</li><li>Castle Wall</li><li>Cave</li><li>Chaos Construction (Variant)</li><li>Chatroom</li><li>Checkered Fillomino</li><li>Clone (Variant)</li><li>Clouds</li><li>Combi Block</li><li>Compass</li><li>Compass (Variant)</li><li>Confetti Sums (Variant)</li><li>Congruence Loop</li><li>Consecutive (Variant)</li><li>Consecutive Pairs (Variant)</li><li>Coral</li><li>Corridors</li><li>Country Road</li><li>Cross the Streams</li><li>Crossword Construction (empty)</li><li>Crossword Construction (fixed)</li><li>Crossword Puzzle</li><li>Daisho</li><li>Darts</li><li>Diagonal (Variant)</li><li>Diagonal Chains</li><li>Difference (Variant)</li><li>Digital (Variant)</li><li>Disjoint Groups (Variant)</li><li>Distance (Variant)</li><li>Dominion</li><li>Domino Castle</li><li>Domino Search</li><li>Dots (Theme)</li><li>Double Trouble (Variant)</li><li>Earthquake (Variant)</li><li>Easy as ABC</li><li>Entropy (Theme)</li><li>Equality</li><li>Even Neighbours</li><li>Even/Odd (Variant)</li><li>Every Second Turn</li><li>Extra Regions (Variant)</li><li>Fibonacci (Theme)</li><li>Fillomino</li><li>Fish Pairs</li><li>Fortress (Variant)</li><li>Four Winds</li><li>Friendly (Variant)</li><li>Futoshiki</li><li>Fuzuli</li><li>Galaxies</li><li>Gaps</li><li>Geradeweg</li><li>German Whispers (Variant)</li><li>Greater Than (Variant)</li><li>Greener Grasses</li><li>Haisu</li><li>Hakyuu</li><li>Half Dominoes</li><li>Hamle</li><li>Hashiwokakero</li><li>Haus-Baum-Tier</li><li>Heki</li><li>Herugolf</li><li>Heyawake</li><li>Hidato</li><li>Hitori</li><li>Hungarian Tapa</li><li>Icebarn</li><li>Infection</li><li>Irregular (Variant)</li><li>Japanese Sums</li><li>Just One Cell (Variant)</li><li>Kakuro</li><li>Killer (Variant)</li><li>Knickwege</li><li>Knight Move (Theme)</li><li>Kojun</li><li>Kreuzzahlrätsel</li><li>Kropki</li><li>Kropki Pairs (Variant)</li><li>Kuromasu</li><li>Kurotto</li><li>Kyudoku</li><li>LITS</li><li>Landvermessung</li><li>Laser</li><li>Letter Puzzle</li><li>Lighthouses</li><li>Linesweeper</li><li>Little Killer (Variant)</li><li>Lockout Lines (Variant)</li><li>Logical</li><li>Lookouts</li><li>Magic Labyrinth</li><li>Magic Square</li><li>Magnets</li><li>Masterword</li><li>Masyu</li><li>Mathrax</li><li>Maximum (Variant)</li><li>Median (Variant)</li><li>Mid-loop</li><li>Milky Way</li><li>MinMax (Variant)</li><li>Minesweeper</li><li>Mini Coral</li><li>Mini Islands</li><li>Mochikoro</li><li>Modifier Cells (Variant)</li><li>Molecule (Variant)</li><li>Moon-or-Sun</li><li>Mosaic</li><li>Myopia</li><li>Nanro</li><li>Neighbours</li><li>Non-Consecutive (Variant)</li><li>Non-Touching (Variant)</li><li>Nonogram</li><li>Norinori</li><li>Number Link</li><li>Number Maze</li><li>Nuribou</li><li>Nurikabe</li><li>Nurimisaki</li><li>Odd Pairs (Variant)</li><li>Offset (Variant)</li><li>Outside (Variant)</li><li>Palindrome (Variant)</li><li>Parity (Theme)</li><li>Parity Party (Variant)</li><li>Particle Zoo</li><li>Partiti</li><li>Pathway (Variant)</li><li>Pentominous</li><li>Pentopia</li><li>Persistence of Memory</li><li>Pfeilblöcke</li><li>Pills</li><li>Pipes</li><li>Pivot (Variant)</li><li>Point a Star</li><li>Position Sums (Variant)</li><li>Primes (Theme)</li><li>Product (Theme)</li><li>Products</li><li>Putteria</li><li>Pyramid</li><li>Quadruple (Variant)</li><li>Quattroquadri (Variant)</li><li>Railroads</li><li>Ratio (Variant)</li><li>Ratio Pairs (Variant)</li><li>Region Sum Lines (Variant)</li><li>Regional Sums</li><li>Remote (Variant)</li><li>Renban (Variant)</li><li>Renkatsu</li><li>Roller Coaster</li><li>Roman Numerals (Variant)</li><li>Roman Sums</li><li>Rossini (Variant)</li><li>Samurai (Variant)</li><li>Sandwich (Variant)</li><li>Sashigane</li><li>Satogaeri</li><li>Schlingerpfad</li><li>Schräge Räume</li><li>Shakashaka</li><li>Shikaku</li><li>Shimaguni</li><li>Skyscraper Clusters</li><li>Skyscrapers</li><li>Slant</li><li>Slingshot (Variant)</li><li>Slitherlink</li><li>Smashed Sums</li><li>Snake</li><li>Snake (Variant)</li><li>Snake Pit</li><li>Spiegelkabinett</li><li>Spokes</li><li>Star Battle</li><li>Statue Park</li><li>Stellwände im Büro</li><li>Sternenhimmel</li><li>Stostone</li><li>Sudoku</li><li>Suguru</li><li>Sukoro</li><li>Summon</li><li>Suraromu</li><li>Switcheroo</li><li>Takumi</li><li>Tapa</li><li>Tapaeske Dreiecke</li><li>Tasukuea</li><li>Taxicab (Variant)</li><li>Tents</li><li>Thermo (Variant)</li><li>Thermometers</li><li>Three is a Crowd (Variant)</li><li>TomTom</li><li>Top Heavy Number Place</li><li>Touching Pentominoes</li><li>Transporter</li><li>Treasure Map</li><li>Tren</li><li>Trid</li><li>Trio Cut</li><li>Tsutan</li><li>Um die Ecke gedacht</li><li>Umbrellas</li><li>Underground</li><li>Urnenrätsel</li><li>Variables Tapasyu</li><li>WIndows</li><li>Walls</li><li>Windoku (Variant)</li><li>Wittgenstein Briquet</li><li>Word Search</li><li>Word Snakes</li><li>X-Sums (Variant)</li><li>XV (Variant)</li><li>XV Pairs (Variant)</li><li>XY-Differences (Variant)</li><li>Yajilin</li><li>Yajisan-Kazusan</li><li>Yin and Yang</li><li>Yonbun</li></ul></div></div>
+<nav class="topmenu">
+<h2>Selection</h2>
+<ul>
+<li><a href="/">Home</a>
+  <ul>
+  <li><a href="/Einfuehrung/">Introduction</a>
+  </li></ul>
+</li><li><a href="/Raetsel/">Puzzles</a>
+  <ul>
+  <li><a href="/Raetselportal/">Puzzle portal</a>
+  </li><li><a href="/Wettbewerbe/">Contests</a>
+  </li><li><a href="http://wiki.logic-masters.de">Puzzlewiki</a>
+  </li></ul>
+</li><li><a href="/Meisterschaften/">Championships</a>
+  <ul>
+  <li><a href="/LM/">Logic Masters</a>
+  </li><li><a href="/WPC/">World Puzzle Championship</a>
+  </li><li><a href="/DSM/">German Sudoku Championship</a>
+  </li><li><a href="/DJSM/">Deutsche Jugend Sudoku Meisterschaft</a>
+  </li><li><a href="/WSC/">World Sudoku Championship</a>
+  </li></ul>
+</li><li><a href="/Verein/">Association</a>
+  <ul>
+  <li><a href="/Mitgliederzeitung/">Members newspaper</a>
+  </li><li><a href="/Raetselwochenenden/">Puzzle weekends</a>
+  </li></ul>
+</li><li><a href="/Sammlungen/">Collections</a>
+  <ul>
+  <li><a href="/Bilder/">Images</a>
+  </li><li><a href="/Dateien/">Files</a>
+  </li><li><a href="/Archiv/">Archive</a>
+  </li></ul>
+</li><li><a href="http://forum.logic-masters.de">Forum</a>
+  <ul>
+  <li><a href="http://forum.logic-masters.de/forumdisplay.php?fid=6">Regulars' Table</a>
+  </li><li><a href="http://forum.logic-masters.de/forumdisplay.php?fid=13">Discussion of Puzzles</a>
+  </li><li><a href="http://forum.logic-masters.de/forumdisplay.php?fid=15">Puzzle portal</a>
+  </li><li><a href="http://forum.logic-masters.de/forumdisplay.php?fid=7">Logic Masters and World Puzzle Championships</a>
+  </li><li><a href="http://forum.logic-masters.de/forumdisplay.php?fid=8">German Sudoku Championships and World Sudoku Championships</a>
+  </li><li><a href="http://forum.logic-masters.de/forumdisplay.php?fid=27">Online Contests</a>
+  </li></ul>
+</li><li><a href="/Intern/">Intern</a>
+</li></ul>
+<p class="icon"><a href="?chlang=de"><img class="langwahl" src="/images/de.png" alt="de" title="deutsche Version"></a>
+</p><p class="icon"><a href="?print=true"><img class="langwahl" src="/images/printer.png" alt="Druckversion" title="Druckversion"></a>
+</p></nav>
+<div class="leftcolumn">
+<div class="box logo">
+<a href="http://logic-masters.de">
+<img src="/images/lmd-logo.png" alt="LOGIC MASTERS Deutschland e.V." width="131" height="60"></a><br>
+<a href="http://www.worldpuzzle.org/">member of<br>
+<img class="wpf-logo" src="/images/wpf.png" alt="World Puzzle Federation" width="133" height="26"></a>
+</div><div class="box menu">
+<h2>Menu</h2>
+<ul>
+<li><a href="/Raetselportal/index.php">Puzzle portal</a>
+</li><li><a href="/Raetselportal/Suche/einfach.php">Search puzzles</a>
+</li><li><a href="/Raetselportal/Raetsel/zeigen.php">Show puzzle</a>
+</li><li><a class="aktiv" href="/Raetselportal/Eigene/einstellen.php">Create a new puzzle</a>
+</li><li><a href="/Raetselportal/Hilfe/allgemein.php">Help</a>
+</li><li><a href="/Raetselportal/Benutzer/allgemein.php">User pages</a>
+</li><li><a href="/Raetselportal/Einstellungen/allgemein.php">Settings</a>
+</li><li><a href="/Raetselportal/Statistik/allgemein.php">Statistics</a>
+</li></ul>
+</div><div class="box menu">
+<h2>Account: ChinStrap</h2>
+<ul>
+<li><a href="/registrieren.php">Change settings</a>
+</li><li><a href="?logout=true">Logout</a>
+</li></ul>
+</div></div>
+<div class="footer"><a href="/sitemap.php">sitemap</a> - <a href="/nutzungsbedingungen.php">terms of usage</a> - <a href="/datenschutz.php">data protection</a> - <a href="/impressum.php">contact and imprint</a></div><img style="display: none" src="/cron.php"><ul id="ui-id-1" tabindex="0" class="ui-menu ui-widget ui-widget-content ui-autocomplete ui-front" style="display: none;"></ul><div role="status" aria-live="assertive" aria-relevant="additions" class="ui-helper-hidden-accessible"></div></body></html>
