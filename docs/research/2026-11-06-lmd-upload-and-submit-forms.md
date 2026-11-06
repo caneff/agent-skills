@@ -44,9 +44,12 @@ The account in use is `ChinStrap`, and the site UI language is English.
   newest first in `table.upload_list_gross`. Each row has
   `span.upload_list_gross_name` (the `name`), `span.upload_list_gross_data`
   (format, pixel size, KB) and `span.upload_list_gross_id` ("ID: 0015HL"). The
-  row also links to `/Dateien/index.php?id=<id>`. What the page shows right
-  after the POST is not yet seen. The driver should read the newest row whose
-  name matches the one it sent.
+  row also links to `/Dateien/index.php?id=<id>`. Right after an upload,
+  `/Dateien/` shows the file list with the new file as its first row and **no
+  upload form** (seen 2026-11-06 in #1659's closing check: "check-in … PNG
+  (800 x 800, 124KB) ID: 001626" on top, `input[name=datei]` absent). So a
+  check after the upload looks for the list, not the form. The driver reads
+  the newest row whose name matches the one it sent.
 - The submit page (`Eigene/einstellen.php`) embeds a second copy of this upload
   form, with the same fields, posting to `/Raetselportal/Eigene/einstellen.php`.
 - Chris's past uploads are mostly 800px wide. Heights run from 722 to 977, a
