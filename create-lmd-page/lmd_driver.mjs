@@ -8,9 +8,10 @@
 // loopback port); the caller checks the stream gate first. In one new tab it uploads the PNG on LMD's
 // file page ("author created", "others may use" unchecked) and reads the new image id, fills the page
 // template's {{IMAGE_ID}}, fills the English-only submit form and clicks "Create", which saves the
-// puzzle inactive, then reads the new puzzle id. It never clicks "Aktivieren". It closes its tab and
-// prints one JSON line: {"image_id", "puzzle_id", "puzzle_url", "html"}. --image-id names an image already
-// on LMD (an earlier run's upload) and skips the upload; --png is still required and still checked.
+// puzzle inactive, then reads the new puzzle id off the saved notice's puzzle-page link. It never clicks
+// "Aktivieren". It closes its tab and prints one JSON line: {"image_id", "puzzle_id", "puzzle_url", "html"}.
+// --image-id names an image already on LMD (an earlier run's upload) and skips the upload; --png is still
+// required and still checked.
 //
 // values.json, every key required: {"slug", "title", "code", "difficulty" (1-5), "sudoku" ("Ja" | "Nein"),
 //   "labels" ([<n> of label_<n>]), "freetags" (string), "codedescr_en" (string, may be empty)}.
@@ -29,6 +30,8 @@ import { parseArgs } from "node:util";
 
 const IMAGE_PLACEHOLDER = "{{IMAGE_ID}}";
 const UPLOAD_DESCRIPTION = "author created";
+const SAVED_NOTICE = "The puzzle has been saved.";
+const PUZZLE_PAGE = "/Raetselportal/Raetsel/zeigen.php";
 const MAX_UPLOAD_BYTES = 4194304; // the upload form's MAX_FILE_SIZE
 // LMD strips any other character from a solution code silently (its help page and the form's hint:
 // "Letters, numbers and ()<>~+-*= /\|!#$%&"). Letters are uppercased, so lowercase is kept.
@@ -276,12 +279,19 @@ async function submitPuzzle(tab, base, form, html) {
   if (problem) fail(problem);
   posted.submitted = true;
   await tab.submit("document.querySelector('input[name=einstellen]').click()", "the puzzle submit");
-  // "Create" lands on the new puzzle's page, zeigen.php?id=<id>; any other page is a refusal.
-  const url = await tab.evaluate("location.href");
-  const landed = new URL(url);
-  const id = landed.pathname.endsWith("/zeigen.php") ? landed.searchParams.get("id") : null;
-  if (!id) fail(`no puzzle id after "Create": ${await pageReport(tab)}`);
-  return { id, url };
+  // Live LMD answers "Create" on einstellen.php itself: "The puzzle has been saved. Edit Puzzle <id> To the
+  // puzzle page", with the form shown again, emptied (#1659's closing check). The id is read from the
+  // "To the puzzle page" link (the site menu's own zeigen.php link has no id); a page without the notice, or
+  // without exactly one such id, is a refusal.
+  const { saved, ids } = await tab.evaluate(`({
+    saved: (document.body?.innerText ?? '').includes(${JSON.stringify(SAVED_NOTICE)}),
+    ids: [...new Set([...document.querySelectorAll('a[href]')].map((a) => new URL(a.href))
+      .filter((u) => u.pathname.endsWith(${JSON.stringify(PUZZLE_PAGE)}) && u.searchParams.get('id'))
+      .map((u) => u.searchParams.get('id')))],
+  })`);
+  const [id] = ids;
+  if (!saved || ids.length !== 1 || !/^[0-9A-Z]+$/.test(id ?? "")) fail(`no puzzle id after "Create": ${await pageReport(tab)}`);
+  return { id, url: `${base}${PUZZLE_PAGE}?id=${id}` };
 }
 
 // What reached LMD so far, printed on a failure after the upload.

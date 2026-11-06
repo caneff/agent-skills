@@ -74,6 +74,16 @@ LOGIN_PAGE = """<!doctype html><html><body><h1>Login</h1>
 </form></body></html>"""
 NEW_IMAGE_ID = "0100XY"
 NEW_PUZZLE_ID = "000QRS"
+SAVED = "The puzzle has been saved."
+
+
+def _saved_page(link=True):
+    """What live LMD answered "Create" with (#1659's closing check, Check-In, puzzle 000VX4): it stays on
+    einstellen.php, says the puzzle was saved, links its edit and puzzle pages, and shows the form again."""
+    to_page = f'<a href="{PUZZLE_PATH}?id={NEW_PUZZLE_ID}">To the puzzle page</a>' if link else ""
+    notice = (f'<p>{SAVED}</p><p><a href="/Raetselportal/Eigene/bearbeiten.php?id={NEW_PUZZLE_ID}">Edit Puzzle '
+              f'{NEW_PUZZLE_ID}</a> {to_page}</p>')
+    return re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + notice, SUBMIT_PAGE, count=1)
 FORM_ERROR = "Please enter a name for the puzzle."
 UPLOAD_ERROR = "Die Datei ist zu groß."
 # A one-pixel PNG: the bytes the recorded upload must carry.
@@ -124,7 +134,7 @@ class FakeLmd:
         self.submits = []  # each a dict of field -> list of str
         self.rows = []  # uploaded files, newest first, (id, name)
         self.upload_mode = "ok"  # ok | noid | login | nolist (the page after the upload has no file list)
-        self.submit_mode = "ok"  # ok | error | noid | elsewhere | alert | login
+        self.submit_mode = "ok"  # ok | error | noid | nolink | elsewhere | alert | login
 
 
 def _handler(lmd):
@@ -179,8 +189,8 @@ def _handler(lmd):
                 return self._send(f"<!doctype html><html><body><p class='fehler'>{UPLOAD_ERROR}</p></body></html>")
             if path == SUBMIT_PATH:
                 lmd.submits.append(urllib.parse.parse_qs(body.decode("utf-8"), keep_blank_values=True))
-                if lmd.submit_mode == "ok":
-                    return self._send("", 302, [("Location", f"{PUZZLE_PATH}?id={NEW_PUZZLE_ID}")])
+                if lmd.submit_mode in ("ok", "nolink"):
+                    return self._send(_saved_page(link=lmd.submit_mode == "ok"))
                 if lmd.submit_mode == "elsewhere":
                     # an id on a page that is not the puzzle's: not the landing "Create" leads to
                     return self._send("", 302, [("Location", f"{OWN_PUZZLES_PATH}?id={NEW_PUZZLE_ID}")])
@@ -281,6 +291,7 @@ def test_prints_the_ids_lmd_issued_and_the_page_html_and_never_activates(endpoin
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
     assert (out["image_id"], out["puzzle_id"]) == (NEW_IMAGE_ID, NEW_PUZZLE_ID)
+    assert out["puzzle_url"] == f"{lmd.base}{PUZZLE_PATH}?id={NEW_PUZZLE_ID}"
     assert f'<img:{NEW_IMAGE_ID} width="420">' in out["html"]
     assert not any("aktiv" in p.lower() for _, p in lmd.requests)
 
@@ -388,6 +399,12 @@ def test_sudoku_nein_is_the_choice_sent(endpoint, lmd, tmp_path):
     assert result.returncode == 0, result.stderr
     [submit] = lmd.submits
     assert submit["Sudoku_JaNein"] == ["Nein"]
+
+
+def test_a_saved_notice_with_no_puzzle_page_link_is_a_refusal(endpoint, lmd, tmp_path):
+    lmd.submit_mode = "nolink"
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', SAVED,
+                    posted={"uploaded": True, "image_id": NEW_IMAGE_ID, "submitted": True})
 
 
 def test_an_id_on_a_page_other_than_the_puzzles_is_a_refusal(endpoint, lmd, tmp_path):
