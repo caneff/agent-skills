@@ -81,8 +81,13 @@ The account in use is `ChinStrap`, and the site UI language is English.
 - The submit page's footnote says: "In order to publish the puzzle
   automatically you have to activate it on the puzzle page!" This agrees with
   the help page: "Create" saves the puzzle inactive.
-- Where the new puzzle id appears after "Create" is not yet seen. It shows on
-  the first real post (#1662 closing check).
+- "Create" does not redirect. Seen 2026-11-06 in #1659's closing check
+  (Check-In, puzzle 000VX4): the answer stays on
+  `Raetselportal/Eigene/einstellen.php`. Its text begins "The puzzle has been
+  saved. Edit Puzzle 000VX4 To the puzzle page", and the submit form shows
+  again below, emptied. The id is in the "To the puzzle page" link
+  (`Raetsel/zeigen.php?id=000VX4`) and in the "Edit Puzzle" text. The site
+  menu also links `Raetsel/zeigen.php`, with no id.
 - The form's character hint and the help page list the same symbols. The
   form's hint also shows a space.
 
