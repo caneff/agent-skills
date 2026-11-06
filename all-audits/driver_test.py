@@ -246,7 +246,7 @@ def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, extra_args=(), **extr
         os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
     # The ceiling variable is dropped from the ambient env so a shell that
     # already exports it cannot make the driver's own setting look unneeded.
-    ambient = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"}
+    ambient = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "SWEEP_JOBS")}
     env = {
         **ambient, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
         "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env,
@@ -255,6 +255,44 @@ def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, extra_args=(), **extr
         [sys.executable, os.path.join(here, "driver.py"), tmp, "--only", only, *extra_args, "--out", os.path.join(tmp, "out")],
         capture_output=True, text=True, env=env,
     )
+
+
+def _inflight_counts(inflight):
+    """What each fake `claude` saw in flight when it started (#1666)."""
+    return [int(n) for n in open(os.path.join(inflight, "counts")).read().split()]
+
+
+def test_sweep_runs_at_most_sweep_jobs_audits_at_once(tmp_path):
+    """#1666: with SWEEP_JOBS=2 and five audits, no audit starts with more than
+    two in flight and some overlap; SWEEP_JOBS=1 never overlaps."""
+    only = "dead-code,duplication,test-audit,comment-audit,error-handling"
+    for jobs, overlaps in (("2", True), ("1", False)):
+        (tmp_path / jobs).mkdir()
+        tmp, cache_dir, bin_dir, inflight = _mkdirs(tmp_path / jobs, "tmp", "cache_dir", "bin_dir", "inflight")
+        _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, SWEEP_JOBS=jobs, FAKE_CLAUDE_INFLIGHT=inflight)
+        counts = _inflight_counts(inflight)
+        assert len(counts) == 5, counts
+        assert max(counts) <= int(jobs), (jobs, counts)
+        assert (max(counts) >= 2) is overlaps, (jobs, counts)
+
+
+def test_sweep_jobs_defaults_to_four(tmp_path):
+    only = "dead-code,duplication,test-audit,comment-audit,error-handling,type-tightness,domain-drift,docstring-coverage"
+    tmp, cache_dir, bin_dir, inflight = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir", "inflight")
+    _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, FAKE_CLAUDE_INFLIGHT=inflight)
+    counts = _inflight_counts(inflight)
+    assert len(counts) == 8, counts
+    assert 2 <= max(counts) <= 4, counts
+
+
+def test_sweep_jobs_must_be_a_positive_integer(tmp_path):
+    for bad in ("0", "many", "-1"):
+        (tmp_path / bad).mkdir()
+        tmp, cache_dir, bin_dir = _mkdirs(tmp_path / bad, "tmp", "cache_dir", "bin_dir")
+        r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", SWEEP_JOBS=bad)
+        assert r.returncode == 2 and "SWEEP_JOBS must be a positive integer" in r.stderr, r.stdout + r.stderr
+        assert "smoke test" not in r.stdout
+        assert not os.path.exists(os.path.join(tmp, "out")), "a bad value must stop before the run dir exists"
 
 
 def test_audit_claude_gets_the_unlimited_bg_wait_ceiling(tmp_path):
@@ -726,7 +764,7 @@ def test_help_prints_the_docstring_and_an_unknown_flag_exits_2():
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.startswith("usage:"), r.stdout
     assert driver.__doc__.splitlines()[0] in r.stdout
-    for flag in ("--out", "--only", "--short", "--index", "--force", "--mutation"):
+    for flag in ("--out", "--only", "--short", "--index", "--force", "--mutation", "SWEEP_JOBS"):
         assert flag in r.stdout, flag
 
     bad = subprocess.run([sys.executable, driver_py, "--nope"], capture_output=True, text=True)

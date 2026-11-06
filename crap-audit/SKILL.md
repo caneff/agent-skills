@@ -63,7 +63,9 @@ suite isn't watching it at all.
 2. **Detect the language, then discover the test command by judgment.**
    TypeScript if the scope has a `package.json` plus a `tsconfig.json` or
    `.ts`/`.tsx` source files and no Python project marker takes priority;
-   Python (`pyproject.toml`/`setup.py`/`.py` sources) otherwise. A mixed
+   a JavaScript-only repo (`package.json`, `.js`/`.mjs` sources, tests on
+   `node --test`) takes "Plain Node path" below; Python
+   (`pyproject.toml`/`setup.py`/`.py` sources) otherwise. A mixed
    repo audits both, one pass each, same report.
 
    - **Python:** a `Makefile` target named `test`/`coverage`, a
@@ -235,6 +237,40 @@ suite isn't watching it at all.
    names a manifest path in its prompt to write to (see
    `~/.agents/skills/all-audits/harness/AUDIT-RUN.md#the-manifest`)
    and says not to open anything.
+
+## Plain Node path (`node --test`, no vitest/jest)
+
+A JavaScript repo whose tests run on `node --test` (no vitest, no jest) has no
+`crap-typescript` runner. Never write your own coverage hook; use the shipped,
+tested one. It needs Node 22.15+ (`module.registerHooks`) and fails with a
+message saying so on an older Node.
+
+- `node-coverage-hook.cjs` instruments the listed source files through
+  `istanbul-lib-instrument` as Node loads them and dumps Istanbul counters per
+  process. It takes `esModules` from the format Node resolved
+  (`result.format === 'module'`), never the extension: an ES module saved as
+  `.js` is a module (#1667). It fails the import loudly, naming the file, on an
+  instrument error, a missing variable or a listed file that does not exist.
+- `capped-run.sh <cap> -- <cmd>` runs the suite in a memory-capped systemd
+  unit with no swap, so a runaway suite is an OOM kill of its own unit, not a
+  dead VM. It passes `PATH`, `HOME`, `NODE_OPTIONS` and `CRAP_*` through to the
+  unit and refuses to run uncapped when `systemd-run` is absent: do not fall
+  back to an uncapped run.
+- `merge-hits.cjs <hits-dir>` sums the per-process dumps into one
+  `coverage-final.json` on stdout, and exits non-zero when there are none.
+
+1. Install `istanbul-lib-instrument` into a scratch tools dir (not the repo).
+   Write the in-scope source files, repo-root-relative, one per line, to a
+   list file.
+2. Export `CRAP_TOOLS` (that dir), `CRAP_ROOT` (repo root), `CRAP_FILES` (the
+   list), `CRAP_HITS` (an empty scratch dir) and
+   `NODE_OPTIONS="--require $HOME/.agents/skills/crap-audit/node-coverage-hook.cjs"`.
+3. Run the suite capped, with a low `--test-concurrency` (the cap is per unit,
+   so concurrent files share it):
+   `bash ~/.agents/skills/crap-audit/capped-run.sh 6G -- node --test <files>`.
+4. `node ~/.agents/skills/crap-audit/merge-hits.cjs "$CRAP_HITS" >
+   <tmpdir>/coverage-final.json`, then feed that to the Istanbul fallback
+   join under "TypeScript path" below.
 
 ## TypeScript path
 

@@ -26,6 +26,14 @@ A report that highlights code or draws a Mermaid diagram needs two files
 Prism grammars **before** `base.js` / `code.js`, and add the `mermaid.js`
 bridge last.
 
+**Check the diagrams render.** Mermaid fails at parse time in the browser, so
+only a render sees a bad label. Before handing a report with `vt-mermaid`
+blocks over, run `python3 pagelib.py check-mermaid <report.html>` (or call
+`pagelib.check_mermaid(path)`): it renders the page with `shot-scraper` and
+exits 1, naming each block that shows "Syntax error" or never rendered;
+2 when the check could not run; 3 when the page has no `vt-mermaid` block, so nothing was checked.
+A label holding `()`, `[]`, `{}`, `|` or `:` must be in double quotes.
+
 > **Never add `type="module"`** to `base.js`, `code.js`, or the `mermaid.js`
 > tag. They are plain scripts; `type="module"` makes the browser load them
 > under CORS rules, which `file://` blocks — the toggle, copy buttons, and

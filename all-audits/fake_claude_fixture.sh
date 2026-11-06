@@ -9,6 +9,9 @@
 # FAKE_CLAUDE_INCONCLUSIVE=<why> makes the mutation audit's manifest carry
 # an `inconclusive` reason, as the real skill writes on audit.py's exit 3 (#1588).
 # FAKE_CLAUDE_RENDEZVOUS / FAKE_CLAUDE_NO_FINDINGS_LOG: see the mutation branch below.
+# FAKE_CLAUDE_INFLIGHT=<dir> (#1666): every audit marks itself started in <dir>,
+# appends how many marks it sees to <dir>/counts, holds 0.3s, then unmarks, so a
+# test reads the most audits that were in flight at once from the counts.
 # FAKE_CLAUDE_PREPASS="a.py\nb.py" makes a prompt with no manifest request
 # (the mutation prepass) print that ranking (#1567).
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
@@ -20,6 +23,13 @@ prompt="${*: -1}"
 # Record the wait-ceiling variable in this process's log, so a test can see
 # what env the driver handed it (#1278).
 echo "ceiling=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
+
+if [ -n "${FAKE_CLAUDE_INFLIGHT:-}" ]; then
+  : >"$FAKE_CLAUDE_INFLIGHT/inflight.$$"
+  ls "$FAKE_CLAUDE_INFLIGHT" | grep -c '^inflight\.' >>"$FAKE_CLAUDE_INFLIGHT/counts"
+  sleep 0.3
+  rm -f "$FAKE_CLAUDE_INFLIGHT/inflight.$$"
+fi
 
 # An audit that dies silently: exits 0, writes nothing (#1278).
 [ -z "${FAKE_CLAUDE_NOOP:-}" ] || exit 0

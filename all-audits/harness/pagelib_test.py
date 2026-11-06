@@ -1,7 +1,11 @@
 """Tests for the shared page shell (#613). Two seams: the document `page()`
 returns, and the assets `copy_assets()` puts on disk in a tmp dir."""
 import os
+import shutil
+import subprocess
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
 import pagelib  # noqa: E402
@@ -50,3 +54,74 @@ def test_copy_assets_delivers_base_and_the_named_components_idempotently(tmp_pat
 def test_copy_assets_takes_the_component_list(tmp_path):
     pagelib.copy_assets(str(tmp_path), components=("callout", "chip"))
     assert (tmp_path / "assets" / "components" / "chip" / "chip.css").is_file()
+
+
+# --- check_mermaid: the render check a prose rule alone did not give (#1665) ---
+
+GOOD = 'flowchart LR\n  A[One] --> B[Two]'
+PAREN_LABEL = 'flowchart LR\n  A[One] -->|read_text().strip()| B[Two]'
+QUOTED_LABEL = 'flowchart LR\n  A[One] -->|"read_text().strip()"| B[Two]'
+
+
+def _report(tmp_path, blocks, *, with_bridge=True):
+    """A report beside its assets, one `vt-mermaid` per source in `blocks`."""
+    pagelib.copy_assets(str(tmp_path))
+    scripts = ""
+    if with_bridge:
+        shutil.copy(os.path.join(pagelib.VISUAL_TEACH_ASSETS, "mermaid.js"), tmp_path / "assets")
+        shutil.copy(os.path.join(pagelib.VISUAL_TEACH_ASSETS, "mermaid.min.js"), tmp_path / "assets")
+        scripts = '<script src="assets/mermaid.js"></script>\n'
+    body = "".join(f'<div class="vt-mermaid">\n{b}\n</div>\n' for b in blocks) + scripts
+    path = tmp_path / "report.html"
+    path.write_text(pagelib.page("t", "", "", "", body))
+    return str(path)
+
+
+def test_check_mermaid_passes_quoted_labels_and_names_nothing(tmp_path):
+    result = pagelib.check_mermaid(_report(tmp_path, [GOOD, QUOTED_LABEL]))
+    assert result == {"total": 2, "failed": []}
+
+
+def test_check_mermaid_names_the_block_with_an_unquoted_paren_label(tmp_path):
+    result = pagelib.check_mermaid(_report(tmp_path, [GOOD, PAREN_LABEL, GOOD]))
+    assert result == {"total": 3, "failed": [1]}
+
+
+def test_check_mermaid_fails_a_block_that_never_rendered(tmp_path):
+    # No bridge script: nothing renders, and that must not read as "no errors".
+    result = pagelib.check_mermaid(_report(tmp_path, [GOOD], with_bridge=False), timeout=2)
+    assert result == {"total": 1, "failed": [0]}
+
+
+def test_check_mermaid_cli_exits_nonzero_on_a_failed_block(tmp_path):
+    bad = _report(tmp_path, [PAREN_LABEL])
+    proc = subprocess.run([sys.executable, pagelib.__file__, "check-mermaid", bad],
+                          capture_output=True, text=True)
+    assert proc.returncode == 1
+    assert "block 1" in proc.stdout + proc.stderr
+
+
+def test_check_mermaid_raises_when_it_cannot_run(tmp_path, monkeypatch):
+    with pytest.raises(RuntimeError, match="no such report"):
+        pagelib.check_mermaid(str(tmp_path / "missing.html"))
+    report = _report(tmp_path, [GOOD])
+    monkeypatch.setenv("PATH", str(tmp_path))  # no shot-scraper on it
+    with pytest.raises(RuntimeError, match="not installed"):
+        pagelib.check_mermaid(report)
+
+
+def test_check_mermaid_refuses_a_path_it_cannot_load_faithfully(tmp_path):
+    odd = tmp_path / "a#b"
+    odd.mkdir()
+    with pytest.raises(RuntimeError, match="cannot render a path"):
+        pagelib.check_mermaid(_report(odd, [PAREN_LABEL]))
+
+
+def test_cli_distinguishes_no_blocks_and_could_not_run_from_a_failed_block(tmp_path):
+    def run(path):
+        return subprocess.run([sys.executable, pagelib.__file__, "check-mermaid", path],
+                              capture_output=True, text=True)
+    none = run(_report(tmp_path, []))
+    assert none.returncode == 3 and "nothing was checked" in none.stdout
+    gone = run(str(tmp_path / "missing.html"))
+    assert gone.returncode == 2 and "could not run" in gone.stderr

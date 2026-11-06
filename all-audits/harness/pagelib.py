@@ -13,8 +13,12 @@ so a caller can put markup in a heading. Escape untrusted text with
 `html.escape` before passing it.
 """
 import html
+import json
 import os
+import pathlib
 import shutil
+import subprocess
+import sys
 
 VISUAL_TEACH_ASSETS = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "visual-teach", "assets")
@@ -70,3 +74,80 @@ def _replace_tree(src, dest):
         shutil.rmtree(dest)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     shutil.copytree(src, dest)
+
+
+# Polls until every `.vt-mermaid` holds an svg (mermaid renders async) or the
+# budget runs out, then reports each block that is not a clean render. A block
+# with no svg counts as failed: a bridge that never ran must not read as clean.
+_MERMAID_JS = """(async () => {
+  const blocks = [...document.querySelectorAll('.vt-mermaid')];
+  const end = Date.now() + %d;
+  while (Date.now() < end && blocks.some(b => !b.querySelector('svg'))) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return {total: blocks.length,
+          failed: blocks.flatMap((b, i) =>
+            !b.querySelector('svg') || b.textContent.includes('Syntax error') ? [i] : [])};
+})()"""
+
+
+def check_mermaid(report_path, *, timeout=20):
+    """Render `report_path` headless and return `{"total": n, "failed": [i, ...]}`.
+
+    `failed` holds the 0-based index of every `.vt-mermaid` block that shows
+    Mermaid's "Syntax error" box or never rendered an svg. Mermaid fails at
+    parse time in the browser, so only a render sees it (#1665). Raises if
+    `shot-scraper` is missing or answers something unreadable: a check that
+    could not run is not a clean report.
+    """
+    if not os.path.isfile(report_path):
+        raise RuntimeError(f"no such report: {report_path}")
+    js = _MERMAID_JS % (timeout * 1000)
+    path = str(pathlib.Path(report_path).resolve())
+    # shot-scraper builds `file:<path>` unescaped, so these would be read as a
+    # fragment, query or escape and load some other page.
+    if any(c in path for c in "#?%"):
+        raise RuntimeError(f"cannot render a path holding '#', '?' or '%': {path}")
+    try:
+        proc = subprocess.run(["shot-scraper", "javascript", path, js],
+                              capture_output=True, text=True, timeout=timeout + 60)
+    except FileNotFoundError as e:
+        raise RuntimeError("shot-scraper is not installed") from e
+    if proc.returncode != 0:
+        raise RuntimeError(f"shot-scraper failed ({proc.returncode}): {proc.stderr.strip()}")
+    try:
+        result = json.loads(proc.stdout)
+    except ValueError:
+        result = None
+    if (not isinstance(result, dict) or set(result) != {"total", "failed"}
+            or not isinstance(result["total"], int)
+            or not isinstance(result["failed"], list)
+            or not all(isinstance(i, int) for i in result["failed"])):
+        raise RuntimeError(f"unreadable shot-scraper answer: {proc.stdout[:200]!r}")
+    return result
+
+
+def main(argv):
+    """Exit 0 clean, 1 a block failed, 2 usage or the check could not run,
+    3 no `vt-mermaid` block found (nothing was checked, so not clean)."""
+    if len(argv) != 3 or argv[1] != "check-mermaid":
+        print("usage: pagelib.py check-mermaid <report.html>", file=sys.stderr)
+        return 2
+    try:
+        result = check_mermaid(argv[2])
+    except RuntimeError as e:
+        print(f"check-mermaid could not run: {e}", file=sys.stderr)
+        return 2
+    for i in result["failed"]:
+        print(f"block {i + 1} of {result['total']}: Mermaid syntax error or not rendered")
+    if result["failed"]:
+        return 1
+    if result["total"] == 0:
+        print("no vt-mermaid block found: nothing was checked")
+        return 3
+    print(f"{result['total']} mermaid blocks rendered clean")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
