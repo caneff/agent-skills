@@ -232,7 +232,7 @@ def test_prints_the_ids_lmd_issued_and_the_page_html_and_never_activates(endpoin
     assert not any("aktiv" in p.lower() for _, p in lmd.requests)
 
 
-def _refused(result, *needles):
+def _assert_refused(result, *needles):
     assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
     assert result.stdout == ""
     for needle in needles:
@@ -241,18 +241,18 @@ def _refused(result, *needles):
 
 def test_a_form_error_page_after_create_exits_with_its_text(endpoint, lmd, tmp_path):
     lmd.submit_mode = "error"
-    _refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', FORM_ERROR)
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', FORM_ERROR)
 
 
 def test_no_puzzle_id_after_create_exits_non_zero(endpoint, lmd, tmp_path):
     lmd.submit_mode = "noid"
-    _refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', "Thanks.")
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', "Thanks.")
 
 
 @pytest.mark.parametrize("page", ["upload", "submit"])
 def test_a_login_page_exits_before_anything_is_sent(endpoint, lmd, tmp_path, page):
     setattr(lmd, f"{page}_mode", "login")
-    _refused(run_driver(endpoint, lmd, tmp_path), "login page", "not logged in")
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), "login page", "not logged in")
     assert lmd.submits == []
     assert len(lmd.uploads) == (0 if page == "upload" else 1)
 
@@ -260,18 +260,18 @@ def test_a_login_page_exits_before_anything_is_sent(endpoint, lmd, tmp_path, pag
 def test_no_new_image_id_after_upload_exits_before_the_submit(endpoint, lmd, tmp_path):
     lmd.upload_mode = "noid"
     lmd.rows = [("0099ZZ", "test-puzzle")]  # an earlier upload under the same name is not this one
-    _refused(run_driver(endpoint, lmd, tmp_path), 'no new image named "test-puzzle"')
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no new image named "test-puzzle"')
     assert len(lmd.uploads) == 1
     assert not any(p.startswith(SUBMIT_PATH) for _, p in lmd.requests)
 
 
 def test_a_code_with_characters_lmd_strips_exits_before_any_upload(endpoint, lmd, tmp_path):
-    _refused(run_driver(endpoint, lmd, tmp_path, values={**VALUES, "code": "12_3.4"}), "would strip", '"_."')
+    _assert_refused(run_driver(endpoint, lmd, tmp_path, values={**VALUES, "code": "12_3.4"}), "would strip", '"_."')
     assert lmd.requests == []
 
 
 def test_no_cdp_endpoint_exits_non_zero(lmd, tmp_path):
-    _refused(run_driver("http://127.0.0.1:9", lmd, tmp_path), "no CDP endpoint at http://127.0.0.1:9")
+    _assert_refused(run_driver("http://127.0.0.1:9", lmd, tmp_path), "no CDP endpoint at http://127.0.0.1:9")
 
 
 @pytest.mark.parametrize("mode", ["ok", "error"])
