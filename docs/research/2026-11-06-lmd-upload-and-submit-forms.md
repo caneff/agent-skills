@@ -88,6 +88,18 @@ The account in use is `ChinStrap`, and the site UI language is English.
   again below, emptied. The id is in the "To the puzzle page" link
   (`Raetsel/zeigen.php?id=000VX4`) and in the "Edit Puzzle" text. The site
   menu also links `Raetsel/zeigen.php`, with no id.
+- Editing a saved puzzle, seen 2026-11-06 fixing Check-In by hand: the edit
+  page is `Raetselportal/Eigene/einstellen.php?id=<id>` (`bearbeiten.php` is
+  only the list). It is the same form, pre-filled, without `Sudoku_JaNein`, and
+  its one submit is `einstellen=Change`. It answers "The puzzle has been
+  changed. Edit Puzzle <id> To the puzzle page".
+- After `Sudoku_JaNein=Ja`, LMD added the free tag "Sudoku" itself; the post
+  sent `freetags` empty.
+- On the edit page the date fields come back pre-filled with the save time,
+  while `frei` stays `nein`.
+- A second upload the same day worked on `/Dateien/` (image 001627), and a
+  reload read its id. Swapping `<img:001626>` for `<img:001627>` through the
+  edit page changed the image the live page serves.
 - The form's character hint and the help page list the same symbols. The
   form's hint also shows a space.
 
