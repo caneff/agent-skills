@@ -2,21 +2,24 @@
 // Posts one puzzle to Logic Masters Deutschland through a Chrome it drives over CDP (#1659, #1661).
 //
 //   node lmd_driver.mjs --endpoint http://127.0.0.1:9334 --png <board.png> --template <page.html> \
-//     --values <values.json> [--base-url https://logic-masters.de] [--timeout-ms 30000]
+//     --values <values.json> [--image-id <id>] [--base-url https://logic-masters.de] [--timeout-ms 30000]
 //
 // In real use Windows `node.exe` runs it against the stream browser on 9334 (WSL cannot reach a Windows
 // loopback port); the caller checks the stream gate first. In one new tab it uploads the PNG on LMD's
 // file page ("author created", "others may use" unchecked) and reads the new image id, fills the page
 // template's {{IMAGE_ID}}, fills the English-only submit form and clicks "Create", which saves the
 // puzzle inactive, then reads the new puzzle id. It never clicks "Aktivieren". It closes its tab and
-// prints one JSON line: {"image_id", "puzzle_id", "puzzle_url", "html"}.
+// prints one JSON line: {"image_id", "puzzle_id", "puzzle_url", "html"}. --image-id names an image already
+// on LMD (an earlier run's upload) and skips the upload; --png is still required and still checked.
 //
 // values.json, every key required: {"slug", "title", "code", "difficulty" (1-5), "sudoku" ("Ja" | "Nein"),
 //   "labels" ([<n> of label_<n>]), "freetags" (string), "codedescr_en" (string, may be empty)}.
 //
-// Any failure exits 1 with "lmd_driver: <error>" on stderr; a usage error exits 2. A failure after the
-// upload also prints one JSON line on stdout, {"failed", "image_id", "submitted"}: what already reached LMD,
-// "submitted" true once "Create" was clicked, so a rerun can see an image or puzzle no id records. Every CDP request, the
+// Any failure exits 1 with "lmd_driver: <error>" on stderr; a usage error exits 2. A failure once an image
+// is on LMD also prints one JSON line on stdout, {"failed", "uploaded", "image_id", "submitted"}: what already
+// reached LMD, so a rerun can see an image or puzzle no id records. "uploaded" is true once the upload was
+// sent, "image_id" is null until it is read (or is --image-id's), "submitted" true once "Create" was clicked.
+// Every CDP request, the
 // connection to Chrome and each page load has the --timeout-ms deadline; a JavaScript dialog on the page is
 // dismissed and is a failure; the tab is closed on every exit. Field names and where the ids appear:
 // docs/research/2026-11-06-lmd-upload-and-submit-forms.md.
@@ -47,11 +50,15 @@ function readInputs(argv) {
     args: argv,
     options: {
       endpoint: { type: "string" }, png: { type: "string" }, template: { type: "string" },
-      values: { type: "string" }, "base-url": { type: "string", default: "https://logic-masters.de" },
+      values: { type: "string" }, "image-id": { type: "string" }, "base-url": { type: "string", default: "https://logic-masters.de" },
       "timeout-ms": { type: "string", default: "30000" },
     },
   });
   for (const k of ["endpoint", "png", "template", "values"]) if (!a[k]) throw new UsageError(`--${k} is required`);
+  // LMD's ids are digits and capital letters ("001626", "0015HL"); anything else would corrupt <img:ID>.
+  if (a["image-id"] !== undefined && !/^[0-9A-Z]+$/.test(a["image-id"])) {
+    throw new UsageError(`--image-id must be an LMD image id (digits and capital letters), got ${JSON.stringify(a["image-id"])}`);
+  }
   const timeoutMs = Number(a["timeout-ms"]);
   if (!(timeoutMs > 0)) throw new UsageError(`--timeout-ms must be a positive number, got ${a["timeout-ms"]}`);
   const png = path.resolve(a.png);
@@ -79,6 +86,7 @@ function readInputs(argv) {
   if (!Array.isArray(v.labels) || !v.labels.every(Number.isInteger)) fail("values.labels must be a list of label numbers");
   return {
     endpoint: a.endpoint.replace(/\/+$/, ""), base: a["base-url"].replace(/\/+$/, ""), timeoutMs, png, template,
+    imageId: a["image-id"] ?? null,
     form: Object.fromEntries(VALUE_KEYS.map((k) => [k, v[k]])),
   };
 }
@@ -196,8 +204,8 @@ const pageReport = async (tab) => {
   return `${url}: ${text}`;
 };
 
-// Refuses a page that is not the expected form; a login form there means the browser is logged out.
-async function requireForm(tab, selector, what) {
+// Refuses a page without `selector`; a login form there means the browser is logged out.
+async function requirePage(tab, selector, what) {
   const { hasForm, login } = await tab.evaluate(
     `({ hasForm: !!document.querySelector(${JSON.stringify(selector)}), login: !!document.querySelector('input[name=pwd]') })`);
   if (hasForm) return;
@@ -213,11 +221,13 @@ const uploadRows = (tab, name) => tab.evaluate(`[...document.querySelectorAll('t
 async function uploadImage(tab, base, png, name) {
   const page = `${base}/Dateien/`;
   await tab.navigate(page);
-  await requireForm(tab, "input[name=datei]", "upload form");
+  await requirePage(tab, "input[name=datei]", "upload form");
   // An id already listed under this name is an earlier upload's: the new one must be an id not seen here.
   const before = new Set(await uploadRows(tab, name));
   const { result } = await tab.send("Runtime.evaluate", { expression: "document.querySelector('input[name=datei]')" });
   await tab.send("DOM.setFileInputFiles", { files: [png], objectId: result.objectId });
+  // From the submit on, an image may be on LMD whatever happens next.
+  posted.uploaded = true;
   await tab.submit(`(() => {
     const form = document.querySelector('input[name=datei]').form;
     form.elements.name.value = ${JSON.stringify(name)};
@@ -225,11 +235,12 @@ async function uploadImage(tab, base, png, name) {
     form.elements.offen.checked = false;
     form.querySelector('[name=dateiupload]').click();
   })()`, "the image upload");
-  // The page the POST answers with is not yet seen live, so the id is read from a fresh copy of the list;
-  // the answer is kept for the error report, as it carries LMD's reason for a refused upload.
+  // The id is read from a fresh copy of the list; the POST's answer is kept for the error report, as it
+  // carries LMD's reason for a refused upload. Right after an upload LMD serves /Dateien/ with the file list
+  // and no upload form (#1659's closing check), so the reload needs the list, not the form.
   const answer = await pageReport(tab);
   await tab.navigate(page);
-  await requireForm(tab, "input[name=datei]", "upload page");
+  await requirePage(tab, "table.upload_list_gross", "upload list");
   const [newest] = await uploadRows(tab, name);
   if (!newest || before.has(newest)) fail(`no new image named ${JSON.stringify(name)} on the upload page after the upload; LMD answered the upload with ${answer}`);
   return newest;
@@ -237,7 +248,7 @@ async function uploadImage(tab, base, png, name) {
 
 async function submitPuzzle(tab, base, form, html) {
   await tab.navigate(`${base}/Raetselportal/Eigene/einstellen.php`);
-  await requireForm(tab, "input[name=einstellen]", "puzzle submit form");
+  await requirePage(tab, "input[name=einstellen]", "puzzle submit form");
   const problem = await tab.evaluate(`(() => {
     const v = ${JSON.stringify({ ...form, html, GERMAN_TEXT, DATE_FIELDS })};
     const f = document.querySelector('input[name=einstellen]').form;
@@ -274,12 +285,12 @@ async function submitPuzzle(tab, base, form, html) {
 }
 
 // What reached LMD so far, printed on a failure after the upload.
-const posted = { image_id: null, submitted: false };
+const posted = { uploaded: false, image_id: null, submitted: false };
 
 async function main() {
   const inputs = readInputs(process.argv.slice(2));
   const out = await withTab(inputs.endpoint, inputs.timeoutMs, async (tab) => {
-    const imageId = posted.image_id = await uploadImage(tab, inputs.base, inputs.png, inputs.form.slug);
+    const imageId = posted.image_id = inputs.imageId ?? await uploadImage(tab, inputs.base, inputs.png, inputs.form.slug);
     const html = inputs.template.replaceAll(IMAGE_PLACEHOLDER, imageId);
     const puzzle = await submitPuzzle(tab, inputs.base, inputs.form, html);
     return { image_id: imageId, puzzle_id: puzzle.id, puzzle_url: puzzle.url, html };
@@ -293,6 +304,6 @@ main().then((line) => finish(process.stdout, line, 0), (e) => {
   if (e instanceof UsageError) return finish(process.stderr, `lmd_driver: ${e.message}\n`, 2);
   const message = e instanceof DriverError ? e.message : e.stack;
   const report = () => finish(process.stderr, `lmd_driver: ${message}\n`, 1);
-  if (!posted.image_id) return report();
+  if (!posted.uploaded && !posted.image_id) return report();
   process.stdout.write(JSON.stringify({ failed: message, ...posted }) + "\n", report);
 });

@@ -150,12 +150,21 @@ Work in `~/lmd-pages/work/<slug>/`; `<slug>` comes from the puzzle/rule name, e.
    a rerun never posts a second puzzle over a first or overwrites its id:
 
    ```
-   cd ~/lmd-pages/work/<slug> && python3 -c 'import json,os,sys; t=open("driver.json").read() if os.path.exists("driver.json") else ""; d=json.loads(t) if t.strip() else {}; d and sys.exit("refusing to post: driver.json already holds puzzle %s from an earlier run" % d["puzzle_id"] if d.get("puzzle_id") else "refusing to post: an earlier run failed after uploading image %s%s: %s; check LMD before posting again" % (d.get("image_id"), ", Create clicked" if d.get("submitted") else "", d.get("failed")))' && node.exe "$(wslpath -w ~/.agents/skills/create-lmd-page/lmd_driver.mjs)" --endpoint http://127.0.0.1:9334 --png "$(wslpath -w board.png)" --template "$(wslpath -w page.html)" --values "$(wslpath -w values.json)" > driver.json
+   cd ~/lmd-pages/work/<slug> && python3 -c 'import json,os,sys; t=open("driver.json").read() if os.path.exists("driver.json") else ""; d=json.loads(t) if t.strip() else {}; d and sys.exit("refusing to post: driver.json already holds puzzle %s from an earlier run" % d["puzzle_id"] if d.get("puzzle_id") else "refusing to post: an earlier run failed with %s on LMD%s: %s; check LMD before posting again" % ("image " + d["image_id"] if d.get("image_id") else "an uploaded image whose id was not read", ", Create clicked" if d.get("submitted") else "", d.get("failed")))' && node.exe "$(wslpath -w ~/.agents/skills/create-lmd-page/lmd_driver.mjs)" --endpoint http://127.0.0.1:9334 --png "$(wslpath -w board.png)" --template "$(wslpath -w page.html)" --values "$(wslpath -w values.json)" > driver.json
    ```
 
-   A non-zero exit is a failure. A failure after the upload still leaves a record in
-   `driver.json` (the image id, and whether "Create" was clicked), so the guard refuses a
-   rerun and names what already reached LMD; report it so Chris checks LMD first.
+   A non-zero exit is a failure. A failure once the upload was sent still leaves a record
+   in `driver.json` (that it uploaded, the image id once read, and whether "Create" was
+   clicked), so the guard refuses a rerun and names what already reached LMD; report it so
+   Chris checks LMD first.
+
+   **Retry after a failure past the upload.** Only when Chris asks for a retry, and never
+   retry after "Create clicked": that puzzle may exist, so Chris checks his own puzzles on
+   LMD instead. Otherwise the image is on LMD already, and the retry reuses it instead of
+   uploading a second copy: `mv driver.json driver.failed.json`, then run the Post command
+   with `--image-id <id>` added before `> driver.json`. `<id>` is the image id the guard
+   named; when it says the id was not read, Chris reads it off his LMD files page (the
+   newest file named `<slug>`) and gives it.
 7. **Check the driver's output.** Exit 0 is not enough: `driver.json` must carry a
    non-empty `puzzle_id`, `puzzle_url` and `html`. This prints the puzzle id, or exits
    non-zero naming what is missing, which is a failure:

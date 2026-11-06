@@ -97,15 +97,22 @@ GERMAN_TEXT = ("htmlcode", "codedescr")
 DATE_FIELDS = ("day", "month", "year", "hour", "min", "sec")
 
 
-def _upload_page(rows):
-    """The upload fixture with `rows` (newest first, `(id, name)`) above its two made-up entries."""
+UPLOAD_FORM = re.compile(r'<form class="upload".*?</form>', re.S)
+assert len(UPLOAD_FORM.findall(UPLOAD_PAGE)) == 1
+
+
+def _upload_page(rows, form=True):
+    """The upload fixture with `rows` (newest first, `(id, name)`) above its two made-up entries; without
+    its upload form when `form` is false, as live LMD serves /Dateien/ right after an upload (#1659's
+    closing check, Check-In: the reload showed only the file list)."""
     html = "".join(
         f'<tr><td><a href="/Dateien/index.php?id={i}">img</a></td><td>'
         f'<span class="upload_list_gross_name"><a href="/Dateien/index.php?id={i}">{n}</a></span><br>'
         f'<span class="upload_list_gross_id">ID: {i}</span><br></td></tr>'
         for i, n in rows
     )
-    return UPLOAD_PAGE.replace('<table class="upload_list_gross">\n<tbody>', '<table class="upload_list_gross">\n<tbody>' + html, 1)
+    page = UPLOAD_PAGE if form else UPLOAD_FORM.sub("", UPLOAD_PAGE)
+    return page.replace('<table class="upload_list_gross">\n<tbody>', '<table class="upload_list_gross">\n<tbody>' + html, 1)
 
 
 class FakeLmd:
@@ -116,7 +123,7 @@ class FakeLmd:
         self.uploads = []  # each a dict of field -> str, or bytes for the file
         self.submits = []  # each a dict of field -> list of str
         self.rows = []  # uploaded files, newest first, (id, name)
-        self.upload_mode = "ok"  # ok | noid | login
+        self.upload_mode = "ok"  # ok | noid | login | nolist (the page after the upload has no file list)
         self.submit_mode = "ok"  # ok | error | noid | elsewhere | alert | login
 
 
@@ -139,7 +146,11 @@ def _handler(lmd):
             path = urllib.parse.urlsplit(self.path).path
             lmd.requests.append(("GET", self.path))
             if path in (UPLOAD_PATH, UPLOAD_POST):
-                return self._send(LOGIN_PAGE if lmd.upload_mode == "login" else _upload_page(lmd.rows))
+                if lmd.upload_mode == "login":
+                    return self._send(LOGIN_PAGE)
+                if lmd.uploads and lmd.upload_mode == "nolist":
+                    return self._send("<!doctype html><html><body><p>Wartungsarbeiten.</p></body></html>")
+                return self._send(_upload_page(lmd.rows, form=not lmd.uploads))
             if path == SUBMIT_PATH:
                 return self._send({"login": LOGIN_PAGE, "alert": ALERT_PAGE}.get(lmd.submit_mode, SUBMIT_PAGE))
             if path == OWN_PUZZLES_PATH:
@@ -164,7 +175,7 @@ def _handler(lmd):
                 lmd.uploads.append(fields)
                 if lmd.upload_mode == "ok":
                     lmd.rows.insert(0, (NEW_IMAGE_ID, fields.get("name", "")))
-                    return self._send(_upload_page(lmd.rows))
+                    return self._send(_upload_page(lmd.rows, form=False))
                 return self._send(f"<!doctype html><html><body><p class='fehler'>{UPLOAD_ERROR}</p></body></html>")
             if path == SUBMIT_PATH:
                 lmd.submits.append(urllib.parse.parse_qs(body.decode("utf-8"), keep_blank_values=True))
@@ -228,13 +239,13 @@ def lmd():
     server.server_close()
 
 
-def run_driver(endpoint, lmd, tmp_path, values=None, template=TEMPLATE, png=PNG, timeout_ms=15000):
+def run_driver(endpoint, lmd, tmp_path, values=None, template=TEMPLATE, png=PNG, timeout_ms=15000, extra=()):
     (tmp_path / "board.png").write_bytes(png)
     (tmp_path / "page.html").write_text(template, encoding="utf-8")
     (tmp_path / "values.json").write_text(json.dumps(values if values is not None else VALUES), encoding="utf-8")
     return subprocess.run(
         ["node", str(DRIVER), "--endpoint", endpoint, "--base-url", lmd.base, "--png", str(tmp_path / "board.png"),
-         "--template", str(tmp_path / "page.html"), "--values", str(tmp_path / "values.json"), "--timeout-ms", str(timeout_ms)],
+         "--template", str(tmp_path / "page.html"), "--values", str(tmp_path / "values.json"), "--timeout-ms", str(timeout_ms), *extra],
         capture_output=True, text=True, timeout=60,
     )
 
@@ -275,13 +286,14 @@ def test_prints_the_ids_lmd_issued_and_the_page_html_and_never_activates(endpoin
 
 
 def _assert_refused(result, *needles, posted=None):
-    """`posted`: the {"image_id", "submitted"} record a failure after the upload prints on stdout; None, none."""
+    """`posted`: the {"uploaded", "image_id", "submitted"} record a failure once an image is on LMD prints on
+    stdout; None, none."""
     assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
     if posted is None:
         assert result.stdout == ""
     else:
         record = json.loads(result.stdout)
-        assert {k: record[k] for k in ("image_id", "submitted")} == posted
+        assert {k: record[k] for k in ("uploaded", "image_id", "submitted")} == posted
         assert record["failed"] in result.stderr
     for needle in needles:
         assert needle in result.stderr, result.stderr
@@ -290,20 +302,20 @@ def _assert_refused(result, *needles, posted=None):
 def test_a_form_error_page_after_create_exits_with_its_text(endpoint, lmd, tmp_path):
     lmd.submit_mode = "error"
     _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', FORM_ERROR,
-                    posted={"image_id": NEW_IMAGE_ID, "submitted": True})
+                    posted={"uploaded": True, "image_id": NEW_IMAGE_ID, "submitted": True})
 
 
 def test_no_puzzle_id_after_create_exits_non_zero(endpoint, lmd, tmp_path):
     lmd.submit_mode = "noid"
     _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', "Thanks.",
-                    posted={"image_id": NEW_IMAGE_ID, "submitted": True})
+                    posted={"uploaded": True, "image_id": NEW_IMAGE_ID, "submitted": True})
 
 
 @pytest.mark.parametrize("page", ["upload", "submit"])
 def test_a_login_page_exits_before_anything_is_sent(endpoint, lmd, tmp_path, page):
     setattr(lmd, f"{page}_mode", "login")
     _assert_refused(run_driver(endpoint, lmd, tmp_path), "login page", "not logged in",
-                    posted=None if page == "upload" else {"image_id": NEW_IMAGE_ID, "submitted": False})
+                    posted=None if page == "upload" else {"uploaded": True, "image_id": NEW_IMAGE_ID, "submitted": False})
     assert lmd.submits == []
     assert len(lmd.uploads) == (0 if page == "upload" else 1)
 
@@ -311,9 +323,41 @@ def test_a_login_page_exits_before_anything_is_sent(endpoint, lmd, tmp_path, pag
 def test_no_new_image_id_after_upload_exits_before_the_submit(endpoint, lmd, tmp_path):
     lmd.upload_mode = "noid"
     lmd.rows = [("0099ZZ", "test-puzzle")]  # an earlier upload under the same name is not this one
-    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no new image named "test-puzzle"', UPLOAD_ERROR)
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no new image named "test-puzzle"', UPLOAD_ERROR,
+                    posted={"uploaded": True, "image_id": None, "submitted": False})
     assert len(lmd.uploads) == 1
     assert not any(p.startswith(SUBMIT_PATH) for _, p in lmd.requests)
+
+
+def test_a_failure_after_the_upload_post_records_the_upload(endpoint, lmd, tmp_path):
+    # The POST went out, so an image may be on LMD with no id read: the record says so, or a rerun uploads twice.
+    lmd.upload_mode = "nolist"
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), "upload list", "Wartungsarbeiten.",
+                    posted={"uploaded": True, "image_id": None, "submitted": False})
+    assert len(lmd.uploads) == 1 and lmd.submits == []
+
+
+def test_image_id_reuses_an_uploaded_image_and_uploads_nothing(endpoint, lmd, tmp_path):
+    result = run_driver(endpoint, lmd, tmp_path, extra=("--image-id", "001626"))
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    assert (out["image_id"], out["puzzle_id"]) == ("001626", NEW_PUZZLE_ID)
+    [submit] = lmd.submits
+    assert '<img:001626 width="420">' in submit["htmlcode_en"][0]
+    assert lmd.uploads == [] and not any(p.startswith(UPLOAD_PATH) for _, p in lmd.requests)
+
+
+def test_a_failure_with_a_reused_image_records_it(endpoint, lmd, tmp_path):
+    lmd.submit_mode = "error"
+    _assert_refused(run_driver(endpoint, lmd, tmp_path, extra=("--image-id", "001626")), FORM_ERROR,
+                    posted={"uploaded": False, "image_id": "001626", "submitted": True})
+
+
+@pytest.mark.parametrize("bad", ["", "00 16", "<img:1>"])
+def test_a_malformed_image_id_is_a_usage_error(endpoint, lmd, tmp_path, bad):
+    result = run_driver(endpoint, lmd, tmp_path, extra=("--image-id", bad))
+    assert result.returncode == 2 and "--image-id" in result.stderr, result.stderr
+    assert lmd.requests == []
 
 
 def test_a_code_with_characters_lmd_strips_exits_before_any_upload(endpoint, lmd, tmp_path):
@@ -349,7 +393,7 @@ def test_sudoku_nein_is_the_choice_sent(endpoint, lmd, tmp_path):
 def test_an_id_on_a_page_other_than_the_puzzles_is_a_refusal(endpoint, lmd, tmp_path):
     lmd.submit_mode = "elsewhere"
     _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', "Your puzzles",
-                    posted={"image_id": NEW_IMAGE_ID, "submitted": True})
+                    posted={"uploaded": True, "image_id": NEW_IMAGE_ID, "submitted": True})
 
 
 def test_an_alert_on_the_page_is_dismissed_and_is_a_refusal(endpoint, lmd, tmp_path):
@@ -377,7 +421,7 @@ def test_bad_inputs_exit_before_any_request(endpoint, lmd, tmp_path, values, tem
 
 def test_a_label_the_form_lacks_exits_before_the_submit(endpoint, lmd, tmp_path):
     _assert_refused(run_driver(endpoint, lmd, tmp_path, values={**VALUES, "labels": [3, 999]}), "no label 999",
-                    posted={"image_id": NEW_IMAGE_ID, "submitted": False})
+                    posted={"uploaded": True, "image_id": NEW_IMAGE_ID, "submitted": False})
     assert lmd.submits == []
 
 

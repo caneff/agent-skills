@@ -179,14 +179,23 @@ def test_post_refuses_when_driver_json_holds_an_earlier_puzzle(tmp_path):
     assert (tmp_path / "driver.json").read_text() == earlier
 
 
+@pytest.mark.parametrize("image_id, image", [("0100XY", "image 0100XY"), (None, "an uploaded image whose id was not read")])
 @pytest.mark.parametrize("submitted, clicked", [(True, ", Create clicked"), (False, "")])
-def test_post_refuses_after_an_earlier_failure_past_the_upload(tmp_path, submitted, clicked):
-    earlier = json.dumps({"failed": "no puzzle id", "image_id": "0100XY", "submitted": submitted}) + "\n"
+def test_post_refuses_after_an_earlier_failure_past_the_upload(tmp_path, image_id, image, submitted, clicked):
+    earlier = json.dumps({"failed": "no puzzle id", "uploaded": image_id is None, "image_id": image_id,
+                          "submitted": submitted}) + "\n"
     (tmp_path / "driver.json").write_text(earlier)
     r = post_with_a_fake_driver(tmp_path)
     assert r.returncode != 0, r
-    assert f"failed after uploading image 0100XY{clicked}: no puzzle id" in r.stderr, r.stderr
+    assert f"an earlier run failed with {image} on LMD{clicked}: no puzzle id" in r.stderr, r.stderr
     assert (tmp_path / "driver.json").read_text() == earlier
+
+
+def test_a_retry_reuses_the_uploaded_image_only_when_create_was_not_clicked():
+    out = " ".join(section("Output").split())
+    retry = out[out.index("**Retry after a failure past the upload.**"):out.index("7. **Check the driver's output.**")]
+    assert "--image-id <id>" in retry and "driver.failed.json" in retry
+    assert 'never retry after "Create clicked"' in retry
 
 
 @pytest.mark.parametrize("earlier", [None, ""])
