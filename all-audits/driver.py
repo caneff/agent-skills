@@ -340,7 +340,7 @@ def module_slug(module):
 def manifest_instruction(manifest_path):
     return (
         f"\nAfter writing the report, write a manifest to {manifest_path} — a JSON object with "
-        '"report_path" (the report\'s absolute path), "count" (how many findings), and "headline" '
+        '"report_path" (the report\'s absolute path), "count" (how many actionable findings), and "headline" '
         "(the one-line verdict). This is how the sweep finds your report; it does not scan your output."
     )
 
