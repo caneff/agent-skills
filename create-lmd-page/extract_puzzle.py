@@ -2,7 +2,9 @@
 """Pull title/author/rules from a SudokuPad link or id.
 
 Usage: extract_puzzle.py <sudokupad-url-or-id>
-Prints JSON {title, author, rules} to stdout. Exits non-zero if fetch/decode fails.
+Prints JSON {title, author, rules, solution, layout} to stdout. `solution` is
+the puzzle's embedded solution string (row-major digits, as SudokuPad stores
+it), or null when the puzzle carries none. Exits non-zero if fetch/decode fails.
 
 The API returns an lz-string(base64) blob prefixed with a format tag ("scl").
 Two payload shapes exist: SudokuMaker exports are valid JSON with the fields
@@ -10,7 +12,6 @@ under "metadata"; legacy SudokuPad blobs are a JS object literal (unquoted keys,
 `t`/`f` bools) — not strict JSON — so those we string-slice instead of parsing.
 """
 import json, re, sys, urllib.request
-import lzstring
 
 
 def puzzle_id(arg):
@@ -52,7 +53,23 @@ def layout_hint(rules_text):
     return "one" if h > IMG_H else "two"
 
 
+def parse_blob(data):
+    """{title, author, rules, solution} from a decompressed blob.
+
+    `solution` is None when absent or empty.
+    """
+    try:  # SudokuMaker: valid JSON, fields under "metadata"
+        m = json.loads(data)["metadata"]
+        out = {k: m.get(k) for k in ("title", "author", "rules", "solution")}
+    except (ValueError, KeyError, TypeError):  # legacy SudokuPad JS-literal blob
+        out = {"title": field(data, "t"), "author": field(data, "author"),
+               "rules": field(data, "rules"), "solution": field(data, "solution")}
+    out["solution"] = out["solution"] or None
+    return out
+
+
 def main():
+    import lzstring
     if len(sys.argv) != 2:
         sys.exit("usage: extract_puzzle.py <sudokupad-url-or-id>")
     pid = puzzle_id(sys.argv[1])
@@ -63,12 +80,7 @@ def main():
     data = lzstring.LZString().decompressFromBase64(body)
     if not data:
         sys.exit("decompress failed (unexpected blob format)")
-    try:  # SudokuMaker: valid JSON, fields under "metadata"
-        m = json.loads(data)["metadata"]
-        out = {k: m.get(k) for k in ("title", "author", "rules")}
-    except (ValueError, KeyError, TypeError):  # legacy SudokuPad JS-literal blob
-        out = {"title": field(data, "t"), "author": field(data, "author"),
-               "rules": field(data, "rules")}
+    out = parse_blob(data)
     if not out["rules"]:
         sys.exit("no rules field found in puzzle data")
     out["layout"] = layout_hint(out["rules"])
