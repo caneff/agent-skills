@@ -753,9 +753,11 @@ def plan_sweep(repo, selected, force, base=None):
     return plan
 
 
-def _jobs_from_env(name, default="4"):
-    """A positive-integer concurrency cap from the environment, else exit 2."""
-    raw = os.environ.get(name, default)
+def _jobs_from_env(name):
+    """A positive-integer concurrency cap from the environment (default 4). A
+    value that is not one stops the run with exit 2; it is never rounded to a
+    default."""
+    raw = os.environ.get(name, "4")
     try:
         jobs = int(raw)
     except ValueError:
@@ -767,12 +769,11 @@ def _jobs_from_env(name, default="4"):
 
 
 def sweep_jobs():
-    """`SWEEP_JOBS` (#1666): how many audits a sweep runs at once. Validated as
-    `mutation_jobs` is: a bad value stops the run, never a silent default."""
+    """`SWEEP_JOBS` (#1666): how many audits a sweep runs at once."""
     return _jobs_from_env("SWEEP_JOBS")
 
 
-def execute(repo, plan, run):
+def execute(repo, plan, run, jobs):
     """Run the planned audits — the only place a sweep spawns a process.
 
     The first audit runs alone as a smoke test: if the `-p` slash invocation
@@ -780,7 +781,6 @@ def execute(repo, plan, run):
     same way, so the sweep aborts instead of fanning thirteen failures out.
     Returns the names of the audits that failed (#1278).
     """
-    jobs = sweep_jobs()
     if not plan.to_run:
         return []
     smoke = plan.to_run[0]
@@ -935,10 +935,11 @@ def _announce(run, repo):
 def sweep(repo, out, only, short, force):
     repo = os.path.abspath(repo)
     selected = only if only is not None else (SHORT_SET if short else list(AUDIT_NAMES))
+    jobs = sweep_jobs()  # before the run dir exists, as mutation_mode does
     run = RunDir.create(out)
     _announce(run, repo)
     plan = plan_sweep(repo, selected, force)
-    failed = execute(repo, plan, run)
+    failed = execute(repo, plan, run, jobs)
     open_index(collect(run, repo, plan))
     if failed:
         print(f"FAILED audits: {', '.join(failed)}", file=sys.stderr)
@@ -956,8 +957,7 @@ def rebuild_index(repo, out):
 # --- mutation mode --------------------------------------------------------
 
 def mutation_jobs():
-    """`MUTATION_JOBS` (#1588): how many modules run at once. A value that is
-    not a positive integer stops the run; it is never rounded to a default."""
+    """`MUTATION_JOBS` (#1588): how many modules run at once."""
     return _jobs_from_env("MUTATION_JOBS")
 
 
