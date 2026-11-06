@@ -64,6 +64,16 @@ Pick the pattern that fits the candidate. Mix them — don't make every diagram 
 
 "X calls Y calls Z, and look at the mess" → a `flowchart`. Fill leaking and shallow nodes solid red with `classDef` so the problem sites read at a glance; a sequence diagram works well for "before: 6 round-trips; after: 1." **Write one statement per line inside `vt-mermaid`** — a line wrapped mid-edge is a syntax error.
 
+**Quote any label holding punctuation.** A node or edge label with `()`, `[]`, `{}`, `|` or `:` goes in double quotes: `-->|"read_text().strip()"|`, `A["list(x.values())"]`. Unquoted, the parens end the label early and the whole diagram renders as Mermaid's "Syntax error" box (#1665).
+
+**Render the report before handing it over.** A prose rule alone let two broken diagrams ship, so run the check on the finished file and fix every block it names:
+
+```
+python3 ~/.agents/skills/all-audits/harness/pagelib.py check-mermaid <report.html>
+```
+
+Run it only on a report that draws diagrams: it exits non-zero on a bad block, and on a report with none. See [`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
+
 ```html
 <div class="vt-mermaid">
 flowchart LR
