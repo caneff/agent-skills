@@ -289,6 +289,16 @@ def test_aktivieren_is_left_to_chris_and_hand_off_is_the_puzzle_link():
     assert "puzzle_url" in hand_off and "puzzle page link" in hand_off
 
 
+def test_archive_waits_for_chris_to_activate_after_the_hand_off():
+    # Chris's ruling on #1662 (A1 = a): LMD hides an inactive puzzle from the anonymous
+    # fetch lmd_archive makes, so the one archive call runs only once he says he activated it.
+    out = section("Output")
+    hand_off, archive = out.index("**Hand-off.**"), out.index("**Archive**")
+    assert hand_off < archive
+    wait = " ".join(out[hand_off:archive].split())
+    assert 'say once he has clicked "Aktivieren"' in wait and "Wait for that answer" in wait
+
+
 def test_failure_stops_the_skill_and_is_reported_with_output():
     assert "A failure stops the skill" in FLAT
     assert "reported to the user with the command's output" in FLAT

@@ -1,14 +1,14 @@
 ---
 name: create-lmd-page
-description: Post a Logic Masters Deutschland puzzle from a SudokuPad link: render the image, create the inactive puzzle through the driver, archive it, and hand back the puzzle page link.
+description: Post a Logic Masters Deutschland puzzle from a SudokuPad link: render the image, create the inactive puzzle through the driver, hand back the puzzle page link, and archive it once Chris activates it.
 disable-model-invocation: true
 ---
 
 # Create LMD Page
 
 Make a Logic Masters Deutschland puzzle page from a SudokuPad link: render the board
-image, post the puzzle to LMD as an inactive draft, write the page HTML, archive the
-puzzle, and hand Chris the puzzle page link. **Chris reviews the page and clicks
+image, post the puzzle to LMD as an inactive draft, write the page HTML, hand Chris the
+puzzle page link, and archive the puzzle once he has activated it. **Chris reviews the page and clicks
 "Aktivieren" himself; the skill never does.**
 
 **A failure stops the skill.** Any step that fails (the extractor after its one
@@ -165,10 +165,13 @@ Work in `~/lmd-pages/work/<slug>/`; `<slug>` comes from the puzzle/rule name, e.
    ```
 8. **Write the page file.** Write `html` from `driver.json` to `~/lmd-pages/<slug>.html`
    and load it onto the clipboard: `clip.exe < FILE` (WSL). State the file path.
-9. **Archive** (§ Archive), with the puzzle id from `driver.json`.
-10. **Hand-off.** Give Chris `puzzle_url` from `driver.json`, the puzzle page link, bare on
+9. **Hand-off.** Give Chris `puzzle_url` from `driver.json`, the puzzle page link, bare on
    its own line. Say the puzzle is saved inactive; he reviews the page and clicks
-   "Aktivieren" himself.
+   "Aktivieren" himself. Ask him to say once he has clicked "Aktivieren". Wait for that
+   answer: the archive reads the page without logging in, and LMD shows an inactive
+   puzzle to nobody but its author.
+10. **Archive** (§ Archive), with the puzzle id from `driver.json`, once Chris says he has
+   clicked "Aktivieren". Never ask him for the id.
 
 **Never have the user copy the HTML out of the terminal.** Drag-selecting long soft-wrapped
 lines in the TUI silently drops chunks mid-line. **Never print the HTML to the terminal at
@@ -204,8 +207,9 @@ Layout — pick by the `layout` field (see the two variants under Template):
 
 ## Archive
 
-Back the puzzle up once, with its LMD id from the driver (the user's ruling, sudokupad-art
-`docs/research/2026-09-30-lmd-archive-facts.md`, rulings 13 and 18). `<slug>` is the page
+Back the puzzle up once, with its LMD id from the driver, after Chris has activated it
+(the user's rulings: sudokupad-art `docs/research/2026-09-30-lmd-archive-facts.md`,
+rulings 13 and 18, and #1662's A1, which waits for activation). `<slug>` is the page
 file's name without `.html`; `<sudokupad-link>` is the link exactly as the page uses it,
 any `?setting-...` query included; `<id>` is `puzzle_id` from `driver.json`.
 
