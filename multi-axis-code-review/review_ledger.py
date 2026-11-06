@@ -1037,7 +1037,7 @@ def fold_corrections(rows: list[dict]) -> list[dict]:
     outcome is replaced and the row keeps a `corrected` note; the correction rows themselves are
     not returned. A correction whose target is absent or is not a mutation row raises ValueError,
     never reads as nothing: the false row would then stand unnoticed."""
-    held = {r["row_id"]: r for r in rows if r.get("type") != CORRECTION_TYPE}
+    held = {r.get("row_id"): r for r in rows if r.get("type") != CORRECTION_TYPE}
     latest: dict[str, dict] = {}
     for c in rows:
         if c.get("type") != CORRECTION_TYPE:
@@ -1054,7 +1054,7 @@ def fold_corrections(rows: list[dict]) -> list[dict]:
     return [{**r, "outcome": latest[r["row_id"]]["outcome"],
              "corrected": {"from": r.get("outcome"), "by": latest[r["row_id"]]["row_id"],
                            "reason": latest[r["row_id"]].get("reason")}}
-            if r["row_id"] in latest else r
+            if r.get("row_id") in latest else r
             for r in rows if r.get("type") != CORRECTION_TYPE]
 
 

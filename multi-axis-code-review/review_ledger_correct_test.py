@@ -121,3 +121,9 @@ def test_a_correction_naming_a_missing_row_fails_the_reader_loud(tmp_path):
         assert "gone" in str(e)
     else:
         raise AssertionError("an orphan correction was read as nothing")
+
+
+def test_a_hand_built_row_with_no_row_id_still_reads(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(json.dumps({"repo": "skills", "ticket": 1, "type": "spec"}) + "\n")
+    assert review_ledger.read_ledger(ledger) == [{"repo": "skills", "ticket": 1, "type": "spec"}]
