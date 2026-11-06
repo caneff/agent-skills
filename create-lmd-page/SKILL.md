@@ -97,15 +97,19 @@ Work in `~/lmd-pages/work/<slug>/`; `<slug>` comes from the puzzle/rule name, e.
 
    It runs sudokupad-art's `render_real.js` on the puzzle and shrinks the PNG when a side
    is over 800 px. Its last line prints the size; if either side is over 800, stop.
-3. **Stream gate.** Before any driver call, run the check and stop on a non-zero exit,
-   showing its output:
+3. **Stream gate.** Before any driver call, run the rig's own check and stop on a
+   non-zero exit, showing its stderr as it stands:
 
    ```
-   node ~/.agents/skills/create-lmd-page/stream_gate.mjs
+   node ~/src/twitch-rules-scroller/layout/install-preflight.mjs obs
    ```
 
-   It exits 0 only when OBS is neither streaming nor recording (or is not running). It
-   refuses when OBS is streaming or recording, and when it cannot read the status.
+   Exit 0 (it prints `open` or `closed`) means OBS is neither streaming nor recording.
+   It refuses when OBS is streaming or recording, when OBS's status cannot be read, and
+   when the websocket is unreachable while `obs64.exe` is running. Its message starts
+   "Refusing to install"; in this skill the refusal is the stream gate's, so say so and
+   show the output unchanged.
+
 4. **Write the driver values** to `~/lmd-pages/work/<slug>/values.json`, from what the user
    confirmed: `{"slug", "title", "code", "difficulty", "sudoku", "labels": [<n>...],
    "freetags", "codedescr_en"}`. `title` is the extractor's; `codedescr_en` is the

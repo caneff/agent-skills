@@ -1,6 +1,6 @@
 """Structure test for the create-lmd-page flow (#1662): the SKILL.md prose that the spec's
-acceptance criteria name, plus the three scripts it calls (extractor `solution`, the PNG fit,
-the stream gate).
+acceptance criteria name, plus the scripts it calls (extractor `solution`, the PNG fit) and
+the rig's stream gate it runs.
 
 Blind to: whether a model follows the prose, the `lmd_archive` command itself (sudokupad-art
 #261, #262, #287), the driver (lmd_driver_test.py), and a real render or a real OBS.
@@ -70,30 +70,36 @@ with tempfile.TemporaryDirectory() as d:
     assert out.stdout.strip() == "(800, 625) (800, 625) (600, 600)"
 
 
-# ---- the stream gate ----
+# ---- the stream gate (the rig's obsState, #723; this skill adds no logic of its own) ----
 
-def gate(status=None, error=None):
+PREFLIGHT = Path.home() / "src/twitch-rules-scroller/layout/install-preflight.mjs"
+
+
+def obs_state(status=None, error=None, tasks=""):
+    """obsState() from the rig's module, with OBS and tasklist.exe faked. Returns {state?, refuse?}."""
     js = """
-import { gate } from %r;
-const status = %s, error = %s;
-const withObs = async (run) => { if (error) throw error; return run(); };
-const r = await gate(withObs, async () => status);
+import { obsState } from %r;
+const withObs = async (run) => { %s return run(async () => (%s)); };
+const r = await obsState({ withObs, listProcesses: () => %s });
 console.log(JSON.stringify(r));
-""" % ((HERE / "stream_gate.mjs").as_uri(), json.dumps(status),
-       "Object.assign(new Error('x'), %s)" % json.dumps(error) if error is not None else "null")
+""" % (PREFLIGHT.as_uri(),
+       "throw Object.assign(new Error('x'), %s);" % json.dumps(error) if error is not None else "",
+       json.dumps(status or {"outputActive": False}), json.dumps(tasks))
     out = subprocess.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True, check=True)
-    return json.loads(out.stdout)["ok"]
+    return json.loads(out.stdout)
 
 
-def test_gate_passes_only_when_idle_or_obs_not_running():
-    assert gate({"streaming": False, "recording": False}) is True
-    assert gate(error={"unreachable": True}) is True
+def test_unreachable_websocket_with_obs_running_is_a_refusal():
+    r = obs_state(error={"unreachable": True}, tasks="obs64.exe    1234 Console")
+    assert "refuse" in r and "obs64.exe" in r["refuse"], r
 
 
-def test_gate_refuses_streaming_recording_and_an_unreadable_status():
-    assert gate({"streaming": True, "recording": False}) is False
-    assert gate({"streaming": False, "recording": True}) is False
-    assert gate(error={}) is False
+def test_unreachable_websocket_with_no_obs_process_is_closed():
+    assert obs_state(error={"unreachable": True}, tasks="INFO: No tasks are running")["state"] == "closed"
+
+
+def test_streaming_obs_is_a_refusal():
+    assert "refuse" in obs_state(status={"outputActive": True}), "streaming must refuse"
 
 
 # ---- SKILL.md ----
@@ -123,7 +129,7 @@ def test_inputs_are_asked_one_per_message_in_order():
 
 def test_stream_gate_runs_before_the_driver_call():
     out = section("Output")
-    gate_at, driver_at = out.index("stream_gate.mjs"), out.index("lmd_driver.mjs")
+    gate_at, driver_at = out.index("install-preflight.mjs obs"), out.index("lmd_driver.mjs")
     assert gate_at < driver_at
     assert "Before any driver call" in out
 
