@@ -11,11 +11,15 @@
 // puzzle inactive, then reads the new puzzle id. It never clicks "Aktivieren". It closes its tab and
 // prints one JSON line: {"image_id", "puzzle_id", "puzzle_url", "html"}.
 //
-// values.json: {"slug", "title", "code", "difficulty" (1-5), "sudoku" ("Ja" | "Nein", default "Ja"),
-//   "labels" ([<n> of label_<n>]), "freetags" (string), "codedescr_en"}.
+// values.json, every key required: {"slug", "title", "code", "difficulty" (1-5), "sudoku" ("Ja" | "Nein"),
+//   "labels" ([<n> of label_<n>]), "freetags" (string), "codedescr_en" (string, may be empty)}.
 //
-// Any failure exits 1 with "lmd_driver: <error>" on stderr; a usage error exits 2. Field names and where
-// the ids appear: docs/research/2026-11-06-lmd-upload-and-submit-forms.md.
+// Any failure exits 1 with "lmd_driver: <error>" on stderr; a usage error exits 2. A failure after the
+// upload also prints one JSON line on stdout, {"failed", "image_id", "submitted"}: what already reached LMD,
+// "submitted" true once "Create" was clicked, so a rerun can see an image or puzzle no id records. Every CDP request, the
+// connection to Chrome and each page load has the --timeout-ms deadline; a JavaScript dialog on the page is
+// dismissed and is a failure; the tab is closed on every exit. Field names and where the ids appear:
+// docs/research/2026-11-06-lmd-upload-and-submit-forms.md.
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -28,9 +32,15 @@ const MAX_UPLOAD_BYTES = 4194304; // the upload form's MAX_FILE_SIZE
 const CODE_ALLOWED = /^[A-Za-z0-9()<>~+\-*= /\\|!#$%&]*$/;
 const GERMAN_TEXT = ["htmlcode", "codedescr"];
 const DATE_FIELDS = ["day", "month", "year", "hour", "min", "sec"];
+const VALUE_KEYS = ["slug", "title", "code", "difficulty", "sudoku", "labels", "freetags", "codedescr_en"];
 
 class DriverError extends Error {}
+class UsageError extends Error {}
 const fail = (msg) => { throw new DriverError(msg); };
+
+function readText(file, what) {
+  try { return readFileSync(file, "utf8"); } catch (e) { fail(`cannot read the ${what} ${file}: ${e.message}`); }
+}
 
 function readInputs(argv) {
   const { values: a } = parseArgs({
@@ -48,82 +58,118 @@ function readInputs(argv) {
   let size;
   try { size = statSync(png).size; } catch (e) { fail(`cannot read the PNG ${png}: ${e.message}`); }
   if (size > MAX_UPLOAD_BYTES) fail(`the PNG is ${size} bytes, over LMD's upload limit of ${MAX_UPLOAD_BYTES}`);
-  const template = readFileSync(a.template, "utf8");
+  const template = readText(a.template, "page template");
   if (!template.includes(IMAGE_PLACEHOLDER)) fail(`the page template has no ${IMAGE_PLACEHOLDER} placeholder`);
-  const v = JSON.parse(readFileSync(a.values, "utf8"));
-  for (const k of ["slug", "title", "code", "codedescr_en"]) {
-    if (typeof v[k] !== "string" || (k !== "codedescr_en" && !v[k].trim())) fail(`values.${k} must be a non-empty string`);
+  const valuesText = readText(a.values, "values file");
+  let v;
+  try { v = JSON.parse(valuesText); } catch (e) { fail(`the values file ${a.values} is not JSON: ${e.message}`); }
+  if (v === null || typeof v !== "object" || Array.isArray(v)) fail(`the values file ${a.values} is not a JSON object`);
+  // A missing key is refused, never defaulted: each value is one the user confirmed.
+  for (const k of VALUE_KEYS) if (!Object.hasOwn(v, k)) fail(`the values file has no "${k}"`);
+  for (const k of ["slug", "title", "code"]) {
+    if (typeof v[k] !== "string" || !v[k].trim()) fail(`values.${k} must be a non-empty string`);
   }
+  for (const k of ["codedescr_en", "freetags"]) if (typeof v[k] !== "string") fail(`values.${k} must be a string`);
   if (!CODE_ALLOWED.test(v.code)) {
     const bad = [...new Set([...v.code].filter((c) => !CODE_ALLOWED.test(c)))].join("");
     fail(`the solution code ${JSON.stringify(v.code)} has characters LMD would strip: ${JSON.stringify(bad)}`);
   }
   if (!Number.isInteger(v.difficulty) || v.difficulty < 1 || v.difficulty > 5) fail(`values.difficulty must be 1-5, got ${JSON.stringify(v.difficulty)}`);
-  const sudoku = v.sudoku ?? "Ja";
-  if (sudoku !== "Ja" && sudoku !== "Nein") fail(`values.sudoku must be "Ja" or "Nein", got ${JSON.stringify(sudoku)}`);
-  const labels = v.labels ?? [];
-  if (!Array.isArray(labels) || !labels.every(Number.isInteger)) fail("values.labels must be a list of label numbers");
-  const freetags = v.freetags ?? "";
-  if (typeof freetags !== "string") fail("values.freetags must be a string");
+  if (v.sudoku !== "Ja" && v.sudoku !== "Nein") fail(`values.sudoku must be "Ja" or "Nein", got ${JSON.stringify(v.sudoku)}`);
+  if (!Array.isArray(v.labels) || !v.labels.every(Number.isInteger)) fail("values.labels must be a list of label numbers");
   return {
     endpoint: a.endpoint.replace(/\/+$/, ""), base: a["base-url"].replace(/\/+$/, ""), timeoutMs, png, template,
-    form: { slug: v.slug, title: v.title, code: v.code, difficulty: v.difficulty, sudoku, labels, freetags, codedescr_en: v.codedescr_en },
+    form: Object.fromEntries(VALUE_KEYS.map((k) => [k, v[k]])),
   };
 }
-class UsageError extends Error {}
 
-// One CDP session on a tab's websocket, hand-rolled on Node's global WebSocket like twitch-rules-scroller's
-// e2e client (e2e/chrome-windows.mjs withCdp): no dependency. Every wait has a deadline.
-async function withTab(endpoint, timeoutMs, run) {
-  let tab;
+// One HTTP call to Chrome's CDP endpoint, with the deadline; the body is read inside it too.
+async function cdpHttp(endpoint, url, timeoutMs, init = {}) {
   try {
-    const r = await fetch(`${endpoint}/json/new?about:blank`, { method: "PUT" });
-    if (!r.ok) fail(`CDP ${endpoint}/json/new answered ${r.status} ${await r.text()}`);
-    tab = await r.json();
+    const r = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    return { ok: r.ok, status: r.status, body: await r.text() };
   } catch (e) {
-    if (e instanceof DriverError) throw e;
+    if (e.name === "TimeoutError") fail(`CDP ${url} did not answer within ${timeoutMs} ms`);
     fail(`no CDP endpoint at ${endpoint}: ${e.cause?.message ?? e.message}`);
   }
-  const ws = new WebSocket(tab.webSocketDebuggerUrl);
+}
+
+// Opens a new tab, runs `run` on it and closes it, whatever happened.
+async function withTab(endpoint, timeoutMs, run) {
+  const created = await cdpHttp(endpoint, `${endpoint}/json/new?about:blank`, timeoutMs, { method: "PUT" });
+  if (!created.ok) fail(`CDP ${endpoint}/json/new answered ${created.status} ${created.body}`);
+  let tab;
+  try { tab = JSON.parse(created.body); } catch { fail(`CDP ${endpoint}/json/new answered with a body that is not JSON: ${created.body.slice(0, 300)}`); }
+  try {
+    if (typeof tab?.webSocketDebuggerUrl !== "string") fail(`CDP ${endpoint}/json/new answered with no webSocketDebuggerUrl: ${created.body.slice(0, 300)}`);
+    return await withSession(tab.webSocketDebuggerUrl, timeoutMs, run);
+  } finally {
+    if (tab?.id) {
+      await cdpHttp(endpoint, `${endpoint}/json/close/${tab.id}`, timeoutMs)
+        .catch((e) => process.stderr.write(`lmd_driver: could not close tab ${tab.id}: ${e.message}\n`));
+    }
+  }
+}
+
+// One CDP session on a tab's websocket, hand-rolled on Node's global WebSocket like twitch-rules-scroller's
+// e2e client (e2e/chrome-windows.mjs withCdp): no dependency. Every wait has a deadline, and every wait ends
+// at once when the session ends: the socket closed, or the page opened a dialog.
+async function withSession(url, timeoutMs, run) {
+  let ws;
+  try { ws = new WebSocket(url); } catch (e) { fail(`CDP gave a websocket URL that cannot be opened, ${url}: ${e.message}`); }
   const pending = new Map();
   const listeners = new Set();
   let nextId = 0;
-  ws.onmessage = ({ data }) => {
-    const msg = JSON.parse(data);
-    if (msg.id === undefined) { for (const l of listeners) l(msg); return; }
-    const p = pending.get(msg.id);
-    if (!p) return;
-    pending.delete(msg.id);
-    if (msg.error) p.rej(new DriverError(`CDP ${p.method}: ${msg.error.message}`));
-    else p.res(msg.result);
+  let endSession;
+  const ended = new Promise((_, rej) => { endSession = rej; });
+  ended.catch(() => {});
+  // Waits for `start` to settle its promise, for at most timeoutMs; `start` returns its own cleanup.
+  const bounded = (start, late) => {
+    let timer, cleanup;
+    return Promise.race([
+      new Promise((res, rej) => {
+        timer = setTimeout(() => rej(new DriverError(late)), timeoutMs);
+        cleanup = start(res, rej);
+      }),
+      ended,
+    ]).finally(() => { clearTimeout(timer); cleanup?.(); });
   };
-  ws.onclose = () => {
-    for (const p of pending.values()) p.rej(new DriverError(`the CDP socket closed during ${p.method}`));
-    pending.clear();
-  };
-  const send = (method, params = {}) => new Promise((res, rej) => {
+  const send = (method, params = {}) => bounded((res, rej) => {
     const id = ++nextId;
     pending.set(id, { res, rej, method });
     ws.send(JSON.stringify({ id, method, params }));
-  });
-  const waitFor = (method, what) => {
-    let done;
-    const promise = new Promise((res, rej) => {
-      const timer = setTimeout(() => { listeners.delete(done); rej(new DriverError(`${what} did not finish loading within ${timeoutMs} ms`)); }, timeoutMs);
-      done = (msg) => { if (msg.method === method) { clearTimeout(timer); listeners.delete(done); res(msg.params); } };
-      listeners.add(done);
-    });
-    return promise;
+    return () => pending.delete(id);
+  }, `CDP ${method} got no answer within ${timeoutMs} ms`);
+  const waitFor = (method, what) => bounded((res) => {
+    const listener = (msg) => { if (msg.method === method) res(msg.params); };
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }, `${what} did not finish loading within ${timeoutMs} ms`);
+  ws.onmessage = ({ data }) => {
+    const msg = JSON.parse(data);
+    if (msg.method === "Page.javascriptDialogOpening") {
+      // A dialog blocks the page's script, so no evaluate would answer: dismiss it and stop.
+      ws.send(JSON.stringify({ id: ++nextId, method: "Page.handleJavaScriptDialog", params: { accept: false } }));
+      const { type, message, url: at } = msg.params;
+      endSession(new DriverError(`the page opened a ${type} dialog, dismissed unanswered, at ${at}: ${JSON.stringify(message)}`));
+      return;
+    }
+    if (msg.id === undefined) { for (const l of listeners) l(msg); return; }
+    const p = pending.get(msg.id);
+    if (!p) return;
+    if (msg.error) p.rej(new DriverError(`CDP ${p.method}: ${msg.error.message}`));
+    else p.res(msg.result);
   };
+  ws.onclose = () => endSession(new DriverError(`the CDP socket at ${url} closed`));
   const evaluate = async (expression) => {
     const { result, exceptionDetails } = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     if (exceptionDetails) fail(`the page threw: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
     return result?.value;
   };
-  const navigate = async (url) => {
-    const loaded = waitFor("Page.loadEventFired", url);
-    const { errorText } = await send("Page.navigate", { url });
-    if (errorText) fail(`cannot open ${url}: ${errorText}`);
+  const navigate = async (to) => {
+    const loaded = waitFor("Page.loadEventFired", to);
+    const { errorText } = await send("Page.navigate", { url: to });
+    if (errorText) fail(`cannot open ${to}: ${errorText}`);
     await loaded;
   };
   // Runs `expression`, which submits a form, and waits for the page it leads to.
@@ -133,15 +179,14 @@ async function withTab(endpoint, timeoutMs, run) {
     await loaded;
   };
   try {
-    await new Promise((res, rej) => {
+    await bounded((res, rej) => {
       ws.onopen = res;
-      ws.onerror = () => rej(new DriverError(`CDP websocket unreachable at ${tab.webSocketDebuggerUrl}`));
-    });
+      ws.onerror = () => rej(new DriverError(`CDP websocket unreachable at ${url}`));
+    }, `the CDP websocket at ${url} did not open within ${timeoutMs} ms`);
     await send("Page.enable");
     return await run({ send, evaluate, navigate, submit });
   } finally {
     ws.close();
-    await fetch(`${endpoint}/json/close/${tab.id}`).catch(() => {});
   }
 }
 
@@ -180,11 +225,13 @@ async function uploadImage(tab, base, png, name) {
     form.elements.offen.checked = false;
     form.querySelector('[name=dateiupload]').click();
   })()`, "the image upload");
-  // The page the POST answers with is not yet seen live, so the id is read from a fresh copy of the list.
+  // The page the POST answers with is not yet seen live, so the id is read from a fresh copy of the list;
+  // the answer is kept for the error report, as it carries LMD's reason for a refused upload.
+  const answer = await pageReport(tab);
   await tab.navigate(page);
   await requireForm(tab, "input[name=datei]", "upload page");
   const [newest] = await uploadRows(tab, name);
-  if (!newest || before.has(newest)) fail(`no new image named ${JSON.stringify(name)} on the upload page after the upload`);
+  if (!newest || before.has(newest)) fail(`no new image named ${JSON.stringify(name)} on the upload page after the upload; LMD answered the upload with ${answer}`);
   return newest;
 }
 
@@ -216,27 +263,36 @@ async function submitPuzzle(tab, base, form, html) {
     return null;
   })()`);
   if (problem) fail(problem);
+  posted.submitted = true;
   await tab.submit("document.querySelector('input[name=einstellen]').click()", "the puzzle submit");
   // "Create" lands on the new puzzle's page, zeigen.php?id=<id>; any other page is a refusal.
   const url = await tab.evaluate("location.href");
-  const id = new URL(url).pathname.endsWith("/zeigen.php") ? new URL(url).searchParams.get("id") : null;
+  const landed = new URL(url);
+  const id = landed.pathname.endsWith("/zeigen.php") ? landed.searchParams.get("id") : null;
   if (!id) fail(`no puzzle id after "Create": ${await pageReport(tab)}`);
   return { id, url };
 }
 
+// What reached LMD so far, printed on a failure after the upload.
+const posted = { image_id: null, submitted: false };
+
 async function main() {
   const inputs = readInputs(process.argv.slice(2));
   const out = await withTab(inputs.endpoint, inputs.timeoutMs, async (tab) => {
-    const imageId = await uploadImage(tab, inputs.base, inputs.png, inputs.form.slug);
+    const imageId = posted.image_id = await uploadImage(tab, inputs.base, inputs.png, inputs.form.slug);
     const html = inputs.template.replaceAll(IMAGE_PLACEHOLDER, imageId);
     const puzzle = await submitPuzzle(tab, inputs.base, inputs.form, html);
     return { image_id: imageId, puzzle_id: puzzle.id, puzzle_url: puzzle.url, html };
   });
-  process.stdout.write(JSON.stringify(out) + "\n");
+  return JSON.stringify(out) + "\n";
 }
 
-main().catch((e) => {
-  if (e instanceof UsageError) { process.stderr.write(`lmd_driver: ${e.message}\n`); process.exit(2); }
-  process.stderr.write(`lmd_driver: ${e instanceof DriverError ? e.message : e.stack}\n`);
-  process.exit(1);
+// Exits once the line is written: a socket whose peer never acknowledges the close must not hold the process.
+const finish = (stream, text, code) => stream.write(text, () => process.exit(code));
+main().then((line) => finish(process.stdout, line, 0), (e) => {
+  if (e instanceof UsageError) return finish(process.stderr, `lmd_driver: ${e.message}\n`, 2);
+  const message = e instanceof DriverError ? e.message : e.stack;
+  const report = () => finish(process.stderr, `lmd_driver: ${message}\n`, 1);
+  if (!posted.image_id) return report();
+  process.stdout.write(JSON.stringify({ failed: message, ...posted }) + "\n", report);
 });

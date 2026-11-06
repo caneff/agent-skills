@@ -1,17 +1,27 @@
 """`lmd_driver.mjs` posts a puzzle to LMD: what a fake LMD receives, and what the driver reads back.
 
-WSL `node` runs the driver against a headless Chromium, as Windows `node.exe` runs it against the stream
-browser in real use. Chromium loads a fake LMD: the saved copies of the real upload and submit forms
-(`fixtures/`, #1660), served by a local HTTP server that records every request and form it gets and
-answers with pages carrying the ids. Chromium is Playwright's headless shell under
-`~/.cache/ms-playwright` (or `LMD_TEST_CHROMIUM`); with none found the suite fails rather than skips, so a
-green run always drove a browser.
+This is #1659's end-to-end test: it drives the driver, the half of the skill that posts, through every
+acceptance criterion it carries, and `bash tests/all.sh` runs it. WSL `node` runs the driver against a
+headless Chromium, as Windows `node.exe` runs it against the stream browser in real use. Chromium loads a
+fake LMD: the saved copies of the real upload and submit forms (`fixtures/`, #1660), served by a local
+HTTP server that records every request and form it gets and answers with pages carrying the ids. Each
+field the driver must set starts in the fake's forms at the value it must not send, so a field the
+driver leaves alone shows in what the fake receives. Chromium is Playwright's headless shell, found in
+Playwright's browser cache under the user's home directory as `node` is found on PATH: a tool the
+machine has, read and never written. With none found the suite fails rather than skips, so a green run
+always drove a browser.
+
+Blind to: LMD changing its markup after the fixtures were saved, the real stream browser (Windows
+`node.exe`, port 9334, the rig's profile) and its LMD login.
 """
+import base64
 import email.parser
 import email.policy
+import hashlib
 import json
-import re
+import pwd
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -27,12 +37,37 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 DRIVER = HERE / "lmd_driver.mjs"
-UPLOAD_PAGE = (HERE / "fixtures" / "lmd-upload.html").read_text(encoding="utf-8")
+
+
+def _swap(html, old, new):
+    """`html` with its one `old` replaced by `new`; a fixture that lost `old` fails here, not in a test."""
+    assert html.count(old) == 1, (old, html.count(old))
+    return html.replace(old, new)
+
+
+# The saved forms, with each field the driver must set started at the value it must not send: "others may
+# use" checked, German text present, a timed activation chosen.
+UPLOAD_PAGE = _swap((HERE / "fixtures" / "lmd-upload.html").read_text(encoding="utf-8"),
+                    '<input type="checkbox" name="offen">', '<input type="checkbox" name="offen" checked>')
 SUBMIT_PAGE = (HERE / "fixtures" / "lmd-submit.html").read_text(encoding="utf-8")
+for _old, _new in [
+    ('<textarea name="htmlcode" cols="60" rows="15"></textarea>', '<textarea name="htmlcode" cols="60" rows="15">Rätsel</textarea>'),
+    ('<textarea name="codedescr" cols="60" rows="5"></textarea>', '<textarea name="codedescr" cols="60" rows="5">Zeile 5</textarea>'),
+    ('<option value="ja">Yes, on:</option>\n<option value="nein" selected="">No</option>',
+     '<option value="ja" selected="">Yes, on:</option>\n<option value="nein">No</option>'),
+]:
+    SUBMIT_PAGE = _swap(SUBMIT_PAGE, _old, _new)
+# A form check of the kind LMD may run: it stops the submit with an alert, which blocks the page's script.
+ALERT_TEXT = "Bitte einen Namen eingeben."
+ALERT_PAGE = _swap(SUBMIT_PAGE, "</body>", f"""<script>
+document.querySelector('input[name=einstellen]').form.addEventListener('submit', (e) => {{
+  e.preventDefault(); alert({json.dumps(ALERT_TEXT)}); }});
+</script></body>""")
 UPLOAD_PATH = "/Dateien/"
 UPLOAD_POST = "/Dateien/index.php"
 SUBMIT_PATH = "/Raetselportal/Eigene/einstellen.php"
 PUZZLE_PATH = "/Raetselportal/Raetsel/zeigen.php"
+OWN_PUZZLES_PATH = "/Raetselportal/Eigene/"
 LOGIN_PAGE = """<!doctype html><html><body><h1>Login</h1>
 <form action="?" method="POST"><input type="text" name="name"><input type="password" name="pwd">
 <input type="hidden" name="hiddenaction" value="login"><input type="submit" name="login" value="Anmelden">
@@ -40,6 +75,7 @@ LOGIN_PAGE = """<!doctype html><html><body><h1>Login</h1>
 NEW_IMAGE_ID = "0100XY"
 NEW_PUZZLE_ID = "000QRS"
 FORM_ERROR = "Please enter a name for the puzzle."
+UPLOAD_ERROR = "Die Datei ist zu groß."
 # A one-pixel PNG: the bytes the recorded upload must carry.
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
@@ -81,7 +117,7 @@ class FakeLmd:
         self.submits = []  # each a dict of field -> list of str
         self.rows = []  # uploaded files, newest first, (id, name)
         self.upload_mode = "ok"  # ok | noid | login
-        self.submit_mode = "ok"  # ok | error | noid | login
+        self.submit_mode = "ok"  # ok | error | noid | elsewhere | alert | login
 
 
 def _handler(lmd):
@@ -105,7 +141,9 @@ def _handler(lmd):
             if path in (UPLOAD_PATH, UPLOAD_POST):
                 return self._send(LOGIN_PAGE if lmd.upload_mode == "login" else _upload_page(lmd.rows))
             if path == SUBMIT_PATH:
-                return self._send(LOGIN_PAGE if lmd.submit_mode == "login" else SUBMIT_PAGE)
+                return self._send({"login": LOGIN_PAGE, "alert": ALERT_PAGE}.get(lmd.submit_mode, SUBMIT_PAGE))
+            if path == OWN_PUZZLES_PATH:
+                return self._send("<!doctype html><html><body><h1>Your puzzles</h1></body></html>")
             if path == PUZZLE_PATH:
                 return self._send("<!doctype html><html><body><h1>Test Puzzle</h1><a href='?aktivieren=1'>Aktivieren</a></body></html>")
             return self._send("not found", 404)
@@ -126,11 +164,15 @@ def _handler(lmd):
                 lmd.uploads.append(fields)
                 if lmd.upload_mode == "ok":
                     lmd.rows.insert(0, (NEW_IMAGE_ID, fields.get("name", "")))
-                return self._send(_upload_page(lmd.rows))
+                    return self._send(_upload_page(lmd.rows))
+                return self._send(f"<!doctype html><html><body><p class='fehler'>{UPLOAD_ERROR}</p></body></html>")
             if path == SUBMIT_PATH:
                 lmd.submits.append(urllib.parse.parse_qs(body.decode("utf-8"), keep_blank_values=True))
                 if lmd.submit_mode == "ok":
                     return self._send("", 302, [("Location", f"{PUZZLE_PATH}?id={NEW_PUZZLE_ID}")])
+                if lmd.submit_mode == "elsewhere":
+                    # an id on a page that is not the puzzle's: not the landing "Create" leads to
+                    return self._send("", 302, [("Location", f"{OWN_PUZZLES_PATH}?id={NEW_PUZZLE_ID}")])
                 if lmd.submit_mode == "error":
                     return self._send(f"<!doctype html><html><body><p class='fehler'>{FORM_ERROR}</p></body></html>")
                 return self._send("<!doctype html><html><body><p>Thanks.</p></body></html>")
@@ -140,12 +182,12 @@ def _handler(lmd):
 
 
 def _chromium():
-    path = os.environ.get("LMD_TEST_CHROMIUM")
-    if path:
-        return path
-    found = sorted(glob(os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell")))
+    """The newest Playwright headless shell. The home directory comes from the user's account, not from
+    HOME, so the lookup does not turn on what the shell exports."""
+    cache = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".cache" / "ms-playwright"
+    found = sorted(glob(str(cache / "chromium_headless_shell-*" / "chrome-headless-shell-linux64" / "chrome-headless-shell")))
     if not found:
-        pytest.fail("no headless Chromium: set LMD_TEST_CHROMIUM or install Playwright's chromium_headless_shell")
+        pytest.fail(f"no headless Chromium under {cache}: install Playwright's chromium_headless_shell")
     return found[-1]
 
 
@@ -186,13 +228,13 @@ def lmd():
     server.server_close()
 
 
-def run_driver(endpoint, lmd, tmp_path, values=None, template=TEMPLATE, png=PNG):
+def run_driver(endpoint, lmd, tmp_path, values=None, template=TEMPLATE, png=PNG, timeout_ms=15000):
     (tmp_path / "board.png").write_bytes(png)
     (tmp_path / "page.html").write_text(template, encoding="utf-8")
     (tmp_path / "values.json").write_text(json.dumps(values if values is not None else VALUES), encoding="utf-8")
     return subprocess.run(
         ["node", str(DRIVER), "--endpoint", endpoint, "--base-url", lmd.base, "--png", str(tmp_path / "board.png"),
-         "--template", str(tmp_path / "page.html"), "--values", str(tmp_path / "values.json"), "--timeout-ms", "15000"],
+         "--template", str(tmp_path / "page.html"), "--values", str(tmp_path / "values.json"), "--timeout-ms", str(timeout_ms)],
         capture_output=True, text=True, timeout=60,
     )
 
@@ -232,27 +274,36 @@ def test_prints_the_ids_lmd_issued_and_the_page_html_and_never_activates(endpoin
     assert not any("aktiv" in p.lower() for _, p in lmd.requests)
 
 
-def _assert_refused(result, *needles):
+def _assert_refused(result, *needles, posted=None):
+    """`posted`: the {"image_id", "submitted"} record a failure after the upload prints on stdout; None, none."""
     assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
-    assert result.stdout == ""
+    if posted is None:
+        assert result.stdout == ""
+    else:
+        record = json.loads(result.stdout)
+        assert {k: record[k] for k in ("image_id", "submitted")} == posted
+        assert record["failed"] in result.stderr
     for needle in needles:
         assert needle in result.stderr, result.stderr
 
 
 def test_a_form_error_page_after_create_exits_with_its_text(endpoint, lmd, tmp_path):
     lmd.submit_mode = "error"
-    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', FORM_ERROR)
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', FORM_ERROR,
+                    posted={"image_id": NEW_IMAGE_ID, "submitted": True})
 
 
 def test_no_puzzle_id_after_create_exits_non_zero(endpoint, lmd, tmp_path):
     lmd.submit_mode = "noid"
-    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', "Thanks.")
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', "Thanks.",
+                    posted={"image_id": NEW_IMAGE_ID, "submitted": True})
 
 
 @pytest.mark.parametrize("page", ["upload", "submit"])
 def test_a_login_page_exits_before_anything_is_sent(endpoint, lmd, tmp_path, page):
     setattr(lmd, f"{page}_mode", "login")
-    _assert_refused(run_driver(endpoint, lmd, tmp_path), "login page", "not logged in")
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), "login page", "not logged in",
+                    posted=None if page == "upload" else {"image_id": NEW_IMAGE_ID, "submitted": False})
     assert lmd.submits == []
     assert len(lmd.uploads) == (0 if page == "upload" else 1)
 
@@ -260,7 +311,7 @@ def test_a_login_page_exits_before_anything_is_sent(endpoint, lmd, tmp_path, pag
 def test_no_new_image_id_after_upload_exits_before_the_submit(endpoint, lmd, tmp_path):
     lmd.upload_mode = "noid"
     lmd.rows = [("0099ZZ", "test-puzzle")]  # an earlier upload under the same name is not this one
-    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no new image named "test-puzzle"')
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no new image named "test-puzzle"', UPLOAD_ERROR)
     assert len(lmd.uploads) == 1
     assert not any(p.startswith(SUBMIT_PATH) for _, p in lmd.requests)
 
@@ -274,7 +325,7 @@ def test_no_cdp_endpoint_exits_non_zero(lmd, tmp_path):
     _assert_refused(run_driver("http://127.0.0.1:9", lmd, tmp_path), "no CDP endpoint at http://127.0.0.1:9")
 
 
-@pytest.mark.parametrize("mode", ["ok", "error"])
+@pytest.mark.parametrize("mode", ["ok", "error", "alert"])
 def test_the_driver_closes_its_tab(endpoint, lmd, tmp_path, mode):
     lmd.submit_mode = mode
     run_driver(endpoint, lmd, tmp_path)
@@ -286,3 +337,115 @@ def test_the_driver_closes_its_tab(endpoint, lmd, tmp_path, mode):
 def test_the_driver_imports_only_node_builtins():
     imports = re.findall(r'^import .* from "([^"]+)";', DRIVER.read_text(encoding="utf-8"), re.M)
     assert imports and all(m.startswith("node:") for m in imports), imports
+
+
+def test_sudoku_nein_is_the_choice_sent(endpoint, lmd, tmp_path):
+    result = run_driver(endpoint, lmd, tmp_path, values={**VALUES, "sudoku": "Nein"})
+    assert result.returncode == 0, result.stderr
+    [submit] = lmd.submits
+    assert submit["Sudoku_JaNein"] == ["Nein"]
+
+
+def test_an_id_on_a_page_other_than_the_puzzles_is_a_refusal(endpoint, lmd, tmp_path):
+    lmd.submit_mode = "elsewhere"
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), 'no puzzle id after "Create"', "Your puzzles",
+                    posted={"image_id": NEW_IMAGE_ID, "submitted": True})
+
+
+def test_an_alert_on_the_page_is_dismissed_and_is_a_refusal(endpoint, lmd, tmp_path):
+    lmd.submit_mode = "alert"
+    _assert_refused(run_driver(endpoint, lmd, tmp_path), "alert dialog, dismissed unanswered", ALERT_TEXT)
+    assert lmd.submits == []
+
+
+@pytest.mark.parametrize(
+    "values, template, png, message",
+    [
+        (VALUES, TEMPLATE, PNG + bytes(4194304 - len(PNG) + 1), "over LMD's upload limit of 4194304"),
+        (VALUES, "<p>No image.</p>", PNG, "no {{IMAGE_ID}} placeholder"),
+        ({**VALUES, "difficulty": 0}, TEMPLATE, PNG, "values.difficulty must be 1-5, got 0"),
+        ({**VALUES, "difficulty": 6}, TEMPLATE, PNG, "values.difficulty must be 1-5, got 6"),
+        *[({k: v for k, v in VALUES.items() if k != key}, TEMPLATE, PNG, f'the values file has no "{key}"')
+          for key in ("sudoku", "labels", "freetags")],
+    ],
+    ids=["png-over-4MiB", "no-placeholder", "difficulty-0", "difficulty-6", "no-sudoku", "no-labels", "no-freetags"],
+)
+def test_bad_inputs_exit_before_any_request(endpoint, lmd, tmp_path, values, template, png, message):
+    _assert_refused(run_driver(endpoint, lmd, tmp_path, values=values, template=template, png=png), message)
+    assert lmd.requests == []
+
+
+def test_a_label_the_form_lacks_exits_before_the_submit(endpoint, lmd, tmp_path):
+    _assert_refused(run_driver(endpoint, lmd, tmp_path, values={**VALUES, "labels": [3, 999]}), "no label 999",
+                    posted={"image_id": NEW_IMAGE_ID, "submitted": False})
+    assert lmd.submits == []
+
+
+class FakeCdp:
+    """A CDP endpoint that hands out one tab and then stalls: the websocket handshake never completes
+    (`handshake`), or it completes and no command is ever answered (`commands`); or /json/new answers
+    with a body that is not JSON (`notjson`)."""
+
+    def __init__(self, mode):
+        self.mode = mode
+        self.requests = []
+
+
+def _cdp_handler(cdp):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _hold(self):
+            """Keep the connection open, saying nothing, until the driver hangs up."""
+            while self.rfile.read(1):
+                pass
+
+        def do_PUT(self):
+            """/json/new: the one tab."""
+            cdp.requests.append(urllib.parse.urlsplit(self.path).path)
+            port = self.server.server_port
+            body = (b"<html>not a tab</html>" if cdp.mode == "notjson" else json.dumps(
+                {"id": "T1", "webSocketDebuggerUrl": f"ws://127.0.0.1:{port}/devtools/page/T1"}).encode())
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = urllib.parse.urlsplit(self.path).path
+            cdp.requests.append(path)
+            if path == "/devtools/page/T1":
+                if cdp.mode == "commands":
+                    accept = base64.b64encode(hashlib.sha1(
+                        (self.headers["Sec-WebSocket-Key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest())
+                    self.wfile.write(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                                     b"Connection: Upgrade\r\nSec-WebSocket-Accept: " + accept + b"\r\n\r\n")
+                    self.wfile.flush()
+                return self._hold()
+            self.send_response(200)  # /json/close/<id>
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    return Handler
+
+
+@pytest.mark.parametrize("mode, message", [
+    ("handshake", "did not open within 1000 ms"),
+    ("commands", "CDP Page.enable got no answer within 1000 ms"),
+    ("notjson", "answered with a body that is not JSON: <html>not a tab</html>"),
+])
+def test_a_stalled_or_garbled_cdp_endpoint_exits_and_closes_the_tab(lmd, tmp_path, mode, message):
+    cdp = FakeCdp(mode)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _cdp_handler(cdp))
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        started = time.monotonic()
+        result = run_driver(f"http://127.0.0.1:{server.server_port}", lmd, tmp_path, timeout_ms=1000)
+        _assert_refused(result, message)
+        assert time.monotonic() - started < 10  # the 1 s deadline held, not run_driver's 60 s kill
+        assert ("/json/close/T1" in cdp.requests) == (mode != "notjson")
+    finally:
+        server.shutdown()
+        server.server_close()

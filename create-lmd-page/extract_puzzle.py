@@ -2,8 +2,9 @@
 """Pull title/author/rules from a SudokuPad link or id.
 
 Usage: extract_puzzle.py <sudokupad-url-or-id>
-Prints JSON {title, author, rules, solution, layout} to stdout. `solution` is the puzzle's embedded
-solution string (row-major digits, as SudokuPad stores it), or null when the puzzle carries none. Exits non-zero if fetch/decode fails.
+Prints JSON {title, author, rules, solution, layout} to stdout. `solution` is
+the puzzle's embedded solution string (row-major digits, as SudokuPad stores
+it), or null when the puzzle carries none. Exits non-zero if fetch/decode fails.
 
 The API returns an lz-string(base64) blob prefixed with a format tag ("scl").
 Two payload shapes exist: SudokuMaker exports are valid JSON with the fields
@@ -53,7 +54,10 @@ def layout_hint(rules_text):
 
 
 def parse_blob(data):
-    """{title, author, rules, solution} from a decompressed blob; `solution` is None when absent or empty."""
+    """{title, author, rules, solution} from a decompressed blob.
+
+    `solution` is None when absent or empty.
+    """
     try:  # SudokuMaker: valid JSON, fields under "metadata"
         m = json.loads(data)["metadata"]
         out = {k: m.get(k) for k in ("title", "author", "rules", "solution")}

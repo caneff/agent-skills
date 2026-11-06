@@ -12,11 +12,17 @@ puzzle, and hand Chris the puzzle page link. **Chris reviews the page and clicks
 "Aktivieren" himself; the skill never does.**
 
 **A failure stops the skill.** Any step that fails (the extractor after its one
-fallback, the stream gate, the render, the driver, the archive) stops the run, and the
-failure is reported to the user with the command's output. There is no fallback to the
-manual flow: do not hand over a page to paste, and never say the puzzle is posted or
-archived after a failure. Facts about the LMD forms and the driver's contract:
+fallback, the stream gate, the stream browser, the render, the driver, a check on its
+output, the archive) stops the run, and the failure is reported to the user with the
+command's output. Once Output step 1 has run, the report also names the page file it
+wrote, `~/lmd-pages/work/<slug>/page.html` (its image id still the literal
+`{{IMAGE_ID}}`), for reference. There is no fallback to the manual flow: do not hand over
+a page to paste, and never say the puzzle is posted or archived after a failure. Facts
+about the LMD forms and the driver's contract:
 `docs/research/2026-11-06-lmd-upload-and-submit-forms.md`, `create-lmd-page/lmd_driver.mjs`.
+
+This is the one statement of the failure rule; the steps below say what counts as a
+failure, never how to report it.
 
 ## Inputs
 
@@ -25,6 +31,8 @@ before asking the next. Skip any input the user already supplied. Order:
 
 1. **SudokuPad link** — e.g. `https://sudokupad.app/abc123`. It *also supplies the
    ruleset*: run the extractor (below) and show the rules for the user to correct.
+   When the extractor's `title` is `null` (or it failed), ask for the **title** next,
+   in one message of its own, before the notes.
 2. **Notes** (optional) — intro/flavor text shown at the *top* of the page, above the
    image, with no header. If not given, omit the intro block entirely.
 3. **Solution code description** — what the code is, e.g. "row 5, left to right".
@@ -54,7 +62,7 @@ column count — see the Template section.
 If the script errors (fetch failed, unknown blob format, no rules field), ask the user
 for the ruleset as plain text, and judge `layout` by eye: one column if the rules would
 run taller than the ~450px image. That one fallback is the extractor's only; `solution`
-is then `null`.
+and `title` are then `null`.
 
 ### Solution code
 
@@ -65,8 +73,8 @@ The code is what the solver enters on LMD. Derive it, then show it for confirmat
   code. Chris confirms or corrects it.
 - Anything else, or `solution` is `null`: ask the user for the code.
 
-LMD silently strips characters outside letters, digits and ``()<>~+-*= /\|!#$%&``, so
-the code uses only those.
+The driver refuses a code with a character LMD would strip; the allowed set is its
+`CODE_ALLOWED`.
 
 ### Tags, and the Sudoku question
 
@@ -96,7 +104,7 @@ Work in `~/lmd-pages/work/<slug>/`; `<slug>` comes from the puzzle/rule name, e.
    ```
 
    It runs sudokupad-art's `render_real.js` on the puzzle and shrinks the PNG when a side
-   is over 800 px. Its last line prints the size; if either side is over 800, stop.
+   is over 800 px. A non-zero exit is a failure, and it leaves no PNG.
 3. **Stream gate.** Before any driver call, run the rig's own check and stop on a
    non-zero exit, showing its stderr as it stands:
 
@@ -109,27 +117,56 @@ Work in `~/lmd-pages/work/<slug>/`; `<slug>` comes from the puzzle/rule name, e.
    when the websocket is unreachable while `obs64.exe` is running. Its message starts
    "Refusing to install"; in this skill the refusal is the stream gate's, so say so and
    show the output unchanged.
+4. **Stream browser endpoint.** The driver needs the stream browser's control port. Ask
+   it, through Windows `node.exe` (WSL cannot reach a Windows loopback port); the last
+   argument is how many seconds to keep trying:
 
-4. **Write the driver values** to `~/lmd-pages/work/<slug>/values.json`, from what the user
-   confirmed: `{"slug", "title", "code", "difficulty", "sudoku", "labels": [<n>...],
-   "freetags", "codedescr_en"}`. `title` is the extractor's; `codedescr_en` is the
-   description the user gave.
-5. **Post.** Run the driver through Windows `node.exe`, against the stream browser on
+   ```
+   node.exe -e "const end=Date.now()+1000*Number(process.argv[1]);(async()=>{for(;;){try{if((await fetch('http://127.0.0.1:9334/json/version')).ok)process.exit(0)}catch{}if(Date.now()>=end){console.error('nothing answers on 127.0.0.1:9334');process.exit(1)}await new Promise(r=>setTimeout(r,500))}})()" 0
+   ```
+
+   Exit 0: go on. Otherwise list the running stream browsers:
+   `tasklist.exe /FI "IMAGENAME eq chrome-stream.exe" /NH`. Any `chrome-stream.exe` line
+   is a refusal: a stream browser that is already running keeps the command line it
+   started with, so it has no control port until it is closed once (the e2e Chrome runs
+   the same exe, so name the pids and say that). With none running, launch it with the
+   rig's own arguments (twitch-rules-scroller `StreamBrowser.cs` `LaunchStreamBrowser`,
+   read at 3784974; the rig lives in `C:\Users\canef\stream-rig`):
+
+   ```
+   powershell.exe -NoProfile -Command "Start-Process -FilePath 'C:\Users\canef\stream-rig\chrome-stream\chrome-stream.exe' -WorkingDirectory 'C:\Users\canef\stream-rig\chrome-stream' -ArgumentList '--remote-debugging-port=9334','--user-data-dir=C:\Users\canef\stream-rig\stream-profile','--no-first-run','--no-default-browser-check','--hide-crash-restore-bubble','https://logic-masters.de/Raetselportal/Einstellungen/listen.php?list=beobachtung'"
+   ```
+
+   then rerun the endpoint check above with `20` in place of `0`. A non-zero exit there
+   is a failure.
+5. **Write the driver values** to `~/lmd-pages/work/<slug>/values.json`, from what the
+   user confirmed, with the keys and types the header of `lmd_driver.mjs` lists. `title`
+   is the extractor's, or the one Chris gave; `codedescr_en` is the description the user
+   gave.
+6. **Post.** Run the driver through Windows `node.exe`, against the stream browser on
    9334. It uploads the image, fills the template's image id, fills the English-only form
-   and clicks "Create", which saves the puzzle inactive:
+   and clicks "Create", which saves the puzzle inactive. The command first refuses when
+   `driver.json` already holds an earlier run's output, naming that run's puzzle id, so
+   a rerun never posts a second puzzle over a first or overwrites its id:
 
    ```
-   cd ~/lmd-pages/work/<slug> && node.exe "$(wslpath -w ~/.agents/skills/create-lmd-page/lmd_driver.mjs)" --endpoint http://127.0.0.1:9334 --png "$(wslpath -w board.png)" --template "$(wslpath -w page.html)" --values "$(wslpath -w values.json)" > driver.json
+   cd ~/lmd-pages/work/<slug> && python3 -c 'import json,os,sys; t=open("driver.json").read() if os.path.exists("driver.json") else ""; d=json.loads(t) if t.strip() else {}; d and sys.exit("refusing to post: driver.json already holds puzzle %s from an earlier run" % d["puzzle_id"] if d.get("puzzle_id") else "refusing to post: an earlier run failed after uploading image %s%s: %s; check LMD before posting again" % (d.get("image_id"), ", Create clicked" if d.get("submitted") else "", d.get("failed")))' && node.exe "$(wslpath -w ~/.agents/skills/create-lmd-page/lmd_driver.mjs)" --endpoint http://127.0.0.1:9334 --png "$(wslpath -w board.png)" --template "$(wslpath -w page.html)" --values "$(wslpath -w values.json)" > driver.json
    ```
 
-   `driver.json` holds one JSON line `{"image_id", "puzzle_id", "puzzle_url", "html"}`.
-   Any non-zero exit (a refusal) is a failure: report its output and stop. The driver
-   reads the puzzle id from the page "Create" lands on; if it refuses there, that is
-   reported as it stands.
-6. **Write the page file.** Write `html` from `driver.json` to `~/lmd-pages/<slug>.html`
+   A non-zero exit is a failure. A failure after the upload still leaves a record in
+   `driver.json` (the image id, and whether "Create" was clicked), so the guard refuses a
+   rerun and names what already reached LMD; report it so Chris checks LMD first.
+7. **Check the driver's output.** Exit 0 is not enough: `driver.json` must carry a
+   non-empty `puzzle_id`, `puzzle_url` and `html`. This prints the puzzle id, or exits
+   non-zero naming what is missing, which is a failure:
+
+   ```
+   cd ~/lmd-pages/work/<slug> && python3 -c 'import json,sys; t=open("driver.json").read(); d=json.loads(t) if t.strip() else {}; miss=[k for k in ("puzzle_id","puzzle_url","html") if not d.get(k)]; sys.exit("driver.json lacks " + ", ".join(miss)) if miss else print(d["puzzle_id"])'
+   ```
+8. **Write the page file.** Write `html` from `driver.json` to `~/lmd-pages/<slug>.html`
    and load it onto the clipboard: `clip.exe < FILE` (WSL). State the file path.
-7. **Archive** (§ Archive), with the puzzle id from `driver.json`.
-8. **Hand-off.** Give Chris `puzzle_url` from `driver.json`, the puzzle page link, bare on
+9. **Archive** (§ Archive), with the puzzle id from `driver.json`.
+10. **Hand-off.** Give Chris `puzzle_url` from `driver.json`, the puzzle page link, bare on
    its own line. Say the puzzle is saved inactive; he reviews the page and clicks
    "Aktivieren" himself.
 
@@ -177,9 +214,8 @@ uv run --project ~/src/sudokupad-art ~/src/sudokupad-art/lmd_archive.py archive 
 ```
 
 That archives the puzzle and its LMD page and names the folder by the id. A non-zero exit,
-or any `FAILED` line on stderr, is reported to the user with the command's output; never
-skip a failure, and never say the puzzle is archived after one. The puzzle is already
-posted, so a failed archive does not undo it: report that too, and stop.
+or any `FAILED` line on stderr, is a failure. The puzzle is already posted, so a failed
+archive does not undo it: say that too.
 
 ## Template
 

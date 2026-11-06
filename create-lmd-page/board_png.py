@@ -14,15 +14,15 @@ LIMIT = 800
 ART = Path.home() / "src" / "sudokupad-art"
 
 
-def fit(png, limit=LIMIT):
-    """Shrink `png` in place, keeping its aspect ratio, until both sides are <= limit. Returns (w, h)."""
+def fit(png):
+    """Shrink `png` in place, keeping its aspect ratio, until both sides are <= LIMIT. Returns (w, h)."""
     from PIL import Image
     with Image.open(png) as im:
         im.load()
-        if im.width <= limit and im.height <= limit:
+        if im.width <= LIMIT and im.height <= LIMIT:
             return im.size
         small = im.copy()
-    small.thumbnail((limit, limit), Image.LANCZOS)
+    small.thumbnail((LIMIT, LIMIT), Image.LANCZOS)
     small.save(png)
     return small.size
 
