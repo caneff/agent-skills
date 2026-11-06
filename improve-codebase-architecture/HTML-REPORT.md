@@ -72,7 +72,7 @@ Pick the pattern that fits the candidate. Mix them — don't make every diagram 
 python3 ~/.agents/skills/all-audits/harness/pagelib.py check-mermaid <report.html>
 ```
 
-It exits non-zero and prints `block <i> of <n>` for each `.vt-mermaid` that shows "Syntax error" or never rendered. See [`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
+Run it only on a report that draws diagrams: it exits non-zero on a bad block, and on a report with none. See [`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
 
 ```html
 <div class="vt-mermaid">

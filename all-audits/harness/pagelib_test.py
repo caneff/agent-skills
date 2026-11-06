@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(__file__))
 import pagelib  # noqa: E402
 
@@ -97,3 +99,29 @@ def test_check_mermaid_cli_exits_nonzero_on_a_failed_block(tmp_path):
                           capture_output=True, text=True)
     assert proc.returncode == 1
     assert "block 1" in proc.stdout + proc.stderr
+
+
+def test_check_mermaid_raises_when_it_cannot_run(tmp_path, monkeypatch):
+    with pytest.raises(RuntimeError, match="no such report"):
+        pagelib.check_mermaid(str(tmp_path / "missing.html"))
+    report = _report(tmp_path, [GOOD])
+    monkeypatch.setenv("PATH", str(tmp_path))  # no shot-scraper on it
+    with pytest.raises(RuntimeError, match="not installed"):
+        pagelib.check_mermaid(report)
+
+
+def test_check_mermaid_refuses_a_path_it_cannot_load_faithfully(tmp_path):
+    odd = tmp_path / "a#b"
+    odd.mkdir()
+    with pytest.raises(RuntimeError, match="cannot render a path"):
+        pagelib.check_mermaid(_report(odd, [PAREN_LABEL]))
+
+
+def test_cli_distinguishes_no_blocks_and_could_not_run_from_a_failed_block(tmp_path):
+    def run(path):
+        return subprocess.run([sys.executable, pagelib.__file__, "check-mermaid", path],
+                              capture_output=True, text=True)
+    none = run(_report(tmp_path, []))
+    assert none.returncode == 3 and "nothing was checked" in none.stdout
+    gone = run(str(tmp_path / "missing.html"))
+    assert gone.returncode == 2 and "could not run" in gone.stderr

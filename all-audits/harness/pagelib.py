@@ -15,6 +15,7 @@ so a caller can put markup in a heading. Escape untrusted text with
 import html
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -99,27 +100,53 @@ def check_mermaid(report_path, *, timeout=20):
     `shot-scraper` is missing or answers something unreadable: a check that
     could not run is not a clean report.
     """
+    if not os.path.isfile(report_path):
+        raise RuntimeError(f"no such report: {report_path}")
     js = _MERMAID_JS % (timeout * 1000)
-    proc = subprocess.run(["shot-scraper", "javascript", report_path, js],
-                          capture_output=True, text=True, timeout=timeout + 60)
+    path = str(pathlib.Path(report_path).resolve())
+    # shot-scraper builds `file:<path>` unescaped, so these would be read as a
+    # fragment, query or escape and load some other page.
+    if any(c in path for c in "#?%"):
+        raise RuntimeError(f"cannot render a path holding '#', '?' or '%': {path}")
+    try:
+        proc = subprocess.run(["shot-scraper", "javascript", path, js],
+                              capture_output=True, text=True, timeout=timeout + 60)
+    except FileNotFoundError as e:
+        raise RuntimeError("shot-scraper is not installed") from e
     if proc.returncode != 0:
         raise RuntimeError(f"shot-scraper failed ({proc.returncode}): {proc.stderr.strip()}")
-    result = json.loads(proc.stdout)
-    if not isinstance(result, dict) or set(result) != {"total", "failed"}:
+    try:
+        result = json.loads(proc.stdout)
+    except ValueError:
+        result = None
+    if (not isinstance(result, dict) or set(result) != {"total", "failed"}
+            or not isinstance(result["total"], int)
+            or not isinstance(result["failed"], list)
+            or not all(isinstance(i, int) for i in result["failed"])):
         raise RuntimeError(f"unreadable shot-scraper answer: {proc.stdout[:200]!r}")
     return result
 
 
 def main(argv):
+    """Exit 0 clean, 1 a block failed, 2 usage or the check could not run,
+    3 no `vt-mermaid` block found (nothing was checked, so not clean)."""
     if len(argv) != 3 or argv[1] != "check-mermaid":
         print("usage: pagelib.py check-mermaid <report.html>", file=sys.stderr)
         return 2
-    result = check_mermaid(argv[2])
+    try:
+        result = check_mermaid(argv[2])
+    except RuntimeError as e:
+        print(f"check-mermaid could not run: {e}", file=sys.stderr)
+        return 2
     for i in result["failed"]:
         print(f"block {i + 1} of {result['total']}: Mermaid syntax error or not rendered")
-    if not result["failed"]:
-        print(f"{result['total']} mermaid blocks rendered clean")
-    return 1 if result["failed"] else 0
+    if result["failed"]:
+        return 1
+    if result["total"] == 0:
+        print("no vt-mermaid block found: nothing was checked")
+        return 3
+    print(f"{result['total']} mermaid blocks rendered clean")
+    return 0
 
 
 if __name__ == "__main__":
