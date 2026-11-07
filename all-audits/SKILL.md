@@ -2,7 +2,7 @@
 name: all-audits
 description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time and land the sweep as one spec per area.
 disable-model-invocation: true
-argument-hint: "[path]"
+argument-hint: "[path] | multi [paths…]"
 ---
 
 Run the whole audit set over one repo in a single sweep. Thirteen audit skills fan
@@ -128,6 +128,31 @@ When you are invoked in-session as `/all-audits [path]`:
    it — which walks every report widest-first per
    [`harness/GRILLING.md`](harness/GRILLING.md). It opens with one question,
    `harness/GRILLING.md` § Offer the batch mode.
+
+## Multi-repo — `/all-audits multi [paths…]`
+
+Sweeps several owned repos in one background run. Each repo is swept from a
+fresh worktree of its `origin/main`, one after another, and stored under
+`~/.local/share/all-audits/<repo>/<sweep-id>/` (`driver.py --multi`).
+
+1. **Pick the repos.** With paths, use them and skip the ask. With none, run
+   `driver.py --suggest`. It prints one `suggest: <path>` line per owned repo
+   with a PR you authored in the last 14 days and a local checkout under
+   `~/src` (`--roots DIR,DIR` changes where it looks), and one `skipped:
+   <owner/name> (no local checkout)` line per repo with recent PRs and no
+   checkout. A repo with two checkouts is listed once. If the verb exits
+   non-zero, show its error and stop: do not fall back to a guessed list.
+2. **Ask once.** Show the `suggest:` paths as one pre-ticked list, name the
+   `skipped:` repos, and take the user's final list. This is the only
+   question of the run.
+3. **Launch it under `job-run`, then end the turn.**
+   `job-run --name all-audits-multi -- driver.py --multi <path> <path>…`.
+   Do not poll or sleep; the job's completion wakes the session.
+4. **On wake, report from the summary.** Read the `== multi-repo summary ==`
+   block in the job's progress (`job-run --status all-audits-multi`). Give
+   each repo's outcome: `swept` with the stored audit record link (the
+   `<stored path>/collection/index.html`), `refused` or `failed` with its
+   reason. A failed repo is reported as failed, never as swept.
 
 ## After the sweep
 

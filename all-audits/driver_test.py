@@ -1393,3 +1393,93 @@ def test_single_repo_sweep_is_unchanged_by_multi(tmp_path):
     assert "multi-repo summary" not in r.stdout
     assert os.path.isfile(os.path.join(tmp, "out", "collection", "index.html"))
     assert not os.path.exists(os.path.join(tmp, "data"))
+
+
+# --- --suggest (#1683) ---------------------------------------------------------
+
+def _suggest_fixture(tmp, clones):
+    """`clones` maps a directory name under <tmp>/src to the origin URL it
+    carries; returns (roots dir, env with the fake gh on PATH)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    bindir, roots = os.path.join(tmp, "bin"), os.path.join(tmp, "src")
+    os.makedirs(bindir)
+    os.makedirs(roots)
+    os.symlink(os.path.join(here, "fake_gh_fixture.sh"), os.path.join(bindir, "gh"))
+    genv = driver.scrubbed_env()
+    for dirname, url in clones.items():
+        path = os.path.join(roots, dirname)
+        os.mkdir(path)
+        subprocess.run(["git", "init", "-q", path], check=True, env=genv)
+        subprocess.run(["git", "-C", path, "remote", "add", "origin", url], check=True, env=genv)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "FAKE_GH_LOG": os.path.join(tmp, "gh.log")}
+    return roots, env
+
+
+def _prs(*names):
+    return json.dumps([{"repository": {"nameWithOwner": n}} for n in names])
+
+
+def _suggest(roots, env, **extra_env):
+    return subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
+         "--suggest", "--roots", roots],
+        capture_output=True, text=True, env={**env, **extra_env},
+    )
+
+
+def _suggested(r):
+    return sorted(l.split(": ", 1)[1] for l in r.stdout.splitlines() if l.startswith("suggest: "))
+
+
+def test_suggest_lists_exactly_the_owned_repos_with_a_recent_pr_and_a_local_checkout(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {
+        "alpha": "https://github.com/caneff/alpha.git", "beta": "git@github.com:caneff/beta.git",
+        "idle": "https://github.com/caneff/idle.git", "theirs": "https://github.com/other/theirs.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS=_prs("caneff/alpha", "caneff/beta", "caneff/alpha", "other/theirs"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _suggested(r) == [os.path.join(roots, "alpha"), os.path.join(roots, "beta")]
+    assert "search prs" in open(env["FAKE_GH_LOG"]).read()
+
+
+def test_suggest_lists_a_repo_with_two_checkouts_once(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {
+        "alpha": "https://github.com/caneff/alpha.git", "alpha-wt-9": "https://github.com/caneff/alpha"})
+    r = _suggest(roots, env, FAKE_GH_PRS=_prs("caneff/alpha"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _suggested(r) == [os.path.join(roots, "alpha")]
+
+
+def test_suggest_names_a_repo_with_no_local_checkout_as_skipped(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS=_prs("caneff/alpha", "caneff/ghost"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _suggested(r) == [os.path.join(roots, "alpha")]
+    assert "skipped: caneff/ghost (no local checkout)" in r.stdout.splitlines()
+
+
+def test_suggest_with_a_failed_gh_search_exits_nonzero_with_the_error_never_an_empty_list(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_EXIT="4", FAKE_GH_STDERR="HTTP 401: bad credentials")
+    assert r.returncode != 0
+    assert "HTTP 401: bad credentials" in r.stderr
+    assert "suggest:" not in r.stdout
+
+
+def test_suggest_with_an_unreadable_gh_reply_exits_nonzero(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS="not json")
+    assert r.returncode != 0
+    assert "suggest:" not in r.stdout
+
+
+def test_suggest_with_no_recent_prs_says_so_and_exits_zero(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS="[]")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no owned repo has a PR in the last 14 days" in r.stdout

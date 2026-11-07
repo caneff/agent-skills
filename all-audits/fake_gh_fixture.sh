@@ -9,9 +9,10 @@
 # FAKE_GH_ISSUE_STATE=OPEN|CLOSED  issue view --json state (default OPEN)
 # FAKE_GH_ISSUE_URL=<url>          issue create prints it
 # FAKE_GH_EXIT=<n>                 every call exits n, printing nothing
+# FAKE_GH_STDERR=<text>            with FAKE_GH_EXIT, the text goes to stderr
 set -euo pipefail
 [ -z "${FAKE_GH_LOG:-}" ] || printf '%s\t%s\n' "$PWD" "$*" >>"$FAKE_GH_LOG"
-[ -z "${FAKE_GH_EXIT:-}" ] || exit "$FAKE_GH_EXIT"
+[ -z "${FAKE_GH_EXIT:-}" ] || { [ -z "${FAKE_GH_STDERR:-}" ] || echo "$FAKE_GH_STDERR" >&2; exit "$FAKE_GH_EXIT"; }
 case "$1 ${2:-}" in
   "repo view")
     owner="${FAKE_GH_OWNER:-caneff}"
