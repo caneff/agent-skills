@@ -7,9 +7,11 @@ bad-last-run-SHA case, which must mean RUN.
 import contextlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("AUDITS_NO_OPEN", "1")
@@ -242,13 +244,16 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row(tmp_path):
 
 def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, extra_args=(), **extra_env):
     here = os.path.dirname(os.path.abspath(__file__))
-    if not os.path.lexists(os.path.join(bin_dir, "claude")):  # a second run reuses the same bin_dir
-        os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
+    for name, fixture in (("claude", "fake_claude_fixture.sh"), ("gh", "fake_gh_fixture.sh")):
+        if not os.path.lexists(os.path.join(bin_dir, name)):  # a second run reuses the same bin_dir
+            os.symlink(os.path.join(here, fixture), os.path.join(bin_dir, name))
     # The ceiling variable is dropped from the ambient env so a shell that
     # already exports it cannot make the driver's own setting look unneeded.
     ambient = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "SWEEP_JOBS")}
     env = {
         **ambient, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
+        # Never the machine's stored sweeps or its real `gh` (#1678): the sweep prunes closed records.
+        "XDG_DATA_HOME": os.path.join(tmp, "data"),
         "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env,
     }
     return subprocess.run(
@@ -1266,3 +1271,814 @@ def test_mutation_all_refuses_a_module_list(tmp_path):
     )
     assert r.returncode != 0 and "not allowed with" in r.stderr, r.stdout + r.stderr
     assert os.listdir(os.path.join(tmp, "all-audits")) == [] if os.path.isdir(os.path.join(tmp, "all-audits")) else True
+
+
+# --- --multi (#1679) -----------------------------------------------------------
+
+def _multi_fixture(tmp, names):
+    """Local clones named `names`, each with a bare `origin` holding `main`;
+    returns (repo paths, env with the fake claude and fake gh on PATH)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    bindir = os.path.join(tmp, "bin")
+    os.makedirs(bindir)
+    os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bindir, "claude"))
+    os.symlink(os.path.join(here, "fake_gh_fixture.sh"), os.path.join(bindir, "gh"))
+    genv = driver.scrubbed_env()
+    repos = []
+    for name in names:
+        bare, repo = os.path.join(tmp, "bare-" + name), os.path.join(tmp, name)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True, env=genv)
+        os.mkdir(repo)
+        _init_git_repo(repo)
+        subprocess.run(["git", "-C", repo, "branch", "-M", "main"], check=True, env=genv)
+        subprocess.run(["git", "-C", repo, "remote", "add", "origin", bare], check=True, env=genv)
+        subprocess.run(["git", "-C", repo, "push", "-q", "origin", "main"], check=True, env=genv)
+        repos.append(repo)
+    ambient = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "SWEEP_JOBS")}
+    env = {**ambient, "PATH": f"{bindir}:{os.environ['PATH']}", "XDG_CACHE_HOME": os.path.join(tmp, "cache"),
+           "XDG_DATA_HOME": os.path.join(tmp, "data"), "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1",
+           "FAKE_GH_LOG": os.path.join(tmp, "gh.log"), "FAKE_CLAUDE_STARTS": os.path.join(tmp, "starts.log")}
+    return repos, env
+
+
+def _multi(repos, env, *args, **extra_env):
+    return subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
+         "--multi", *repos, "--only", "dead-code", *args],
+        capture_output=True, text=True, env={**env, **extra_env},
+    )
+
+
+def _git_out(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, env=driver.scrubbed_env()).stdout.strip()
+
+
+def test_multi_sweeps_two_owned_repos_in_turn_from_origin_main(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    # Local clone: dirty tree on a non-main branch must not reach the sweep.
+    _git_out(a, "checkout", "-q", "-b", "wip")
+    open(os.path.join(a, "wip.py"), "w").write("y = 2\n")
+    r = _multi([a, b], env, FAKE_GH_BODIES=os.path.join(tmp, "bodies.log"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    for name, repo in (("alpha", a), ("beta", b)):
+        sweeps = os.listdir(os.path.join(tmp, "data", "all-audits", name))
+        assert len(sweeps) == 1
+        stored = os.path.join(tmp, "data", "all-audits", name, sweeps[0])
+        assert os.path.isfile(os.path.join(stored, "collection", "index.html"))
+        assert os.path.isfile(os.path.join(stored, "collection", "dead-code", "report.html"))
+        assert f"{name}: swept" in r.stdout
+    paths = [l.split()[1] for l in open(env["FAKE_CLAUDE_STARTS"]).read().splitlines()]
+    assert all(p.endswith(os.sep + "checkout") and p not in (a, b) for p in paths), paths
+    owners = ["alpha" if os.sep + "alpha-" in p else "beta" for p in paths]
+    # Never overlapping: all of alpha's audits start before any of beta's.
+    assert owners == sorted(owners) and set(owners) == {"alpha", "beta"}, owners
+    # Each record names its repo's origin/main sha as the audited commit, and
+    # alpha's wip branch tip is not it.
+    bodies = _bodies(env)
+    for repo in (a, b):
+        assert f"Audited commit: {_git_out(repo, 'rev-parse', 'origin/main')}" in bodies, bodies[:400]
+    # No worktree is left registered in either clone.
+    for repo in (a, b):
+        assert _git_out(repo, "worktree", "list").count("\n") == 0
+
+
+def test_multi_refuses_a_repo_not_owned_by_caneff_before_any_claude_starts_for_it(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    r = _multi([a, b], env, FAKE_GH_OWNER_FOR="beta=someoneelse")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "beta: refused (owner is someoneelse, not caneff)" in r.stdout, r.stdout
+    assert "alpha: swept" in r.stdout
+    assert not os.path.exists(os.path.join(tmp, "data", "all-audits", "beta"))
+    starts = open(env["FAKE_CLAUDE_STARTS"]).read()
+    assert "beta" not in starts and "alpha" in starts
+
+
+def test_multi_gh_failure_refuses_the_repo(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, FAKE_GH_EXIT="1")
+    assert "alpha: refused (owner check failed" in r.stdout, r.stdout + r.stderr
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
+
+
+def test_multi_sweeps_origin_main_not_a_dirty_or_other_branch_checkout(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _git_out(a, "checkout", "-q", "-b", "wip")
+    open(os.path.join(a, "wip.py"), "w").write("y = 2\n")
+    _git_out(a, "add", ".")
+    _git_out(a, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "wip")
+    open(os.path.join(a, "dirty.py"), "w").write("z = 3\n")
+    r = _multi([a], env, FAKE_GH_BODIES=os.path.join(tmp, "bodies.log"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    # The audit ran in a worktree outside the clone, at origin/main, which the
+    # wip commit is not.
+    prompts = [l for l in open(env["FAKE_CLAUDE_STARTS"]).read().splitlines()]
+    wt = prompts[0].split()[1]
+    assert wt.endswith("checkout") and os.path.dirname(wt) != a
+    body = _bodies(env)
+    assert f"Audited commit: {_git_out(a, 'rev-parse', 'origin/main')}" in body, body[:400]
+    assert _git_out(a, "rev-parse", "wip") not in body
+
+
+def test_multi_short_runs_only_the_short_set_in_each_repo(tmp_path):
+    from audits_data import SHORT_SET
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    r = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "--multi", a, b, "--short"],
+        capture_output=True, text=True, env=env)
+    starts = [l.split()[0] for l in open(env["FAKE_CLAUDE_STARTS"]).read().splitlines()]
+    assert sorted(set(starts)) == sorted("/" + n for n in SHORT_SET), (starts, r.stdout)
+    assert len(starts) == 2 * len(SHORT_SET)
+
+
+def test_single_repo_sweep_is_unchanged_by_multi(tmp_path):
+    tmp = str(tmp_path)
+    os.mkdir(os.path.join(tmp, "bin"))
+    r = _sweep_with_fake_claude(tmp, os.path.join(tmp, "cache"), os.path.join(tmp, "bin"), "dead-code")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "multi-repo summary" not in r.stdout
+    assert os.path.isfile(os.path.join(tmp, "out", "collection", "index.html"))
+    assert not os.path.exists(os.path.join(tmp, "data"))
+
+
+# --- the audit record (#1680) --------------------------------------------------
+
+def _finding(n, **over):
+    row = {"bucket": "cut", "file": f"src/mod{n}.py", "line": 10 + n, "category": "unused",
+           "summary": f"unused helper number {n}", "failure": f"nothing calls helper{n}",
+           "after": f"delete helper{n}"}
+    return {**row, **over}
+
+
+def _findings_file(tmp, rows, name="findings.jsonl"):
+    path = os.path.join(tmp, name)
+    with open(path, "w") as f:
+        for row in rows:
+            f.write((row if isinstance(row, str) else json.dumps(row)) + "\n")
+    return path
+
+
+def _record_env(tmp, rows, **extra):
+    return {"FAKE_CLAUDE_FINDINGS_FILE": _findings_file(tmp, rows), "FAKE_GH_BODIES": os.path.join(tmp, "bodies.log"),
+            "AUDITS_NO_SYNTH": "1", **extra}
+
+
+def _gh_calls(env, verb):
+    lines = [l.split("\t", 1)[1] for l in open(env["FAKE_GH_LOG"]).read().splitlines()]
+    return [l for l in lines if l.startswith(verb)]
+
+
+def _bodies(env):
+    path = os.path.join(os.path.dirname(env["FAKE_GH_LOG"]), "bodies.log")
+    return open(path).read() if os.path.exists(path) else ""
+
+
+def _stored_record(tmp, name):
+    sweeps = os.listdir(os.path.join(tmp, "data", "all-audits", name))
+    return json.load(open(os.path.join(tmp, "data", "all-audits", name, sweeps[0], "audit-record.json")))
+
+
+def test_record_one_issue_with_the_mapped_label_holding_every_finding_of_every_audit(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    os.makedirs(os.path.join(a, "docs", "agents"))
+    open(os.path.join(a, "docs", "agents", "triage-labels.md"), "w").write(
+        "| Label in mattpocock/skills | Label in our tracker | Meaning |\n| --- | --- | --- |\n"
+        "| `needs-triage` | `to-look-at` | x |\n| `needs-info` | `info` | y |\n")
+    _git_out(a, "add", ".")
+    _git_out(a, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "labels")
+    _git_out(a, "push", "-q", "origin", "main")
+    rows = [_finding(1), _finding(2), _finding(3)]
+    r = _multi([a], env, "--only", "dead-code,domain-drift", **_record_env(tmp, rows, FAKE_GH_LABELS='[{"name":"to-look-at"}]'))
+    assert r.returncode == 0, r.stdout + r.stderr
+    creates = _gh_calls(env, "issue create")
+    assert len(creates) == 1, creates
+    assert "--label to-look-at" in creates[0], creates[0]
+    body = _bodies(env)
+    for audit in ("dead-code", "domain-drift"):
+        section = body.split(f"### {audit}\n", 1)[1].split("\n### ", 1)[0]
+        for n in (1, 2, 3):
+            assert f"unused helper number {n}" in section, (audit, n)
+            assert f"src/mod{n}.py:{10 + n}" in section and f"delete helper{n}" in section
+    assert "issues/1" in r.stdout and "alpha: swept" in r.stdout, r.stdout
+
+
+def test_record_names_the_commit_the_clean_worktree_and_the_stored_path(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)]))
+    assert r.returncode == 0, r.stdout + r.stderr
+    body = _bodies(env)
+    sha = _git_out(a, "rev-parse", "origin/main")
+    stored = os.path.join(tmp, "data", "all-audits", "alpha")
+    assert f"Audited commit: {sha}" in body, body[:600]
+    assert "Worktree clean: yes" in body
+    assert f"Stored sweep: {stored}" in body
+    assert "Audits run: dead-code" in body
+
+
+def test_record_shows_a_failed_audit_with_its_error_tail_and_files_for_that_alone(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, "--only", "duplication", **_record_env(tmp, []))
+    assert len(_gh_calls(env, "issue create")) == 1, r.stdout + r.stderr
+    body = _bodies(env)
+    assert "## Failed audits" in body and "Skipped as unchanged" not in body, body[:600]
+    failed = body.split("Failed audits", 1)[1].split("\n## ", 1)[0]
+    assert "duplication" in failed and "no manifest" in failed
+    assert "see /tmp/unrelated-1234/other.html" in failed, failed
+    assert r.returncode == 1 and "alpha: failed" in r.stdout and "issues/1" in r.stdout, r.stdout
+
+
+def test_record_lists_an_unchanged_audit_with_the_earlier_sha_and_copies_none_of_its_findings(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    out = os.path.join(tmp, "out")
+    only = ("--only", "domain-drift,duplication", "--out", out)
+    first = _multi([a], env, *only, **_record_env(tmp, [_finding(1)]))
+    assert first.returncode == 1, first.stdout + first.stderr
+    assert "unused helper number 1" in _bodies(env).split("### domain-drift", 1)[1]
+    open(os.path.join(tmp, "bodies.log"), "w").close()
+    time.sleep(1.1)  # the sweep id is a second-resolution timestamp
+    second = _multi([a], env, *only, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="CLOSED"))  # triaged since
+    assert len(_gh_calls(env, "issue create")) == 2, second.stdout + second.stderr
+    body = _bodies(env)
+    sha = _git_out(a, "rev-parse", "origin/main")
+    skipped = body.split("Skipped as unchanged", 1)[1].split("\n## ", 1)[0]
+    assert "domain-drift" in skipped and sha in skipped, skipped
+    assert "Earlier audit record: https://github.com/caneff/fake/issues/1" in skipped, skipped
+    assert "unused helper number" not in body
+
+
+def test_record_not_filed_for_a_repo_with_no_findings_and_no_failure(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, []))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _gh_calls(env, "issue create") == []
+    assert "alpha: swept" in r.stdout and "issues/" not in r.stdout
+    stored = os.path.join(tmp, "data", "all-audits", "alpha")
+    assert os.path.isfile(os.path.join(stored, os.listdir(stored)[0], "collection", "index.html"))
+    assert not os.path.exists(os.path.join(stored, os.listdir(stored)[0], "audit-record.json"))
+
+
+def test_record_past_the_limit_continues_in_ordered_comments_holding_every_finding_once(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    rows = [_finding(n, summary=f"S{n:03d}-" + "x" * 900) for n in range(150)]
+    r = _multi([a], env, **_record_env(tmp, rows))
+    assert r.returncode == 0, r.stdout + r.stderr
+    comments = _gh_calls(env, "issue comment")
+    assert len(comments) >= 1 and all(c.startswith("issue comment 1 ") for c in comments), comments
+    parts = re.split(r"^=== (issue [^\n]*) ===\n", _bodies(env), flags=re.M)[1:]
+    texts = parts[1::2]
+    assert parts[0].startswith("issue create") and all(p.startswith("issue comment") for p in parts[2::2])
+    assert all(len(t) <= 65536 for t in texts), [len(t) for t in texts]
+    joined = "\n".join(texts)
+    for n in range(150):
+        assert joined.count(f"S{n:03d}-") == 1, n
+    order = [int(m) for m in re.findall(r"S(\d{3})-", joined)]
+    assert order == sorted(order)
+
+
+def test_repo_without_its_triage_label_is_refused_before_any_claude_starts(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    r = _multi([a, b], env, FAKE_GH_LABELS='[{"name":"bug"}]')
+    assert "alpha: refused (label `needs-triage` is missing" in r.stdout, r.stdout + r.stderr
+    assert "beta: refused (label `needs-triage` is missing" in r.stdout
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
+    assert _gh_calls(env, "label create") == []
+    assert not os.path.exists(os.path.join(tmp, "data"))
+
+
+def test_stored_sweep_records_the_issue_number(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL="https://github.com/caneff/alpha/issues/42"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    rec = _stored_record(tmp, "alpha")
+    assert rec["issue"] == 42 and rec["url"] == "https://github.com/caneff/alpha/issues/42", rec
+    assert "https://github.com/caneff/alpha/issues/42" in r.stdout
+
+
+# --- triage pending (#1681) ----------------------------------------------------
+
+def _first_sweep_then(tmp, env, repo, url):
+    """Sweep `repo` once, filing record `url`, then clear the logs a second
+    sweep's assertions read."""
+    r = _multi([repo], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=url))
+    assert r.returncode == 0, r.stdout + r.stderr
+    base = os.path.join(tmp, "data", "all-audits", os.path.basename(repo))
+    os.rename(os.path.join(base, os.listdir(base)[0]), os.path.join(base, "20200101-000000"))  # an earlier day's sweep
+    os.remove(env["FAKE_CLAUDE_STARTS"])
+    os.remove(os.path.join(tmp, "bodies.log"))
+    open(env["FAKE_GH_LOG"], "w").close()
+
+
+def test_open_earlier_record_means_no_sweep_and_triage_pending_with_the_link(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    url = "https://github.com/caneff/alpha/issues/42"
+    _first_sweep_then(tmp, env, a, url)
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="OPEN"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"alpha: triage pending ({url})" in r.stdout, r.stdout
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
+    assert any(c.startswith("issue view 42") for c in _gh_calls(env, "issue view")), _gh_calls(env, "issue view")
+    assert _gh_calls(env, "issue create") == []
+
+
+def test_closed_earlier_record_is_swept_normally(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _first_sweep_then(tmp, env, a, "https://github.com/caneff/alpha/issues/42")
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="CLOSED",
+                                       FAKE_GH_ISSUE_URL="https://github.com/caneff/alpha/issues/43"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "triage pending" not in r.stdout and "alpha: swept" in r.stdout, r.stdout
+    assert os.path.exists(env["FAKE_CLAUDE_STARTS"])
+    assert "issues/42" not in _bodies(env)
+
+
+def test_force_sweeps_a_pending_repo_and_the_new_record_names_the_open_one(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    url = "https://github.com/caneff/alpha/issues/42"
+    _first_sweep_then(tmp, env, a, url)
+    r = _multi([a], env, "--force", **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="OPEN",
+                                                  FAKE_GH_ISSUE_URL="https://github.com/caneff/alpha/issues/43"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.path.exists(env["FAKE_CLAUDE_STARTS"]) and "triage pending" not in r.stdout
+    assert f"Earlier open audit record: {url}" in _bodies(env), _bodies(env)
+
+
+def test_unanswerable_earlier_record_check_refuses_the_repo_and_starts_nothing(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _first_sweep_then(tmp, env, a, "https://github.com/caneff/alpha/issues/42")
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="BOGUS"))
+    assert "alpha: refused (earlier record check failed" in r.stdout, r.stdout + r.stderr
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
+
+
+def _stored_log(tmp, name, audit):
+    root = os.path.join(tmp, "data", "all-audits", name)
+    return open(os.path.join(root, sorted(os.listdir(root))[-1], "logs", audit + ".log")).read()
+
+
+def test_record_counts_what_the_ignore_file_suppressed(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    open(os.path.join(a, ".audit-ignore.md"), "w").write("- src/mod1.py: rejected\n")
+    _git_out(a, "add", ".audit-ignore.md")
+    _git_out(a, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "ignore")
+    _git_out(a, "push", "-q", "origin", "main")
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_CLAUDE_SUPPRESSED="7"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Suppressed by .audit-ignore.md: 7" in _bodies(env)
+    assert 'Also put "suppressed" in the manifest' in _stored_log(tmp, "alpha", "dead-code")
+
+
+def test_no_suppressed_count_is_asked_for_without_an_ignore_file(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)]))
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = _stored_log(tmp, "alpha", "dead-code")
+    assert "prompt=" in log and '"suppressed"' not in log, log[:400]
+
+
+def test_record_carries_the_synthesis_as_is_and_a_malformed_finding_line_is_kept(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1), "{not json"], AUDITS_NO_SYNTH="0"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    body = _bodies(env)
+    assert "## Synthesis" in body and "ceiling=" in body.split("## Synthesis", 1)[1]
+    assert "{not json" in body
+
+
+# --- prune stored sweeps whose record is closed (#1682) --------------------------
+
+def _stored(tmp, repo_name, sweep, issue):
+    d = os.path.join(tmp, "data", "all-audits", repo_name, sweep)
+    os.makedirs(os.path.join(d, "collection"))
+    json.dump({"issue": issue, "url": f"https://github.com/caneff/{repo_name}/issues/{issue}", "repo": repo_name},
+              open(os.path.join(d, "audit-record.json"), "w"))
+    os.utime(d, (0, 0))  # far older than 3 days: age must not decide
+    return d
+
+
+def _single(repo, env, **extra):
+    return subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), repo, "--only", "dead-code"],
+        capture_output=True, text=True, env={**env, **extra},
+    )
+
+
+def test_closed_record_sweep_is_deleted_open_and_unreadable_are_kept_on_a_multi_sweep(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    closed, opened, broken = (_stored(tmp, "beta", "20200101-000000", 1), _stored(tmp, "beta", "20200102-000000", 2),
+                              _stored(tmp, "gamma", "20200103-000000", 3))
+    r = _multi([a], env, FAKE_GH_ISSUE_STATES="1=CLOSED,2=OPEN,3=FAIL")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not os.path.exists(closed)
+    assert os.path.isdir(opened) and os.path.isdir(broken)
+    assert "#3" in r.stdout + r.stderr and "fake gh: issue view 3 failed" in r.stdout + r.stderr
+
+
+def test_closed_record_sweep_is_deleted_at_the_start_of_a_single_repo_sweep(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    closed, opened = _stored(tmp, "beta", "20200101-000000", 1), _stored(tmp, "beta", "20200102-000000", 2)
+    r = _single(a, env, FAKE_GH_ISSUE_STATES="1=CLOSED,2=OPEN")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not os.path.exists(closed) and os.path.isdir(opened)
+
+
+def test_unanswerable_state_keeps_the_stored_sweep(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    d = _stored(tmp, "beta", "20200101-000000", 1)
+    _single(a, env, FAKE_GH_ISSUE_STATE="BOGUS")
+    assert os.path.isdir(d)
+
+
+def test_single_repo_run_folders_past_three_days_are_still_pruned(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    old = os.path.join(tmp, "cache", "all-audits", "run-20200101-000000")
+    os.makedirs(old)
+    os.utime(old, (0, 0))
+    r = _single(a, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not os.path.exists(old)
+
+
+# --- --suggest (#1683) ---------------------------------------------------------
+
+def _suggest_fixture(tmp, clones):
+    """`clones` maps a directory name under <tmp>/src to the origin URL it
+    carries; returns (roots dir, env with the fake gh on PATH)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    bindir, roots = os.path.join(tmp, "bin"), os.path.join(tmp, "src")
+    os.makedirs(bindir)
+    os.makedirs(roots)
+    os.symlink(os.path.join(here, "fake_gh_fixture.sh"), os.path.join(bindir, "gh"))
+    genv = driver.scrubbed_env()
+    for dirname, url in clones.items():
+        path = os.path.join(roots, dirname)
+        os.mkdir(path)
+        subprocess.run(["git", "init", "-q", path], check=True, env=genv)
+        subprocess.run(["git", "-C", path, "remote", "add", "origin", url], check=True, env=genv)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "FAKE_GH_LOG": os.path.join(tmp, "gh.log")}
+    return roots, env
+
+
+def _prs(*names):
+    return json.dumps([{"repository": {"nameWithOwner": n}} for n in names])
+
+
+def _suggest(roots, env, **extra_env):
+    return subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
+         "--suggest", "--roots", roots],
+        capture_output=True, text=True, env={**env, **extra_env},
+    )
+
+
+def _suggested(r):
+    return sorted(l.split(": ", 1)[1] for l in r.stdout.splitlines() if l.startswith("suggest: "))
+
+
+def test_suggest_lists_exactly_the_owned_repos_with_a_recent_pr_and_a_local_checkout(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {
+        "alpha": "https://github.com/caneff/alpha.git", "beta": "git@github.com:caneff/beta.git",
+        "idle": "https://github.com/caneff/idle.git", "theirs": "https://github.com/other/theirs.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS=_prs("caneff/alpha", "caneff/beta", "caneff/alpha", "other/theirs"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _suggested(r) == [os.path.join(roots, "alpha"), os.path.join(roots, "beta")]
+    assert "search prs" in open(env["FAKE_GH_LOG"]).read()
+
+
+def test_suggest_lists_a_repo_with_two_checkouts_once(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {
+        "alpha": "https://github.com/caneff/alpha.git", "alpha-wt-9": "https://github.com/caneff/alpha"})
+    r = _suggest(roots, env, FAKE_GH_PRS=_prs("caneff/alpha"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _suggested(r) == [os.path.join(roots, "alpha")]
+
+
+def test_suggest_names_a_repo_with_no_local_checkout_as_skipped(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS=_prs("caneff/alpha", "caneff/ghost"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _suggested(r) == [os.path.join(roots, "alpha")]
+    assert "skipped: caneff/ghost (no local checkout)" in r.stdout.splitlines()
+
+
+def test_suggest_with_a_failed_gh_search_exits_nonzero_with_the_error_never_an_empty_list(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_EXIT="4", FAKE_GH_STDERR="HTTP 401: bad credentials")
+    assert r.returncode != 0
+    assert "HTTP 401: bad credentials" in r.stderr
+    assert "suggest:" not in r.stdout
+
+
+def test_suggest_with_an_unreadable_gh_reply_exits_nonzero(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS="not json")
+    assert r.returncode != 0
+    assert "suggest:" not in r.stdout
+
+
+def test_suggest_with_no_recent_prs_says_so_and_exits_zero(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS="[]")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no owned repo has a PR in the last 14 days" in r.stdout
+
+
+# --- --load: reopen a stored sweep for triage (#1684) ---------------------------
+
+def _swept_with_record(tmp, url="https://github.com/caneff/alpha/issues/42"):
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=url))
+    assert r.returncode == 0, r.stdout + r.stderr
+    return env
+
+
+def _load(env, *args):
+    return subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "--load", *args],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_load_rebuilds_a_working_index_from_the_issue_number_alone(tmp_path):
+    tmp = str(tmp_path)
+    env = _swept_with_record(tmp)
+    stored_dir = os.path.join(tmp, "data", "all-audits", "alpha")
+    stored = os.path.join(stored_dir, os.listdir(stored_dir)[0])
+    index = os.path.join(stored, "collection", "index.html")
+    os.remove(index)  # prove the verb rebuilds it, not that --multi left one
+    r = _load(env, "42")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"index: {index}" in r.stdout, r.stdout
+    page = open(index, encoding="utf-8").read()
+    assert "dead-code" in page, page[:500]
+
+
+def test_load_missing_stored_sweep_exits_nonzero_naming_the_issue_and_the_path(tmp_path):
+    tmp = str(tmp_path)
+    env = _swept_with_record(tmp)
+    r = _load(env, "7")
+    assert r.returncode != 0
+    assert "#7" in r.stderr and os.path.join(tmp, "data", "all-audits") in r.stderr, r.stderr
+    assert "audit-record.json" in r.stderr, r.stderr
+
+
+def test_load_with_the_record_but_no_collection_exits_nonzero_naming_the_path(tmp_path):
+    tmp = str(tmp_path)
+    env = _swept_with_record(tmp)
+    stored_dir = os.path.join(tmp, "data", "all-audits", "alpha")
+    stored = os.path.join(stored_dir, os.listdir(stored_dir)[0])
+    shutil.rmtree(os.path.join(stored, "collection"))
+    r = _load(env, "42")
+    assert r.returncode != 0
+    assert "#42" in r.stderr and os.path.join(stored, "collection") in r.stderr, r.stderr
+
+
+def test_load_two_repos_sharing_an_issue_number_needs_the_repo_name(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    for repo, name in ((a, "alpha"), (b, "beta")):
+        r = _multi([repo], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=f"https://github.com/caneff/{name}/issues/42"))
+        assert r.returncode == 0, r.stdout + r.stderr
+    r = _load(env, "42")
+    assert r.returncode != 0 and "alpha" in r.stderr and "beta" in r.stderr, r.stderr
+    r = _load(env, "42", "beta")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.path.join("beta", "") in r.stdout
+
+
+# --- spec-level review fixes (#1678) ------------------------------------------
+
+def _stored_sweeps(tmp, name):
+    root = os.path.join(tmp, "data", "all-audits", name)
+    return sorted(os.path.join(root, s) for s in os.listdir(root)) if os.path.isdir(root) else []
+
+
+def test_stored_sweeps_are_keyed_on_the_github_name_and_pruned_in_that_repo(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["skills"])
+    named = {"FAKE_GH_NAME_FOR": "skills=agent-skills"}
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], **named))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "agent-skills: swept" in r.stdout, r.stdout
+    assert _stored_sweeps(tmp, "skills") == []
+    (first,) = _stored_sweeps(tmp, "agent-skills")
+    rec = json.load(open(os.path.join(first, "audit-record.json")))
+    assert rec["repo"] == "caneff/agent-skills" and rec["checkout"] == a, rec
+    time.sleep(1.1)  # the sweep id is a second-resolution timestamp
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="CLOSED", **named))
+    assert r.returncode == 0, r.stdout + r.stderr
+    views = _gh_calls(env, "issue view")
+    assert views and all("--repo caneff/agent-skills" in v for v in views), views
+    assert first not in _stored_sweeps(tmp, "agent-skills")
+
+
+def test_two_checkouts_of_one_repo_share_its_stored_sweeps(tmp_path):
+    tmp = str(tmp_path)
+    (a, a2), env = _multi_fixture(tmp, ["alpha", "alpha-wt"])
+    named = {"FAKE_GH_NAME_FOR": "alpha-wt=alpha"}
+    r = _multi([a, a2], env, **_record_env(tmp, [_finding(1)], **named))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"alpha: skipped ({a2} is caneff/alpha again, already swept from {a})" in r.stdout, r.stdout
+    assert len(_gh_calls(env, "issue create")) == 1
+    r = _multi([a2], env, **_record_env(tmp, [_finding(1)], **named))
+    assert "alpha: triage pending (https://github.com/caneff/fake/issues/1)" in r.stdout, r.stdout
+
+
+def test_multi_reuses_the_staleness_cache_across_sweeps_with_no_out(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    only = ("--only", "domain-drift")
+    assert _multi([a], env, *only, **_record_env(tmp, [_finding(1)])).returncode == 0
+    time.sleep(1.1)
+    open(os.path.join(tmp, "bodies.log"), "w").close()
+    second = _multi([a], env, *only, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="CLOSED"))
+    assert second.returncode == 0, second.stdout + second.stderr
+    starts = open(env["FAKE_CLAUDE_STARTS"]).read().splitlines()
+    assert len(starts) == 1, starts
+    assert "[domain-drift] skipped (unchanged since" in second.stdout, second.stdout
+    assert "alpha: swept -> " in second.stdout and "no audit record" in second.stdout, second.stdout
+
+
+def test_a_sweep_stopped_by_the_guard_still_files_a_failure_record(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [], FAKE_CLAUDE_GUARD="1"))
+    assert r.returncode == 1 and "alpha: failed (sweep stopped before collecting: exit 1)" in r.stdout, r.stdout
+    assert len(_gh_calls(env, "issue create")) == 1, r.stdout + r.stderr
+    failed = _bodies(env).split("## Failed audits", 1)[1]
+    assert "the sweep failed" in failed and "disable-model-invocation" in failed, failed[:600]
+
+
+def test_a_failed_continuation_comment_keeps_every_chunk_and_names_the_unposted_ones(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    rows = [_finding(n, summary=f"S{n:03d}-" + "x" * 900) for n in range(150)]
+    r = _multi([a], env, **_record_env(tmp, rows, FAKE_GH_COMMENT_EXIT="1"))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "is missing continuation comments audit-record-1.md" in r.stdout, r.stdout
+    (stored,) = _stored_sweeps(tmp, "alpha")
+    rec = json.load(open(os.path.join(stored, "audit-record.json")))
+    chunks = sorted(f for f in os.listdir(stored) if re.fullmatch(r"audit-record-\d+\.md", f))
+    assert rec["issue"] == 1 and rec["unposted"] == chunks[1:] and len(chunks) >= 2, (rec, chunks)
+    joined = "".join(open(os.path.join(stored, c)).read() for c in chunks)
+    assert all(joined.count(f"S{n:03d}-") == 1 for n in range(150))
+
+
+def test_load_keeps_the_sweeps_failure_notes_and_its_synthesis_and_runs_no_claude(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, "--only", "dead-code,duplication",
+               **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL="https://github.com/caneff/alpha/issues/42"))
+    assert r.returncode == 1 and "issues/42" in r.stdout, r.stdout + r.stderr
+    (stored,) = _stored_sweeps(tmp, "alpha")
+    open(os.path.join(stored, "collection", driver.SYNTHESIS_FILE), "w").write("the stored synthesis")
+    os.remove(env["FAKE_CLAUDE_STARTS"])
+    load_env = {k: v for k, v in env.items() if k != "AUDITS_NO_SYNTH"}
+    r = _load(load_env, "42")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"]), "load started a claude"
+    page = open(os.path.join(stored, "collection", "index.html"), encoding="utf-8").read()
+    assert "FAILED: " in page and "the stored synthesis" in page, page[:800]
+    assert f"checkout: {a}" in r.stdout and "repo: caneff/alpha" in r.stdout, r.stdout
+
+
+def test_a_repo_that_cannot_be_read_does_not_stop_the_others(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([os.path.join(tmp, "gone"), a], env)
+    assert "gone: refused (no such directory)" in r.stdout, r.stdout + r.stderr
+    assert "alpha: swept" in r.stdout and "== multi-repo summary ==" in r.stdout
+
+
+def test_a_stored_sweep_with_no_record_is_deleted_after_three_days(tmp_path):
+    tmp = str(tmp_path)
+    root = os.path.join(tmp, "data", "all-audits", "alpha")
+    old, new = os.path.join(root, "20200101-000000"), os.path.join(root, "20991231-000000")
+    for d in (old, new):
+        os.makedirs(os.path.join(d, "collection"))
+    past = time.time() - 4 * 86400
+    os.utime(old, (past, past))
+    os.mkdir(os.path.join(tmp, "bin"))
+    r = _sweep_with_fake_claude(tmp, os.path.join(tmp, "cache"), os.path.join(tmp, "bin"), "dead-code")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not os.path.exists(old) and os.path.isdir(new)
+
+
+def test_suggest_looks_under_dot_agents_by_default(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"x": "git@github.com:caneff/x.git"})
+    skills = os.path.join(tmp, ".agents", "skills")
+    os.makedirs(skills)
+    subprocess.run(["git", "init", "-q", skills], check=True, env=driver.scrubbed_env())
+    subprocess.run(["git", "-C", skills, "remote", "add", "origin", "https://github.com/caneff/agent-skills.git"],
+                   check=True, env=driver.scrubbed_env())
+    r = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "--suggest"],
+        capture_output=True, text=True,
+        env={**env, "HOME": tmp, "FAKE_GH_PRS": _prs("caneff/agent-skills", "caneff/x")})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _suggested(r) == sorted([skills, os.path.join(roots, "x")]), r.stdout
+
+
+def test_suggest_refuses_a_search_cut_off_at_its_limit(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {})
+    r = _suggest(roots, env, FAKE_GH_PRS=_prs(*["caneff/x"] * driver.SEARCH_LIMIT))
+    assert r.returncode != 0 and "cut off" in r.stderr, r.stdout + r.stderr
+
+
+def test_load_and_suggest_refuse_the_sweep_flags_they_would_ignore(tmp_path):
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py")
+    for argv in (["--load", "42", "--force"], ["--load", "42", "--only", "dead-code"], ["--suggest", "--short"]):
+        r = subprocess.run([sys.executable, here, *argv], capture_output=True, text=True)
+        refused = "combines with nothing else" in r.stderr or "stands alone" in r.stderr
+        assert r.returncode == 2 and refused, (argv, r.stderr)
+
+
+def test_end_to_end_multi_sweep_record_load_and_prune(tmp_path):
+    """The spec's path at the subprocess seam: an owned repo is swept from
+    origin/main and files its audit record, one not owned is refused before
+    any audit, the record loads back by issue number, and closing it frees the
+    stored sweep at the next sweep's start.
+
+    Blind to: the live `/all-audits multi` ask and its job-run launch, the
+    triage grill and `/triage`'s routing (SKILL.md prose a model follows), and
+    real GitHub: every `gh` reply here is the fake's."""
+    tmp = str(tmp_path)
+    (a, c), env = _multi_fixture(tmp, ["alpha", "gamma"])
+    url = "https://github.com/caneff/alpha/issues/42"
+    r = _multi([a, c], env, **_record_env(
+        tmp, [_finding(1)], FAKE_GH_ISSUE_URL=url, FAKE_GH_OWNER_FOR="gamma=someoneelse"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "gamma: refused (owner is someoneelse, not caneff)" in r.stdout, r.stdout
+    assert "alpha: swept -> " in r.stdout and f"audit record: {url}" in r.stdout, r.stdout
+    assert len(_gh_calls(env, "issue create")) == 1
+    assert "unused helper number 1" in _bodies(env)
+    assert "gamma" not in open(env["FAKE_CLAUDE_STARTS"]).read()
+    loaded = _load(env, "42", "alpha")
+    assert loaded.returncode == 0 and "index: " in loaded.stdout, loaded.stdout + loaded.stderr
+    time.sleep(1.1)
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=url, FAKE_GH_ISSUE_STATE="CLOSED"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert len(_stored_sweeps(tmp, "alpha")) == 1, _stored_sweeps(tmp, "alpha")
+
+
+def test_the_next_sweep_posts_the_comments_a_record_was_missing_first(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    rows = [_finding(n, summary=f"S{n:03d}-" + "x" * 900) for n in range(150)]
+    assert _multi([a], env, **_record_env(tmp, rows, FAKE_GH_COMMENT_EXIT="1")).returncode == 1
+    open(os.path.join(tmp, "bodies.log"), "w").close()
+    r = _multi([a], env, **_record_env(tmp, rows))
+    assert "alpha: posted the missing comments of https://github.com/caneff/fake/issues/1" in r.stdout, r.stdout
+    assert "alpha: triage pending" in r.stdout, r.stdout
+    (stored,) = _stored_sweeps(tmp, "alpha")
+    assert json.load(open(os.path.join(stored, "audit-record.json")))["unposted"] == []
+    posted = _bodies(env)
+    first = open(os.path.join(stored, "audit-record-0.md")).read()
+    assert all((first + posted).count(f"S{n:03d}-") == 1 for n in range(150))
+
+
+def test_multi_fetches_so_a_stale_clone_still_sweeps_the_newest_origin_main(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    other = os.path.join(tmp, "other")
+    genv = driver.scrubbed_env()
+    subprocess.run(["git", "clone", "-q", os.path.join(tmp, "bare-alpha"), other], check=True, env=genv)
+    open(os.path.join(other, "new.py"), "w").write("n = 1\n")
+    for argv in (["add", "new.py"], ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "n"],
+                 ["push", "-q", "origin", "HEAD:main"]):
+        subprocess.run(["git", "-C", other, *argv], check=True, env=genv)
+    newest = _git_out(other, "rev-parse", "HEAD")
+    assert _git_out(a, "rev-parse", "origin/main") != newest  # the clone has not fetched it
+    r = _multi([a], env, FAKE_GH_BODIES=os.path.join(tmp, "bodies.log"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"Audited commit: {newest}" in _bodies(env), _bodies(env)[:400]

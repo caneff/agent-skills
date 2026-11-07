@@ -76,3 +76,15 @@ _Avoid_: feature branch, spec branch, staging branch
 **Run file**:
 One JSON file per run at `~/.cache/spec-run/<run-id>.json` holding that run's whole state: run id, slot budget, controller, and per clump its tickets, workspace, herdr agent name and squash sha. What a resumed controller reads instead of its own context.
 _Avoid_: progress file, state file, log
+
+**Sweep**:
+One pass of `all-audits/driver.py` over one repo: the audits it plans and runs, collected under one run folder with an `index.html`. A `--multi` pass is one sweep per repo, each from a fresh worktree of that repo's `origin/main`. The glossary reserves **Run** for a spec run, so a sweep is never called a run.
+_Avoid_: run, scan, batch
+
+**Stored sweep**:
+A finished sweep copied to `~/.local/share/all-audits/<repo>/<sweep-id>/` (its `collection/` and `logs/`), outside the cache that prunes run folders after three days. The only form of a sweep that outlives the cache.
+_Avoid_: archive, saved run, cached sweep
+
+**Audit record**:
+The GitHub issue a `--multi` sweep opens in the swept repo, labelled with its triage label, holding every finding and every fact about the sweep as text (body, then ordered comments past GitHub's length limit). One per repo per sweep, and only when the sweep found something or an audit failed. Its stored sweep keeps the issue number in `audit-record.json`; closing it, which `/all-audits triage` does, frees that stored sweep for deletion.
+_Avoid_: report (one audit's HTML), manifest (one audit's `claude -p` answer), finding (one row inside a record)
