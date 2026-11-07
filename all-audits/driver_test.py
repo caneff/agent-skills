@@ -1633,6 +1633,64 @@ def test_record_carries_the_synthesis_as_is_and_a_malformed_finding_line_is_kept
     assert "{not json" in body
 
 
+# --- prune stored sweeps whose record is closed (#1682) --------------------------
+
+def _stored(tmp, repo_name, sweep, issue):
+    d = os.path.join(tmp, "data", "all-audits", repo_name, sweep)
+    os.makedirs(os.path.join(d, "collection"))
+    json.dump({"issue": issue, "url": f"https://github.com/caneff/{repo_name}/issues/{issue}", "repo": repo_name},
+              open(os.path.join(d, "audit-record.json"), "w"))
+    os.utime(d, (0, 0))  # far older than 3 days: age must not decide
+    return d
+
+
+def _single(repo, env, **extra):
+    return subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), repo, "--only", "dead-code"],
+        capture_output=True, text=True, env={**env, **extra},
+    )
+
+
+def test_closed_record_sweep_is_deleted_open_and_unreadable_are_kept_on_a_multi_sweep(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    closed, opened, broken = (_stored(tmp, "beta", "20200101-000000", 1), _stored(tmp, "beta", "20200102-000000", 2),
+                              _stored(tmp, "gamma", "20200103-000000", 3))
+    r = _multi([a], env, FAKE_GH_ISSUE_STATES="1=CLOSED,2=OPEN,3=FAIL")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not os.path.exists(closed)
+    assert os.path.isdir(opened) and os.path.isdir(broken)
+    assert "#3" in r.stdout + r.stderr and "fake gh: issue view 3 failed" in r.stdout + r.stderr
+
+
+def test_closed_record_sweep_is_deleted_at_the_start_of_a_single_repo_sweep(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    closed, opened = _stored(tmp, "beta", "20200101-000000", 1), _stored(tmp, "beta", "20200102-000000", 2)
+    r = _single(a, env, FAKE_GH_ISSUE_STATES="1=CLOSED,2=OPEN")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not os.path.exists(closed) and os.path.isdir(opened)
+
+
+def test_unanswerable_state_keeps_the_stored_sweep(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    d = _stored(tmp, "beta", "20200101-000000", 1)
+    _single(a, env, FAKE_GH_ISSUE_STATE="BOGUS")
+    assert os.path.isdir(d)
+
+
+def test_single_repo_run_folders_past_three_days_are_still_pruned(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    old = os.path.join(tmp, "cache", "all-audits", "run-20200101-000000")
+    os.makedirs(old)
+    os.utime(old, (0, 0))
+    r = _single(a, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not os.path.exists(old)
+
+
 # --- --suggest (#1683) ---------------------------------------------------------
 
 def _suggest_fixture(tmp, clones):
