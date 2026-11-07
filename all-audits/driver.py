@@ -1234,6 +1234,53 @@ def multi_mode(repos, out, only, short, force):
         sys.exit(1)
 
 
+# --- load a stored sweep for triage (#1684) ----------------------------------
+
+def find_stored_sweep(issue, repo_name=None):
+    """(stored sweep dir, None) for the sweep whose audit record is issue
+    `issue`, else (None, why). Never a guess: no match, two matches (the same
+    number in two repos) and an unreadable record are each a refusal."""
+    base = stored_sweeps_base()
+    names = [repo_name] if repo_name else (sorted(os.listdir(base)) if os.path.isdir(base) else [])
+    pattern = os.path.join(base, repo_name or "*", "*", "audit-record.json")
+    found = []
+    for name in names:
+        root = os.path.join(base, name)
+        for sweep in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            path = os.path.join(root, sweep, "audit-record.json")
+            if not os.path.isfile(path):
+                continue
+            try:
+                number = int(json.load(open(path, encoding="utf-8"))["issue"])
+            except (OSError, ValueError, KeyError, TypeError):
+                return None, f"stored record {path} is unreadable"
+            if number == issue:
+                found.append(os.path.join(root, sweep))
+    if not found:
+        return None, f"no stored sweep for audit record #{issue}: expected {pattern} with \"issue\": {issue}"
+    if len(found) > 1:
+        return None, (f"audit record #{issue} matches {len(found)} stored sweeps ({', '.join(found)}): "
+                      "name the repo after the issue number")
+    return found[0], None
+
+
+def load_mode(issue, repo_name):
+    """`--load ISSUE [REPO]`: rebuild the stored sweep's collection index so it
+    can be triaged. Prints `index:` and `stored:`; exits 1 naming the issue and
+    the path when the sweep or its collection is missing."""
+    stored, why = find_stored_sweep(issue, os.path.basename((repo_name or "").rstrip("/")) or None)
+    if why:
+        sys.exit(f"all-audits --load: {why}")
+    collection = os.path.join(stored, "collection")
+    if not os.path.isdir(collection):
+        sys.exit(f"all-audits --load: audit record #{issue}: stored collection missing at {collection}")
+    name = os.path.basename(os.path.dirname(stored))
+    run = RunDir.create(stored)
+    print(f"stored: {stored}")
+    index = collect(run, name, Plan())
+    open_index(index)
+
+
 # --- repo suggestions (#1683) -------------------------------------------------
 
 SUGGEST_DAYS = 14
@@ -1499,6 +1546,9 @@ def main(argv):
     p.add_argument("--multi", nargs="+", metavar="REPO",
                    help="sweep each owned repo in turn from a fresh worktree of its origin/main, "
                         "storing each sweep under ~/.local/share/all-audits/ (#1679)")
+    p.add_argument("--load", type=int, metavar="ISSUE",
+                   help="rebuild the stored sweep of audit record ISSUE (a number) and print its index, for "
+                        "/all-audits triage; the repo name after it picks between repos sharing the number (#1684)")
     p.add_argument("--suggest", action="store_true",
                    help="print the owned repos with a PR in the last 14 days and a local checkout, "
                         "one path each, for --multi (#1683)")
@@ -1513,6 +1563,11 @@ def main(argv):
     args = p.parse_args(argv[1:])
 
     repo = args.repo or os.getcwd()
+    if args.load is not None:
+        if args.index or args.multi is not None or args.suggest or args.mutation is not None or args.mutation_all:
+            p.error("--load takes the issue number and an optional repo name, and combines with nothing else.")
+        load_mode(args.load, args.repo)
+        return
     if args.suggest:
         if args.repo or args.index or args.multi is not None or args.mutation is not None or args.mutation_all:
             p.error("--suggest stands alone: it takes only --roots.")

@@ -2,7 +2,7 @@
 name: all-audits
 description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time and land the sweep as one spec per area.
 disable-model-invocation: true
-argument-hint: "[path] | multi [paths…]"
+argument-hint: "[path] | multi [paths…] | triage <issue>"
 ---
 
 Run the whole audit set over one repo in a single sweep. Thirteen audit skills fan
@@ -157,6 +157,30 @@ fresh worktree of its `origin/main`, one after another, and stored under
    open, so nothing was swept; say so and give the link. Only when the user
    asks, re-run that repo with `--force`: it bypasses the staleness cache for
    the repo's audits too (fresh results) and the new record links the open one.
+
+## Triage — `/all-audits triage <issue>`
+
+Opens a saved audit by its audit record's issue number, walks the user through
+deciding on each problem, files what they accept, and closes the record.
+
+1. **Load.** Run `driver.py --load <issue> [repo-name]`. It finds the stored
+   sweep whose `audit-record.json` names that issue, rebuilds its collection
+   and `index.html`, and prints `stored: <dir>` and `index: <path>`. Give the
+   repo name only when the verb says two repos share the number. A non-zero
+   exit (no stored sweep, or a sweep whose collection is gone) is reported
+   verbatim with its path, and the triage stops: do not re-sweep, and do not
+   work from the issue body alone.
+2. **Grill.** Continue straight into [`harness/GRILLING.md`](harness/GRILLING.md)
+   over the stored collection: the batch-mode offer, the per-finding grill,
+   rejections written to the audited repo's `.audit-ignore.md`, and one spec per
+   area after one confirmation. The audited repo is the record's repo, not the
+   current directory.
+3. **Close the record.** Comment on audit record `<issue>` listing the specs the
+   grill filed (links), or saying none were filed, then close it:
+   `gh issue comment <issue> --body-file …` and `gh issue close <issue>`.
+   Closing is what lets `--multi` sweep that repo again, and what frees the
+   stored sweep for deletion. If the grill stopped before the confirmation, close
+   nothing: the record stays open and `triage pending`.
 
 ## After the sweep
 

@@ -1721,3 +1721,66 @@ def test_suggest_with_no_recent_prs_says_so_and_exits_zero(tmp_path):
     r = _suggest(roots, env, FAKE_GH_PRS="[]")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "no owned repo has a PR in the last 14 days" in r.stdout
+
+
+# --- --load: reopen a stored sweep for triage (#1684) ---------------------------
+
+def _swept_with_record(tmp, url="https://github.com/caneff/alpha/issues/42"):
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=url))
+    assert r.returncode == 0, r.stdout + r.stderr
+    return env
+
+
+def _load(env, *args):
+    return subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "--load", *args],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_load_rebuilds_a_working_index_from_the_issue_number_alone(tmp_path):
+    tmp = str(tmp_path)
+    env = _swept_with_record(tmp)
+    stored_dir = os.path.join(tmp, "data", "all-audits", "alpha")
+    stored = os.path.join(stored_dir, os.listdir(stored_dir)[0])
+    index = os.path.join(stored, "collection", "index.html")
+    os.remove(index)  # prove the verb rebuilds it, not that --multi left one
+    r = _load(env, "42")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"index: {index}" in r.stdout, r.stdout
+    page = open(index, encoding="utf-8").read()
+    assert "dead-code" in page, page[:500]
+
+
+def test_load_missing_stored_sweep_exits_nonzero_naming_the_issue_and_the_path(tmp_path):
+    tmp = str(tmp_path)
+    env = _swept_with_record(tmp)
+    r = _load(env, "7")
+    assert r.returncode != 0
+    assert "#7" in r.stderr and os.path.join(tmp, "data", "all-audits") in r.stderr, r.stderr
+    assert "audit-record.json" in r.stderr, r.stderr
+
+
+def test_load_with_the_record_but_no_collection_exits_nonzero_naming_the_path(tmp_path):
+    tmp = str(tmp_path)
+    env = _swept_with_record(tmp)
+    stored_dir = os.path.join(tmp, "data", "all-audits", "alpha")
+    stored = os.path.join(stored_dir, os.listdir(stored_dir)[0])
+    shutil.rmtree(os.path.join(stored, "collection"))
+    r = _load(env, "42")
+    assert r.returncode != 0
+    assert "#42" in r.stderr and os.path.join(stored, "collection") in r.stderr, r.stderr
+
+
+def test_load_two_repos_sharing_an_issue_number_needs_the_repo_name(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    for repo, name in ((a, "alpha"), (b, "beta")):
+        r = _multi([repo], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=f"https://github.com/caneff/{name}/issues/42"))
+        assert r.returncode == 0, r.stdout + r.stderr
+    r = _load(env, "42")
+    assert r.returncode != 0 and "alpha" in r.stderr and "beta" in r.stderr, r.stderr
+    r = _load(env, "42", "beta")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.path.join("beta", "") in r.stdout
