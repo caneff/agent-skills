@@ -14,10 +14,13 @@
 # test reads the most audits that were in flight at once from the counts.
 # FAKE_CLAUDE_PREPASS="a.py\nb.py" makes a prompt with no manifest request
 # (the mutation prepass) print that ranking (#1567).
-# FAKE_CLAUDE_STARTS=<file> (#1679): every start appends "<name> <prompt's first line>"
-# to <file>, so a test reads the order audits started in.
-# FAKE_CLAUDE_FINDINGS_FILE=<file> (#1680): dead-code copies it to findings.jsonl beside its report.
+# FAKE_CLAUDE_STARTS=<file> (#1679): every start appends its prompt's first
+# line ("/<name> <repo>") to <file>, so a test reads the order audits started in.
+# FAKE_CLAUDE_FINDINGS_FILE=<file> (#1680): dead-code copies it to
+# findings.jsonl beside its report.
 # FAKE_CLAUDE_SUPPRESSED=<n>: dead-code's manifest carries "suppressed": <n>.
+# FAKE_CLAUDE_GUARD=1: every audit prints the model-invocation guard's
+# refusal and exits, as a rejected `-p` slash invocation does.
 # domain-drift writes the same report and manifest as dead-code.
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
@@ -37,6 +40,8 @@ if [ -n "${FAKE_CLAUDE_INFLIGHT:-}" ]; then
   sleep 0.3
   rm -f "$FAKE_CLAUDE_INFLIGHT/inflight.$$"
 fi
+
+[ -z "${FAKE_CLAUDE_GUARD:-}" ] || { echo "Skill cannot be used with Skill tool: disable-model-invocation"; exit 1; }
 
 # An audit that dies silently: exits 0, writes nothing (#1278).
 [ -z "${FAKE_CLAUDE_NOOP:-}" ] || exit 0

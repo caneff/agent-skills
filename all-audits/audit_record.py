@@ -33,7 +33,8 @@ class RecordModel:
     suppression_unreported: list  # audits that ran but gave no suppressed count, when an ignore file exists
     headings: dict              # structural audit -> report headings
     synthesis: str
-    open_record: str = ""      # url of an earlier record still open when this sweep was forced
+    open_record: str = ""       # url of an earlier record still open when this sweep was forced
+    earlier_record: str = ""    # url of the newest earlier record, where skipped audits' findings went
 
 
 def finding_count(model):
@@ -106,7 +107,8 @@ def _blocks(model):
         out[0] += f"\n- Earlier open audit record: {model.open_record}"
     if model.skipped:
         out.append("## Skipped as unchanged\n\nTheir findings are not copied in: they were recorded when the earlier report was made.\n\n"
-                   + "\n".join(f"- {n}: unchanged since {sha}" for n, sha in model.skipped.items()))
+                   + "\n".join(f"- {n}: unchanged since {sha}" for n, sha in model.skipped.items())
+                   + (f"\n\nEarlier audit record: {model.earlier_record}" if model.earlier_record else ""))
     if model.failed:
         out.append("## Failed audits\n\n" + "\n\n".join(
             f"### {n} failed\n\n```\n{tail}\n```" for n, tail in model.failed.items()))

@@ -194,10 +194,12 @@ class CacheDecision:
     report_dir: str = None
 
 
-def decide(repo, name, ground_truth, threshold=DEFAULT_THRESHOLD, backstop=DEFAULT_BACKSTOP_DAYS, base=None):
+def decide(repo, name, ground_truth, threshold=DEFAULT_THRESHOLD, backstop=DEFAULT_BACKSTOP_DAYS, base=None,
+           key=None):
     """The cache decision as a structured result (#558) — not the old
-    tab-separated RUN/SKIP text `cache.py decide` printed."""
-    record = load_record(_record_file(repo, base))
+    tab-separated RUN/SKIP text `cache.py decide` printed. `key` names the
+    record when `repo` is a throwaway checkout (#1678); git still reads `repo`."""
+    record = load_record(_record_file(key or repo, base))
     entry = record.get(name)
     cache_record = None
     if entry and {"last_sha", "timestamp", "report_dir"} <= entry.keys():
@@ -215,8 +217,8 @@ def decide(repo, name, ground_truth, threshold=DEFAULT_THRESHOLD, backstop=DEFAU
     return CacheDecision(run=False, reason=reason, sha=entry["last_sha"], report_dir=entry["report_dir"])
 
 
-def update_cache(repo, name, report_dir, base=None):
-    path = _record_file(repo, base)
+def update_cache(repo, name, report_dir, base=None, key=None):
+    path = _record_file(key or repo, base)
     record = load_record(path)
     record[name] = {
         "last_sha": head_sha(repo),
@@ -710,7 +712,7 @@ class RunDir:
         cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
         for entry in os.listdir(base):
             p = os.path.join(base, entry)
-            if entry.startswith("run-") and os.path.isdir(p) and p != root and os.path.getmtime(p) < cutoff:
+            if entry.startswith(("run-", "multi-")) and os.path.isdir(p) and p != root and os.path.getmtime(p) < cutoff:
                 shutil.rmtree(p, ignore_errors=True)
         run = cls(
             root=root,
@@ -741,13 +743,13 @@ class Plan:
     skip_sha: dict = dataclasses.field(default_factory=dict)
 
 
-def plan_sweep(repo, selected, force, base=None):
+def plan_sweep(repo, selected, force, base=None, key=None):
     """Ask the staleness cache which of `selected` still needs a run."""
     base = base or cache_base()
     plan = Plan()
     for name in selected:
         if name in GATED and not force:
-            d = decide(repo, name, GATED[name], base=base)
+            d = decide(repo, name, GATED[name], base=base, key=key)
             if not d.run:
                 if d.report_dir and os.path.isdir(d.report_dir):
                     plan.reused[name] = d.report_dir
@@ -852,7 +854,7 @@ def render_mutation_subindex(collection, repo, mut):
 SYNTHESIS_FILE = "synthesis.txt"
 
 
-def collect(run, repo, plan, base=None):
+def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False):
     """Assemble the collection from what is on disk and render the index.
 
     Reports arrive two ways — through the manifest each audit that ran wrote,
@@ -866,7 +868,7 @@ def collect(run, repo, plan, base=None):
     for name, cached in plan.reused.items():
         replace_dir(cached, os.path.join(collection, name))
 
-    stable = os.path.join(base, repo_key(repo), "reports")
+    stable = os.path.join(base, repo_key(key or repo), "reports")
     manifest_note = {}
     for name in plan.to_run:
         reason = collect_from_manifest(run.manifests, name, collection, name)
@@ -879,7 +881,7 @@ def collect(run, repo, plan, base=None):
         if name in GATED:
             os.makedirs(stable, exist_ok=True)
             replace_dir(os.path.join(collection, name), os.path.join(stable, name))
-            update_cache(repo, name, os.path.join(stable, name), base=base)
+            update_cache(repo, name, os.path.join(stable, name), base=base, key=key)
 
     report_link = {}
     for name in AUDIT_NAMES:
@@ -894,7 +896,11 @@ def collect(run, repo, plan, base=None):
 
     report_files = [os.path.join(collection, report_link[n]) for n in AUDIT_NAMES if report_link[n]]
     synthesis = ""
-    if os.environ.get("AUDITS_NO_SYNTH", "0") != "1" and report_files:
+    synthesis_path = os.path.join(collection, SYNTHESIS_FILE)
+    if reuse_synthesis:  # `--load` (#1678): the stored synthesis as it was, no new `claude` call
+        if os.path.isfile(synthesis_path):
+            synthesis = open(synthesis_path, encoding="utf-8").read()
+    elif os.environ.get("AUDITS_NO_SYNTH", "0") != "1" and report_files:
         print("== synthesis pass ==")
         prompt = (
             f"Read these {len(report_files)} audit report HTML files and write a 2-3 sentence synthesis of "
@@ -904,7 +910,7 @@ def collect(run, repo, plan, base=None):
         result = _run(["claude", *CLAUDE_FLAGS, prompt], env=claude_env())
         synthesis = result.stdout.strip()
         if synthesis:  # the audit record (#1680) carries it as-is
-            with open(os.path.join(collection, SYNTHESIS_FILE), "w", encoding="utf-8") as f:
+            with open(synthesis_path, "w", encoding="utf-8") as f:
                 f.write(synthesis)
 
     pagelib.copy_assets(collection, components=INDEX_COMPONENTS)
@@ -952,7 +958,7 @@ class SweepResult:
     failed: list
 
 
-def run_sweep(repo, out, only, short, force):
+def run_sweep(repo, out, only, short, force, key=None):
     """Plan, execute and collect one sweep; opens the index. Returns what
     happened: the audit record (#1680) is built from it."""
     repo = os.path.abspath(repo)
@@ -960,9 +966,9 @@ def run_sweep(repo, out, only, short, force):
     jobs = sweep_jobs()  # before the run dir exists, as mutation_mode does
     run = RunDir.create(out)
     _announce(run, repo)
-    plan = plan_sweep(repo, selected, force)
+    plan = plan_sweep(repo, selected, force, key=key)
     failed = execute(repo, plan, run, jobs)
-    open_index(collect(run, repo, plan))
+    open_index(collect(run, repo, plan, key=key))
     return SweepResult(run, plan, failed)
 
 
@@ -992,17 +998,24 @@ def stored_sweeps_base():
     return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "all-audits")
 
 
-def repo_owner_refusal(repo):
-    """None when `gh` reports the owner is `caneff`, else the reason to refuse.
-    Anything `gh` cannot answer is a refusal, never a pass."""
-    r = _run(["gh", "repo", "view", "--json", "owner"], cwd=repo)
+def repo_identity(repo):
+    """(`owner/name` on GitHub, None) when `gh` reports `caneff` owns the repo,
+    else (None, why it is refused). The GitHub name, never the checkout's
+    directory, keys the stored sweeps, so two checkouts of one repo share
+    them. Anything `gh` cannot answer is a refusal, never a pass."""
+    if not os.path.isdir(repo):
+        return None, "no such directory"
+    r = _run(["gh", "repo", "view", "--json", "owner,name"], cwd=repo)
     if r.returncode != 0:
-        return f"owner check failed (gh exit {r.returncode})"
+        return None, f"owner check failed (gh exit {r.returncode})"
     try:
-        owner = json.loads(r.stdout)["owner"]["login"]
+        reply = json.loads(r.stdout)
+        owner, name = reply["owner"]["login"], reply["name"]
     except (ValueError, KeyError, TypeError):
-        return "owner check failed (gh reply unreadable)"
-    return None if owner == OWNER else f"owner is {owner}, not {OWNER}"
+        return None, "owner check failed (gh reply unreadable)"
+    if owner != OWNER:
+        return None, f"owner is {owner}, not {OWNER}"
+    return f"{owner}/{name}", None
 
 
 TRIAGE_ROLE = "needs-triage"
@@ -1033,57 +1046,103 @@ def label_refusal(repo, label):
     return None if label in names else f"label `{label}` is missing"
 
 
-def earlier_record(repo, name):
-    """(url, None) when `name`'s newest stored sweep filed an audit record that is
-    still open on GitHub, ("", None) when there is none or it is closed, and
-    (None, why) when that cannot be told: an unreadable record or a `gh` that does
-    not answer OPEN or CLOSED is a refusal, never "closed" (#1681)."""
-    root = os.path.join(stored_sweeps_base(), name)
-    sweeps = sorted(os.listdir(root), reverse=True) if os.path.isdir(root) else []
-    for sweep in sweeps:
-        path = os.path.join(root, sweep, "audit-record.json")
-        if not os.path.isfile(path):
-            continue
+RECORD_FILE = "audit-record.json"
+
+
+def stored_records(name=None):
+    """Each stored sweep holding an audit record, oldest first within a repo:
+    (sweep dir, record) with `issue` an int, or (sweep dir, None) when the
+    record cannot be read. `name` keeps one repo's."""
+    pattern = os.path.join(stored_sweeps_base(), name or "*", "*", RECORD_FILE)
+    for path in sorted(glob.glob(pattern)):
         try:
             rec = json.load(open(path, encoding="utf-8"))
-            number, url = int(rec["issue"]), str(rec["url"])
+            rec["issue"], rec["url"] = int(rec["issue"]), str(rec["url"])
         except (OSError, ValueError, KeyError, TypeError):
-            return None, f"earlier record check failed ({path} unreadable)"
-        r = _run(["gh", "issue", "view", str(number), "--json", "state"], cwd=repo)
+            rec = None
+        yield os.path.dirname(path), rec
+
+
+def record_repo(sweep, rec):
+    """The GitHub repo a record was filed in. A record written before it held
+    `owner/name` falls back to its directory's name."""
+    slug = str(rec.get("repo", ""))
+    return slug if "/" in slug else f"{OWNER}/{os.path.basename(os.path.dirname(sweep))}"
+
+
+def issue_state(number, slug):
+    """("OPEN" or "CLOSED", "") from `gh`, or (None, why). An answer that is
+    neither is never read as either."""
+    r = _run(["gh", "issue", "view", str(number), "--repo", slug, "--json", "state"])
+    try:
+        state = json.loads(r.stdout)["state"] if r.returncode == 0 else None
+    except (ValueError, KeyError, TypeError):
+        state = None
+    if state in ("OPEN", "CLOSED"):
+        return state, ""
+    err = r.stderr.strip()
+    return None, f"gh exit {r.returncode}, state {state!r}{': ' + err if err else ''}"
+
+
+def earlier_record(name):
+    """(url, None) when `name`'s newest audit record is still open on GitHub,
+    ("", None) when there is none or it is closed, and (None, why) when that
+    cannot be told: an unreadable record or an unanswered state is a refusal,
+    never "closed" (#1681)."""
+    records = list(stored_records(name))
+    if not records:
+        return "", None
+    sweep, rec = records[-1]
+    if rec is None:
+        return None, f"earlier record check failed ({os.path.join(sweep, RECORD_FILE)} unreadable)"
+    state, why = issue_state(rec["issue"], record_repo(sweep, rec))
+    if state is None:
+        return None, f"earlier record check failed (issue #{rec['issue']}: {why})"
+    return (rec["url"] if state == "OPEN" else ""), None
+
+
+def _record_history(name):
+    """Every audit record filed for `name`, one JSON line each. A dot-directory,
+    so no `<repo>/<sweep-id>` glob ever reads it as a repo or a sweep."""
+    return os.path.join(stored_sweeps_base(), ".records", name + ".jsonl")
+
+
+def latest_record_url(name):
+    """The newest audit record ever filed for `name`, open or closed, or "":
+    where a skipped-as-unchanged audit's findings went. Read from the repo's
+    record history, which outlives the stored sweeps closing deletes."""
+    path = _record_history(name)
+    urls = []
+    for line in open(path, encoding="utf-8").read().splitlines() if os.path.isfile(path) else []:
         try:
-            state = json.loads(r.stdout)["state"] if r.returncode == 0 else None
+            urls.append(str(json.loads(line)["url"]))
         except (ValueError, KeyError, TypeError):
-            state = None
-        if state not in ("OPEN", "CLOSED"):
-            return None, f"earlier record check failed (issue #{number}: gh exit {r.returncode}, state {state!r})"
-        return (url if state == "OPEN" else ""), None
-    return "", None
+            continue
+    return urls[-1] if urls else ""
 
 
 def prune_closed_sweeps():
     """Delete each stored sweep whose audit record is CLOSED on GitHub (#1682).
-    A sweep with no record, an unreadable record, or an issue whose state `gh`
-    does not answer OPEN or CLOSED is kept; a failed lookup is printed, never
-    read as closed."""
-    base = stored_sweeps_base()
-    for path in sorted(glob.glob(os.path.join(base, "*", "*", "audit-record.json"))):
-        sweep = os.path.dirname(path)
-        name = os.path.basename(os.path.dirname(sweep))
-        try:
-            number = int(json.load(open(path, encoding="utf-8"))["issue"])
-        except (OSError, ValueError, KeyError, TypeError):
-            print(f"stored sweep {sweep}: kept ({path} unreadable)", file=sys.stderr)
+    One whose record is open, unreadable, or whose state `gh` does not answer
+    is kept, and a failed lookup is printed, never read as closed. A stored
+    sweep with no record at all (its issue was never filed) is deleted once it
+    is older than `RUN_TTL_DAYS`, so nothing grows without bound."""
+    for sweep, rec in stored_records():
+        if rec is None:
+            print(f"stored sweep {sweep}: kept ({RECORD_FILE} unreadable)", file=sys.stderr)
             continue
-        r = _run(["gh", "issue", "view", str(number), "--repo", f"{OWNER}/{name}", "--json", "state"])
-        try:
-            state = json.loads(r.stdout)["state"] if r.returncode == 0 else None
-        except (ValueError, KeyError, TypeError):
-            state = None
+        state, why = issue_state(rec["issue"], record_repo(sweep, rec))
         if state == "CLOSED":
             shutil.rmtree(sweep, ignore_errors=True)
-        elif state != "OPEN":
-            print(f"stored sweep {sweep}: kept (record #{number}: gh exit {r.returncode}, state {state!r}"
-                  f"{': ' + r.stderr.strip() if r.stderr.strip() else ''})", file=sys.stderr)
+        elif state is None:
+            print(f"stored sweep {sweep}: kept (record #{rec['issue']}: {why})", file=sys.stderr)
+    cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
+    for sweep in glob.glob(os.path.join(stored_sweeps_base(), "*", "*")):
+        if (os.path.isdir(sweep) and not os.path.exists(os.path.join(sweep, RECORD_FILE))
+                and os.path.getmtime(sweep) < cutoff):
+            print(f"stored sweep {sweep}: deleted (no audit record, older than {RUN_TTL_DAYS} days)",
+                  file=sys.stderr)
+            shutil.rmtree(sweep, ignore_errors=True)
 
 
 @dataclasses.dataclass
@@ -1094,16 +1153,17 @@ class Outcome:
     issue_url: str = ""
 
 
-def log_tail(path, lines=15):
+def log_tail(path):
     try:
         text = open(path, encoding="utf-8", errors="replace").read()
     except OSError:
         return "(no log)"
-    return "\n".join(text.splitlines()[-lines:]) or "(empty log)"
+    return "\n".join(text.splitlines()[-15:]) or "(empty log)"
 
 
 def _read_jsonl(path):
-    """Every line of a findings log: the parsed object, or the raw line when it is not JSON."""
+    """Every line of a findings log: the parsed object, or the raw line when
+    it is not JSON."""
     rows = []
     for line in open(path, encoding="utf-8", errors="replace").read().splitlines():
         if not line.strip():
@@ -1123,7 +1183,7 @@ def _report_headings(collection, name):
     return audit_record.report_headings(open(os.path.join(d, htmls[0]), encoding="utf-8", errors="replace").read())
 
 
-def record_model(result, sweep_id, sha, clean, stored, has_ignore_file, open_record=""):
+def record_model(result, sweep_id, sha, clean, stored, has_ignore_file, open_record="", earlier=""):
     """What the sweep left on disk, as the audit record's inputs. An audit that
     failed contributes a failure and no findings; one reused from the cache
     contributes its earlier sha and no findings."""
@@ -1150,33 +1210,64 @@ def record_model(result, sweep_id, sha, clean, stored, has_ignore_file, open_rec
         sweep_id=sweep_id, timestamp=now_iso(), sha=sha, clean=clean, stored_path=stored,
         ran=list(plan.to_run), skipped=dict(plan.skip_sha), failed=failed, findings=findings, no_log=no_log,
         suppressed=suppressed, suppression_unreported=unreported, headings=headings, synthesis=synthesis,
-        open_record=open_record)
+        open_record=open_record, earlier_record=earlier)
 
 
-def file_audit_record(repo, run_root, title, label, chunks):
+def aborted_model(sweep_id, sha, clean, stored, reason, logs, open_record=""):
+    """The record of a sweep that stopped before collecting (a guard, a crash):
+    a failure, never a clean repo (#1678)."""
+    tails = [f"{f}:\n{log_tail(os.path.join(logs, f))}" for f in sorted(os.listdir(logs))] if os.path.isdir(logs) else []
+    return audit_record.RecordModel(
+        sweep_id=sweep_id, timestamp=now_iso(), sha=sha, clean=clean, stored_path=stored,
+        ran=[], skipped={}, failed={"the sweep": "\n\n".join([reason, *tails])}, findings={}, no_log={},
+        suppressed=0, suppression_unreported=[], headings={}, synthesis="", open_record=open_record)
+
+
+SWEEP_STATE_FILE = "sweep-state.json"
+
+
+def _write_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def file_audit_record(repo, stored, title, label, chunks, meta):
     """Open the issue with `chunks[0]` and add the rest as comments, in order.
-    Returns (url, None) or (url_or_"", why it failed)."""
-    os.makedirs(run_root, exist_ok=True)
+    The chunks stay in the stored sweep, and the record file is written the
+    moment the issue exists, naming every comment not yet posted, so a failure
+    part-way loses nothing. Returns (url, None) or (url_or_"", why it failed)."""
     paths = []
     for i, text in enumerate(chunks):
-        paths.append(os.path.join(run_root, f"audit-record-{i}.md"))
+        paths.append(os.path.join(stored, f"audit-record-{i}.md"))
         with open(paths[-1], "w", encoding="utf-8") as f:
             f.write(text)
     created = _run(["gh", "issue", "create", "--title", title, "--label", label, "--body-file", paths[0]], cwd=repo)
     match = re.search(r"/issues/(\d+)", created.stdout)
     if created.returncode != 0 or not match:
-        return "", f"audit record not filed (gh exit {created.returncode}): {created.stderr.strip() or created.stdout.strip()}"
+        return "", (f"audit record not filed (gh exit {created.returncode}): "
+                    f"{created.stderr.strip() or created.stdout.strip()}; its text is in {stored}")
     url, number = created.stdout.strip().splitlines()[-1], match.group(1)
+    meta = {**meta, "issue": int(number), "url": url, "unposted": [os.path.basename(p) for p in paths[1:]]}
+    record_path = os.path.join(stored, RECORD_FILE)
+    _write_json(record_path, meta)
+    history = _record_history(os.path.basename(os.path.dirname(stored)))
+    os.makedirs(os.path.dirname(history), exist_ok=True)
+    with open(history, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"sweep": os.path.basename(stored), "url": url}) + "\n")
     for path in paths[1:]:
         c = _run(["gh", "issue", "comment", number, "--body-file", path], cwd=repo)
         if c.returncode != 0:
-            return url, f"audit record {url} is missing a continuation comment (gh exit {c.returncode}): {c.stderr.strip()}"
+            return url, (f"audit record {url} is missing continuation comments {', '.join(meta['unposted'])} "
+                         f"(gh exit {c.returncode}): {c.stderr.strip()}; their text is in {stored}")
+        meta["unposted"].pop(0)
+        _write_json(record_path, meta)
     return url, None
 
 
-def _sweep_origin_main(repo, name, run_root, sweep_id, only, short, force, open_record=""):
+def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_record=""):
     """Sweep a fresh worktree of `repo`'s origin/main, store the result, and
     file the audit record. Returns an Outcome."""
+    name = slug.split("/", 1)[1]
     fetch = _run(["git", "-C", repo, "fetch", "origin"])
     if fetch.returncode != 0:
         return Outcome("failed", f"git fetch failed: {fetch.stderr.strip()}")
@@ -1190,73 +1281,89 @@ def _sweep_origin_main(repo, name, run_root, sweep_id, only, short, force, open_
         refusal = label_refusal(repo, label)  # before any audit starts
         if refusal:
             return Outcome("refused", refusal)
+        earlier = latest_record_url(name)  # before this sweep stores its own
         result, failure = None, None
         try:
-            result = run_sweep(wt, os.path.join(run_root, "run"), only, short, force)
+            result = run_sweep(wt, os.path.join(run_root, "run"), only, short, force, key="github:" + slug)
         except SystemExit as e:
             if e.code not in (0, None):
-                failure = f"sweep failed (exit {e.code})"  # still stored below: partial results are kept
+                failure = f"sweep stopped before collecting: {e.code if isinstance(e.code, str) else f'exit {e.code}'}"
         stored = os.path.join(stored_sweeps_base(), name, sweep_id)
         run = os.path.join(run_root, "run")
+        os.makedirs(stored, exist_ok=True)
         for sub in ("collection", "logs"):
             if os.path.isdir(os.path.join(run, sub)):
-                shutil.copytree(os.path.join(run, sub), os.path.join(stored, sub))
-        if not os.path.isfile(os.path.join(stored, "collection", "index.html")):
-            return Outcome("failed", failure or "sweep left no index.html to store")
-        if result is None:
-            return Outcome("failed", failure, stored)
+                shutil.copytree(os.path.join(run, sub), os.path.join(stored, sub), dirs_exist_ok=True)
         sha = head_sha(wt)
         dirty = _run(["git", "-C", wt, "status", "--porcelain"]).stdout.splitlines()
-        model = record_model(result, sweep_id, sha, "yes" if not dirty else f"no ({len(dirty)} changed paths)",
-                             stored, os.path.isfile(os.path.join(wt, ".audit-ignore.md")), open_record)
-        outcome = Outcome("failed" if result.failed else "swept", stored=stored)
-        if result.failed:
-            outcome.reason = f"{len(result.failed)} audit(s) failed: {', '.join(result.failed)}"
-        if audit_record.worth_filing(model):
-            url, error = file_audit_record(repo, run_root, f"Audit record: {name} {sweep_id}", label, audit_record.build(model))
-            outcome.issue_url = url
-            if url:
-                with open(os.path.join(stored, "audit-record.json"), "w", encoding="utf-8") as f:
-                    json.dump({"issue": int(re.search(r"/issues/(\d+)", url).group(1)), "url": url, "repo": name}, f)
-            if error:
-                outcome.status, outcome.reason = "failed", "; ".join(x for x in (outcome.reason, error) if x)
+        clean = "yes" if not dirty else f"no ({len(dirty)} changed paths)"
+        if result is None:
+            model = aborted_model(sweep_id, sha, clean, stored, failure or "sweep stopped before collecting",
+                                  os.path.join(stored, "logs"), open_record)
+            outcome = Outcome("failed", model.failed["the sweep"].splitlines()[0], stored)
+        else:
+            model = record_model(result, sweep_id, sha, clean, stored,
+                                 os.path.isfile(os.path.join(wt, ".audit-ignore.md")), open_record, earlier)
+            _write_json(os.path.join(stored, SWEEP_STATE_FILE),
+                        {"skip_note": result.plan.skip_note,
+                         "failed": {n: t.splitlines()[0] for n, t in model.failed.items()}})
+            outcome = Outcome("failed" if result.failed else "swept", stored=stored)
+            if result.failed:
+                outcome.reason = f"{len(result.failed)} audit(s) failed: {', '.join(result.failed)}"
+        if not audit_record.worth_filing(model):
+            return outcome  # stored with no record: `prune_closed_sweeps` drops it after RUN_TTL_DAYS
+        meta = {"repo": slug, "checkout": repo}
+        url, error = file_audit_record(repo, stored, f"Audit record: {name} {sweep_id}", label,
+                                       audit_record.build(model), meta)
+        outcome.issue_url = url
+        if error:
+            outcome.status, outcome.reason = "failed", "; ".join(x for x in (outcome.reason, error) if x)
         return outcome
     finally:
         _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
         _run(["git", "-C", repo, "worktree", "prune"])
 
 
+def _multi_one(repo, base, sweep_id, only, short, force, seen):
+    """One repo of a multi-repo sweep: (summary line, whether it failed)."""
+    slug, refusal = repo_identity(repo)
+    label = slug.split("/", 1)[1] if slug else (os.path.basename(repo.rstrip("/")) or "repo")
+    if refusal:
+        return f"{label}: refused ({refusal})", False
+    if slug in seen:
+        return f"{label}: skipped ({repo} is {slug} again, already swept from {seen[slug]})", False
+    seen[slug] = repo
+    open_record, why = earlier_record(label)
+    if why:
+        return f"{label}: refused ({why})", False
+    if open_record and not force:
+        return f"{label}: triage pending ({open_record})", False
+    o = _sweep_origin_main(repo, slug, os.path.join(base, repo_key(repo)), sweep_id, only, short, force, open_record)
+    link = f"; audit record: {o.issue_url}" if o.issue_url else ""
+    if o.status == "refused":
+        return f"{label}: refused ({o.reason})", False
+    if o.status == "failed":
+        return f"{label}: failed ({o.reason}){link}", True
+    return f"{label}: swept -> {o.stored}{link or '; no audit record (no findings, no failures)'}", False
+
+
 def multi_mode(repos, out, only, short, force):
     """Sweep each repo in turn (never overlapping); one summary line per repo.
-    Exits 1 if any repo failed; a refused repo is reported, not a failure."""
+    Exits 1 if any repo failed; a refused repo is reported, not a failure. A
+    repo that crashes is that repo's failure, and the rest still run."""
     sweep_jobs()  # a bad SWEEP_JOBS stops the run before any repo is touched
     prune_closed_sweeps()
     sweep_id = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     base = os.path.abspath(out) if out else os.path.join(cache_base(), "multi-" + sweep_id)
-    summary, failed = [], False
+    summary, failed, seen = [], False, {}
     for path in repos:
         repo = os.path.abspath(path)
-        name = os.path.basename(repo.rstrip("/")) or "repo"
-        refusal = repo_owner_refusal(repo)
-        if refusal:
-            summary.append(f"{name}: refused ({refusal})")
-            continue
-        open_record, why = earlier_record(repo, name)
-        if why:
-            summary.append(f"{name}: refused ({why})")
-            continue
-        if open_record and not force:
-            summary.append(f"{name}: triage pending ({open_record})")
-            continue
-        o = _sweep_origin_main(repo, name, os.path.join(base, repo_key(repo)), sweep_id, only, short, force, open_record)
-        link = f"; audit record: {o.issue_url}" if o.issue_url else ("; no audit record (no findings, no failures)" if o.status == "swept" else "")
-        if o.status == "refused":
-            summary.append(f"{name}: refused ({o.reason})")
-        elif o.status == "failed":
-            failed = True
-            summary.append(f"{name}: failed ({o.reason}){link}")
-        else:
-            summary.append(f"{name}: swept -> {o.stored}{link}")
+        try:
+            line, bad = _multi_one(repo, base, sweep_id, only, short, force, seen)
+        except Exception as e:  # noqa: BLE001 - reported by name, never swallowed
+            line, bad = f"{os.path.basename(repo.rstrip('/')) or repo}: failed (crashed: {e!r})", True
+        summary.append(line)
+        failed = failed or bad
     print("\n== multi-repo summary ==")
     print("\n".join(summary))
     if failed:
@@ -1266,70 +1373,75 @@ def multi_mode(repos, out, only, short, force):
 # --- load a stored sweep for triage (#1684) ----------------------------------
 
 def find_stored_sweep(issue, repo_name=None):
-    """(stored sweep dir, None) for the sweep whose audit record is issue
+    """(stored sweep dir, record) for the sweep whose audit record is issue
     `issue`, else (None, why). Never a guess: no match, two matches (the same
     number in two repos) and an unreadable record are each a refusal."""
-    base = stored_sweeps_base()
-    names = [repo_name] if repo_name else (sorted(os.listdir(base)) if os.path.isdir(base) else [])
-    pattern = os.path.join(base, repo_name or "*", "*", "audit-record.json")
+    pattern = os.path.join(stored_sweeps_base(), repo_name or "*", "*", RECORD_FILE)
     found = []
-    for name in names:
-        root = os.path.join(base, name)
-        for sweep in sorted(os.listdir(root)) if os.path.isdir(root) else []:
-            path = os.path.join(root, sweep, "audit-record.json")
-            if not os.path.isfile(path):
-                continue
-            try:
-                number = int(json.load(open(path, encoding="utf-8"))["issue"])
-            except (OSError, ValueError, KeyError, TypeError):
-                return None, f"stored record {path} is unreadable"
-            if number == issue:
-                found.append(os.path.join(root, sweep))
+    for sweep, rec in stored_records(repo_name):
+        if rec is None:
+            return None, f"stored record {os.path.join(sweep, RECORD_FILE)} is unreadable"
+        if rec["issue"] == issue:
+            found.append((sweep, rec))
     if not found:
         return None, f"no stored sweep for audit record #{issue}: expected {pattern} with \"issue\": {issue}"
     if len(found) > 1:
-        return None, (f"audit record #{issue} matches {len(found)} stored sweeps ({', '.join(found)}): "
-                      "name the repo after the issue number")
+        return None, (f"audit record #{issue} matches {len(found)} stored sweeps "
+                      f"({', '.join(s for s, _ in found)}): name the repo after the issue number")
     return found[0], None
 
 
 def load_mode(issue, repo_name):
-    """`--load ISSUE [REPO]`: rebuild the stored sweep's collection index so it
-    can be triaged. Prints `index:` and `stored:`; exits 1 naming the issue and
-    the path when the sweep or its collection is missing."""
-    stored, why = find_stored_sweep(issue, os.path.basename((repo_name or "").rstrip("/")) or None)
+    """`--load ISSUE [REPO]`: rebuild the stored sweep's index so it can be
+    triaged, with the failed and unchanged audits' notes it was swept with and
+    its stored synthesis; no `claude` runs. Prints `stored:`, `checkout:` and
+    `index:`; exits 1 naming the issue and the path when the sweep or its
+    collection is missing."""
+    found, why = find_stored_sweep(issue, os.path.basename((repo_name or "").rstrip("/")) or None)
     if why:
         sys.exit(f"all-audits --load: {why}")
+    stored, rec = found
     collection = os.path.join(stored, "collection")
     if not os.path.isdir(collection):
         sys.exit(f"all-audits --load: audit record #{issue}: stored collection missing at {collection}")
-    name = os.path.basename(os.path.dirname(stored))
+    state_path = os.path.join(stored, SWEEP_STATE_FILE)
+    state = json.load(open(state_path, encoding="utf-8")) if os.path.isfile(state_path) else {}
+    notes = {**state.get("skip_note", {}), **{n: f"FAILED: {why}" for n, why in state.get("failed", {}).items()}}
     run = RunDir.create(stored)
+    slug = record_repo(stored, rec)
     print(f"stored: {stored}")
-    index = collect(run, name, Plan())
-    open_index(index)
+    print(f"repo: {slug}")
+    print(f"checkout: {rec.get('checkout', '(not recorded)')}")
+    open_index(collect(run, slug, Plan(skip_note=notes), reuse_synthesis=True))
 
 
 # --- repo suggestions (#1683) -------------------------------------------------
 
 SUGGEST_DAYS = 14
-DEFAULT_ROOTS = "~/src"
+DEFAULT_ROOTS = "~/src,~/.agents"  # agent-skills lives at ~/.agents/skills, as `landed` scans it
 _ORIGIN_SLUG = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 
 
-def recent_pr_repos(days=SUGGEST_DAYS):
+SEARCH_LIMIT = 1000  # `gh search` returns at most 1000 results
+
+
+def recent_pr_repos():
     """Sorted `owner/name`s of owned repos where the user authored a PR in the
-    last `days` days. Raises RuntimeError on any `gh` failure: an empty list
-    must mean "no PRs", never "the search broke"."""
-    since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    last `SUGGEST_DAYS` days. Raises RuntimeError on any `gh` failure, and on a
+    reply that hit the result limit: an empty or short list must mean "no
+    more PRs", never "the search broke" or "the search was cut off"."""
+    since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=SUGGEST_DAYS)).strftime("%Y-%m-%d")
     r = _run(["gh", "search", "prs", "--author", "@me", "--created", f">={since}",
-              "--json", "repository", "--limit", "200"])
+              "--json", "repository", "--limit", str(SEARCH_LIMIT)])
     if r.returncode != 0:
         raise RuntimeError(f"gh search prs failed (exit {r.returncode}): {r.stderr.strip()}")
     try:
-        names = {pr["repository"]["nameWithOwner"] for pr in json.loads(r.stdout)}
+        rows = json.loads(r.stdout)
+        names = {pr["repository"]["nameWithOwner"] for pr in rows}
     except (ValueError, KeyError, TypeError):
         raise RuntimeError("gh search prs reply unreadable")
+    if len(rows) >= SEARCH_LIMIT:
+        raise RuntimeError(f"gh search prs returned {len(rows)} PRs, its limit: the list may be cut off")
     return sorted(n for n in names if n.startswith(OWNER + "/"))
 
 
@@ -1582,7 +1694,7 @@ def main(argv):
                    help="print the owned repos with a PR in the last 14 days and a local checkout, "
                         "one path each, for --multi (#1683)")
     p.add_argument("--roots", metavar="DIR,DIR", default=DEFAULT_ROOTS,
-                   help="with --suggest: the directories holding local checkouts (default ~/src)")
+                   help="with --suggest: the directories holding local checkouts (default ~/src,~/.agents)")
     p.add_argument("--mutation", nargs="?", const="", metavar="A.PY,B.PY",
                    help="run mutation-audit on each module, one fresh git worktree at a time "
                         "(no value: pick the modules with a prepass)")
@@ -1593,12 +1705,14 @@ def main(argv):
 
     repo = args.repo or os.getcwd()
     if args.load is not None:
-        if args.index or args.multi is not None or args.suggest or args.mutation is not None or args.mutation_all:
+        if (args.index or args.multi is not None or args.suggest or args.mutation is not None or args.mutation_all
+                or args.only is not None or args.short or args.force or args.out):
             p.error("--load takes the issue number and an optional repo name, and combines with nothing else.")
         load_mode(args.load, args.repo)
         return
     if args.suggest:
-        if args.repo or args.index or args.multi is not None or args.mutation is not None or args.mutation_all:
+        if (args.repo or args.index or args.multi is not None or args.mutation is not None or args.mutation_all
+                or args.only is not None or args.short or args.force or args.out):
             p.error("--suggest stands alone: it takes only --roots.")
         suggest_mode(_split(args.roots))
         return

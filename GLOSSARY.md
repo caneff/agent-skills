@@ -86,5 +86,5 @@ A finished sweep copied to `~/.local/share/all-audits/<repo>/<sweep-id>/` (its `
 _Avoid_: archive, saved run, cached sweep
 
 **Audit record**:
-The `claude -p` audit's result for one audit in one sweep: its manifest (report path, count, headline) and the report folder that manifest names, as collected into the sweep's `collection/<audit>/`. Not the staleness cache's per-repo JSON file, which is the cache record.
-_Avoid_: finding (a finding is one row inside a record), result, report (the HTML is only the record's rendering)
+The GitHub issue a `--multi` sweep opens in the swept repo, labelled with its triage label, holding every finding and every fact about the sweep as text (body, then ordered comments past GitHub's length limit). One per repo per sweep, and only when the sweep found something or an audit failed. Its stored sweep keeps the issue number in `audit-record.json`; closing it, which `/all-audits triage` does, frees that stored sweep for deletion.
+_Avoid_: report (one audit's HTML), manifest (one audit's `claude -p` answer), finding (one row inside a record)
