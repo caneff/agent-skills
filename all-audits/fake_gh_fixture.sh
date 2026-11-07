@@ -7,6 +7,8 @@
 # FAKE_GH_LABELS='[{"name":"a"}]'  label list --json name (default: needs-triage only)
 # FAKE_GH_PRS='[...]'              pr list / search prs (default [])
 # FAKE_GH_ISSUE_STATE=OPEN|CLOSED  issue view --json state (default OPEN)
+# FAKE_GH_ISSUE_STATES="42=CLOSED,43=FAIL" (#1682)  per-issue override of the above, keyed on the issue number;
+#                                  FAIL makes that `issue view` exit 1
 # FAKE_GH_ISSUE_URL=<url>          issue create prints it
 # FAKE_GH_BODIES=<file> (#1680)    issue create / issue comment append "=== <argv> ===", then the
 #                                  --body-file's text, so a test reads the bodies in call order
@@ -28,7 +30,14 @@ case "$1 ${2:-}" in
     default='[{"name":"needs-triage"}]'
     echo "${FAKE_GH_LABELS:-$default}" ;;
   "pr list"|"search prs") echo "${FAKE_GH_PRS:-[]}" ;;
-  "issue view") printf '{"state":"%s"}\n' "${FAKE_GH_ISSUE_STATE:-OPEN}" ;;
+  "issue view")
+    state="${FAKE_GH_ISSUE_STATE:-OPEN}"
+    IFS=, read -ra pairs <<<"${FAKE_GH_ISSUE_STATES:-}"
+    for pair in "${pairs[@]}"; do
+      [ "${pair%%=*}" != "$3" ] || state="${pair#*=}"
+    done
+    [ "$state" != FAIL ] || { echo "fake gh: issue view $3 failed" >&2; exit 1; }
+    printf '{"state":"%s"}\n' "$state" ;;
   "issue create"|"issue comment")
     if [ -n "${FAKE_GH_BODIES:-}" ]; then
       args=("$@"); body=""

@@ -26,6 +26,7 @@ import datetime as _dt
 import hashlib
 import html
 import importlib.util
+import glob
 import json
 import os
 import re
@@ -966,6 +967,7 @@ def run_sweep(repo, out, only, short, force):
 
 
 def sweep(repo, out, only, short, force):
+    prune_closed_sweeps()
     failed = run_sweep(repo, out, only, short, force).failed
     if failed:
         print(f"FAILED audits: {', '.join(failed)}", file=sys.stderr)
@@ -1056,6 +1058,32 @@ def earlier_record(repo, name):
             return None, f"earlier record check failed (issue #{number}: gh exit {r.returncode}, state {state!r})"
         return (url if state == "OPEN" else ""), None
     return "", None
+
+
+def prune_closed_sweeps():
+    """Delete each stored sweep whose audit record is CLOSED on GitHub (#1682).
+    A sweep with no record, an unreadable record, or an issue whose state `gh`
+    does not answer OPEN or CLOSED is kept; a failed lookup is printed, never
+    read as closed."""
+    base = stored_sweeps_base()
+    for path in sorted(glob.glob(os.path.join(base, "*", "*", "audit-record.json"))):
+        sweep = os.path.dirname(path)
+        name = os.path.basename(os.path.dirname(sweep))
+        try:
+            number = int(json.load(open(path, encoding="utf-8"))["issue"])
+        except (OSError, ValueError, KeyError, TypeError):
+            print(f"stored sweep {sweep}: kept ({path} unreadable)", file=sys.stderr)
+            continue
+        r = _run(["gh", "issue", "view", str(number), "--repo", f"{OWNER}/{name}", "--json", "state"])
+        try:
+            state = json.loads(r.stdout)["state"] if r.returncode == 0 else None
+        except (ValueError, KeyError, TypeError):
+            state = None
+        if state == "CLOSED":
+            shutil.rmtree(sweep, ignore_errors=True)
+        elif state != "OPEN":
+            print(f"stored sweep {sweep}: kept (record #{number}: gh exit {r.returncode}, state {state!r}"
+                  f"{': ' + r.stderr.strip() if r.stderr.strip() else ''})", file=sys.stderr)
 
 
 @dataclasses.dataclass
@@ -1202,6 +1230,7 @@ def multi_mode(repos, out, only, short, force):
     """Sweep each repo in turn (never overlapping); one summary line per repo.
     Exits 1 if any repo failed; a refused repo is reported, not a failure."""
     sweep_jobs()  # a bad SWEEP_JOBS stops the run before any repo is touched
+    prune_closed_sweeps()
     sweep_id = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     base = os.path.abspath(out) if out else os.path.join(cache_base(), "multi-" + sweep_id)
     summary, failed = [], False
