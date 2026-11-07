@@ -307,8 +307,12 @@
     },
     "claude-fable-5-1": {
       "effortLevel": "medium"
+    },
+    "claude-opus-5-5": {
+      "effortLevel": "medium"
     }
   },
+  "promptSuggestionEnabled": false,
   "autoMemoryEnabled": false,
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
@@ -362,6 +366,5 @@
       "**Org-specific CLIs**: job-run (background job wrapper), implement-dispatch and merge-cleanup (worker lifecycle), herdr (terminal/agent multiplexer), gh, uv, just. All are the user's own tooling installed under ~/.local/bin and ~/.agents/skills.",
       "**Reversibility on this box**: every repo under ~/src and ~/.agents is the user's own git checkout with a GitHub remote. A git-tracked file whose working copy matches HEAD is recoverable with git restore, so overwriting it is reversible. Only uncommitted edits, untracked files, ignored files and paths outside a repo are irreversible to overwrite."
     ]
-  },
-  "promptSuggestionEnabled": false
+  }
 }
