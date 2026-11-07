@@ -7,9 +7,11 @@ bad-last-run-SHA case, which must mean RUN.
 import contextlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("AUDITS_NO_OPEN", "1")
@@ -1393,6 +1395,183 @@ def test_single_repo_sweep_is_unchanged_by_multi(tmp_path):
     assert "multi-repo summary" not in r.stdout
     assert os.path.isfile(os.path.join(tmp, "out", "collection", "index.html"))
     assert not os.path.exists(os.path.join(tmp, "data"))
+
+
+# --- the audit record (#1680) --------------------------------------------------
+
+def _finding(n, **over):
+    row = {"bucket": "cut", "file": f"src/mod{n}.py", "line": 10 + n, "category": "unused",
+           "summary": f"unused helper number {n}", "failure": f"nothing calls helper{n}",
+           "after": f"delete helper{n}"}
+    return {**row, **over}
+
+
+def _findings_file(tmp, rows, name="findings.jsonl"):
+    path = os.path.join(tmp, name)
+    with open(path, "w") as f:
+        for row in rows:
+            f.write((row if isinstance(row, str) else json.dumps(row)) + "\n")
+    return path
+
+
+def _record_env(tmp, rows, **extra):
+    return {"FAKE_CLAUDE_FINDINGS_FILE": _findings_file(tmp, rows), "FAKE_GH_BODIES": os.path.join(tmp, "bodies.log"),
+            "AUDITS_NO_SYNTH": "1", **extra}
+
+
+def _gh_calls(env, verb):
+    lines = [l.split("\t", 1)[1] for l in open(env["FAKE_GH_LOG"]).read().splitlines()]
+    return [l for l in lines if l.startswith(verb)]
+
+
+def _bodies(env):
+    path = os.path.join(os.path.dirname(env["FAKE_GH_LOG"]), "bodies.log")
+    return open(path).read() if os.path.exists(path) else ""
+
+
+def _stored_record(tmp, name):
+    sweeps = os.listdir(os.path.join(tmp, "data", "all-audits", name))
+    return json.load(open(os.path.join(tmp, "data", "all-audits", name, sweeps[0], "audit-record.json")))
+
+
+def test_record_one_issue_with_the_mapped_label_holding_every_finding_of_every_audit(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    os.makedirs(os.path.join(a, "docs", "agents"))
+    open(os.path.join(a, "docs", "agents", "triage-labels.md"), "w").write(
+        "| Label in mattpocock/skills | Label in our tracker | Meaning |\n| --- | --- | --- |\n"
+        "| `needs-triage` | `to-look-at` | x |\n| `needs-info` | `info` | y |\n")
+    _git_out(a, "add", ".")
+    _git_out(a, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "labels")
+    _git_out(a, "push", "-q", "origin", "main")
+    rows = [_finding(1), _finding(2), _finding(3)]
+    r = _multi([a], env, "--only", "dead-code,domain-drift", **_record_env(tmp, rows, FAKE_GH_LABELS='[{"name":"to-look-at"}]'))
+    assert r.returncode == 0, r.stdout + r.stderr
+    creates = _gh_calls(env, "issue create")
+    assert len(creates) == 1, creates
+    assert "--label to-look-at" in creates[0], creates[0]
+    body = _bodies(env)
+    for audit in ("dead-code", "domain-drift"):
+        section = body.split(f"### {audit}\n", 1)[1].split("\n### ", 1)[0]
+        for n in (1, 2, 3):
+            assert f"unused helper number {n}" in section, (audit, n)
+            assert f"src/mod{n}.py:{10 + n}" in section and f"delete helper{n}" in section
+    assert "issues/1" in r.stdout and "alpha: swept" in r.stdout, r.stdout
+
+
+def test_record_names_the_commit_the_clean_worktree_and_the_stored_path(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)]))
+    assert r.returncode == 0, r.stdout + r.stderr
+    body = _bodies(env)
+    sha = _git_out(a, "rev-parse", "origin/main")
+    stored = os.path.join(tmp, "data", "all-audits", "alpha")
+    assert f"Audited commit: {sha}" in body, body[:600]
+    assert "Worktree clean: yes" in body
+    assert f"Stored sweep: {stored}" in body
+    assert "Audits run: dead-code" in body
+
+
+def test_record_shows_a_failed_audit_with_its_error_tail_and_files_for_that_alone(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, "--only", "duplication", **_record_env(tmp, []))
+    assert len(_gh_calls(env, "issue create")) == 1, r.stdout + r.stderr
+    body = _bodies(env)
+    failed = body.split("Failed audits", 1)[1].split("\n## ", 1)[0]
+    assert "duplication" in failed and "no manifest" in failed
+    assert "see /tmp/unrelated-1234/other.html" in failed, failed
+    assert r.returncode == 1 and "alpha: failed" in r.stdout and "issues/1" in r.stdout, r.stdout
+
+
+def test_record_lists_an_unchanged_audit_with_the_earlier_sha_and_copies_none_of_its_findings(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    out = os.path.join(tmp, "out")
+    only = ("--only", "domain-drift,duplication", "--out", out)
+    first = _multi([a], env, *only, **_record_env(tmp, [_finding(1)]))
+    assert first.returncode == 1, first.stdout + first.stderr
+    assert "unused helper number 1" in _bodies(env).split("### domain-drift", 1)[1]
+    open(os.path.join(tmp, "bodies.log"), "w").close()
+    time.sleep(1.1)  # the sweep id is a second-resolution timestamp
+    second = _multi([a], env, *only, **_record_env(tmp, [_finding(1)]))
+    assert len(_gh_calls(env, "issue create")) == 2, second.stdout + second.stderr
+    body = _bodies(env)
+    sha = _git_out(a, "rev-parse", "origin/main")
+    skipped = body.split("Skipped as unchanged", 1)[1].split("\n## ", 1)[0]
+    assert "domain-drift" in skipped and sha in skipped, skipped
+    assert "unused helper number" not in body
+
+
+def test_record_not_filed_for_a_repo_with_no_findings_and_no_failure(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, []))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _gh_calls(env, "issue create") == []
+    assert "alpha: swept" in r.stdout and "issues/" not in r.stdout
+    stored = os.path.join(tmp, "data", "all-audits", "alpha")
+    assert os.path.isfile(os.path.join(stored, os.listdir(stored)[0], "collection", "index.html"))
+    assert not os.path.exists(os.path.join(stored, os.listdir(stored)[0], "audit-record.json"))
+
+
+def test_record_past_the_limit_continues_in_ordered_comments_holding_every_finding_once(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    rows = [_finding(n, summary=f"S{n:03d}-" + "x" * 900) for n in range(150)]
+    r = _multi([a], env, **_record_env(tmp, rows))
+    assert r.returncode == 0, r.stdout + r.stderr
+    comments = _gh_calls(env, "issue comment")
+    assert len(comments) >= 1 and all(c.startswith("issue comment 1 ") for c in comments), comments
+    parts = re.split(r"^=== (issue [^\n]*) ===\n", _bodies(env), flags=re.M)[1:]
+    texts = parts[1::2]
+    assert parts[0].startswith("issue create") and all(p.startswith("issue comment") for p in parts[2::2])
+    assert all(len(t) <= 65536 for t in texts), [len(t) for t in texts]
+    joined = "\n".join(texts)
+    for n in range(150):
+        assert joined.count(f"S{n:03d}-") == 1, n
+    order = [int(m) for m in re.findall(r"S(\d{3})-", joined)]
+    assert order == sorted(order)
+
+
+def test_repo_without_its_triage_label_is_refused_before_any_claude_starts(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    r = _multi([a, b], env, FAKE_GH_LABELS='[{"name":"bug"}]')
+    assert "alpha: refused (label `needs-triage` is missing" in r.stdout, r.stdout + r.stderr
+    assert "beta: refused (label `needs-triage` is missing" in r.stdout
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
+    assert _gh_calls(env, "label create") == []
+    assert not os.path.exists(os.path.join(tmp, "data"))
+
+
+def test_stored_sweep_records_the_issue_number(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL="https://github.com/caneff/alpha/issues/42"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    rec = _stored_record(tmp, "alpha")
+    assert rec["issue"] == 42 and rec["url"] == "https://github.com/caneff/alpha/issues/42", rec
+    assert "https://github.com/caneff/alpha/issues/42" in r.stdout
+
+
+def test_record_counts_what_the_ignore_file_suppressed(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_CLAUDE_SUPPRESSED="7"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Suppressed by .audit-ignore.md: 7" in _bodies(env)
+
+
+def test_record_carries_the_synthesis_as_is_and_a_malformed_finding_line_is_kept(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, **_record_env(tmp, [_finding(1), "{not json"], AUDITS_NO_SYNTH="0"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    body = _bodies(env)
+    assert "## Synthesis" in body and "ceiling=" in body.split("## Synthesis", 1)[1]
+    assert "{not json" in body
 
 
 # --- --suggest (#1683) ---------------------------------------------------------

@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
 from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
 import pagelib  # noqa: E402
+import audit_record  # noqa: E402
 
 DEFAULT_THRESHOLD = 10
 DEFAULT_BACKSTOP_DAYS = 30
@@ -373,6 +374,9 @@ def audit_prompt(name, repo, manifest_path=None):
         "tree — audit only the project's own tracked source. " + NO_OPEN_INSTRUCTION
     )
     manifest_block = manifest_instruction(manifest_path) if manifest_path else ""
+    if manifest_path and ignore_block:
+        manifest_block += (' Also put "suppressed" in the manifest: the number of findings you left out '
+                           "because the rejected list below already covers them.")
     return f"/{name} {repo}\n{override}{manifest_block}{ignore_block}\n"
 
 
@@ -733,6 +737,7 @@ class Plan:
     to_run: list = dataclasses.field(default_factory=list)
     reused: dict = dataclasses.field(default_factory=dict)
     skip_note: dict = dataclasses.field(default_factory=dict)
+    skip_sha: dict = dataclasses.field(default_factory=dict)
 
 
 def plan_sweep(repo, selected, force, base=None):
@@ -746,6 +751,7 @@ def plan_sweep(repo, selected, force, base=None):
                 if d.report_dir and os.path.isdir(d.report_dir):
                     plan.reused[name] = d.report_dir
                     plan.skip_note[name] = f"unchanged since {d.sha[:8]}"
+                    plan.skip_sha[name] = d.sha
                     print(f"[{name}] skipped (unchanged since {d.sha[:8]}), reusing cached report")
                     continue
                 print(f"[{name}] cache says skip but cached report is gone — running fresh")
@@ -842,6 +848,9 @@ def render_mutation_subindex(collection, repo, mut):
         build_mutation_subindex(collection, repo, mut.modules, mut.notest_modules, mut.notest_total, mut.notest_error)
 
 
+SYNTHESIS_FILE = "synthesis.txt"
+
+
 def collect(run, repo, plan, base=None):
     """Assemble the collection from what is on disk and render the index.
 
@@ -893,6 +902,9 @@ def collect(run, repo, plan, base=None):
         )
         result = _run(["claude", *CLAUDE_FLAGS, prompt], env=claude_env())
         synthesis = result.stdout.strip()
+        if synthesis:  # the audit record (#1680) carries it as-is
+            with open(os.path.join(collection, SYNTHESIS_FILE), "w", encoding="utf-8") as f:
+                f.write(synthesis)
 
     pagelib.copy_assets(collection, components=INDEX_COMPONENTS)
 
@@ -932,7 +944,16 @@ def _announce(run, repo):
     print()
 
 
-def sweep(repo, out, only, short, force):
+@dataclasses.dataclass
+class SweepResult:
+    run: RunDir
+    plan: Plan
+    failed: list
+
+
+def run_sweep(repo, out, only, short, force):
+    """Plan, execute and collect one sweep; opens the index. Returns what
+    happened: the audit record (#1680) is built from it."""
     repo = os.path.abspath(repo)
     selected = only if only is not None else (SHORT_SET if short else list(AUDIT_NAMES))
     jobs = sweep_jobs()  # before the run dir exists, as mutation_mode does
@@ -941,6 +962,11 @@ def sweep(repo, out, only, short, force):
     plan = plan_sweep(repo, selected, force)
     failed = execute(repo, plan, run, jobs)
     open_index(collect(run, repo, plan))
+    return SweepResult(run, plan, failed)
+
+
+def sweep(repo, out, only, short, force):
+    failed = run_sweep(repo, out, only, short, force).failed
     if failed:
         print(f"FAILED audits: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
@@ -977,21 +1003,140 @@ def repo_owner_refusal(repo):
     return None if owner == OWNER else f"owner is {owner}, not {OWNER}"
 
 
+TRIAGE_ROLE = "needs-triage"
+
+
+def triage_label(checkout):
+    """The repo's label string for the `needs-triage` role: its
+    docs/agents/triage-labels.md mapping, else the role's own name."""
+    path = os.path.join(checkout, "docs", "agents", "triage-labels.md")
+    if os.path.isfile(path):
+        for line in open(path, encoding="utf-8", errors="replace"):
+            cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+            if len(cells) >= 2 and cells[0] == TRIAGE_ROLE and cells[1]:
+                return cells[1]
+    return TRIAGE_ROLE
+
+
+def label_refusal(repo, label):
+    """None when `repo` has `label`, else why it is refused. A `gh` that cannot
+    answer is a refusal, never a pass; no label is ever created."""
+    r = _run(["gh", "label", "list", "--limit", "1000", "--json", "name"], cwd=repo)
+    if r.returncode != 0:
+        return f"label check failed (gh exit {r.returncode})"
+    try:
+        names = {row["name"] for row in json.loads(r.stdout)}
+    except (ValueError, KeyError, TypeError):
+        return "label check failed (gh reply unreadable)"
+    return None if label in names else f"label `{label}` is missing"
+
+
+@dataclasses.dataclass
+class Outcome:
+    status: str          # "swept", "failed" or "refused"
+    reason: str = ""
+    stored: str = ""
+    issue_url: str = ""
+
+
+def log_tail(path, lines=15):
+    try:
+        text = open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return "(no log)"
+    return "\n".join(text.splitlines()[-lines:]) or "(empty log)"
+
+
+def _read_jsonl(path):
+    """Every line of a findings log: the parsed object, or the raw line when it is not JSON."""
+    rows = []
+    for line in open(path, encoding="utf-8", errors="replace").read().splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            rows.append(line)
+    return rows
+
+
+def _report_headings(collection, name):
+    d = os.path.join(collection, name)
+    htmls = sorted(f for f in os.listdir(d) if f.endswith(".html")) if os.path.isdir(d) else []
+    if not htmls:
+        return []
+    return audit_record.report_headings(open(os.path.join(d, htmls[0]), encoding="utf-8", errors="replace").read())
+
+
+def record_model(result, sweep_id, sha, clean, stored, has_ignore_file):
+    """What the sweep left on disk, as the audit record's inputs. An audit that
+    failed contributes a failure and no findings; one reused from the cache
+    contributes its earlier sha and no findings."""
+    run, plan = result.run, result.plan
+    failed = {n: f"{manifest_failure(run.manifests, n) or 'nonzero exit'}\n{log_tail(os.path.join(run.logs, n + '.log'))}"
+              for n in result.failed}
+    findings, no_log, headings, suppressed, unreported = {}, {}, {}, 0, []
+    for name in (n for n in AUDIT_NAMES if n in plan.to_run and n not in failed):
+        manifest = read_manifest(run.manifests, name) or {}
+        log = os.path.join(run.collection, name, "findings.jsonl")
+        if os.path.isfile(log):
+            findings[name] = _read_jsonl(log)
+        else:
+            no_log[name] = {"count": manifest.get("count"), "headline": manifest.get("headline")}
+        if name in audit_record.STRUCTURAL:
+            headings[name] = _report_headings(run.collection, name)
+        if isinstance(manifest.get("suppressed"), int):
+            suppressed += manifest["suppressed"]
+        elif has_ignore_file:
+            unreported.append(name)
+    synthesis_path = os.path.join(run.collection, SYNTHESIS_FILE)
+    synthesis = open(synthesis_path, encoding="utf-8").read() if os.path.isfile(synthesis_path) else ""
+    return audit_record.RecordModel(
+        sweep_id=sweep_id, timestamp=now_iso(), sha=sha, clean=clean, stored_path=stored,
+        ran=list(plan.to_run), skipped=dict(plan.skip_sha), failed=failed, findings=findings, no_log=no_log,
+        suppressed=suppressed, suppression_unreported=unreported, headings=headings, synthesis=synthesis)
+
+
+def file_audit_record(repo, run_root, title, label, chunks):
+    """Open the issue with `chunks[0]` and add the rest as comments, in order.
+    Returns (url, None) or (url_or_"", why it failed)."""
+    os.makedirs(run_root, exist_ok=True)
+    paths = []
+    for i, text in enumerate(chunks):
+        paths.append(os.path.join(run_root, f"audit-record-{i}.md"))
+        with open(paths[-1], "w", encoding="utf-8") as f:
+            f.write(text)
+    created = _run(["gh", "issue", "create", "--title", title, "--label", label, "--body-file", paths[0]], cwd=repo)
+    match = re.search(r"/issues/(\d+)", created.stdout)
+    if created.returncode != 0 or not match:
+        return "", f"audit record not filed (gh exit {created.returncode}): {created.stderr.strip() or created.stdout.strip()}"
+    url, number = created.stdout.strip().splitlines()[-1], match.group(1)
+    for path in paths[1:]:
+        c = _run(["gh", "issue", "comment", number, "--body-file", path], cwd=repo)
+        if c.returncode != 0:
+            return url, f"audit record {url} is missing a continuation comment (gh exit {c.returncode}): {c.stderr.strip()}"
+    return url, None
+
+
 def _sweep_origin_main(repo, name, run_root, sweep_id, only, short, force):
-    """Sweep a fresh worktree of `repo`'s origin/main, then store the result.
-    Returns None on success, else a failure reason."""
+    """Sweep a fresh worktree of `repo`'s origin/main, store the result, and
+    file the audit record. Returns an Outcome."""
     fetch = _run(["git", "-C", repo, "fetch", "origin"])
     if fetch.returncode != 0:
-        return f"git fetch failed: {fetch.stderr.strip()}"
+        return Outcome("failed", f"git fetch failed: {fetch.stderr.strip()}")
     wt = os.path.join(run_root, "checkout")
     os.makedirs(run_root, exist_ok=True)
     add = _run(["git", "-C", repo, "worktree", "add", "--detach", wt, "origin/main"])
     if add.returncode != 0:
-        return f"git worktree add origin/main failed: {add.stderr.strip()}"
+        return Outcome("failed", f"git worktree add origin/main failed: {add.stderr.strip()}")
     try:
-        failure = None
+        label = triage_label(wt)
+        refusal = label_refusal(repo, label)  # before any audit starts
+        if refusal:
+            return Outcome("refused", refusal)
+        result, failure = None, None
         try:
-            sweep(wt, os.path.join(run_root, "run"), only, short, force)
+            result = run_sweep(wt, os.path.join(run_root, "run"), only, short, force)
         except SystemExit as e:
             if e.code not in (0, None):
                 failure = f"sweep failed (exit {e.code})"  # still stored below: partial results are kept
@@ -1001,8 +1146,25 @@ def _sweep_origin_main(repo, name, run_root, sweep_id, only, short, force):
             if os.path.isdir(os.path.join(run, sub)):
                 shutil.copytree(os.path.join(run, sub), os.path.join(stored, sub))
         if not os.path.isfile(os.path.join(stored, "collection", "index.html")):
-            return failure or "sweep left no index.html to store"
-        return failure
+            return Outcome("failed", failure or "sweep left no index.html to store")
+        if result is None:
+            return Outcome("failed", failure, stored)
+        sha = head_sha(wt)
+        dirty = _run(["git", "-C", wt, "status", "--porcelain"]).stdout.splitlines()
+        model = record_model(result, sweep_id, sha, "yes" if not dirty else f"no ({len(dirty)} changed paths)",
+                             stored, os.path.isfile(os.path.join(wt, ".audit-ignore.md")))
+        outcome = Outcome("failed" if result.failed else "swept", stored=stored)
+        if result.failed:
+            outcome.reason = f"{len(result.failed)} audit(s) failed: {', '.join(result.failed)}"
+        if audit_record.worth_filing(model):
+            url, error = file_audit_record(repo, run_root, f"Audit record: {name} {sweep_id}", label, audit_record.build(model))
+            outcome.issue_url = url
+            if url:
+                with open(os.path.join(stored, "audit-record.json"), "w", encoding="utf-8") as f:
+                    json.dump({"issue": int(re.search(r"/issues/(\d+)", url).group(1)), "url": url, "repo": name}, f)
+            if error:
+                outcome.status, outcome.reason = "failed", "; ".join(x for x in (outcome.reason, error) if x)
+        return outcome
     finally:
         _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
         _run(["git", "-C", repo, "worktree", "prune"])
@@ -1022,12 +1184,15 @@ def multi_mode(repos, out, only, short, force):
         if refusal:
             summary.append(f"{name}: refused ({refusal})")
             continue
-        reason = _sweep_origin_main(repo, name, os.path.join(base, repo_key(repo)), sweep_id, only, short, force)
-        if reason:
+        o = _sweep_origin_main(repo, name, os.path.join(base, repo_key(repo)), sweep_id, only, short, force)
+        link = f"; audit record: {o.issue_url}" if o.issue_url else ("; no audit record (no findings, no failures)" if o.status == "swept" else "")
+        if o.status == "refused":
+            summary.append(f"{name}: refused ({o.reason})")
+        elif o.status == "failed":
             failed = True
-            summary.append(f"{name}: failed ({reason})")
+            summary.append(f"{name}: failed ({o.reason}){link}")
         else:
-            summary.append(f"{name}: swept -> {os.path.join(stored_sweeps_base(), name, sweep_id)}")
+            summary.append(f"{name}: swept -> {o.stored}{link}")
     print("\n== multi-repo summary ==")
     print("\n".join(summary))
     if failed:
