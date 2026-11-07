@@ -1568,8 +1568,9 @@ def test_stored_sweep_records_the_issue_number(tmp_path):
 
 # --- triage pending (#1681) ----------------------------------------------------
 
-def _first_sweep_then(tmp, env, repo, url, **extra):
-    """Sweep `repo` once (filing record `url`), return the env for the second sweep."""
+def _first_sweep_then(tmp, env, repo, url):
+    """Sweep `repo` once, filing record `url`, then clear the logs a second
+    sweep's assertions read."""
     r = _multi([repo], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=url))
     assert r.returncode == 0, r.stdout + r.stderr
     base = os.path.join(tmp, "data", "all-audits", os.path.basename(repo))
@@ -2048,3 +2049,36 @@ def test_end_to_end_multi_sweep_record_load_and_prune(tmp_path):
     r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=url, FAKE_GH_ISSUE_STATE="CLOSED"))
     assert r.returncode == 0, r.stdout + r.stderr
     assert len(_stored_sweeps(tmp, "alpha")) == 1, _stored_sweeps(tmp, "alpha")
+
+
+def test_the_next_sweep_posts_the_comments_a_record_was_missing_first(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    rows = [_finding(n, summary=f"S{n:03d}-" + "x" * 900) for n in range(150)]
+    assert _multi([a], env, **_record_env(tmp, rows, FAKE_GH_COMMENT_EXIT="1")).returncode == 1
+    open(os.path.join(tmp, "bodies.log"), "w").close()
+    r = _multi([a], env, **_record_env(tmp, rows))
+    assert "alpha: posted the missing comments of https://github.com/caneff/fake/issues/1" in r.stdout, r.stdout
+    assert "alpha: triage pending" in r.stdout, r.stdout
+    (stored,) = _stored_sweeps(tmp, "alpha")
+    assert json.load(open(os.path.join(stored, "audit-record.json")))["unposted"] == []
+    posted = _bodies(env)
+    first = open(os.path.join(stored, "audit-record-0.md")).read()
+    assert all((first + posted).count(f"S{n:03d}-") == 1 for n in range(150))
+
+
+def test_multi_fetches_so_a_stale_clone_still_sweeps_the_newest_origin_main(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    other = os.path.join(tmp, "other")
+    genv = driver.scrubbed_env()
+    subprocess.run(["git", "clone", "-q", os.path.join(tmp, "bare-alpha"), other], check=True, env=genv)
+    open(os.path.join(other, "new.py"), "w").write("n = 1\n")
+    for argv in (["add", "new.py"], ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "n"],
+                 ["push", "-q", "origin", "HEAD:main"]):
+        subprocess.run(["git", "-C", other, *argv], check=True, env=genv)
+    newest = _git_out(other, "rev-parse", "HEAD")
+    assert _git_out(a, "rev-parse", "origin/main") != newest  # the clone has not fetched it
+    r = _multi([a], env, FAKE_GH_BODIES=os.path.join(tmp, "bodies.log"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"Audited commit: {newest}" in _bodies(env), _bodies(env)[:400]

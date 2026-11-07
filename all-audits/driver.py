@@ -1107,6 +1107,26 @@ def _record_history(name):
     return os.path.join(stored_sweeps_base(), ".records", name + ".jsonl")
 
 
+def resume_unposted(name):
+    """Post, in order, the comments `name`'s newest audit record is still
+    missing, before anything reads that record. Returns None, or why it could
+    not: the record stays incomplete and says so."""
+    records = list(stored_records(name))
+    if not records or records[-1][1] is None or not records[-1][1].get("unposted"):
+        return None
+    sweep, rec = records[-1]
+    while rec["unposted"]:
+        c = _run(["gh", "issue", "comment", str(rec["issue"]), "--repo", record_repo(sweep, rec),
+                  "--body-file", os.path.join(sweep, rec["unposted"][0])])
+        if c.returncode != 0:
+            return (f"audit record {rec['url']} still misses comments {', '.join(rec['unposted'])} "
+                    f"(gh exit {c.returncode}): {c.stderr.strip()}")
+        rec["unposted"].pop(0)
+        _write_json(os.path.join(sweep, RECORD_FILE), rec)
+    print(f"{name}: posted the missing comments of {rec['url']}")
+    return None
+
+
 def latest_record_url(name):
     """The newest audit record ever filed for `name`, open or closed, or "":
     where a skipped-as-unchanged audit's findings went. Read from the repo's
@@ -1333,6 +1353,9 @@ def _multi_one(repo, base, sweep_id, only, short, force, seen):
     if slug in seen:
         return f"{label}: skipped ({repo} is {slug} again, already swept from {seen[slug]})", False
     seen[slug] = repo
+    why = resume_unposted(label)
+    if why:
+        return f"{label}: failed ({why})", True
     open_record, why = earlier_record(label)
     if why:
         return f"{label}: refused ({why})", False

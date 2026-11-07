@@ -25,16 +25,22 @@ class RecordModel:
     clean: str                  # "yes" or "no (...)"
     stored_path: str
     ran: list                   # audits the sweep ran this time, in order
-    skipped: dict               # audit -> the earlier sha its cached report was made at
+    # audit -> the earlier sha its cached report was made at
+    skipped: dict
     failed: dict                # audit -> error tail
-    findings: dict              # audit -> list of parsed rows (dict) or raw lines (str)
-    no_log: dict                # audit -> manifest summary, for an audit that wrote no findings.jsonl
+    # audit -> list of parsed rows (dict) or raw lines (str)
+    findings: dict
+    # audit -> manifest summary, for an audit that wrote no findings.jsonl
+    no_log: dict
     suppressed: int
-    suppression_unreported: list  # audits that ran but gave no suppressed count, when an ignore file exists
+    # audits that ran but gave no suppressed count, when an ignore file exists
+    suppression_unreported: list
     headings: dict              # structural audit -> report headings
     synthesis: str
-    open_record: str = ""       # url of an earlier record still open when this sweep was forced
-    earlier_record: str = ""    # url of the newest earlier record, where skipped audits' findings went
+    # url of an earlier record still open when this sweep was forced
+    open_record: str = ""
+    # url of the newest earlier record, where skipped audits' findings went
+    earlier_record: str = ""
 
 
 def finding_count(model):
@@ -43,7 +49,8 @@ def finding_count(model):
 
 def worth_filing(model):
     """A repo with a finding, a failed audit, or an audit whose manifest counts
-    findings but wrote no log has something to decide. Anything else files nothing."""
+    findings but wrote no log has something to decide. Anything else files
+    nothing."""
     unlogged = any(info.get("count") for info in model.no_log.values())
     return bool(finding_count(model) or model.failed or unlogged)
 
