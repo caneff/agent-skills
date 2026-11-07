@@ -14,11 +14,15 @@
 # test reads the most audits that were in flight at once from the counts.
 # FAKE_CLAUDE_PREPASS="a.py\nb.py" makes a prompt with no manifest request
 # (the mutation prepass) print that ranking (#1567).
+# FAKE_CLAUDE_STARTS=<file> (#1679): every start appends "<name> <prompt's first line>"
+# to <file>, so a test reads the order audits started in.
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
 # manifest as a named failure, never as a silent skip.
 set -euo pipefail
 prompt="${*: -1}"
+
+[ -z "${FAKE_CLAUDE_STARTS:-}" ] || printf '%s\n' "$(printf '%s' "$prompt" | head -1)" >>"$FAKE_CLAUDE_STARTS"
 
 # Record the wait-ceiling variable in this process's log, so a test can see
 # what env the driver handed it (#1278).
