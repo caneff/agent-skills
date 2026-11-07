@@ -54,6 +54,14 @@ The maintainer invokes `/triage` and describes what they want in natural languag
 - "Move #42 to ready-for-agent"
 - "What's ready for agents to pick up?"
 
+## Audit records
+
+An issue titled `Audit record: <repo> <sweep-id>` is an `all-audits --multi`
+record, not an ordinary issue: never triage it by labels, comments and a brief.
+Run `/all-audits triage <issue>` instead (`all-audits/SKILL.md` § Triage), and
+leave the record's state to that flow, which closes it. In the buckets below,
+tag such an item `[audit]` and route it the same way.
+
 ## Show what needs attention
 
 Query the issue tracker and present four buckets, oldest first:
