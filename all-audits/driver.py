@@ -1031,6 +1031,33 @@ def label_refusal(repo, label):
     return None if label in names else f"label `{label}` is missing"
 
 
+def earlier_record(repo, name):
+    """(url, None) when `name`'s newest stored sweep filed an audit record that is
+    still open on GitHub, ("", None) when there is none or it is closed, and
+    (None, why) when that cannot be told: an unreadable record or a `gh` that does
+    not answer OPEN or CLOSED is a refusal, never "closed" (#1681)."""
+    root = os.path.join(stored_sweeps_base(), name)
+    sweeps = sorted(os.listdir(root), reverse=True) if os.path.isdir(root) else []
+    for sweep in sweeps:
+        path = os.path.join(root, sweep, "audit-record.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            rec = json.load(open(path, encoding="utf-8"))
+            number, url = int(rec["issue"]), str(rec["url"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None, f"earlier record check failed ({path} unreadable)"
+        r = _run(["gh", "issue", "view", str(number), "--json", "state"], cwd=repo)
+        try:
+            state = json.loads(r.stdout)["state"] if r.returncode == 0 else None
+        except (ValueError, KeyError, TypeError):
+            state = None
+        if state not in ("OPEN", "CLOSED"):
+            return None, f"earlier record check failed (issue #{number}: gh exit {r.returncode}, state {state!r})"
+        return (url if state == "OPEN" else ""), None
+    return "", None
+
+
 @dataclasses.dataclass
 class Outcome:
     status: str          # "swept", "failed" or "refused"
@@ -1068,7 +1095,7 @@ def _report_headings(collection, name):
     return audit_record.report_headings(open(os.path.join(d, htmls[0]), encoding="utf-8", errors="replace").read())
 
 
-def record_model(result, sweep_id, sha, clean, stored, has_ignore_file):
+def record_model(result, sweep_id, sha, clean, stored, has_ignore_file, open_record=""):
     """What the sweep left on disk, as the audit record's inputs. An audit that
     failed contributes a failure and no findings; one reused from the cache
     contributes its earlier sha and no findings."""
@@ -1094,7 +1121,8 @@ def record_model(result, sweep_id, sha, clean, stored, has_ignore_file):
     return audit_record.RecordModel(
         sweep_id=sweep_id, timestamp=now_iso(), sha=sha, clean=clean, stored_path=stored,
         ran=list(plan.to_run), skipped=dict(plan.skip_sha), failed=failed, findings=findings, no_log=no_log,
-        suppressed=suppressed, suppression_unreported=unreported, headings=headings, synthesis=synthesis)
+        suppressed=suppressed, suppression_unreported=unreported, headings=headings, synthesis=synthesis,
+        open_record=open_record)
 
 
 def file_audit_record(repo, run_root, title, label, chunks):
@@ -1118,7 +1146,7 @@ def file_audit_record(repo, run_root, title, label, chunks):
     return url, None
 
 
-def _sweep_origin_main(repo, name, run_root, sweep_id, only, short, force):
+def _sweep_origin_main(repo, name, run_root, sweep_id, only, short, force, open_record=""):
     """Sweep a fresh worktree of `repo`'s origin/main, store the result, and
     file the audit record. Returns an Outcome."""
     fetch = _run(["git", "-C", repo, "fetch", "origin"])
@@ -1152,7 +1180,7 @@ def _sweep_origin_main(repo, name, run_root, sweep_id, only, short, force):
         sha = head_sha(wt)
         dirty = _run(["git", "-C", wt, "status", "--porcelain"]).stdout.splitlines()
         model = record_model(result, sweep_id, sha, "yes" if not dirty else f"no ({len(dirty)} changed paths)",
-                             stored, os.path.isfile(os.path.join(wt, ".audit-ignore.md")))
+                             stored, os.path.isfile(os.path.join(wt, ".audit-ignore.md")), open_record)
         outcome = Outcome("failed" if result.failed else "swept", stored=stored)
         if result.failed:
             outcome.reason = f"{len(result.failed)} audit(s) failed: {', '.join(result.failed)}"
@@ -1184,7 +1212,14 @@ def multi_mode(repos, out, only, short, force):
         if refusal:
             summary.append(f"{name}: refused ({refusal})")
             continue
-        o = _sweep_origin_main(repo, name, os.path.join(base, repo_key(repo)), sweep_id, only, short, force)
+        open_record, why = earlier_record(repo, name)
+        if why:
+            summary.append(f"{name}: refused ({why})")
+            continue
+        if open_record and not force:
+            summary.append(f"{name}: triage pending ({open_record})")
+            continue
+        o = _sweep_origin_main(repo, name, os.path.join(base, repo_key(repo)), sweep_id, only, short, force, open_record)
         link = f"; audit record: {o.issue_url}" if o.issue_url else ("; no audit record (no findings, no failures)" if o.status == "swept" else "")
         if o.status == "refused":
             summary.append(f"{name}: refused ({o.reason})")
@@ -1458,7 +1493,9 @@ def main(argv):
     p.add_argument("--only", metavar="A,B", help="run just these audits")
     p.add_argument("--short", action="store_true", help="run only the short set (see audits_data.py)")
     p.add_argument("--index", action="store_true", help="rebuild the index only, over --out DIR's reports")
-    p.add_argument("--force", action="store_true", help="bypass the staleness cache, run everything")
+    p.add_argument("--force", action="store_true",
+                   help="bypass the staleness cache, run everything; under --multi it also sweeps a repo whose "
+                        "earlier audit record is still open (the new record links the open one) (#1681)")
     p.add_argument("--multi", nargs="+", metavar="REPO",
                    help="sweep each owned repo in turn from a fresh worktree of its origin/main, "
                         "storing each sweep under ~/.local/share/all-audits/ (#1679)")

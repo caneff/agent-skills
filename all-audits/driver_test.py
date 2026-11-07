@@ -1495,7 +1495,7 @@ def test_record_lists_an_unchanged_audit_with_the_earlier_sha_and_copies_none_of
     assert "unused helper number 1" in _bodies(env).split("### domain-drift", 1)[1]
     open(os.path.join(tmp, "bodies.log"), "w").close()
     time.sleep(1.1)  # the sweep id is a second-resolution timestamp
-    second = _multi([a], env, *only, **_record_env(tmp, [_finding(1)]))
+    second = _multi([a], env, *only, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="CLOSED"))  # triaged since
     assert len(_gh_calls(env, "issue create")) == 2, second.stdout + second.stderr
     body = _bodies(env)
     sha = _git_out(a, "rev-parse", "origin/main")
@@ -1554,6 +1554,65 @@ def test_stored_sweep_records_the_issue_number(tmp_path):
     rec = _stored_record(tmp, "alpha")
     assert rec["issue"] == 42 and rec["url"] == "https://github.com/caneff/alpha/issues/42", rec
     assert "https://github.com/caneff/alpha/issues/42" in r.stdout
+
+
+# --- triage pending (#1681) ----------------------------------------------------
+
+def _first_sweep_then(tmp, env, repo, url, **extra):
+    """Sweep `repo` once (filing record `url`), return the env for the second sweep."""
+    r = _multi([repo], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_URL=url))
+    assert r.returncode == 0, r.stdout + r.stderr
+    base = os.path.join(tmp, "data", "all-audits", os.path.basename(repo))
+    os.rename(os.path.join(base, os.listdir(base)[0]), os.path.join(base, "20200101-000000"))  # an earlier day's sweep
+    os.remove(env["FAKE_CLAUDE_STARTS"])
+    os.remove(os.path.join(tmp, "bodies.log"))
+    open(env["FAKE_GH_LOG"], "w").close()
+
+
+def test_open_earlier_record_means_no_sweep_and_triage_pending_with_the_link(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    url = "https://github.com/caneff/alpha/issues/42"
+    _first_sweep_then(tmp, env, a, url)
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="OPEN"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"alpha: triage pending ({url})" in r.stdout, r.stdout
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
+    assert any(c.startswith("issue view 42") for c in _gh_calls(env, "issue view")), _gh_calls(env, "issue view")
+    assert _gh_calls(env, "issue create") == []
+
+
+def test_closed_earlier_record_is_swept_normally(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _first_sweep_then(tmp, env, a, "https://github.com/caneff/alpha/issues/42")
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="CLOSED",
+                                       FAKE_GH_ISSUE_URL="https://github.com/caneff/alpha/issues/43"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "triage pending" not in r.stdout and "alpha: swept" in r.stdout, r.stdout
+    assert os.path.exists(env["FAKE_CLAUDE_STARTS"])
+    assert "issues/42" not in _bodies(env)
+
+
+def test_force_sweeps_a_pending_repo_and_the_new_record_names_the_open_one(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    url = "https://github.com/caneff/alpha/issues/42"
+    _first_sweep_then(tmp, env, a, url)
+    r = _multi([a], env, "--force", **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="OPEN",
+                                                  FAKE_GH_ISSUE_URL="https://github.com/caneff/alpha/issues/43"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.path.exists(env["FAKE_CLAUDE_STARTS"]) and "triage pending" not in r.stdout
+    assert f"Earlier open audit record: {url}" in _bodies(env), _bodies(env)
+
+
+def test_unanswerable_earlier_record_check_refuses_the_repo_and_starts_nothing(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _first_sweep_then(tmp, env, a, "https://github.com/caneff/alpha/issues/42")
+    r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="BOGUS"))
+    assert "alpha: refused (earlier record check failed" in r.stdout, r.stdout + r.stderr
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
 
 
 def test_record_counts_what_the_ignore_file_suppressed(tmp_path):
