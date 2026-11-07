@@ -153,6 +153,10 @@ fresh worktree of its `origin/main`, one after another, and stored under
    each repo's outcome: `swept` with the stored audit record link (the
    `<stored path>/collection/index.html`), `refused` or `failed` with its
    reason. A failed repo is reported as failed, never as swept.
+   `triage pending (<issue link>)` means the repo's last audit record is still
+   open, so nothing was swept; say so and give the link. Only when the user
+   asks, re-run that repo with `--force`: it bypasses the staleness cache for
+   the repo's audits too (fresh results) and the new record links the open one.
 
 ## After the sweep
 
