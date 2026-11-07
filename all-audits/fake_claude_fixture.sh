@@ -16,6 +16,9 @@
 # (the mutation prepass) print that ranking (#1567).
 # FAKE_CLAUDE_STARTS=<file> (#1679): every start appends "<name> <prompt's first line>"
 # to <file>, so a test reads the order audits started in.
+# FAKE_CLAUDE_FINDINGS_FILE=<file> (#1680): dead-code copies it to findings.jsonl beside its report.
+# FAKE_CLAUDE_SUPPRESSED=<n>: dead-code's manifest carries "suppressed": <n>.
+# domain-drift writes the same report and manifest as dead-code.
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
 # manifest as a named failure, never as a silent skip.
@@ -51,12 +54,14 @@ manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true
 echo "prompt=$prompt"
 
 case "$prompt" in
-  /dead-code\ *)
+  /dead-code\ *|/domain-drift\ *)
     dir="$(dirname "$manifest")/report"
     mkdir -p "$dir"
     [ -n "${FAKE_CLAUDE_MISSING_REPORT:-}" ] || echo '<html><body>dead-code report</body></html>' >"$dir/report.html"
     mkdir -p "$(dirname "$manifest")"
-    printf '{"report_path": "%s/report.html", "count": 1, "headline": "one finding"}\n' "$dir" >"$manifest"
+    [ -z "${FAKE_CLAUDE_FINDINGS_FILE:-}" ] || cp "$FAKE_CLAUDE_FINDINGS_FILE" "$dir/findings.jsonl"
+    sup=""; [ -z "${FAKE_CLAUDE_SUPPRESSED:-}" ] || sup=", \"suppressed\": $FAKE_CLAUDE_SUPPRESSED"
+    printf '{"report_path": "%s/report.html", "count": 1, "headline": "one finding"%s}\n' "$dir" "$sup" >"$manifest"
     # A nonzero exit even with a manifest on disk (#1278), when a test asks.
     exit "${FAKE_CLAUDE_EXIT_DEAD_CODE:-0}"
     ;;
