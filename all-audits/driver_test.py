@@ -1266,3 +1266,130 @@ def test_mutation_all_refuses_a_module_list(tmp_path):
     )
     assert r.returncode != 0 and "not allowed with" in r.stderr, r.stdout + r.stderr
     assert os.listdir(os.path.join(tmp, "all-audits")) == [] if os.path.isdir(os.path.join(tmp, "all-audits")) else True
+
+
+# --- --multi (#1679) -----------------------------------------------------------
+
+def _multi_fixture(tmp, names):
+    """Local clones named `names`, each with a bare `origin` holding `main`;
+    returns (repo paths, env with the fake claude and fake gh on PATH)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    bindir = os.path.join(tmp, "bin")
+    os.makedirs(bindir)
+    os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bindir, "claude"))
+    os.symlink(os.path.join(here, "fake_gh_fixture.sh"), os.path.join(bindir, "gh"))
+    genv = driver.scrubbed_env()
+    repos = []
+    for name in names:
+        bare, repo = os.path.join(tmp, "bare-" + name), os.path.join(tmp, name)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True, env=genv)
+        os.mkdir(repo)
+        _init_git_repo(repo)
+        subprocess.run(["git", "-C", repo, "branch", "-M", "main"], check=True, env=genv)
+        subprocess.run(["git", "-C", repo, "remote", "add", "origin", bare], check=True, env=genv)
+        subprocess.run(["git", "-C", repo, "push", "-q", "origin", "main"], check=True, env=genv)
+        repos.append(repo)
+    ambient = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "SWEEP_JOBS")}
+    env = {**ambient, "PATH": f"{bindir}:{os.environ['PATH']}", "XDG_CACHE_HOME": os.path.join(tmp, "cache"),
+           "XDG_DATA_HOME": os.path.join(tmp, "data"), "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1",
+           "FAKE_GH_LOG": os.path.join(tmp, "gh.log"), "FAKE_CLAUDE_STARTS": os.path.join(tmp, "starts.log")}
+    return repos, env
+
+
+def _multi(repos, env, *args, **extra_env):
+    return subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
+         "--multi", *repos, "--only", "dead-code", *args],
+        capture_output=True, text=True, env={**env, **extra_env},
+    )
+
+
+def _git_out(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, env=driver.scrubbed_env()).stdout.strip()
+
+
+def test_multi_sweeps_two_owned_repos_in_turn_from_origin_main(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    # Local clone: dirty tree on a non-main branch must not reach the sweep.
+    _git_out(a, "checkout", "-q", "-b", "wip")
+    open(os.path.join(a, "wip.py"), "w").write("y = 2\n")
+    inflight = os.path.join(tmp, "inflight")
+    os.mkdir(inflight)
+    r = _multi([a, b], env, FAKE_CLAUDE_INFLIGHT=inflight)
+    assert r.returncode == 0, r.stdout + r.stderr
+    for name, repo in (("alpha", a), ("beta", b)):
+        sweeps = os.listdir(os.path.join(tmp, "data", "all-audits", name))
+        assert len(sweeps) == 1
+        stored = os.path.join(tmp, "data", "all-audits", name, sweeps[0])
+        assert os.path.isfile(os.path.join(stored, "collection", "index.html"))
+        assert os.path.isfile(os.path.join(stored, "collection", "dead-code", "report.html"))
+        assert f"{name}: swept" in r.stdout
+    paths = [l.split()[1] for l in open(env["FAKE_CLAUDE_STARTS"]).read().splitlines()]
+    assert all(p.endswith(os.sep + "checkout") and p not in (a, b) for p in paths), paths
+    owners = ["alpha" if os.sep + "alpha-" in p else "beta" for p in paths]
+    # Never overlapping: all of alpha's audits start before any of beta's.
+    assert owners == sorted(owners) and set(owners) == {"alpha", "beta"}, owners
+    # Both worktrees sit at their repo's origin/main sha.
+    # No worktree is left registered in either clone.
+    for repo in (a, b):
+        assert _git_out(repo, "worktree", "list").count("\n") == 0
+
+
+def test_multi_refuses_a_repo_not_owned_by_caneff_before_any_claude_starts_for_it(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    r = _multi([a, b], env, FAKE_GH_OWNER_FOR="beta=someoneelse")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "beta: refused (owner is someoneelse, not caneff)" in r.stdout, r.stdout
+    assert "alpha: swept" in r.stdout
+    assert not os.path.exists(os.path.join(tmp, "data", "all-audits", "beta"))
+    starts = open(env["FAKE_CLAUDE_STARTS"]).read()
+    assert "beta" not in starts and "alpha" in starts
+
+
+def test_multi_gh_failure_refuses_the_repo(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, FAKE_GH_EXIT="1")
+    assert "alpha: refused (owner check failed" in r.stdout, r.stdout + r.stderr
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
+
+
+def test_multi_sweeps_origin_main_not_a_dirty_or_other_branch_checkout(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _git_out(a, "checkout", "-q", "-b", "wip")
+    open(os.path.join(a, "wip.py"), "w").write("y = 2\n")
+    _git_out(a, "add", ".")
+    _git_out(a, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "wip")
+    open(os.path.join(a, "dirty.py"), "w").write("z = 3\n")
+    r = _multi([a], env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    # The worktree held exactly origin/main's tree; its path is in the audit prompt.
+    prompts = [l for l in open(env["FAKE_CLAUDE_STARTS"]).read().splitlines()]
+    wt = prompts[0].split()[1]
+    assert wt.endswith("checkout") and os.path.dirname(wt) != a
+    assert _git_out(a, "rev-parse", "origin/main") != _git_out(a, "rev-parse", "wip")
+
+
+def test_multi_short_runs_only_the_short_set_in_each_repo(tmp_path):
+    from audits_data import SHORT_SET
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    r = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "--multi", a, b, "--short"],
+        capture_output=True, text=True, env=env)
+    starts = [l.split()[0] for l in open(env["FAKE_CLAUDE_STARTS"]).read().splitlines()]
+    assert sorted(set(starts)) == sorted("/" + n for n in SHORT_SET), (starts, r.stdout)
+    assert len(starts) == 2 * len(SHORT_SET)
+
+
+def test_single_repo_sweep_is_unchanged_by_multi(tmp_path):
+    tmp = str(tmp_path)
+    os.mkdir(os.path.join(tmp, "bin"))
+    r = _sweep_with_fake_claude(tmp, os.path.join(tmp, "cache"), os.path.join(tmp, "bin"), "dead-code")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "multi-repo summary" not in r.stdout
+    assert os.path.isfile(os.path.join(tmp, "out", "collection", "index.html"))
+    assert not os.path.exists(os.path.join(tmp, "data"))

@@ -954,6 +954,86 @@ def rebuild_index(repo, out):
     open_index(collect(run, repo, Plan()))
 
 
+# --- multi-repo mode (#1679) --------------------------------------------------
+
+OWNER = "caneff"
+
+
+def stored_sweeps_base():
+    """Where finished sweeps live: outside the pruned cache (`RUN_TTL_DAYS`)."""
+    return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "all-audits")
+
+
+def repo_owner_refusal(repo):
+    """None when `gh` reports the owner is `caneff`, else the reason to refuse.
+    Anything `gh` cannot answer is a refusal, never a pass."""
+    r = _run(["gh", "repo", "view", "--json", "owner"], cwd=repo)
+    if r.returncode != 0:
+        return f"owner check failed (gh exit {r.returncode})"
+    try:
+        owner = json.loads(r.stdout)["owner"]["login"]
+    except (ValueError, KeyError, TypeError):
+        return "owner check failed (gh reply unreadable)"
+    return None if owner == OWNER else f"owner is {owner}, not {OWNER}"
+
+
+def _sweep_origin_main(repo, name, run_root, sweep_id, only, short, force):
+    """Sweep a fresh worktree of `repo`'s origin/main, then store the result.
+    Returns None on success, else a failure reason."""
+    fetch = _run(["git", "-C", repo, "fetch", "origin"])
+    if fetch.returncode != 0:
+        return f"git fetch failed: {fetch.stderr.strip()}"
+    wt = os.path.join(run_root, "checkout")
+    os.makedirs(run_root, exist_ok=True)
+    add = _run(["git", "-C", repo, "worktree", "add", "--detach", wt, "origin/main"])
+    if add.returncode != 0:
+        return f"git worktree add origin/main failed: {add.stderr.strip()}"
+    try:
+        failure = None
+        try:
+            sweep(wt, os.path.join(run_root, "run"), only, short, force)
+        except SystemExit as e:
+            if e.code not in (0, None):
+                failure = f"sweep failed (exit {e.code})"  # still stored below: partial results are kept
+        stored = os.path.join(stored_sweeps_base(), name, sweep_id)
+        run = os.path.join(run_root, "run")
+        for sub in ("collection", "logs"):
+            if os.path.isdir(os.path.join(run, sub)):
+                shutil.copytree(os.path.join(run, sub), os.path.join(stored, sub))
+        if not os.path.isfile(os.path.join(stored, "collection", "index.html")):
+            return failure or "sweep left no index.html to store"
+        return failure
+    finally:
+        _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
+        _run(["git", "-C", repo, "worktree", "prune"])
+
+
+def multi_mode(repos, out, only, short, force):
+    """Sweep each repo in turn (never overlapping); one summary line per repo.
+    Exits 1 if any repo failed; a refused repo is reported, not a failure."""
+    sweep_jobs()  # a bad SWEEP_JOBS stops the run before any repo is touched
+    sweep_id = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = os.path.abspath(out) if out else os.path.join(cache_base(), "multi-" + sweep_id)
+    summary, failed = [], False
+    for path in repos:
+        repo = os.path.abspath(path)
+        name = os.path.basename(repo.rstrip("/")) or "repo"
+        refusal = repo_owner_refusal(repo)
+        if refusal:
+            summary.append(f"{name}: refused ({refusal})")
+            continue
+        reason = _sweep_origin_main(repo, name, os.path.join(base, repo_key(repo)), sweep_id, only, short, force)
+        if reason:
+            failed = True
+            summary.append(f"{name}: failed ({reason})")
+        else:
+            summary.append(f"{name}: swept -> {os.path.join(stored_sweeps_base(), name, sweep_id)}")
+    print("\n== multi-repo summary ==")
+    print("\n".join(summary))
+    if failed:
+        sys.exit(1)
+
+
 # --- mutation mode --------------------------------------------------------
 
 def mutation_jobs():
@@ -1153,6 +1233,9 @@ def main(argv):
     p.add_argument("--short", action="store_true", help="run only the short set (see audits_data.py)")
     p.add_argument("--index", action="store_true", help="rebuild the index only, over --out DIR's reports")
     p.add_argument("--force", action="store_true", help="bypass the staleness cache, run everything")
+    p.add_argument("--multi", nargs="+", metavar="REPO",
+                   help="sweep each owned repo in turn from a fresh worktree of its origin/main, "
+                        "storing each sweep under ~/.local/share/all-audits/ (#1679)")
     p.add_argument("--mutation", nargs="?", const="", metavar="A.PY,B.PY",
                    help="run mutation-audit on each module, one fresh git worktree at a time "
                         "(no value: pick the modules with a prepass)")
@@ -1162,6 +1245,12 @@ def main(argv):
     args = p.parse_args(argv[1:])
 
     repo = args.repo or os.getcwd()
+    if args.multi is not None:
+        if args.repo or args.index or args.mutation is not None or args.mutation_all:
+            p.error("--multi takes the repos after it, and does not combine with a positional repo, "
+                    "--index, --mutation or --mutation-all.")
+        multi_mode(args.multi, args.out, _split(args.only) if args.only is not None else None, args.short, args.force)
+        return
     if args.mutation_all and args.mutation is not None:
         p.error("--mutation-all is not allowed with --mutation: it takes every candidate, not a list.")
     if args.mutation_all:
