@@ -1034,6 +1034,67 @@ def multi_mode(repos, out, only, short, force):
         sys.exit(1)
 
 
+# --- repo suggestions (#1683) -------------------------------------------------
+
+SUGGEST_DAYS = 14
+DEFAULT_ROOTS = "~/src"
+_ORIGIN_SLUG = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
+
+
+def recent_pr_repos(days=SUGGEST_DAYS):
+    """Sorted `owner/name`s of owned repos where the user authored a PR in the
+    last `days` days. Raises RuntimeError on any `gh` failure: an empty list
+    must mean "no PRs", never "the search broke"."""
+    since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    r = _run(["gh", "search", "prs", "--author", "@me", "--created", f">={since}",
+              "--json", "repository", "--limit", "200"])
+    if r.returncode != 0:
+        raise RuntimeError(f"gh search prs failed (exit {r.returncode}): {r.stderr.strip()}")
+    try:
+        names = {pr["repository"]["nameWithOwner"] for pr in json.loads(r.stdout)}
+    except (ValueError, KeyError, TypeError):
+        raise RuntimeError("gh search prs reply unreadable")
+    return sorted(n for n in names if n.startswith(OWNER + "/"))
+
+
+def local_checkouts(roots):
+    """Map `owner/name` -> one checkout path, from the git checkouts directly
+    under each root. Of several checkouts of one repo, a primary checkout (a
+    `.git` directory) beats a worktree, then the shorter, then the earlier
+    path: either serves, since the sweep comes from `origin`."""
+    found = {}
+    for root in roots:
+        root = os.path.abspath(os.path.expanduser(root))
+        for entry in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            path = os.path.join(root, entry)
+            if not os.path.exists(os.path.join(path, ".git")):
+                continue
+            url = _run(["git", "-C", path, "remote", "get-url", "origin"]).stdout.strip()
+            m = _ORIGIN_SLUG.search(url)
+            if m:
+                key = (not os.path.isdir(os.path.join(path, ".git")), len(path), path)
+                found.setdefault(m.group(1), []).append((key, path))
+    return {slug: min(c)[1] for slug, c in found.items()}
+
+
+def suggest_mode(roots):
+    """Print `suggest: <path>` per repo worth sweeping, `skipped: <repo> (no
+    local checkout)` per repo that has recent PRs but no checkout."""
+    try:
+        recent = recent_pr_repos()
+    except RuntimeError as e:
+        sys.exit(f"driver.py --suggest: {e}")
+    if not recent:
+        print(f"no owned repo has a PR in the last {SUGGEST_DAYS} days")
+        return
+    checkouts = local_checkouts(roots)
+    for slug in recent:
+        if slug in checkouts:
+            print(f"suggest: {checkouts[slug]}")
+        else:
+            print(f"skipped: {slug} (no local checkout)")
+
+
 # --- mutation mode --------------------------------------------------------
 
 def mutation_jobs():
@@ -1236,6 +1297,11 @@ def main(argv):
     p.add_argument("--multi", nargs="+", metavar="REPO",
                    help="sweep each owned repo in turn from a fresh worktree of its origin/main, "
                         "storing each sweep under ~/.local/share/all-audits/ (#1679)")
+    p.add_argument("--suggest", action="store_true",
+                   help="print the owned repos with a PR in the last 14 days and a local checkout, "
+                        "one path each, for --multi (#1683)")
+    p.add_argument("--roots", metavar="DIR,DIR", default=DEFAULT_ROOTS,
+                   help="with --suggest: the directories holding local checkouts (default ~/src)")
     p.add_argument("--mutation", nargs="?", const="", metavar="A.PY,B.PY",
                    help="run mutation-audit on each module, one fresh git worktree at a time "
                         "(no value: pick the modules with a prepass)")
@@ -1245,6 +1311,11 @@ def main(argv):
     args = p.parse_args(argv[1:])
 
     repo = args.repo or os.getcwd()
+    if args.suggest:
+        if args.repo or args.index or args.multi is not None or args.mutation is not None or args.mutation_all:
+            p.error("--suggest stands alone: it takes only --roots.")
+        suggest_mode(_split(args.roots))
+        return
     if args.multi is not None:
         if args.repo or args.index or args.mutation is not None or args.mutation_all:
             p.error("--multi takes the repos after it, and does not combine with a positional repo, "
