@@ -99,7 +99,10 @@
       "Bash(bash -c *e2e.sh*)",
       "Bash(sh -c *e2e.sh*)"
     ],
-    "defaultMode": "auto"
+    "defaultMode": "auto",
+    "additionalDirectories": [
+      "/home/caneff/src/sudokupad-scripts/node_modules"
+    ]
   },
   "model": "opus",
   "disableClaudeAiConnectors": true,
