@@ -64,7 +64,7 @@ doc-vs-code contradiction is mine to rule on: report both sides.
 - Before you run or grade a drill or quiz: read
   `~/.agents/skills/flow/claude/DRILLS.md`.
 - Before you build a solver, tool or check, say none exists, or answer a
-  factual question about a third-party product: read
+  factual question about a game, mod or other third-party product: read
   `~/.agents/skills/flow/claude/RESEARCH-FIRST.md`.
 - When I say "always" about a recurring output's shape, change the skill that
   makes it.
