@@ -357,3 +357,21 @@ def test_driver_values_point_at_the_drivers_header_instead_of_restating_it():
         assert f'"{key}"' in header, key
     assert '"freetags", "codedescr_en"' not in SKILL, "SKILL.md restates the values.json keys"
     assert "()<>~+-*=" not in SKILL, "SKILL.md restates LMD's allowed code characters"
+
+
+# ---- LMD's base.css caps `p, li` at 35em (#1712) ----
+
+TEMPLATE = (HERE / "reference" / "template.md").read_text()
+
+
+def test_every_template_p_uncaps_lmds_35em_measure():
+    emitted = re.sub(r"<!--.*?-->", "", TEMPLATE, flags=re.S)  # comments mention <p> in prose
+    tags = re.findall(r"<p\b[^>]*>", emitted)
+    assert tags, "template.md emits no <p>; the check below would pass for nothing"
+    bare = [t for t in tags if "max-width: none" not in t]
+    assert not bare, f"<p> without max-width: none: {bare}"
+
+
+def test_the_gutter_note_says_lmd_caps_p_as_well_as_li():
+    note = re.search(r"\*\*Rules card right-gutter.*", SKILL).group(0)
+    assert "`p`" in note and "`<p>`" in note and "max-width: none" in note
