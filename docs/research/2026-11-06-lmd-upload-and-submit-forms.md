@@ -56,6 +56,30 @@ The account in use is `ChinStrap`, and the site UI language is English.
   few are 832×832 or 900×900, and file sizes run from 26 to 178 KB. The
   ruling for this skill is "fits inside 800×800".
 
+### Image size limits (searched 2026-11-09)
+
+**LMD publishes no pixel limit.** The only hard number is the form's
+`MAX_FILE_SIZE` of 4194304 bytes (4 MiB). Browsers do not enforce that field;
+PHP checks it on the server.
+
+What was searched, and what each source says:
+- LMD's upload help, https://logic-masters.de/Raetselportal/Hilfe/einstellen.php
+  (German and English): it lists the formats and the six-character id. It
+  states no pixel or byte limit.
+- LMD's terms of use, https://logic-masters.de/nutzungsbedingungen.php: they
+  list the formats. They state no size limit.
+- The forum thread "Bilder hochladen : Datei zu groß" (2014-08,
+  https://forum.logic-masters.de/archive/index.php?thread-1259.html): uploads
+  of an 11 KB file and of a 436×436, 9 KB PNG were refused with "Bild zu
+  groß", while a 653×883, 25 KB PNG went through. One poster called it a bug.
+  The thread ends without a stated limit or a fix.
+- Exa web search over logic-masters.de and its forum for image size, pixel and
+  "zu groß" limits: nothing beyond the above.
+
+Upper bounds seen to work on Chris's account: 900×900, 800×977, 832×852, and
+230 KB (`000ZKY`, 800×808). Untested: anything wider or taller than 900 px,
+or larger than 230 KB. Only an upload test can settle those.
+
 ## Puzzle submit
 
 - The page is https://logic-masters.de/Raetselportal/Eigene/einstellen.php.
