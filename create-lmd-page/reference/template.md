@@ -23,7 +23,7 @@ short. `flex-wrap` stacks both variants vertically on narrow screens.
   <!-- Intro: only when notes given. Omit this whole <p> (no header, no placeholder) if there are none.
        Author's-note epigraph — italic, centered, muted, hairline divider beneath.
        Text is capped at 620px and centered; the divider rule spans the full column. -->
-  <p style="margin: 0 auto 20px; padding-bottom: 15px; border-bottom: 1px solid #ccd; font-style: italic; text-align: center; color: #555; line-height: 1.6;">
+  <p style="margin: 0 auto 20px; padding-bottom: 15px; border-bottom: 1px solid #ccd; font-style: italic; text-align: center; color: #555; line-height: 1.6; max-width: none;">
     <span style="display: block; max-width: 620px; margin: 0 auto;">{{NOTES}}</span>
   </p>
 
