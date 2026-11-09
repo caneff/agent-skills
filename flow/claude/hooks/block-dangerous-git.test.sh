@@ -14,6 +14,11 @@ hook="$here/block-dangerous-git.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export XDG_CACHE_HOME="$tmp/cache"   # keep the ownership cache out of the real one
+# The hook reads pushRemote, pushDefault and insteadOf, which git also takes
+# from the global and system config: point both at this test's own files.
+mkdir -p "$tmp/home"
+export HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" GIT_CONFIG_GLOBAL="$tmp/gitconfig" GIT_CONFIG_NOSYSTEM=1
+printf '[user]\n\tname = test\n\temail = test@example.invalid\n' > "$GIT_CONFIG_GLOBAL"
 
 # A throwaway repo with a github origin, sitting on its default branch.
 repo="$tmp/repo"
@@ -376,11 +381,36 @@ RUN_CWD="$fork" run "owned fork: a later push in the chain to a non-owned remote
   "git push origin master && git push upstream master" "swaroopg92/penpa-edit"
 RUN_CWD="$fork" run "owned fork: --repo naming the non-owned remote blocked" 2 \
   "git push --repo=upstream" "swaroopg92/penpa-edit"
-RUN_CWD="$fork" run "push: a remote read from a shell variable fails closed" 2 \
-  'git push "$R" master' "could not verify"
+RUN_FORBID="retry" RUN_CWD="$fork" run "push: a remote read from a shell variable is refused, not called a blip" 2 \
+  'git push "$R" master' "cannot tell where to"
+# A target the push parser cannot read as a configured remote fails closed:
+# the old guard blocked each of these in a foreign checkout.
+RUN_CWD="$fork" run "push: a backslash-newline before the remote still reads it" 2 \
+  "git push \\
+upstream master" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "push: a subshell around the push still reads the remote" 2 \
+  "( git push upstream)" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "push: a word that is no remote, URL or path is refused" 2 \
+  "git push nosuchremote master" "no remote configured"
+RUN_CWD="$fork" run "push: a comment on the push line is refused" 2 \
+  "git push origin master # note" "cannot tell where to"
+RUN_CWD="$solo" run "push: a cd into another checkout is refused, naming -C" 2 \
+  "cd $fork && git push upstream master" "git -C <absolute path> push"
+RUN_CWD="$fork" run "push: -o's value is not read as the remote" 2 \
+  "git push -o ci.skip upstream master" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "push: -o's value is skipped on an owned remote too" 0 \
+  "git push -o ci.skip origin master"
+RUN_CWD="$fork" run "push: git -c before the verb still judged" 2 \
+  "git -c push.default=current push upstream master" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "push: git --no-pager before the verb still judged" 2 \
+  "git --no-pager push upstream master" "swaroopg92/penpa-edit"
+RUN_FORBID="SECRET" RUN_CWD="$fork" run "push: a token in a spelled-out URL never reaches the block text" 2 \
+  "git push https://tok:SECRET@github.com/swaroopg92/penpa-edit.git master" "swaroopg92/penpa-edit"
 git -C "$fork" config branch.master.pushRemote upstream
 RUN_CWD="$fork" run "owned fork: bare push to a non-owned pushRemote blocked" 2 \
   "git push" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "owned fork: backgrounded bare push to a non-owned pushRemote blocked" 2 \
+  "git push &" "swaroopg92/penpa-edit"
 RUN_CWD="$fork" run "owned fork: named origin overrides a non-owned pushRemote" 0 "git push origin master"
 git -C "$fork" config --unset branch.master.pushRemote
 git -C "$fork" config remote.pushDefault upstream
@@ -394,9 +424,34 @@ RUN_CWD="$fork" run "owned fork: origin whose push URL is non-owned blocked" 2 \
   "git push origin master" "swaroopg92/penpa-edit"
 git -C "$fork" remote set-url --delete --push origin https://github.com/swaroopg92/penpa-edit.git
 
-# `gh pr create` is gated on the PR's base: --repo/-R when given, else the
-# fork's parent when origin is a fork (gh's default), else origin.
+# `gh pr create` is gated on the PR's base: every repo the command names, and
+# unless the create names its own, every repo gh could default to (each
+# remote, a fork's parent, a set-default repo).
 rm -rf "$XDG_CACHE_HOME"
+RUN_CWD="$fork" run "owned fork: gh pr new, gh's alias, blocked" 2 \
+  "gh pr new --title t" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: repo flag between pr and create naming the parent blocked" 2 \
+  "gh pr --repo swaroopg92/penpa-edit create --title t" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: repo flag between pr and create naming the fork allowed" 0 \
+  "gh pr -R caneff/penpa-edit create --title t"
+RUN_CWD="$fork" run "owned fork: an owned --repo only inside the body text does not set the base" 2 \
+  "gh pr create --title t --body 'use --repo caneff/penpa-edit'" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: gh pr create in a heredoc fed to sh blocked" 2 \
+  $'sh <<EOF\ngh pr create --title t\nEOF' "BLOCKED"
+RUN_CWD="$solo" run "owned non-fork: a quoted ; does not hide a foreign --repo" 2 \
+  "gh pr create --title \"a; b\" --repo someone-else/x" "! gh pr create"
+RUN_CWD="$solo" run "owned non-fork: an exported GH_REPO naming a foreign repo blocked" 2 \
+  "export GH_REPO=someone-else/x; gh pr create --title t" "! gh pr create"
+RUN_CWD="$solo" run "owned non-fork: a cd before gh pr create is refused" 2 \
+  "cd $fork && gh pr create --title t" "cannot tell its base"
+git -C "$solo" remote add upstream https://github.com/swaroopg92/penpa-edit.git
+RUN_CWD="$solo" run "owned non-fork with a foreign upstream remote: default base blocked" 2 \
+  "gh pr create --title t" "swaroopg92/penpa-edit"
+git -C "$solo" remote remove upstream
+git -C "$solo" config remote.origin.gh-resolved swaroopg92/penpa-edit
+RUN_CWD="$solo" run "owned non-fork whose gh set-default is foreign: default base blocked" 2 \
+  "gh pr create --title t" "swaroopg92/penpa-edit"
+git -C "$solo" config --unset remote.origin.gh-resolved
 RUN_CWD="$fork" run "owned fork: gh pr create with the default base (parent) blocked" 2 \
   "gh pr create --title t --body b" "! gh pr create"
 RUN_CWD="$fork" run "owned fork: the block names the parent base" 2 \

@@ -3,18 +3,19 @@
 #
 # Narrow guards; everything else about a push is the agent's business.
 #   - PUSH is gated on OWNERSHIP, not on branch or file type, judged by the
-#     repo the push is sent to: the remote the command names, else the
-#     branch's push remote, else origin. When that repo's owner is the `gh`
-#     login, the push is allowed — any branch, any content, default branch
-#     included — and a fork counts as itself, never as its parent (Chris,
-#     2026-11-09: a fork he publishes from is his). A repo someone else owns is
-#     blocked, and the agent hands the user the push and PR lines to run
-#     themselves: the outward-facing step is the user's. The ownership lookup
-#     FAILS CLOSED: gh erroring or the network being down means "not owned"
-#     means blocked.
-#   - `gh pr create` is gated on the PR's base repo: `--repo`/`-R` when given,
-#     else origin's parent when origin is a fork (gh's default), else origin.
-#     It is what keeps an agent from opening a PR upstream from an owned fork.
+#     repo the push is sent to (`push_target` resolves the remote in git's own
+#     order). When that repo's owner is the `gh` login, the push is allowed —
+#     any branch, any content, default branch included — and a fork counts as
+#     itself, never as its parent (Chris, 2026-11-09: a fork he publishes from
+#     is his). A repo someone else owns is blocked, and the agent hands the
+#     user the push and PR lines to run themselves: the outward-facing step is
+#     the user's. A push whose target cannot be told (a `cd`, a comment, a
+#     word that is no remote) is refused. The ownership lookup FAILS CLOSED:
+#     gh erroring or the network being down means "not owned" means blocked.
+#   - `gh pr create` is gated on the PR's base repo (`pr_create_is_owned`):
+#     every repo the command names, and every repo gh could default to when
+#     the create names none itself. It is what keeps an agent from opening a
+#     PR upstream from an owned fork.
 #   - `gh pr merge` (and `implement/pr_settle.py ... --merge`, which runs one,
 #     #1526) is gated on the same OWNERSHIP (#790): allowed when this
 #     checkout and every repo the line names are the `gh` login's, blocked
@@ -76,6 +77,19 @@ command_views() {
   cmd_substitutions=$(printf '%s' "$CMD_EXPANDS" | tr '\n' ' ' | grep -oE '\$\(.*\)|`[^`]*`')
   return 0
 }
+# The text $1 as command segments, one per line: a backslash-newline is joined
+# first, as the shell joins it, then the text is cut at `&&`, `||`, `;` and
+# `|`. The cut ignores quotes, so a quoted `;` splits too; a reader that needs
+# quotes respected cuts a quote-dropped view instead.
+split_segments() {
+  printf '%s\n' "$1" | sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba' -e '}' | sed -E 's/(&&|\|\||;|\|)/\n/g'
+}
+# A `cd` or `pushd` anywhere in the command: git, and gh, then run somewhere
+# this hook cannot read.
+cd_re='(^|[;&|(`[:space:]])(cd|pushd)([[:space:]]|$)'
+# A `git push`, global options before the verb included (`-C <dir>`,
+# `-c <key=value>`, `--no-pager`).
+push_re='(^|[;&|(`[:space:]])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+push([[:space:]]|$)'
 
 # --- Always-blocked: history/worktree destroyers. ---
 DANGEROUS_PATTERNS=(
@@ -117,7 +131,7 @@ git_target() {
   local dir real gitdir common
   TARGET_TOP="" TARGET_LINKED=0
   TARGET_WHY="a cd or pushd in the command"
-  echo "$SCAN" | grep -qE '(^|[;&|(`[:space:]])(cd|pushd)([[:space:]]|$)' && return 1
+  echo "$SCAN" | grep -qE "$cd_re" && return 1
   TARGET_WHY="a GIT_DIR-style variable or flag"
   echo "$SCAN" | grep -qE 'GIT_(DIR|WORK_TREE|COMMON_DIR)=|--(git-dir|work-tree)' && return 1
   TARGET_WHY="a '#' in the command"
@@ -167,7 +181,7 @@ while IFS= read -r segment; do
     echo "BLOCKED: '$COMMAND' discards every uncommitted change under '.'. That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact line to run themselves. Do not attempt it yourself." >&2
     exit 2
   fi
-done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -e checkout -e restore)
+done < <(split_segments "$SCAN" | grep -e checkout -e restore)
 
 # A destroyer is matched in the command run, not in text an argument carries
 # (#1539): `rg -n 'reset --hard' docs` and a commit message naming one are
@@ -222,7 +236,7 @@ if printf '%s\n' "$COMMAND" | grep -q stash; then
     elif [ "$TARGET_LINKED" = 1 ]; then
       stash_handoff "changes the stash stack from a linked worktree"
     fi
-  done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep stash)
+  done < <(split_segments "$SCAN" | grep stash)
 fi
 
 # --- Bare force-push: blocked. `--force-with-lease` is fine (the lease refuses
@@ -232,7 +246,7 @@ fi
 # --force`) or a `push` that is only a word in a path (`hooks/pre-push`) is
 # not a force-push (#637). ---
 is_force_push_segment() {
-  echo "$1" | grep -qE '(^|[[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)' \
+  echo "$1" | grep -qE "$push_re" \
     && echo "$1" | grep -qE '[[:space:]](--force([[:space:]]|$)|-f([[:space:]]|$))' \
     && ! echo "$1" | grep -q 'force-with-lease'
 }
@@ -241,7 +255,7 @@ while IFS= read -r segment; do
     echo "BLOCKED: bare force-push in '$COMMAND' can destroy commits on origin. Use '--force-with-lease', or hand the user the exact '! git push --force ...' line." >&2
     exit 2
   fi
-done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -e push)
+done < <(split_segments "$SCAN" | grep -e push)
 
 # GitHub owners are case-insensitive: `CANEFF/x` and `caneff/x` name the same
 # account, so every owner-vs-login compare lowercases both sides first. `tr`
@@ -259,17 +273,18 @@ ieq() { [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z
 # block is rare, so re-asking costs nothing and a stale "no" (or a cached
 # network blip) can never harden into a permanent block. Delete $cache_dir if
 # a repo changes hands.
-# An entry is trusted only when it holds its own slug. One written before
-# 2026-11-09, under the rule that judged a fork by its parent, holds the
-# parent: trusting it would let an owned parent clear a push to someone
-# else's fork, so it is re-asked instead.
+# A verdict entry is trusted only when it holds its own slug. One written
+# before 2026-11-09, under the rule that judged a fork by its parent, holds
+# the parent: trusting it would let an owned parent clear a push to someone
+# else's fork, so it is re-asked instead. A PR-base verdict lives apart, under
+# base/, so a fork's own verdict never clears its parent as a base.
 # The owned-or-not functions return 0 owned, 1 not owned (gh answered, a repo
 # this login cannot see included), 2 ownership could not be read (gh failed,
 # or no checkout); on 2, OWNERSHIP_ERR says why, gh's own error text included,
 # so the block can say it was a blip. On a repo gh cannot see, OWNERSHIP_ERR
-# holds gh's answer.
+# holds gh's answer. OWNERSHIP_REPO names the repo judged last, for the block.
 OWNERSHIP_ERR=""
-OWNERSHIP_ORIGIN=""
+OWNERSHIP_REPO=""
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-git-guard"
 # `/` becomes `@`, which GitHub names cannot hold, so `a-b/c` and `a/b-c`
 # never share a key.
@@ -307,9 +322,9 @@ gh_login() {
   [ -n "$GH_LOGIN" ] || { OWNERSHIP_ERR="gh: empty answer"; return 2; }
 }
 # The repo at URL $1, read through the jq filter $2, into GH_ANSWER. 1 when gh
-# reached GitHub and was told the repo does not exist for this login, 2 when gh
-# could not answer. gh's error text goes to a temp file; with none the block
-# says so.
+# reached GitHub and was told the repo does not exist for this login, 2 when
+# gh could not answer. gh's error text goes to a temp file; with none the
+# block says so.
 gh_repo() {
   local errf
   errf=$(mktemp 2>/dev/null) || errf=""
@@ -322,12 +337,12 @@ gh_repo() {
   [ -n "$GH_ANSWER" ] || { OWNERSHIP_ERR="gh: empty answer"; return 2; }
 }
 # Is the repo at URL $1 the login's, judged as itself: a fork is its own
-# owner's, not its parent's. A URL off github — a local path, a private host,
-# no remote at all — is the user's own experiment, with no outward gate.
+# owner's, not its parent's. A URL off github — a local path, a private host —
+# is the user's own experiment, with no outward gate.
 url_is_owned() {
   local slug
   slug=$(github_slug "$1") || return 0
-  OWNERSHIP_ORIGIN=$slug
+  OWNERSHIP_REPO=$slug
   cached_owned "$slug" && return 0
   gh_login || return 2
   gh_repo "$1" '.owner.login + "/" + .name' || return
@@ -335,37 +350,37 @@ url_is_owned() {
   cache_owned "$slug"
   return 0
 }
-# Is this checkout's PR base the login's: origin's parent when origin is a
-# fork, else origin, into BASE_SLUG. Origin is named to gh explicitly (a bare
-# `gh repo view` would resolve to an `upstream` remote instead). The base an
-# origin resolved to is kept under base/, keyed on origin, and the verdict on
-# that base under the base's own slug, so an owned fork's verdict never clears
-# its parent.
+# Is the PR base the repo at URL $1 resolves to the login's: its parent when
+# it is a fork, else itself. The URL is named to gh explicitly (a bare `gh
+# repo view` would resolve to an `upstream` remote instead). base/<key of $1>
+# is written only once that base is verified owned, so its presence is the
+# verdict.
 base_is_owned() {
-  local origin slug map
-  BASE_SLUG=""
-  git rev-parse --show-toplevel >/dev/null 2>&1 || { OWNERSHIP_ERR="not inside a git checkout"; return 2; }
-  origin=$(git remote get-url origin 2>/dev/null)
-  slug=$(github_slug "$origin") || return 0
-  OWNERSHIP_ORIGIN=$slug
+  local slug map
+  slug=$(github_slug "$1") || return 0
+  OWNERSHIP_REPO=$slug
   map="$cache_dir/base/$(cache_key "$slug")"
-  [ -f "$map" ] && BASE_SLUG=$(head -n1 "$map") && cached_owned "$BASE_SLUG" && return 0
+  [ -f "$map" ] && return 0
   gh_login || return 2
-  gh_repo "$origin" 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' || return
-  BASE_SLUG=$GH_ANSWER
-  OWNERSHIP_ORIGIN=$BASE_SLUG
-  ieq "${BASE_SLUG%%/*}" "$GH_LOGIN" || return 1
-  cache_owned "$BASE_SLUG" && mkdir -p "$cache_dir/base" 2>/dev/null \
-    && printf '%s\n' "$BASE_SLUG" > "$map" 2>/dev/null
+  gh_repo "$1" 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' || return
+  OWNERSHIP_REPO=$GH_ANSWER
+  ieq "${GH_ANSWER%%/*}" "$GH_LOGIN" || return 1
+  mkdir -p "$cache_dir/base" 2>/dev/null && printf '%s\n' "$GH_ANSWER" > "$map" 2>/dev/null
   return 0
+}
+# This checkout's origin, as a merge judges it: 2 outside a checkout.
+origin_base_is_owned() {
+  git rev-parse --show-toplevel >/dev/null 2>&1 || { OWNERSHIP_ERR="not inside a git checkout"; return 2; }
+  base_is_owned "$(git remote get-url origin 2>/dev/null)"
 }
 
 # Does the command run a line matching the regex $1, as a command and not as
 # text an argument carries? `pr_settle.py ... --merge` is a `gh pr merge` run
 # in a process this hook does not see (#1526), so its command line is read as
-# one.
+# one. `gh pr new` is gh's own alias of `gh pr create`, and gh takes the
+# repo flag between `pr` and the verb too.
 merge_re='(gh[[:space:]]+pr[[:space:]]+merge|[^[:space:];&|]*pr_settle\.py[^;&|]*[[:space:]]--merge)([[:space:]]|$)'
-create_re='gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'
+create_re='gh[[:space:]]+pr[[:space:]]+((-R|--repo)([[:space:]]+|=)[^[:space:]]+[[:space:]]+)?(create|new)([[:space:]]|$)'
 runs_gh() {
   # Cheap gate on the raw command (heredoc bodies included) before the lexer.
   printf '%s\n' "$COMMAND" | grep -qE "$1" || return 1
@@ -375,23 +390,20 @@ runs_gh() {
   # A shell handed text: `sh -c`, `eval`, a pipe or a heredoc into a shell.
   printf '%s\n' "$BARE" | grep -qE "$shell_handed"
 }
-# Owners the text $1 (default the whole command) names: `--repo`/`-R` values
-# ([HOST/]OWNER/REPO), GH_REPO=, and PR URLs, read from the raw text so a
-# quoted value counts. A value led by
-# `/`, `~` or `.`, or outside two-to-three segments, is not a repo name (e.g.
-# `merge-cleanup --repo <path>`) and names no owner (#803). OWNER is the first
-# segment, or the second when a HOST leads. A URL (`https://`, `ssh://git@`)
-# loses its scheme, and its OWNER is the segment after the host (a `user@`
-# rides along in the host); one with no OWNER prints `?`, which never matches
-# the login, so it fails closed. For a merge they are
-# checked on top of this checkout's ownership, never instead of it, so a name
-# on another command or inside a quoted subject can only block. The scp form
+# Owners the text $1 names: `--repo`/`-R` values ([HOST/]OWNER/REPO),
+# GH_REPO=, and PR URLs, read with quotes dropped so a quoted value counts. A
+# value led by `/`, `~` or `.`, or outside two-to-three segments, is not a
+# repo name (e.g. `merge-cleanup --repo <path>`) and names no owner (#803).
+# OWNER is the first segment, or the second when a HOST leads. A URL
+# (`https://`, `ssh://git@`) loses its scheme, and its OWNER is the segment
+# after the host (a `user@` rides along in the host); one with no OWNER prints
+# `?`, which never matches the login, so it fails closed. The scp form
 # `user@host:OWNER/REPO` (#805) carries no scheme, so it never hits the URL
 # rule above and needs its own: only a clean host:OWNER/REPO reads OWNER out;
 # anything else with that '@...:' shape prints '?' and fails closed, rather
 # than being dropped as "not a repo name" the way a bare path is.
-named_merge_owners() {
-  printf '%s\n' "${1:-$SCAN}" | tr -d "'\"" \
+named_owners() {
+  printf '%s\n' "$1" | tr -d "'\"" \
     | grep -oE '(--repo[= ]|-R[[:space:]]+|GH_REPO=)[^[:space:];&|)]+' \
     | sed -E 's/^(--repo[= ]|-R[[:space:]]+|GH_REPO=)//' \
     | awk -F/ '
@@ -401,50 +413,73 @@ named_merge_owners() {
           print (owner != "" && NF == 2 ? owner : "?"); next
         }
         !/^[\/~.]/ && NF >= 2 && NF <= 3 { print (NF == 3 ? $2 : $1) }'
-  printf '%s\n' "${1:-$SCAN}" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
+  printf '%s\n' "$1" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
     | cut -d/ -f2
 }
 # Every owner in the list $1 is the login; 2, naming them, when the login
 # cannot be read.
 owners_are_login() {
   local owner
-  gh_login || { OWNERSHIP_ORIGIN="the repo the command names (owner $(printf '%s' "$1" | paste -sd, -))"; return 2; }
+  OWNERSHIP_REPO="the repo the command names (owner $(printf '%s' "$1" | paste -sd, -))"
+  gh_login || return 2
   while IFS= read -r owner; do
     ieq "$owner" "$GH_LOGIN" || return 1
   done <<< "$1"
 }
+# A name found anywhere in the command is checked on top of what the command
+# acts on, never instead of it, so a name on another command or inside a
+# quoted subject can only block. Read from the whole command, heredoc bodies
+# included when a shell is handed the text.
+command_owners_are_login() {
+  local owners text=$SCAN
+  command_views
+  [ "$cmd_handed" = 1 ] && text=$COMMAND
+  owners=$(named_owners "$text")
+  [ -z "$owners" ] || owners_are_login "$owners"
+}
 # Returns as base_is_owned does: 0 owned, 1 not owned, 2 gh could not answer.
 merge_is_owned() {
-  local owners rc
-  base_is_owned; rc=$?
-  [ "$rc" = 0 ] || return "$rc"
-  owners=$(named_merge_owners)
-  [ -n "$owners" ] || return 0
+  origin_base_is_owned || return
   # The checkout is already verified; what is left unread is the named repo.
-  owners_are_login "$owners"
+  command_owners_are_login
 }
-# The base of each `gh pr create` segment: the repo its own `--repo`/`-R`/
-# GH_REPO names, else this checkout's base. A name on another command never
-# sets it. PR_BASE says which base failed, for the hand-off line.
+# Every repo gh could take as a PR's default base: each github remote as
+# itself and, when it is a fork, its parent, plus a repo `gh repo set-default`
+# names outright. gh orders the remotes (`upstream`, `github`, `origin`) and
+# honours set-default, so judging them all blocks whatever it picks. Outside a
+# checkout gh has no default, so 2.
+default_bases_are_owned() {
+  local url
+  git rev-parse --git-dir >/dev/null 2>&1 || { OWNERSHIP_ERR="not inside a git checkout"; return 2; }
+  while IFS= read -r url; do
+    url_is_owned "$url" || return
+    base_is_owned "$url" || return
+  done < <(git remote -v | awk '$3 == "(fetch)" { print $2 }'
+           git config --get-regexp '^remote\..*\.gh-resolved$' | awk '$2 ~ /\// { print "https://github.com/" $2 }')
+}
+# The base of a `gh pr create`: every repo the command names must be the
+# login's, and unless each create the shell runs names its repo itself,
+# unquoted, gh's default base must be too. 3, PR_WHY saying why, when the
+# default base is read from a checkout a `cd` moved away from.
 pr_create_is_owned() {
-  local segment owners rc
-  while IFS= read -r segment; do
-    owners=$(named_merge_owners "$segment")
-    if [ -n "$owners" ]; then
-      PR_BASE="the repo it names (owner $(printf '%s' "$owners" | paste -sd, -))"
-      owners_are_login "$owners"; rc=$?
-    else
-      base_is_owned; rc=$?
-      PR_BASE=${BASE_SLUG:-this checkout\'s base}
-    fi
-    [ "$rc" = 0 ] || return "$rc"
-  done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -E "$create_re")
-  return 0
+  local segment segments
+  command_owners_are_login || return
+  command_views
+  segments=$(split_segments "$CMD_BARE" | grep -E "$create_re")
+  if [ -n "$segments" ]; then
+    while IFS= read -r segment; do
+      [ -n "$(named_owners "$segment")" ] || { segments=""; break; }
+    done <<< "$segments"
+  fi
+  [ -n "$segments" ] && return 0
+  PR_WHY="a cd or pushd in the command, so gh picks the base in a checkout this guard cannot read"
+  echo "$SCAN" | grep -qE "$cd_re" && return 3
+  default_bases_are_owned
 }
 # The two block texts every policy shares: ownership unreadable (rc 2), and
 # the gh answer behind a not-owned verdict on a repo gh cannot see.
 lookup_blocked() { # <what the command does, as a lead-in, or empty>
-  echo "BLOCKED: $1could not verify ownership of ${OWNERSHIP_ORIGIN:-this checkout} (${OWNERSHIP_ERR:-no error text}) — retry once it can be verified. This is a lookup failure, not a foreign repo." >&2
+  echo "BLOCKED: $1could not verify ownership of ${OWNERSHIP_REPO:-this checkout} (${OWNERSHIP_ERR:-no error text}) — retry once it can be verified. This is a lookup failure, not a foreign repo." >&2
 }
 unseen_note() {
   [ -z "$OWNERSHIP_ERR" ] || printf ' (%s — if it is yours, the gh token cannot see it.)' "$OWNERSHIP_ERR"
@@ -464,61 +499,68 @@ fi
 
 # --- PR create policy: a PR whose base is yours = allowed, else handed off. ---
 if runs_gh "$create_re"; then
-  OWNERSHIP_ERR="" OWNERSHIP_ORIGIN=""
+  OWNERSHIP_ERR="" OWNERSHIP_REPO=""
   pr_create_is_owned; rc=$?
   if [ "$rc" = 2 ]; then
     lookup_blocked "'$COMMAND' opens a PR; "
     exit 2
+  elif [ "$rc" = 3 ]; then
+    echo "BLOCKED: '$COMMAND' opens a PR, and this guard cannot tell its base ($PR_WHY). Run it from the checkout itself with '--repo <owner>/<name>' unquoted on the 'gh pr create', or hand the user the exact '! gh pr create ...' line." >&2
+    exit 2
   elif [ "$rc" != 0 ]; then
-    echo "BLOCKED: '$COMMAND' opens a PR on $PR_BASE, a repo you don't own.$(unseen_note) That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh pr create --repo <base> --head <owner>:<branch> --title ... --body ...' line, title and body drafted, to run in their own shell. Do not attempt it yourself." >&2
+    echo "BLOCKED: '$COMMAND' opens a PR on $OWNERSHIP_REPO, a repo you don't own.$(unseen_note) That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh pr create --repo <base> --head <owner>:<branch> --title ... --body ...' line, title and body drafted, to run in their own shell. Do not attempt it yourself." >&2
     exit 2
   fi
 fi
 
 # --- Push policy: judged by the repo each push is sent to. ---
-push_re='(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)'
 # The repository a push segment $1 names, into PUSH_WORD (empty when none):
-# the first word after `push` that is not an option or a redirection, or the
-# value of `--repo`. Quotes are dropped, so a quoted remote name counts.
+# the first word after `push` that is not an option, an option's value or a
+# redirection, or the value of `--repo`. Quotes and parentheses are dropped,
+# so a quoted remote name counts; an `&` ends the command.
 push_named_remote() {
-  local w words after=0 skip=0 repo_next=0
+  local w words after=0 skip=0 repo_next=0 stop
   PUSH_WORD=""
   set -f
-  read -r -a words <<< "$(printf '%s' "$1" | tr -d "'\"")"
+  read -r -a words <<< "$(printf '%s' "$1" | tr -d "'\"()")"
   set +f
   for w in "${words[@]}"; do
     if [ "$after" = 0 ]; then [ "$w" = push ] && after=1; continue; fi
-    [ "$repo_next" = 1 ] && { PUSH_WORD=$w; return; }
     [ "$skip" = 1 ] && { skip=0; continue; }
     case "$w" in
-      --repo=*) PUSH_WORD=${w#--repo=}; return ;;
-      --repo) repo_next=1 ;;
-      -o | --push-option | --receive-pack | --exec | *'<' | *'>') skip=1 ;;
-      -* | *'<'* | *'>'*) ;;
-      *) PUSH_WORD=$w; return ;;
+      *'<' | *'>') skip=1; continue ;;
+      *'<'* | *'>'*) continue ;;
     esac
+    stop=0
+    case "$w" in *'&'*) w=${w%%&*}; stop=1 ;; esac
+    if [ -n "$w" ]; then
+      [ "$repo_next" = 1 ] && { PUSH_WORD=$w; return; }
+      case "$w" in
+        --repo=*) PUSH_WORD=${w#--repo=}; return ;;
+        --repo) repo_next=1 ;;
+        -o | --push-option | --receive-pack | --exec) skip=1 ;;
+        -*) ;;
+        *) PUSH_WORD=$w; return ;;
+      esac
+    fi
+    [ "$stop" = 1 ] && return
   done
 }
-# The URLs a push segment $1 sends to, one per line, into PUSH_URLS, with
-# PUSH_WORD the remote git picks: the one the command names, else the
-# branch's pushRemote, remote.pushDefault, the branch's remote, then origin —
-# git's own order. Read in `git -C <dir>` or the cwd. 2, OWNERSHIP_ERR saying
-# why, when the remote cannot be told.
+# The URLs a push segment $1 sends to, one per line, into PUSH_URLS. The
+# remote is the one the command names, else the branch's pushRemote,
+# remote.pushDefault, the branch's remote, then origin: git's own order. It is
+# read in the checkout `git_target` resolves, so a `cd`, a comment or a
+# GIT_DIR is refused, not guessed at. PUSH_REMOTE is the remote's name when it
+# is a configured one, for the block text; a URL the command spells out is
+# never printed, as it can carry a token. 3, PUSH_WHY saying why, when the
+# target cannot be told.
 push_target() {
   local dir branch
-  OWNERSHIP_ERR="" OWNERSHIP_ORIGIN=""
+  OWNERSHIP_ERR="" OWNERSHIP_REPO="" PUSH_REMOTE=""
+  git_target "$1" || { PUSH_WHY=$TARGET_WHY; return 3; }
+  dir=$TARGET_TOP
   push_named_remote "$1"
-  case "$PUSH_WORD" in
-    *'$'* | *'`'*)
-      OWNERSHIP_ORIGIN="the push's remote"
-      OWNERSHIP_ERR="it is a shell expansion, '$PUSH_WORD'"
-      return 2 ;;
-  esac
-  dir=$(printf '%s' "$1" | grep -oE 'git[[:space:]]+-C[[:space:]]+[^[:space:]]+[[:space:]]+push' \
-    | sed -E 's/^git[[:space:]]+-C[[:space:]]+//; s/[[:space:]]+push$//' | tr -d "'\"")
-  dir=${dir:-.}
-  dir=${dir/#\~/$HOME}
-  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || { OWNERSHIP_ERR="not inside a git checkout"; return 2; }
+  case "$PUSH_WORD" in *'$'* | *'`'*) PUSH_WHY="the remote is a shell expansion, '$PUSH_WORD'"; return 3 ;; esac
   if [ -z "$PUSH_WORD" ]; then
     branch=$(git -C "$dir" symbolic-ref -q --short HEAD)
     [ -n "$branch" ] && PUSH_WORD=$(git -C "$dir" config "branch.$branch.pushRemote")
@@ -526,32 +568,36 @@ push_target() {
     [ -n "$PUSH_WORD" ] || [ -z "$branch" ] || PUSH_WORD=$(git -C "$dir" config "branch.$branch.remote")
     PUSH_WORD=${PUSH_WORD:-origin}
   fi
-  # A configured remote gives every push URL it has; anything else is a URL or
-  # path, with `insteadOf` applied the way git applies it.
-  PUSH_URLS=$(git -C "$dir" remote get-url --push --all "$PUSH_WORD" 2>/dev/null) \
-    || PUSH_URLS=$(git -C "$dir" ls-remote --get-url "$PUSH_WORD" 2>/dev/null) \
-    || PUSH_URLS=$PUSH_WORD
-  return 0
+  if PUSH_URLS=$(git -C "$dir" remote get-url --push --all "$PUSH_WORD" 2>/dev/null); then
+    PUSH_REMOTE=$PUSH_WORD
+    return 0
+  fi
+  # Not a configured remote: a URL or a path, with `insteadOf` applied the
+  # way git applies it. A bare word that is neither is refused.
+  case "$PUSH_WORD" in
+    . | */* | *:*)
+      PUSH_URLS=$(git -C "$dir" ls-remote --get-url "$PUSH_WORD" 2>/dev/null) || PUSH_URLS=$PUSH_WORD ;;
+    *) PUSH_WHY="'$PUSH_WORD' is no remote configured in $dir, nor a URL or a path"; return 3 ;;
+  esac
 }
 push_is_owned() { # <segment>
-  local url rc
+  local url
   push_target "$1" || return
   while IFS= read -r url; do
-    url_is_owned "$url"; rc=$?
-    [ "$rc" = 0 ] || return "$rc"
+    url_is_owned "$url" || return
   done <<< "$PUSH_URLS"
 }
 if echo "$SCAN" | grep -qE "$push_re"; then
   while IFS= read -r segment; do
     push_is_owned "$segment"; rc=$?
-    [ "$rc" = 0 ] && continue
-    if [ "$rc" = 2 ]; then
-      lookup_blocked ""
-      exit 2
-    fi
-    echo "BLOCKED: pushing to a repo you don't own.$(unseen_note) This push goes to $OWNERSHIP_ORIGIN, through remote '$PUSH_WORD'. Hand the user the exact '! git push -u <remote> <branch>' line and a drafted '! gh pr create ...' line to run in their own shell — the outward-facing step is theirs, not yours." >&2
+    case "$rc" in
+      0) continue ;;
+      2) lookup_blocked "" ;;
+      3) echo "BLOCKED: '$COMMAND' pushes, and this guard cannot tell where to ($PUSH_WHY). Give the push as 'git -C <absolute path> push <remote> <branch>' with a configured remote, and no cd, comment or shell expansion." >&2 ;;
+      *) echo "BLOCKED: pushing to a repo you don't own.$(unseen_note) This push goes to $OWNERSHIP_REPO${PUSH_REMOTE:+, through remote '$PUSH_REMOTE'}. Hand the user the exact '! git push -u <remote> <branch>' line and a drafted '! gh pr create ...' line to run in their own shell — the outward-facing step is theirs, not yours." >&2 ;;
+    esac
     exit 2
-  done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -E "$push_re")
+  done < <(split_segments "$SCAN" | grep -E "$push_re")
 fi
 
 exit 0
