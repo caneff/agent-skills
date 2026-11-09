@@ -88,16 +88,7 @@
       "mcp__c4ai__ask"
     ],
     "ask": [
-      "Bash(./e2e.sh *)",
-      "Bash(bash e2e.sh *)",
-      "Bash(bash ./e2e.sh *)",
-      "Bash(/home/caneff/src/twitch-rules-scroller/e2e.sh *)",
-      "Bash(bash /home/caneff/src/twitch-rules-scroller/e2e.sh *)",
-      "Bash(*/.claude/worktrees/*/e2e.sh *)",
-      "Bash(bash */.claude/worktrees/*/e2e.sh *)",
-      "Bash(job-run *e2e.sh*)",
-      "Bash(bash -c *e2e.sh*)",
-      "Bash(sh -c *e2e.sh*)"
+      "Bash(*e2e.sh*--main-monitor*)"
     ],
     "defaultMode": "auto",
     "additionalDirectories": [
