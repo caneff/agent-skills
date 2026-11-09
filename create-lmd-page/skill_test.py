@@ -373,5 +373,6 @@ def test_every_template_p_uncaps_lmds_35em_measure():
 
 
 def test_the_gutter_note_says_lmd_caps_p_as_well_as_li():
-    note = re.search(r"\*\*Rules card right-gutter.*", SKILL).group(0)
-    assert "`p`" in note and "`<p>`" in note and "max-width: none" in note
+    # max-width: none must follow the `p` mention: the note already said it for ul/li.
+    m = re.search(r"caps `p`.*?`<p>`.*?max-width: none", FLAT)
+    assert m, "SKILL.md's gutter note no longer says LMD caps `p` and that a `<p>` needs max-width: none"
