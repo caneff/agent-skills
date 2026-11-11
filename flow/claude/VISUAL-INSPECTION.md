@@ -39,6 +39,15 @@ a step your own hands can do.
   also listed under `wsl_connections` in the Windows
   `AppData/Roaming/Zed/settings.json`, so it shows up in the launchpad.
   Added 2026-09-19.
+  A second `Zed.exe --wsl …` launch while Zed is already running (Zed
+  1.27.0) hands off to the running instance, logs `error parsing path
+  argument`, and opens a local `empty project` window whose terminal is
+  pwsh, so herdr never attaches. The taskbar pin is therefore
+  **Zed (focus)** (Start menu `Programs/Zed/Zed (focus).lnk`), which runs
+  `AppData/Local/Programs/ZedFocus/ZedFocus.exe` (source `ZedFocus.cs` beside
+  it): focus an open Zed window, else launch on WSL. Giving the pin a shared
+  AppUserModelID does not help — Zed's windows carry none — and changing the
+  ID on an already-pinned `.lnk` makes Windows drop the pin. 2026-11-11.
 
 - A web link or rendered HTML page I should look at myself opens in my
   **personal** Chrome profile, never through `wslview` or a bare `start`:
