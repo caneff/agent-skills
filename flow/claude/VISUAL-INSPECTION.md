@@ -82,7 +82,16 @@ first: read `WSL_INTEROP` from `/proc/<claude pid>/environ` and test it with
 socket that lands in Windows session 0, where the clipboard reads empty.
 `wsl-interop-repoint.sh` repairs shells and Bash tool calls, never a running
 Claude, and restarting in the same pane inherits the pane shell's dead socket.
-The fix, tried 2026-11-03: `/exit`, then at that pane's shell:
+**Preferred fix, no restart (worked 2026-11-11):** the dead path is a file
+path Claude resolves on each paste, and `/run/WSL/<pid>_interop` for a dead
+pid is simply gone. Point it at a live socket and every stuck Claude pastes
+again: `sudo ln -s /run/WSL/<live>_interop /run/WSL/<dead>_interop`, where
+`<live>` is a socket that passes `[ -S ]` (the repointed shell's own
+`$WSL_INTEROP`). `sudo` because `/run/WSL` is root-owned; WSL itself already
+links `1_interop -> 2_interop` this way. It lasts until WSL restarts or the
+live socket's process dies; undo with `sudo rm`.
+
+The restart fix, tried 2026-11-03: `/exit`, then at that pane's shell:
 
 ```
 source ~/.agents/skills/flow/bin/wsl-interop-repoint.sh && cd <dir> && claude --resume <session id>
