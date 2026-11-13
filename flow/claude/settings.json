@@ -91,6 +91,8 @@
       "Bash(./e2e.sh *--main-monitor*)",
       "Bash(bash e2e.sh *--main-monitor*)",
       "Bash(bash ./e2e.sh *--main-monitor*)",
+      "Bash(sh e2e.sh *--main-monitor*)",
+      "Bash(sh ./e2e.sh *--main-monitor*)",
       "Bash(bash -c *e2e.sh*--main-monitor*)",
       "Bash(sh -c *e2e.sh*--main-monitor*)",
       "Bash(job-run *e2e.sh*--main-monitor*)",

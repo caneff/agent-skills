@@ -22,28 +22,34 @@ lacks() { # lacks <list> <rule>
 # run needs no go. Anchored at the start of a subcommand (#1725): a leading `*`
 # matched `e2e.sh` and `--main-monitor` anywhere in a command, so a heredoc
 # quoting a repo's AGENTS.md was denied in a `-p` run. Asserted by behaviour:
-# samples are matched against permissions.ask with glob semantics (`*` = any
-# text, whole-string match).
+# samples are matched against permissions.ask the way the harness matches a
+# Bash rule (code.claude.com/docs/en/permissions: `*` = any text, the rule must
+# match the whole subcommand). This models one subcommand; it does not split
+# compound commands on `&&`, `;`, `|` or newlines as the harness does first,
+# so a sample is one already-split subcommand (the heredoc is one command).
 e2e_check=$(jq -c '.permissions.ask' "$settings" 2>&1 | python3 -c '
-import json, re, sys
+import fnmatch, json, sys
 ask = json.loads(sys.stdin.read())
-pats = [r[5:-1] for r in ask if r.startswith("Bash(") and r.endswith(")")]
+patterns = [r[5:-1] for r in ask if r.startswith("Bash(") and r.endswith(")")]
 def matches(cmd):
-    return [p for p in pats
-            if re.fullmatch(".*".join(map(re.escape, p.split("*"))), cmd, re.S)]
+    return [p for p in patterns if fnmatch.fnmatchcase(cmd, p)]
 tw = "/home/caneff/src/twitch-rules-scroller"
-heads = ["./e2e.sh", "bash e2e.sh", "bash ./e2e.sh", tw + "/e2e.sh", "bash " + tw + "/e2e.sh",
-         tw + "/.claude/worktrees/implement-9/e2e.sh", "bash " + tw + "/.claude/worktrees/implement-9/e2e.sh",
-         "/home/caneff/src/.claude/worktrees/twitch-rules-scroller/implement-9/e2e.sh",
-         "bash /home/caneff/src/.claude/worktrees/twitch-rules-scroller/implement-9/e2e.sh",
-         "job-run --name x ./e2e.sh", "bash -c \"./e2e.sh", "sh -c \"./e2e.sh"]
+wt = tw + "/.claude/worktrees/implement-9/e2e.sh"
+wt2 = "/home/caneff/src/.claude/worktrees/twitch-rules-scroller/implement-9/e2e.sh"
+# (start of the command, text that closes it): the -c forms open a quote
+starts = [(h, "") for h in ("./e2e.sh", "bash e2e.sh", "bash ./e2e.sh", "sh e2e.sh", "sh ./e2e.sh",
+                            tw + "/e2e.sh", "bash " + tw + "/e2e.sh", wt, "bash " + wt, wt2,
+                            "bash " + wt2, "job-run --name x ./e2e.sh")]
+starts += [("bash -c \"./e2e.sh", "\""), ("sh -c \"./e2e.sh", "\"")]
 bad = []
-for h in heads:
+for head, close in starts:
     for tail, want in ((" --main-monitor", True), (" --only foo --main-monitor", True),
                        ("", False), (" --only foo", False)):
-        cmd = h + tail + ("\"" if "-c" in h else "")
+        cmd = head + tail + close
         if bool(matches(cmd)) != want:
             bad.append(("should match" if want else "must not match") + ": " + cmd)
+# The 2026-11-13 denial: e2e.sh ~4.7k chars into a heredoc, --main-monitor ~9k
+# chars after it (the sizes only make the sample as long as the real one).
 heredoc = "cat > f <<\x27PY\x27\n" + "x" * 4600 + " ./e2e.sh --only x " + "y" * 9000 + " --main-monitor\nPY"
 for cmd in (heredoc, "echo e2e.sh --main-monitor", "grep -n e2e.sh AGENTS.md; echo --main-monitor"):
     if matches(cmd):
