@@ -374,6 +374,7 @@ cpu_budget() { # <label>: prints the suite's budget in seconds
     flow/install.test.sh) echo 160 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME (measured 109s)
     flow/claude/hooks/block-dangerous-git.test.sh) echo 30 ;; # every case spawns jq, the hook, git and a gh stub: 9.2s CPU on a quiet box, 14-18s at load average 10-16 (2026-10-13, #1571)
     drain/drain_test.py) echo 100 ;; # one real git repo, bare origin and stub processes per case, 146 cases (measured 65.7s CPU alone, 67.7s in an 8-job run, 2026-10-15; 80.5s seen under drain load, #1586)
+    all-audits/driver_test.py) echo 45 ;; # each --multi case builds bare origins, clones and worktrees and spawns the driver, fake claude and fake gh: 30.3s CPU alone on origin/main c245fc48 already, 30.1s with #1721's 139 cases (2026-11-13)
     *) echo "$default_cpu_budget" ;;
   esac
 }
