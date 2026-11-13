@@ -7,6 +7,13 @@ heading to know whether the component runs.
 
 ## Codex pass — ended
 
+- **Switched off again, 2026-11-13, by Chris's ruling** ("lets totally disable
+  codex review now"): `~/.config/agent-skills/codex-reviews-off` is back, so
+  `implement/codex-usage-gate.py` answers 20 to every launch — the implement
+  lane's pass, `implement-spec`'s pass and the `--audit` launch. This is not a
+  new ablation: no decision rule, no burn count; it stays off until Chris says
+  otherwise. Skip rows still take `--skip-reason ablation` (the reason the
+  kill switch maps to, `implement/SKILL.md` § The Codex pass).
 - **Ended:** 2026-10-11 by Chris's ruling: the Codex pass stays in the wave,
   and `~/.config/agent-skills/codex-reviews-off` is removed. The escapes table
   did not decide it. In `skills` its matches were dominated by two commits
