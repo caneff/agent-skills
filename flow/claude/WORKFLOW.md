@@ -5,11 +5,14 @@ invariants; this file holds their exceptions and mechanics.
 
 ## Gate 1 — whose repo
 
-Base repo = upstream parent for a fork, else this repo. Anyone else's repo →
-hand me the drafted title/body, the `gh pr create ...` line, and a compare
-command. The ownership-gated git hook, not prose, is what blocks pushes to
-repos I don't own. Why: a push or PR to someone else's repo is seen by another
-human before me, and cannot be taken back.
+A push is judged by the repo it is sent to, so a fork I own is mine (Chris,
+2026-11-09: a fork I publish from, such as `caneff/penpa-edit`); a PR by its
+base repo. Anyone else's repo → hand me the drafted title/body, the `gh pr
+create ...` line, and a compare command. The ownership-gated git hook
+(`hooks/block-dangerous-git.sh`, whose header says how each repo is
+resolved), not prose, is what blocks pushes and PRs to repos I don't own.
+Why: a push or PR to someone else's repo is seen by another human before me,
+and cannot be taken back.
 
 ## Undoable or not
 

@@ -14,6 +14,11 @@ hook="$here/block-dangerous-git.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export XDG_CACHE_HOME="$tmp/cache"   # keep the ownership cache out of the real one
+# The hook reads pushRemote, pushDefault and insteadOf, which git also takes
+# from the global and system config: point both at this test's own files.
+mkdir -p "$tmp/home"
+export HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" GIT_CONFIG_GLOBAL="$tmp/gitconfig" GIT_CONFIG_NOSYSTEM=1
+printf '[user]\n\tname = test\n\temail = test@example.invalid\n' > "$GIT_CONFIG_GLOBAL"
 
 # A throwaway repo with a github origin, sitting on its default branch.
 repo="$tmp/repo"
@@ -22,10 +27,28 @@ git -C "$repo" remote add origin https://github.com/caneff/agent-skills.git
 
 # gh stub: `gh api user` prints $STUB_LOGIN, `gh repo view` prints $STUB_OWNER/name.
 # Either being empty makes the stub exit non-zero, standing in for "gh broke".
+# With $STUB_REPOS naming a file, `gh repo view <url> ... -q <filter>` answers
+# per repo instead: each line is `<owner/name> <owner login> <isFork> <parent
+# owner/name or ->`, the filter runs over that repo's JSON, a repo not listed
+# is GitHub's "Could not resolve", and an empty $STUB_LOGIN fails every call.
 stubdir="$tmp/bin"
 mkdir -p "$stubdir"
 cat > "$stubdir/gh" <<'STUB'
 #!/usr/bin/env bash
+if [ -n "${STUB_REPOS:-}" ] && [ "$1 $2" = "repo view" ]; then
+  [ -n "${STUB_LOGIN:-}" ] || { echo "${STUB_ERR:-}" >&2; exit 1; }
+  slug=${3#*github.com}; slug=${slug#[:/]}; slug=${slug%/}; slug=${slug%.git}
+  filter=.; prev=
+  for a in "$@"; do [ "$prev" = -q ] && filter=$a; prev=$a; done
+  line=$(awk -v s="$slug" 'tolower($1) == tolower(s)' "$STUB_REPOS")
+  [ -n "$line" ] || { echo "GraphQL: Could not resolve to a Repository with the name '$slug'. (repository)" >&2; exit 1; }
+  read -r name owner fork parent <<< "$line"
+  jq -rn --arg n "${name#*/}" --arg o "$owner" --argjson f "$fork" --arg p "$parent" \
+    '{name: $n, owner: {login: $o}, isFork: $f,
+      parent: (if $p == "-" then null else {owner: {login: ($p | split("/")[0])}, name: ($p | split("/")[1])} end)}' \
+    | jq -r "$filter"
+  exit
+fi
 case "$1 $2" in
   "api user")  [ -n "${STUB_LOGIN:-}" ] || { echo "${STUB_ERR:-}" >&2; exit 1; }; printf '%s\n' "$STUB_LOGIN" ;;
   "repo view") [ -n "${STUB_OWNER:-}" ] || { echo "${STUB_ERR:-}" >&2; exit 1; }; printf '%s/agent-skills\n' "$STUB_OWNER" ;;
@@ -237,7 +260,7 @@ run "phrase search with a --type sh flag allowed on unowned repo" 0 \
 run "a bash run chained with a phrase grep allowed on unowned repo" 0 \
   "bash tests/all.sh && grep -rn \"gh pr merge --squash\" ."
 run "backticks inside single quotes allowed on unowned repo" 0 \
-  "gh pr create --title t --body 'run \`gh pr merge 12\` after CLEAN'"
+  "gh issue comment 5 --body 'run \`gh pr merge 12\` after CLEAN'"
 run "gh pr merge piped into a shell blocked on unowned repo" 2 \
   "echo 'gh pr merge 12' | sh" "gh pr merge"
 
@@ -313,8 +336,10 @@ RUN_CWD="$tmp" RUN_FORBID="you don't own" run "merge outside a checkout is a loo
 
 # The merge's own login read keeps gh's error text (#1309).
 rm -rf "$XDG_CACHE_HOME"
-# Prime the ownership cache with an owned verdict; no assertion of its own, the cases below read it.
-printf '%s' "git push origin main" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+# Prime the ownership cache with an owned verdict on this checkout's PR base;
+# no assertion of its own, the cases below read it. A merge earns it: a push
+# earns a verdict on the remote it sends to, which never vouches for a base.
+printf '%s' "gh pr merge 12 --squash" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
   | (cd "$repo" && PATH="$stubdir:$PATH" bash "$hook") >/dev/null 2>&1
 export STUB_LOGIN= STUB_ERR="boom2: login read failed"
 RUN_FORBID="you don't own" run "merge naming a repo, login read failing, keeps gh's text" 2 \
@@ -322,6 +347,153 @@ RUN_FORBID="you don't own" run "merge naming a repo, login read failing, keeps g
 RUN_FORBID="ownership of caneff-agent/skills" run "merge naming a repo, login read failing, names that repo's owner" 2 \
   "gh pr merge 1 --repo caneff/x" "could not verify ownership of the repo the command names (owner caneff)"
 unset STUB_ERR
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+
+# A push is judged by the repo it is sent to, with no fork->parent
+# substitution, and a PR by its base repo (Chris, 2026-11-09: caneff/penpa-edit
+# is a fork of swaroopg92/penpa-edit that publishes from its own master and
+# never PRs upstream). The checkout below is that fork: origin is the owned
+# fork, upstream its parent, which someone else owns.
+fork="$tmp/fork"
+git init -q -b master "$fork"
+git -C "$fork" remote add origin https://github.com/caneff/penpa-edit.git
+git -C "$fork" remote add upstream https://github.com/swaroopg92/penpa-edit.git
+solo="$tmp/solo"
+git init -q -b main "$solo"
+git -C "$solo" remote add origin git@github.com:caneff/solo.git
+cat > "$tmp/repos" <<'EOF'
+caneff/penpa-edit caneff true swaroopg92/penpa-edit
+swaroopg92/penpa-edit swaroopg92 false -
+caneff/solo caneff false -
+someone-else/fork someone-else true caneff/solo
+EOF
+export STUB_REPOS="$tmp/repos" STUB_LOGIN=caneff
+rm -rf "$XDG_CACHE_HOME"
+RUN_CWD="$fork" run "owned fork: push to origin allowed" 0 "git push origin master"
+RUN_CWD="$fork" run "owned fork: bare push goes to origin, allowed" 0 "git push"
+RUN_CWD="$fork" run "owned fork: push to the named non-owned remote blocked" 2 \
+  "git push upstream master" "swaroopg92/penpa-edit"
+run "owned fork: -C push to the named non-owned remote blocked" 2 \
+  "git -C $fork push -u upstream master" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "owned fork: push to a non-owned URL blocked" 2 \
+  "git push https://github.com/swaroopg92/penpa-edit.git master" "BLOCKED"
+RUN_CWD="$fork" run "owned fork: a later push in the chain to a non-owned remote blocked" 2 \
+  "git push origin master && git push upstream master" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "owned fork: --repo naming the non-owned remote blocked" 2 \
+  "git push --repo=upstream" "swaroopg92/penpa-edit"
+RUN_FORBID="retry" RUN_CWD="$fork" run "push: a remote read from a shell variable is refused, not called a blip" 2 \
+  'git push "$R" master' "cannot tell where to"
+# A target the push parser cannot read as a configured remote fails closed:
+# the old guard blocked each of these in a foreign checkout.
+RUN_CWD="$fork" run "push: a backslash-newline before the remote still reads it" 2 \
+  "git push \\
+upstream master" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "push: a subshell around the push still reads the remote" 2 \
+  "( git push upstream)" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "push: a word that is no remote, URL or path is refused" 2 \
+  "git push nosuchremote master" "no remote configured"
+RUN_CWD="$fork" run "push: a comment on the push line is refused" 2 \
+  "git push origin master # note" "cannot tell where to"
+RUN_CWD="$solo" run "push: a cd into another checkout is refused, naming -C" 2 \
+  "cd $fork && git push upstream master" "git -C <absolute path> push"
+RUN_CWD="$fork" run "push: -o's value is not read as the remote" 2 \
+  "git push -o ci.skip upstream master" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "push: -o's value is skipped on an owned remote too" 0 \
+  "git push -o ci.skip origin master"
+RUN_CWD="$fork" run "push: git -c before the verb still judged" 2 \
+  "git -c push.default=current push upstream master" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "push: git --no-pager before the verb still judged" 2 \
+  "git --no-pager push upstream master" "swaroopg92/penpa-edit"
+RUN_FORBID="SECRET" RUN_CWD="$fork" run "push: a token in a spelled-out URL never reaches the block text" 2 \
+  "git push https://tok:SECRET@github.com/swaroopg92/penpa-edit.git master" "swaroopg92/penpa-edit"
+git -C "$fork" config branch.master.pushRemote upstream
+RUN_CWD="$fork" run "owned fork: bare push to a non-owned pushRemote blocked" 2 \
+  "git push" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "owned fork: backgrounded bare push to a non-owned pushRemote blocked" 2 \
+  "git push &" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "owned fork: named origin overrides a non-owned pushRemote" 0 "git push origin master"
+git -C "$fork" config --unset branch.master.pushRemote
+git -C "$fork" config remote.pushDefault upstream
+RUN_CWD="$fork" run "owned fork: bare push to a non-owned pushDefault blocked" 2 "git push 2>&1" "swaroopg92/penpa-edit"
+git -C "$fork" config --unset remote.pushDefault
+git -C "$fork" config branch.master.remote upstream
+RUN_CWD="$fork" run "owned fork: bare push to a non-owned branch remote blocked" 2 "git push" "swaroopg92/penpa-edit"
+git -C "$fork" config --unset branch.master.remote
+git -C "$fork" remote set-url --push origin https://github.com/swaroopg92/penpa-edit.git
+RUN_CWD="$fork" run "owned fork: origin whose push URL is non-owned blocked" 2 \
+  "git push origin master" "swaroopg92/penpa-edit"
+git -C "$fork" remote set-url --delete --push origin https://github.com/swaroopg92/penpa-edit.git
+
+# `gh pr create` is gated on the PR's base: every repo the command names, and
+# unless the create names its own, every repo gh could default to (each
+# remote, a fork's parent, a set-default repo).
+rm -rf "$XDG_CACHE_HOME"
+RUN_CWD="$fork" run "owned fork: gh pr new, gh's alias, blocked" 2 \
+  "gh pr new --title t" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: repo flag between pr and create naming the parent blocked" 2 \
+  "gh pr --repo swaroopg92/penpa-edit create --title t" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: repo flag between pr and create naming the fork allowed" 0 \
+  "gh pr -R caneff/penpa-edit create --title t"
+RUN_CWD="$fork" run "owned fork: an owned --repo only inside the body text does not set the base" 2 \
+  "gh pr create --title t --body 'use --repo caneff/penpa-edit'" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: gh pr create in a heredoc fed to sh blocked" 2 \
+  $'sh <<EOF\ngh pr create --title t\nEOF' "BLOCKED"
+RUN_CWD="$solo" run "owned non-fork: a quoted ; does not hide a foreign --repo" 2 \
+  "gh pr create --title \"a; b\" --repo someone-else/x" "! gh pr create"
+RUN_CWD="$solo" run "owned non-fork: an exported GH_REPO naming a foreign repo blocked" 2 \
+  "export GH_REPO=someone-else/x; gh pr create --title t" "! gh pr create"
+RUN_CWD="$solo" run "owned non-fork: a cd before gh pr create is refused" 2 \
+  "cd $fork && gh pr create --title t" "cannot tell its base"
+git -C "$solo" remote add upstream https://github.com/swaroopg92/penpa-edit.git
+RUN_CWD="$solo" run "owned non-fork with a foreign upstream remote: default base blocked" 2 \
+  "gh pr create --title t" "swaroopg92/penpa-edit"
+git -C "$solo" remote remove upstream
+git -C "$solo" config remote.origin.gh-resolved swaroopg92/penpa-edit
+RUN_CWD="$solo" run "owned non-fork whose gh set-default is foreign: default base blocked" 2 \
+  "gh pr create --title t" "swaroopg92/penpa-edit"
+git -C "$solo" config --unset remote.origin.gh-resolved
+RUN_CWD="$fork" run "owned fork: gh pr create with the default base (parent) blocked" 2 \
+  "gh pr create --title t --body b" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: the block names the parent base" 2 \
+  "gh pr create --title t --body b" "swaroopg92/penpa-edit"
+RUN_CWD="$fork" run "owned fork: gh pr create -R the owned fork allowed" 0 \
+  "gh pr create -R caneff/penpa-edit --title t --body b"
+RUN_CWD="$fork" run "owned fork: gh pr create --repo the parent blocked" 2 \
+  "gh pr create --repo swaroopg92/penpa-edit --title t" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: an owned --repo on another command does not set the base" 2 \
+  "gh pr view 1 --repo caneff/penpa-edit && gh pr create --title t" "! gh pr create"
+RUN_CWD="$fork" run "owned fork: gh pr create handed to bash -c blocked" 2 \
+  "bash -c 'gh pr create --title t'" "! gh pr create"
+RUN_CWD="$fork" run "gh pr create named in a commit message allowed" 0 \
+  "git commit -m \"docs: then run gh pr create\""
+
+# A non-fork owned repo is unchanged: push and PR both allowed.
+RUN_CWD="$solo" run "owned non-fork: push allowed" 0 "git push origin main"
+RUN_CWD="$solo" run "owned non-fork: gh pr create allowed" 0 "gh pr create --title t --body b"
+
+# The cache keys a verdict on the slug it judged: an owned verdict on the fork
+# (from the pushes above) must never clear its parent, as a PR base or a
+# merge, when gh is down.
+rm -rf "$XDG_CACHE_HOME"
+RUN_CWD="$fork" run "owned fork: push earns a cached verdict" 0 "git push origin master"
+export STUB_LOGIN=
+RUN_CWD="$fork" run "owned fork, gh down: cached push verdict still allows the push" 0 "git push origin master"
+RUN_CWD="$fork" run "owned fork, gh down: the fork's verdict does not clear a PR to its parent" 2 \
+  "gh pr create --title t" "BLOCKED"
+RUN_CWD="$fork" run "owned fork, gh down: the fork's verdict does not clear a merge on its parent" 2 \
+  "gh pr merge 3 --squash" "BLOCKED"
+# An entry written under the old fork->parent rule holds the parent, not its
+# own slug: someone else's fork of an owned repo was cached as owned. It must
+# be re-asked, not trusted.
+mkdir -p "$XDG_CACHE_HOME/claude-git-guard"
+printf 'caneff/solo\n' > "$XDG_CACHE_HOME/claude-git-guard/someone-else@fork"
+git -C "$fork" remote add theirs https://github.com/someone-else/fork.git
+RUN_CWD="$fork" run "old fork->parent cache entry does not clear a push to the fork" 2 \
+  "git push theirs master" "BLOCKED"
+export STUB_LOGIN=caneff
+RUN_CWD="$fork" run "someone else's fork of an owned repo: push blocked" 2 \
+  "git push theirs master" "someone-else/fork"
+unset STUB_REPOS
 export STUB_LOGIN=caneff STUB_OWNER=caneff
 
 # Reading git is untouched.
