@@ -86,7 +86,7 @@ A finished sweep copied to `~/.local/share/all-audits/<repo>/<sweep-id>/` (its `
 _Avoid_: archive, saved run, cached sweep
 
 **Multi-repo index**:
-The page a `--multi` pass writes at `~/.local/share/all-audits/multi/<sweep-id>/index.html`: one row per repo in the order given, with its status, its stored sweep's index, its audit record and its reports. Rewritten after each repo, from the pass's `state.json`, and opened once at the end; `driver.py --multi-index <sweep-id>` rebuilds it.
+The one page a `--multi` pass writes, at `~/.local/share/all-audits/multi/<sweep-id>/index.html`, linking every repo's stored sweep and audit record. When it is written and opened: `all-audits/SKILL.md` § Multi-repo.
 _Avoid_: progress page, run page, summary page
 
 **Audit record**:

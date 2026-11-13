@@ -2257,3 +2257,85 @@ def test_multi_page_marks_an_audit_reused_as_unchanged_with_its_sha(tmp_path):
     _, row = _page_rows(open(os.path.join(second, "index.html")).read())["alpha"]
     sha = _git_out(a, "rev-parse", "origin/main")[:8]
     assert re.search(rf'>domain-drift</a> <em class="mark-unchanged">unchanged since {sha}</em>', row), row
+
+
+def _rebuild_without_state(tmp, env):
+    """Drop the pass's page folder, state.json with it, and rebuild: the rows
+    of a pass that recorded none."""
+    (page_dir,) = _multi_page_dirs(tmp)
+    shutil.rmtree(page_dir)
+    r = _multi_index(env, os.path.basename(page_dir))
+    page = os.path.join(page_dir, "index.html")
+    return r, _page_rows(open(page).read()) if os.path.isfile(page) else {}
+
+
+def test_multi_index_refuses_a_corrupt_state_file_never_renders_it_as_no_repos(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _multi([a], env, **_record_env(tmp, [_finding(1)]))
+    (page_dir,) = _multi_page_dirs(tmp)
+    state = os.path.join(page_dir, "state.json")
+    for broken in ('{"sweep_id": "x", "repos": [', '{"repos": [{"label": "alpha", "bogus": 1}]}'):
+        open(state, "w").write(broken)
+        r = _multi_index(env, os.path.basename(page_dir))
+        assert r.returncode == 1 and state in r.stderr, r.stdout + r.stderr
+        assert "index:" not in r.stdout and "Traceback" not in r.stderr, r.stdout + r.stderr
+
+
+def test_fallback_row_of_a_sweep_with_a_failed_audit_is_failed_naming_it(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _multi([a], env, "--only", "dead-code,duplication", **_record_env(tmp, [_finding(1)]))
+    r, rows = _rebuild_without_state(tmp, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert rows["alpha"][0] == "failed" and "1 audit(s) failed: duplication" in rows["alpha"][1], rows
+
+
+def test_fallback_row_of_a_corrupt_sweep_state_is_failed_and_its_marks_unknown(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    _multi([a], env, **_record_env(tmp, [_finding(1)]))
+    (stored,) = _stored_sweeps(tmp, "alpha")
+    open(os.path.join(stored, "sweep-state.json"), "w").write("{not json")
+    r, rows = _rebuild_without_state(tmp, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    status, row = rows["alpha"]
+    assert status == "failed" and "sweep-state.json unreadable" in row, row
+    assert "marks unknown" in row, row
+
+
+def test_fallback_row_of_a_sweep_whose_record_misses_comments_is_failed(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    rows = [_finding(n, summary="S%03d-" % n + "x" * 400) for n in range(150)]
+    _multi([a], env, **_record_env(tmp, rows, FAKE_GH_COMMENT_EXIT="1"))
+    r, page_rows = _rebuild_without_state(tmp, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert page_rows["alpha"][0] == "failed" and "misses comments" in page_rows["alpha"][1], page_rows
+
+
+def test_a_page_that_cannot_be_written_is_named_and_every_repo_is_still_swept(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    os.makedirs(os.path.join(tmp, "data", "all-audits"))
+    open(os.path.join(tmp, "data", "all-audits", "multi"), "w").close()  # a file where the folder goes
+    r = _multi([a, b], env, **_record_env(tmp, [_finding(1)]))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "alpha: swept" in r.stdout and "beta: swept" in r.stdout, r.stdout + r.stderr
+    assert "multi-repo index not written" in r.stderr, r.stderr
+
+
+def test_a_multi_pass_prints_exactly_one_index_line_and_it_is_the_page(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    r = _multi([a, b], env, **_record_env(tmp, [_finding(1)]))
+    (page_dir,) = _multi_page_dirs(tmp)
+    lines = [l for l in r.stdout.splitlines() if l.startswith("index: ")]
+    assert lines == [f"index: {os.path.join(page_dir, 'index.html')}"], r.stdout
+
+
+def test_multi_index_refuses_roots(tmp_path):
+    tmp = str(tmp_path)
+    _, env = _multi_fixture(tmp, [])
+    r = _multi_index(env, "20990101-000000", "--roots", "/x")
+    assert r.returncode == 2 and "combines with nothing else" in r.stderr, r.stderr
