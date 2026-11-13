@@ -854,7 +854,18 @@ def render_mutation_subindex(collection, repo, mut):
 SYNTHESIS_FILE = "synthesis.txt"
 
 
-def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False):
+def report_links(collection):
+    """{audit: its report's path relative to `collection`, or ""}: the first
+    `.html` in each audit's folder."""
+    links = {}
+    for name in AUDIT_NAMES:
+        d = os.path.join(collection, name)
+        htmls = sorted(f for f in os.listdir(d) if f.endswith(".html")) if os.path.isdir(d) else []
+        links[name] = f"{name}/{htmls[0]}" if htmls else ""
+    return links
+
+
+def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_label="index"):
     """Assemble the collection from what is on disk and render the index.
 
     Reports arrive two ways — through the manifest each audit that ran wrote,
@@ -883,15 +894,7 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False):
             replace_dir(os.path.join(collection, name), os.path.join(stable, name))
             update_cache(repo, name, os.path.join(stable, name), base=base, key=key)
 
-    report_link = {}
-    for name in AUDIT_NAMES:
-        d = os.path.join(collection, name)
-        found = None
-        if os.path.isdir(d):
-            htmls = sorted(f for f in os.listdir(d) if f.endswith(".html"))
-            found = htmls[0] if htmls else None
-        report_link[name] = f"{name}/{found}" if found else ""
-
+    report_link = report_links(collection)
     mut = scan_mutation(collection)
 
     report_files = [os.path.join(collection, report_link[n]) for n in AUDIT_NAMES if report_link[n]]
@@ -931,7 +934,7 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False):
 
     index_path = os.path.join(collection, "index.html")
     print()
-    print(f"index: {index_path}")
+    print(f"{index_label}: {index_path}")
     print(f"logs: {run.logs}")
     return index_path
 
@@ -958,9 +961,11 @@ class SweepResult:
     failed: list
 
 
-def run_sweep(repo, out, only, short, force, key=None):
-    """Plan, execute and collect one sweep; opens the index. Returns what
-    happened: the audit record (#1680) is built from it."""
+def run_sweep(repo, out, only, short, force, key=None, standalone=True):
+    """Plan, execute and collect one sweep. Standalone, it prints its index as
+    `index:` and opens it; one repo of a `--multi` pass prints `repo index:`
+    and opens nothing, since the pass's own page is its `index:` (#1721).
+    Returns what happened: the audit record (#1680) is built from it."""
     repo = os.path.abspath(repo)
     selected = only if only is not None else (SHORT_SET if short else list(AUDIT_NAMES))
     jobs = sweep_jobs()  # before the run dir exists, as mutation_mode does
@@ -968,7 +973,9 @@ def run_sweep(repo, out, only, short, force, key=None):
     _announce(run, repo)
     plan = plan_sweep(repo, selected, force, key=key)
     failed = execute(repo, plan, run, jobs)
-    open_index(collect(run, repo, plan, key=key))
+    index = collect(run, repo, plan, key=key, index_label="index" if standalone else "repo index")
+    if standalone:
+        open_index(index)
     return SweepResult(run, plan, failed)
 
 
@@ -1049,18 +1056,28 @@ def label_refusal(repo, label):
 RECORD_FILE = "audit-record.json"
 
 
+def repo_sweep_dirs(name="*", sweep_id="*"):
+    """Every repo's stored sweep folder, sorted, `name` and `sweep_id` as glob
+    patterns. The multi-repo index folder (`MULTI_DIR`, #1721) holds no repo's
+    sweeps and is never one."""
+    return [d for d in sorted(glob.glob(os.path.join(stored_sweeps_base(), name, sweep_id)))
+            if os.path.isdir(d) and os.path.basename(os.path.dirname(d)) != MULTI_DIR]
+
+
 def stored_records(name=None):
     """Each stored sweep holding an audit record, oldest first within a repo:
     (sweep dir, record) with `issue` an int, or (sweep dir, None) when the
     record cannot be read. `name` keeps one repo's."""
-    pattern = os.path.join(stored_sweeps_base(), name or "*", "*", RECORD_FILE)
-    for path in sorted(glob.glob(pattern)):
+    for sweep in repo_sweep_dirs(name or "*"):
+        path = os.path.join(sweep, RECORD_FILE)
+        if not os.path.isfile(path):
+            continue
         try:
             rec = json.load(open(path, encoding="utf-8"))
             rec["issue"], rec["url"] = int(rec["issue"]), str(rec["url"])
         except (OSError, ValueError, KeyError, TypeError):
             rec = None
-        yield os.path.dirname(path), rec
+        yield sweep, rec
 
 
 def record_repo(sweep, rec):
@@ -1146,7 +1163,9 @@ def prune_closed_sweeps():
     One whose record is open, unreadable, or whose state `gh` does not answer
     is kept, and a failed lookup is printed, never read as closed. A stored
     sweep with no record at all (its issue was never filed) is deleted once it
-    is older than `RUN_TTL_DAYS`, so nothing grows without bound."""
+    is older than `RUN_TTL_DAYS`, so nothing grows without bound. A multi-repo
+    index (#1721) is deleted once it is that old and no stored sweep carrying
+    its sweep id is left for it to link."""
     for sweep, rec in stored_records():
         if rec is None:
             print(f"stored sweep {sweep}: kept ({RECORD_FILE} unreadable)", file=sys.stderr)
@@ -1157,12 +1176,17 @@ def prune_closed_sweeps():
         elif state is None:
             print(f"stored sweep {sweep}: kept (record #{rec['issue']}: {why})", file=sys.stderr)
     cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
-    for sweep in glob.glob(os.path.join(stored_sweeps_base(), "*", "*")):
-        if (os.path.isdir(sweep) and not os.path.exists(os.path.join(sweep, RECORD_FILE))
-                and os.path.getmtime(sweep) < cutoff):
+    for sweep in repo_sweep_dirs():
+        if not os.path.exists(os.path.join(sweep, RECORD_FILE)) and os.path.getmtime(sweep) < cutoff:
             print(f"stored sweep {sweep}: deleted (no audit record, older than {RUN_TTL_DAYS} days)",
                   file=sys.stderr)
             shutil.rmtree(sweep, ignore_errors=True)
+    for page_dir in glob.glob(os.path.join(stored_sweeps_base(), MULTI_DIR, "*")):
+        if (os.path.isdir(page_dir) and os.path.getmtime(page_dir) < cutoff
+                and not repo_sweep_dirs(sweep_id=os.path.basename(page_dir))):
+            print(f"multi-repo index {page_dir}: deleted (no stored sweep left to link, older than "
+                  f"{RUN_TTL_DAYS} days)", file=sys.stderr)
+            shutil.rmtree(page_dir, ignore_errors=True)
 
 
 @dataclasses.dataclass
@@ -1304,7 +1328,8 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
         earlier = latest_record_url(name)  # before this sweep stores its own
         result, failure = None, None
         try:
-            result = run_sweep(wt, os.path.join(run_root, "run"), only, short, force, key="github:" + slug)
+            result = run_sweep(wt, os.path.join(run_root, "run"), only, short, force, key="github:" + slug,
+                               standalone=False)
         except SystemExit as e:
             if e.code not in (0, None):
                 failure = f"sweep stopped before collecting: {e.code if isinstance(e.code, str) else f'exit {e.code}'}"
@@ -1344,53 +1369,280 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
         _run(["git", "-C", repo, "worktree", "prune"])
 
 
+@dataclasses.dataclass
+class RepoRow:
+    """One repo of a `--multi` pass: what its summary line and its row on the
+    multi-repo index both say (#1721). `status` is one of `REPO_STATUSES`."""
+
+    label: str
+    status: str
+    reason: str = ""
+    stored: str = ""
+    issue_url: str = ""
+
+    def summary_line(self):
+        if self.status == "swept":
+            return f"{self.label}: swept -> {self.stored}" + (
+                f"; audit record: {self.issue_url}" if self.issue_url
+                else "; no audit record (no findings, no failures)")
+        link = f"; audit record: {self.issue_url}" if self.status == "failed" and self.issue_url else ""
+        return f"{self.label}: {self.status} ({self.reason}){link}"
+
+
+NOT_YET_RUN = "not yet run"
+REPO_STATUSES = ("swept", "failed", "refused", "triage pending", "skipped", NOT_YET_RUN)
+
+
+def _path_label(repo):
+    return os.path.basename(repo.rstrip("/")) or repo
+
+
 def _multi_one(repo, base, sweep_id, only, short, force, seen):
-    """One repo of a multi-repo sweep: (summary line, whether it failed)."""
+    """One repo of a multi-repo sweep: (its RepoRow, whether it failed)."""
     slug, refusal = repo_identity(repo)
-    label = slug.split("/", 1)[1] if slug else (os.path.basename(repo.rstrip("/")) or "repo")
+    label = slug.split("/", 1)[1] if slug else _path_label(repo)
     if refusal:
-        return f"{label}: refused ({refusal})", False
+        return RepoRow(label, "refused", refusal), False
+    if label == MULTI_DIR:  # its stored sweeps would land in the multi-repo index folder
+        return RepoRow(label, "refused", f"a repo named `{MULTI_DIR}` collides with the multi-repo index folder"), False
     if slug in seen:
-        return f"{label}: skipped ({repo} is {slug} again, already swept from {seen[slug]})", False
+        return RepoRow(label, "skipped", f"{repo} is {slug} again, already swept from {seen[slug]}"), False
     seen[slug] = repo
     why = resume_unposted(label)
     if why:
-        return f"{label}: failed ({why})", True
+        return RepoRow(label, "failed", why), True
     open_record, why = earlier_record(label)
     if why:
-        return f"{label}: refused ({why})", False
+        return RepoRow(label, "refused", why), False
     if open_record and not force:
-        return f"{label}: triage pending ({open_record})", False
+        return RepoRow(label, "triage pending", open_record, issue_url=open_record), False
     o = _sweep_origin_main(repo, slug, os.path.join(base, repo_key(repo)), sweep_id, only, short, force, open_record)
-    link = f"; audit record: {o.issue_url}" if o.issue_url else ""
     if o.status == "refused":
-        return f"{label}: refused ({o.reason})", False
-    if o.status == "failed":
-        return f"{label}: failed ({o.reason}){link}", True
-    return f"{label}: swept -> {o.stored}{link or '; no audit record (no findings, no failures)'}", False
+        return RepoRow(label, "refused", o.reason), False
+    return RepoRow(label, o.status, o.reason, o.stored, o.issue_url), o.status == "failed"
 
 
 def multi_mode(repos, out, only, short, force):
     """Sweep each repo in turn (never overlapping); one summary line per repo.
     Exits 1 if any repo failed; a refused repo is reported, not a failure. A
-    repo that crashes is that repo's failure, and the rest still run."""
+    repo that crashes is that repo's failure, and the rest still run. The
+    multi-repo index is rewritten after each repo and opened once, at the end."""
     sweep_jobs()  # a bad SWEEP_JOBS stops the run before any repo is touched
     prune_closed_sweeps()
     sweep_id = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     base = os.path.abspath(out) if out else os.path.join(cache_base(), "multi-" + sweep_id)
-    summary, failed, seen = [], False, {}
-    for path in repos:
-        repo = os.path.abspath(path)
+    paths = [os.path.abspath(p) for p in repos]
+    rows = [RepoRow(_path_label(p), NOT_YET_RUN) for p in paths]
+    page, failed = _write_page_or_say(sweep_id, rows), False
+    if page:
+        print(f"multi-repo index (rewritten as each repo finishes): {page}")
+    page_ok, seen = bool(page), {}
+    for i, repo in enumerate(paths):
         try:
-            line, bad = _multi_one(repo, base, sweep_id, only, short, force, seen)
+            rows[i], bad = _multi_one(repo, base, sweep_id, only, short, force, seen)
         except Exception as e:  # noqa: BLE001 - reported by name, never swallowed
-            line, bad = f"{os.path.basename(repo.rstrip('/')) or repo}: failed (crashed: {e!r})", True
-        summary.append(line)
+            rows[i], bad = RepoRow(_path_label(repo), "failed", f"crashed: {e!r}"), True
         failed = failed or bad
+        page = _write_page_or_say(sweep_id, rows)
+        page_ok = page_ok and bool(page)
     print("\n== multi-repo summary ==")
-    print("\n".join(summary))
-    if failed:
+    print("\n".join(row.summary_line() for row in rows))
+    if page:
+        print(f"index: {page}")
+        open_index(page)
+    if failed or not page_ok:
         sys.exit(1)
+
+
+def _write_page_or_say(sweep_id, rows):
+    """The page's path, or None after naming on stderr why it was not written:
+    a page that fails never stops the sweeps it reports on, and the pass exits
+    1 for it."""
+    try:
+        return write_multi_page(sweep_id, rows)
+    except (OSError, MultiIndexError) as e:
+        print(f"multi-repo index not written: {e}", file=sys.stderr)
+        return None
+
+
+# --- the multi-repo index (#1721) --------------------------------------------
+
+MULTI_DIR = "multi"  # under stored_sweeps_base(): one folder per sweep id, never a repo's
+MULTI_STATE_FILE = "state.json"
+SWEEP_ID = re.compile(r"\d{8}-\d{6}")
+
+
+class MultiIndexError(Exception):
+    """The multi-repo index cannot be rendered truthfully; the message says why."""
+
+
+def read_json(path):
+    """(data, None), or (None, why) for a file that cannot be read or is not
+    JSON. Never `{}` for a broken file, which would read as a clean one."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f), None
+    except (OSError, ValueError) as e:
+        return None, f"{path} unreadable ({e})"
+
+
+def multi_page_dir(sweep_id):
+    return os.path.join(stored_sweeps_base(), MULTI_DIR, sweep_id)
+
+
+def write_multi_page(sweep_id, rows):
+    """Record the pass's rows in its `state.json`, then render the page from
+    it: the live pass and `--multi-index` render through the same read."""
+    save_record(os.path.join(multi_page_dir(sweep_id), MULTI_STATE_FILE),
+                {"sweep_id": sweep_id, "repos": [dataclasses.asdict(r) for r in rows]})
+    return render_multi_page(sweep_id)
+
+
+def state_rows(state_path):
+    """The rows a pass recorded; raises MultiIndexError for a file that is
+    unreadable or does not hold repo rows."""
+    data, why = read_json(state_path)
+    if why:
+        raise MultiIndexError(why)
+    try:
+        return [RepoRow(**r) for r in data["repos"]]
+    except (KeyError, TypeError) as e:
+        raise MultiIndexError(f"{state_path} unreadable (not a list of repo rows: {e!r})") from e
+
+
+def sweep_marks(stored):
+    """(failed, skip_note, why) from a stored sweep's sweep-state.json; `why`
+    names a file missing or unreadable, whose marks are then unknown."""
+    path = os.path.join(stored, SWEEP_STATE_FILE)
+    if not os.path.isfile(path):
+        return {}, {}, "sweep stopped before collecting"
+    data, why = read_json(path)
+    if why or not isinstance(data, dict):
+        return {}, {}, f"{SWEEP_STATE_FILE} unreadable"
+    return data.get("failed") or {}, data.get("skip_note") or {}, None
+
+
+def stored_record(stored):
+    """(issue url or "", why the record is incomplete or None) for a stored
+    sweep: never filed although its text was written, missing comments, or
+    an unreadable record file."""
+    path = os.path.join(stored, RECORD_FILE)
+    if not os.path.isfile(path):
+        return "", ("audit record not filed" if os.path.isfile(os.path.join(stored, "audit-record-0.md")) else None)
+    rec, why = read_json(path)
+    if why or not isinstance(rec, dict):
+        return "", f"{RECORD_FILE} unreadable"
+    url = str(rec.get("url", ""))
+    unposted = rec.get("unposted") or []
+    return url, (f"audit record {url} misses comments {', '.join(map(str, unposted))}" if unposted else None)
+
+
+def rows_from_stored_sweeps(sweep_id):
+    """The rows a sweep id's stored sweeps alone can give, for a pass that
+    wrote no `state.json` (started before #1721): swept, or failed with every
+    problem its files show, sorted by name. Refused, skipped and
+    triage-pending repos left nothing."""
+    rows = []
+    for stored in repo_sweep_dirs(sweep_id=sweep_id):
+        failed, _, marks_why = sweep_marks(stored)
+        url, record_why = stored_record(stored)
+        audits_why = f"{len(failed)} audit(s) failed: {', '.join(failed)}" if failed else None
+        problems = [p for p in (marks_why, audits_why, record_why) if p]
+        rows.append(RepoRow(os.path.basename(os.path.dirname(stored)), "failed" if problems else "swept",
+                            "; ".join(problems), stored, url))
+    return rows
+
+
+def _link(href, text):
+    return f'<a href="{html.escape(href)}">{html.escape(text)}</a>'
+
+
+_MUTED = '<span style="color:var(--vt-muted)">{}</span>'
+
+
+def _row_reports(stored, page_dir):
+    """The reports cell: a link per audit report, each failed or unchanged
+    audit marked with the note its stored sweep recorded."""
+    collection = os.path.join(stored, "collection")
+    failed, skipped, why = sweep_marks(stored)
+    links = report_links(collection)
+    items = []
+    for name in AUDIT_NAMES:
+        if not (links[name] or name in failed or name in skipped):
+            continue
+        item = (_link(os.path.relpath(os.path.join(collection, links[name]), page_dir), name)
+                if links[name] else html.escape(name))
+        if name in failed:
+            item += f' <strong class="mark-failed">FAILED: {html.escape(str(failed[name]))}</strong>'
+        if name in skipped:
+            item += f' <em class="mark-unchanged">{html.escape(str(skipped[name]))}</em>'
+        items.append(f"<li>{item}</li>")
+    note = f"<p>{_MUTED.format('marks unknown: ' + html.escape(why))}</p>" if why else ""
+    return note + (f'<ul>{"".join(items)}</ul>' if items else _MUTED.format("no reports"))
+
+
+def _multi_row(row, page_dir):
+    status = html.escape(row.status) + (f" ({html.escape(row.reason)})" if row.reason else "")
+    index = os.path.join(row.stored, "collection", "index.html") if row.stored else ""
+    sweep = (_link(os.path.relpath(index, page_dir), "sweep index") if index and os.path.isfile(index)
+             else _MUTED.format("no stored sweep"))
+    record = _link(row.issue_url, row.issue_url) if row.issue_url else _MUTED.format("no audit record")
+    reports = _row_reports(row.stored, page_dir) if index and os.path.isfile(index) else ""
+    return (f'<tr data-repo="{html.escape(row.label)}" data-status="{html.escape(row.status)}">'
+            f"<td>{html.escape(row.label)}</td><td>{status}</td><td>{sweep}</td><td>{record}</td>"
+            f"<td>{reports}</td></tr>\n")
+
+
+def render_multi_page(sweep_id):
+    """Write the pass's `index.html` from its `state.json`, or from its stored
+    sweeps when it has none, and return the page's path. Raises
+    MultiIndexError for an unreadable `state.json`, or when neither exists.
+    Reads only the disk, so the same state renders the same bytes."""
+    page_dir = multi_page_dir(sweep_id)
+    state_path = os.path.join(page_dir, MULTI_STATE_FILE)
+    note = ""
+    if os.path.isfile(state_path):
+        rows = state_rows(state_path)
+    else:
+        rows = rows_from_stored_sweeps(sweep_id)
+        if not rows:
+            raise MultiIndexError(f"no state at {state_path} and no stored sweep at "
+                                  f"{os.path.join(stored_sweeps_base(), '*', sweep_id)}")
+        note = ('<div class="vt-callout warn">This pass recorded no state.json, so these rows come from its '
+                "stored sweeps alone: a repo it refused, skipped or found triage pending is not listed, "
+                "and the order is by name, not the order given.</div>\n")
+    counts = collections.Counter(r.status for r in rows)
+    lede = ", ".join(f"{counts[s]} {s}" for s in REPO_STATUSES if counts[s])
+    body = [note, '<h2>Repos</h2><div class="vt-table-wrap"><table class="audit-table">\n',
+            "<thead><tr><th>Repo</th><th>Status</th><th>Sweep</th><th>Audit record</th><th>Reports</th></tr>"
+            "</thead><tbody>\n", *(_multi_row(r, page_dir) for r in rows), "</tbody></table></div>\n"]
+    os.makedirs(page_dir, exist_ok=True)
+    pagelib.copy_assets(page_dir, components=INDEX_COMPONENTS)
+    path = os.path.join(page_dir, "index.html")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(pagelib.page(
+            title=f"All-audits multi-repo index {sweep_id}",
+            kicker="All-audits multi-repo sweep",
+            h1=f'{html.escape(sweep_id)} <span style="color:var(--vt-muted)">· {len(rows)} repos</span>',
+            lede=html.escape(lede),
+            body="".join(body),
+            extra_css=_INDEX_CSS,
+        ))
+    return path
+
+
+def multi_index_mode(sweep_id):
+    """`--multi-index SWEEP_ID`: rebuild the pass's page from its `state.json`
+    or stored sweeps; no `claude` runs. Prints `index:`; exits 1 naming the
+    file or paths at fault when it cannot."""
+    if not SWEEP_ID.fullmatch(sweep_id):
+        sys.exit(f"all-audits --multi-index: {sweep_id!r} is not a sweep id (YYYYMMDD-HHMMSS)")
+    try:
+        page = render_multi_page(sweep_id)
+    except MultiIndexError as e:
+        sys.exit(f"all-audits --multi-index: {e}")
+    print(f"index: {page}")
+    open_index(page)
 
 
 # --- load a stored sweep for triage (#1684) ----------------------------------
@@ -1709,7 +1961,11 @@ def main(argv):
                         "earlier audit record is still open (the new record links the open one) (#1681)")
     p.add_argument("--multi", nargs="+", metavar="REPO",
                    help="sweep each owned repo in turn from a fresh worktree of its origin/main, "
-                        "storing each sweep under ~/.local/share/all-audits/ (#1679)")
+                        "storing each sweep under ~/.local/share/all-audits/ (#1679), and the multi-repo index "
+                        "linking them under ~/.local/share/all-audits/multi/<sweep-id>/ (#1721; SKILL.md § Multi-repo)")
+    p.add_argument("--multi-index", metavar="SWEEP_ID", dest="multi_index",
+                   help="rebuild a --multi pass's page from its recorded state (or, for a pass that recorded none, "
+                        "from the stored sweeps carrying SWEEP_ID) and print its index; runs no claude (#1721)")
     p.add_argument("--load", type=int, metavar="ISSUE",
                    help="rebuild the stored sweep of audit record ISSUE (a number) and print its index, for "
                         "/all-audits triage; the repo name after it picks between repos sharing the number (#1684)")
@@ -1727,6 +1983,13 @@ def main(argv):
     args = p.parse_args(argv[1:])
 
     repo = args.repo or os.getcwd()
+    if args.multi_index is not None:
+        if (args.repo or args.load is not None or args.index or args.multi is not None or args.suggest
+                or args.mutation is not None or args.mutation_all or args.only is not None or args.short
+                or args.force or args.out or args.roots != DEFAULT_ROOTS):
+            p.error("--multi-index takes the sweep id and combines with nothing else.")
+        multi_index_mode(args.multi_index)
+        return
     if args.load is not None:
         if (args.index or args.multi is not None or args.suggest or args.mutation is not None or args.mutation_all
                 or args.only is not None or args.short or args.force or args.out):

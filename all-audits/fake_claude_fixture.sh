@@ -21,6 +21,9 @@
 # FAKE_CLAUDE_SUPPRESSED=<n>: dead-code's manifest carries "suppressed": <n>.
 # FAKE_CLAUDE_GUARD=1: every audit prints the model-invocation guard's
 # refusal and exits, as a rejected `-p` slash invocation does.
+# FAKE_CLAUDE_SNAPSHOT=<dir> (#1721): every start copies each multi-repo index
+# under $XDG_DATA_HOME/all-audits/multi/ to <dir>/start-<k>.html, k counting
+# starts from 1, so a test reads the page as it stood when that audit began.
 # domain-drift writes the same report and manifest as dead-code.
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
@@ -29,6 +32,14 @@ set -euo pipefail
 prompt="${*: -1}"
 
 [ -z "${FAKE_CLAUDE_STARTS:-}" ] || printf '%s\n' "$(printf '%s' "$prompt" | head -1)" >>"$FAKE_CLAUDE_STARTS"
+
+if [ -n "${FAKE_CLAUDE_SNAPSHOT:-}" ]; then
+  mkdir -p "$FAKE_CLAUDE_SNAPSHOT"
+  k=$(( $(ls "$FAKE_CLAUDE_SNAPSHOT" | wc -l) + 1 ))
+  for page in "$XDG_DATA_HOME"/all-audits/multi/*/index.html; do
+    [ ! -f "$page" ] || cp "$page" "$FAKE_CLAUDE_SNAPSHOT/start-$k.html"
+  done
+fi
 
 # Record the wait-ceiling variable in this process's log, so a test can see
 # what env the driver handed it (#1278).

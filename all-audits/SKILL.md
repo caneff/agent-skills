@@ -133,7 +133,12 @@ When you are invoked in-session as `/all-audits [path]`:
 
 Sweeps several owned repos in one background run. Each repo is swept from a
 fresh worktree of its `origin/main`, one after another, and stored under
-`~/.local/share/all-audits/<repo>/<sweep-id>/` (`driver.py --multi`).
+`~/.local/share/all-audits/<repo>/<sweep-id>/` (`driver.py --multi`). One page,
+`~/.local/share/all-audits/multi/<sweep-id>/index.html`, links every repo's
+sweep: the pass rewrites it after each repo finishes, so it is also the pass's
+progress page, and opens it once at the end. No repo's own index opens during
+the pass. The pass prints its path first, as `multi-repo index (rewritten as
+each repo finishes): <path>`, and last, as `index: <path>`.
 
 1. **Pick the repos.** With paths, use them and skip the ask. With none, run
    `driver.py --suggest`. It prints one `suggest: <path>` line per owned repo
@@ -148,15 +153,20 @@ fresh worktree of its `origin/main`, one after another, and stored under
 3. **Launch it under `job-run`, then end the turn.**
    `job-run --name all-audits-multi -- driver.py --multi <path> <path>…`.
    Do not poll or sleep; the job's completion wakes the session.
-4. **On wake, report from the summary.** Read the `== multi-repo summary ==`
-   block in the job's progress (`job-run --status all-audits-multi`). Give
-   each repo's outcome: `swept` with its audit record link (the
+4. **On wake, report from the page.** Read the pass's `index:` line, the last
+   line of the job's progress (`job-run --status all-audits-multi`), and give
+   that page's path first: it is already open. Then give each repo's outcome
+   from the `== multi-repo summary ==` block above it, which says what the
+   page's rows say: `swept` with its audit record link (the
    `audit record: <issue url>` on its line, or "no audit record" when it found
    nothing), `refused` or `failed` with its reason and any record link. A failed repo is reported as failed, never as swept.
    `triage pending (<issue link>)` means the repo's last audit record is still
    open, so nothing was swept; say so and give the link. Only when the user
    asks, re-run that repo with `--force`: it bypasses the staleness cache for
    the repo's audits too (fresh results) and the new record links the open one.
+   A pass with no page (one started before the page existed, or a page
+   deleted) gets one from `driver.py --multi-index <sweep-id>`, which runs no
+   `claude` and prints `index: <path>`.
 
 ## Triage — `/all-audits triage <issue>`
 
