@@ -20,15 +20,23 @@ repo="$tmp/repo"
 git init -q -b main "$repo"
 git -C "$repo" remote add origin https://github.com/caneff/agent-skills.git
 
-# gh stub: `gh api user` prints $STUB_LOGIN, `gh repo view` prints $STUB_OWNER/name.
-# Either being empty makes the stub exit non-zero, standing in for "gh broke".
+# gh stub: `gh api user` prints $STUB_LOGIN. `gh repo view` answers the hook's
+# own `-q` query over a repo $STUB_OWNER/agent-skills, a fork of
+# $STUB_PARENT/agent-skills when that is set. An empty login or owner makes the
+# stub exit non-zero, standing in for "gh broke".
 stubdir="$tmp/bin"
 mkdir -p "$stubdir"
 cat > "$stubdir/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
   "api user")  [ -n "${STUB_LOGIN:-}" ] || { echo "${STUB_ERR:-}" >&2; exit 1; }; printf '%s\n' "$STUB_LOGIN" ;;
-  "repo view") [ -n "${STUB_OWNER:-}" ] || { echo "${STUB_ERR:-}" >&2; exit 1; }; printf '%s/agent-skills\n' "$STUB_OWNER" ;;
+  "repo view")
+    [ -n "${STUB_OWNER:-}" ] || { echo "${STUB_ERR:-}" >&2; exit 1; }
+    q=.; while [ $# -gt 0 ]; do [ "$1" = -q ] && q=$2; shift; done
+    jq -nr --arg o "$STUB_OWNER" --arg p "${STUB_PARENT:-}" \
+      '{owner: {login: $o}, name: "agent-skills", isFork: ($p != ""),
+        parent: (if $p == "" then null else {owner: {login: $p}, name: "agent-skills"} end)}' \
+      | jq -r "$q" ;;
   *) exit 1 ;;
 esac
 STUB
@@ -322,6 +330,33 @@ RUN_FORBID="you don't own" run "merge naming a repo, login read failing, keeps g
 RUN_FORBID="ownership of caneff-agent/skills" run "merge naming a repo, login read failing, names that repo's owner" 2 \
   "gh pr merge 1 --repo caneff/x" "could not verify ownership of the repo the command names (owner caneff)"
 unset STUB_ERR
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+
+# A fork resolves to its parent (#1716): work on it heads upstream through a
+# PR, so it is the parent's repo. A checkout that made origin the gh default
+# (`gh repo set-default`, stored as remote.origin.gh-resolved=base) declared
+# the fork standalone, and origin's owner decides; `gh pr create` there targets
+# origin too. The marker is part of the cached verdict's key, so one checkout
+# carrying it never vouches for one that does not.
+fork="$tmp/fork"
+git init -q -b main "$fork"
+git -C "$fork" remote add origin https://github.com/caneff/agent-skills.git
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER=caneff STUB_PARENT=someone-else
+RUN_CWD="$fork" run "fork without the gh-default marker: push blocked as the parent's" 2 \
+  "git push origin main" "pushing to a repo you don't own."
+RUN_CWD="$fork" run "fork without the gh-default marker: merge blocked as the parent's" 2 \
+  "gh pr merge 12 --squash" "merges a PR on a repo you don't own."
+git -C "$fork" config remote.origin.gh-resolved base
+RUN_CWD="$fork" run "fork with origin as gh default: push allowed" 0 "git push origin main"
+RUN_CWD="$fork" run "fork with origin as gh default: merge allowed" 0 "gh pr merge 12 --squash"
+git -C "$fork" config --unset remote.origin.gh-resolved
+RUN_CWD="$fork" run "marker removed: the cached standalone verdict does not carry over" 2 \
+  "git push origin main" "pushing to a repo you don't own."
+git -C "$fork" config remote.upstream.gh-resolved base
+RUN_CWD="$fork" run "gh default on another remote is not the marker" 2 \
+  "git push origin main" "pushing to a repo you don't own."
+unset STUB_PARENT
 export STUB_LOGIN=caneff STUB_OWNER=caneff
 
 # Reading git is untouched.

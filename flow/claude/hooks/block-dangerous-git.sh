@@ -3,7 +3,9 @@
 #
 # Narrow guards; everything else about a push is the agent's business.
 #   - PUSH is gated on OWNERSHIP, not on branch or file type. If origin's owner
-#     is the `gh` login (resolving a fork to its parent), every push is allowed
+#     is the `gh` login (resolving a fork to its parent, unless the checkout
+#     made origin the gh default: `gh repo set-default`, stored as
+#     remote.origin.gh-resolved=base, #1716), every push is allowed
 #     — any branch, any content, default branch included. A repo someone else
 #     owns is blocked, and the agent hands the user the push and PR lines to
 #     run themselves: the outward-facing step is the user's. The ownership
@@ -275,7 +277,7 @@ gh_login() {
   [ -n "$GH_LOGIN" ] || { OWNERSHIP_ERR="gh: empty answer"; return 2; }
 }
 repo_is_owned() {
-  local toplevel origin cache_dir key target errf slug
+  local toplevel origin cache_dir key target errf slug base_q
   toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || { OWNERSHIP_ERR="not inside a git checkout"; return 2; }
   origin=$(git remote get-url origin 2>/dev/null)
 
@@ -296,15 +298,25 @@ repo_is_owned() {
   # `/` becomes `@`, which GitHub names cannot hold, so `a-b/c` and `a/b-c`
   # never share a key.
   key=$(printf '%s' "$slug" | tr 'A-Z' 'a-z' | tr '/' '@' | tr -c 'a-z0-9@._-' '_')
-  [ -f "$cache_dir/$key" ] && return 0
 
   # Evaluate ORIGIN explicitly (a bare `gh repo view` would resolve to an
-  # `upstream` remote instead), and a fork's real base repo is its parent.
+  # `upstream` remote instead). A fork's real base repo is its parent, where
+  # its work heads through a PR, unless this checkout made origin the gh
+  # default (#1716): the fork is then a product of its own, and `gh pr create`
+  # targets origin too. `+` cannot occur in a slug, so the standalone verdict
+  # has its own cache key and never vouches for a checkout without the marker.
+  base_q='if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end'
+  if [ "$(git config --get remote.origin.gh-resolved 2>/dev/null)" = base ]; then
+    base_q='.owner.login + "/" + .name'
+    key="$key+standalone"
+  fi
+  [ -f "$cache_dir/$key" ] && return 0
+
   # gh's own error text goes to a temp file; with no temp file the block says so.
   gh_login || return 2
   errf=$(mktemp 2>/dev/null) || errf=""
   target=$(gh repo view "$origin" --json owner,name,isFork,parent \
-      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>"${errf:-/dev/null}") || {
+      -q "$base_q" 2>"${errf:-/dev/null}") || {
     gh_failed "$errf"
     # gh reached GitHub and was told the repo does not exist for this login.
     case "$OWNERSHIP_ERR" in *"Could not resolve to a Repository"* | *"(HTTP 404)"*) return 1 ;; esac

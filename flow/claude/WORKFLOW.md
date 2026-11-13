@@ -5,7 +5,11 @@ invariants; this file holds their exceptions and mechanics.
 
 ## Gate 1 — whose repo
 
-Base repo = upstream parent for a fork, else this repo. Anyone else's repo →
+Base repo = upstream parent for a fork, else this repo. One exception: a fork
+whose checkout made origin the gh default (`gh repo set-default <origin>`,
+stored as `remote.origin.gh-resolved = base`) is a product of its own, and its
+base is origin; `gh pr create` there targets origin too (#1716, penpa-edit).
+Without the marker, a fork stays the parent's. Anyone else's repo →
 hand me the drafted title/body, the `gh pr create ...` line, and a compare
 command. The ownership-gated git hook, not prose, is what blocks pushes to
 repos I don't own. Why: a push or PR to someone else's repo is seen by another
