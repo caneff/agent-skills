@@ -1553,7 +1553,8 @@ def test_repo_without_its_triage_label_is_refused_before_any_claude_starts(tmp_p
     assert "beta: refused (label `needs-triage` is missing" in r.stdout
     assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
     assert _gh_calls(env, "label create") == []
-    assert not os.path.exists(os.path.join(tmp, "data"))
+    # Only the pass's own page (#1721) is stored: no sweep of either repo.
+    assert sorted(os.listdir(os.path.join(tmp, "data", "all-audits"))) == ["multi"]
 
 
 def test_stored_sweep_records_the_issue_number(tmp_path):
@@ -2082,3 +2083,177 @@ def test_multi_fetches_so_a_stale_clone_still_sweeps_the_newest_origin_main(tmp_
     r = _multi([a], env, FAKE_GH_BODIES=os.path.join(tmp, "bodies.log"))
     assert r.returncode == 0, r.stdout + r.stderr
     assert f"Audited commit: {newest}" in _bodies(env), _bodies(env)[:400]
+
+
+# --- the multi-repo index (#1721) -- ------------------------------------------
+
+def _multi_page_dirs(tmp):
+    base = os.path.join(tmp, "data", "all-audits", "multi")
+    return [os.path.join(base, d) for d in sorted(os.listdir(base))] if os.path.isdir(base) else []
+
+
+def _page_rows(page_html):
+    """{repo: (status, row html)} from the page's `<tr data-repo=..>` rows, in order."""
+    rows = re.findall(r'<tr data-repo="([^"]+)" data-status="([^"]+)">(.*?)</tr>', page_html, re.S)
+    return {repo: (status, body) for repo, status, body in rows}
+
+
+def test_multi_page_after_repo_one_of_two_shows_it_swept_and_the_other_not_yet_run(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    snaps = os.path.join(tmp, "snaps")
+    r = _multi([a, b], env, **_record_env(tmp, [_finding(1)], FAKE_CLAUDE_SNAPSHOT=snaps,
+                                         FAKE_GH_ISSUE_URL="https://github.com/caneff/alpha/issues/7"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    # start-1 is alpha's audit, start-2 beta's: the page as beta began.
+    rows = _page_rows(open(os.path.join(snaps, "start-2.html")).read())
+    assert list(rows) == ["alpha", "beta"], rows
+    assert rows["alpha"][0] == "swept" and rows["beta"][0] == "not yet run", rows
+    (stored,) = [os.path.join(tmp, "data", "all-audits", "alpha", d)
+                 for d in os.listdir(os.path.join(tmp, "data", "all-audits", "alpha"))]
+    (page_dir,) = _multi_page_dirs(tmp)
+    hrefs = re.findall(r'href="([^"]+)"', rows["alpha"][1])
+    resolved = [os.path.normpath(os.path.join(page_dir, h)) for h in hrefs if not h.startswith("http")]
+    assert os.path.join(stored, "collection", "index.html") in resolved, hrefs
+    assert os.path.join(stored, "collection", "dead-code", "report.html") in resolved, hrefs
+    assert "https://github.com/caneff/alpha/issues/7" in hrefs, hrefs
+
+
+def test_multi_page_marks_a_failed_audit_beside_the_report_of_one_that_ran(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    r = _multi([a], env, "--only", "dead-code,duplication", **_record_env(tmp, [_finding(1)]))
+    assert r.returncode == 1, r.stdout + r.stderr  # duplication writes no manifest
+    (page_dir,) = _multi_page_dirs(tmp)
+    status, row = _page_rows(open(os.path.join(page_dir, "index.html")).read())["alpha"]
+    assert status == "failed", row
+    items = dict(re.findall(r"<li>(?:<a [^>]*>)?([\w-]+)(.*?)</li>", row))
+    assert "FAILED: no manifest" in items["duplication"], items
+    assert "FAILED" not in items["dead-code"], items
+
+
+def test_multi_opens_only_its_own_page_once_at_the_end(tmp_path):
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    opened = _fake_openers(os.path.join(tmp, "bin"))
+    r = _multi([a, b], env, **_record_env(tmp, [_finding(1)], AUDITS_NO_OPEN="0"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    (page_dir,) = _multi_page_dirs(tmp)
+    page = os.path.join(page_dir, "index.html")
+    assert _pages_opened(opened) == [page]
+    assert r.stdout.rstrip().splitlines()[-1] == f"index: {page}", r.stdout[-400:]
+
+
+def test_a_single_repo_sweep_still_opens_its_own_index(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    opened = _fake_openers(os.path.join(tmp, "bin"))
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
+                        a, "--only", "dead-code", "--out", os.path.join(tmp, "out")],
+                       capture_output=True, text=True, env={**env, "AUDITS_NO_OPEN": "0"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _pages_opened(opened) == [os.path.join(tmp, "out", "collection", "index.html")]
+
+
+def _multi_index(env, *args):
+    return subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
+                           "--multi-index", *args], capture_output=True, text=True, env=env)
+
+
+def test_multi_index_rebuilds_the_page_byte_identically_and_runs_no_claude(tmp_path):
+    tmp = str(tmp_path)
+    (a, b, c), env = _multi_fixture(tmp, ["alpha", "beta", "gamma"])
+    r = _multi([a, b, c], env, "--only", "dead-code,duplication",
+               **_record_env(tmp, [_finding(1)], FAKE_GH_OWNER_FOR="beta=someoneelse"))
+    (page_dir,) = _multi_page_dirs(tmp)
+    page = os.path.join(page_dir, "index.html")
+    before = open(page, "rb").read()
+    assert list(_page_rows(before.decode())) == ["alpha", "beta", "gamma"], r.stdout
+    os.remove(page)
+    starts = open(env["FAKE_CLAUDE_STARTS"]).read()
+    rebuilt = _multi_index(env, os.path.basename(page_dir))
+    assert rebuilt.returncode == 0, rebuilt.stdout + rebuilt.stderr
+    assert f"index: {page}" in rebuilt.stdout
+    assert open(page, "rb").read() == before
+    assert open(env["FAKE_CLAUDE_STARTS"]).read() == starts
+
+
+def test_multi_index_without_a_state_file_rebuilds_from_the_stored_sweeps(tmp_path):
+    """A pass started before state.json existed (sweep 20261113-082113)."""
+    tmp = str(tmp_path)
+    (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
+    _multi([a, b], env, **_record_env(tmp, [_finding(1)], FAKE_GH_OWNER_FOR="alpha=someoneelse",
+                                      FAKE_GH_ISSUE_URL="https://github.com/caneff/beta/issues/9"))
+    (page_dir,) = _multi_page_dirs(tmp)
+    shutil.rmtree(page_dir)
+    r = _multi_index(env, os.path.basename(page_dir))
+    assert r.returncode == 0, r.stdout + r.stderr
+    rows = _page_rows(open(os.path.join(page_dir, "index.html")).read())
+    assert list(rows) == ["beta"], rows  # the refused repo left no stored sweep
+    assert rows["beta"][0] == "swept" and "https://github.com/caneff/beta/issues/9" in rows["beta"][1]
+
+
+def test_multi_index_with_nothing_stored_or_a_bad_id_exits_nonzero(tmp_path):
+    tmp = str(tmp_path)
+    _, env = _multi_fixture(tmp, [])
+    r = _multi_index(env, "20990101-000000")
+    assert r.returncode == 1 and "20990101-000000" in r.stderr and "state.json" in r.stderr, r.stderr
+    r = _multi_index(env, "../alpha")
+    assert r.returncode == 1 and "not a sweep id" in r.stderr, r.stderr
+    r = _multi_index(env, "20990101-000000", "--force")
+    assert r.returncode == 2, r.stderr
+
+
+def _old_multi_page(tmp, sweep_id):
+    d = os.path.join(tmp, "data", "all-audits", "multi", sweep_id)
+    os.makedirs(d)
+    open(os.path.join(d, "index.html"), "w").write("<html></html>")
+    os.utime(d, (0, 0))
+    return d
+
+
+def test_an_old_multi_page_is_kept_while_a_stored_sweep_it_links_lives_and_deleted_after(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    linked = _old_multi_page(tmp, "20200102-000000")
+    _stored(tmp, "beta", "20200102-000000", 2)  # open record: the stored sweep stays
+    orphan = _old_multi_page(tmp, "20200101-000000")
+    r = _single(a, env, FAKE_GH_ISSUE_STATES="2=OPEN")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.path.isdir(linked) and not os.path.exists(orphan), r.stderr
+
+
+def test_a_multi_page_folder_is_never_read_as_a_stored_sweep(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    d = _old_multi_page(tmp, "20200102-000000")
+    _stored(tmp, "beta", "20200102-000000", 2)
+    # A record file under multi/ would be pruned as a closed sweep if it were read as one.
+    json.dump({"issue": 1, "url": "https://github.com/caneff/multi/issues/1"},
+              open(os.path.join(d, "audit-record.json"), "w"))
+    r = _single(a, env, FAKE_GH_ISSUE_STATES="1=CLOSED,2=OPEN")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.path.isdir(d)
+    assert "issue view 1 " not in open(env["FAKE_GH_LOG"]).read()
+
+
+def test_a_repo_named_multi_is_refused_before_any_claude_starts(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["multi"])
+    r = _multi([a], env)
+    assert "multi: refused (a repo named `multi` collides" in r.stdout, r.stdout + r.stderr
+    assert not os.path.exists(env["FAKE_CLAUDE_STARTS"])
+
+
+def test_multi_page_marks_an_audit_reused_as_unchanged_with_its_sha(tmp_path):
+    tmp = str(tmp_path)
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    only = ("--only", "domain-drift", "--out", os.path.join(tmp, "out"))
+    assert _multi([a], env, *only, **_record_env(tmp, [_finding(1)])).returncode == 0
+    time.sleep(1.1)  # the sweep id is a second-resolution timestamp
+    r = _multi([a], env, *only, **_record_env(tmp, [_finding(1)], FAKE_GH_ISSUE_STATE="CLOSED"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    _, second = _multi_page_dirs(tmp)
+    _, row = _page_rows(open(os.path.join(second, "index.html")).read())["alpha"]
+    sha = _git_out(a, "rev-parse", "origin/main")[:8]
+    assert re.search(rf'>domain-drift</a> <em class="mark-unchanged">unchanged since {sha}</em>', row), row
