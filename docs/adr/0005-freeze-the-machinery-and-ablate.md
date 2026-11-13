@@ -44,3 +44,11 @@ one-at-a-time rule would not allow, and #1634's slices are tickets against the
 machinery. Both were built under Chris's 2026-11-03 rulings on #1634, which
 outrank this ADR on those two points. The friction log and the review ledger
 stand.
+
+## Note, 2026-11-13: the freeze lifted
+
+Chris ruled on the 2026-11-13 audit sweep triage (audit record #1719, Q1 (c))
+that tickets against the review and implement machinery are allowed again,
+restructures included, not only removals and bugs that block work. The friction
+log (`docs/agents/friction-log.md`) and the review ledger and its ablation stand
+unchanged, the same carve-out as the 2026-11-03 note.
