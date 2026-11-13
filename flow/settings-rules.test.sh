@@ -17,23 +17,43 @@ lacks() { # lacks <list> <rule>
 }
 
 # The live e2e lock (#1392), narrowed by Chris's ruling 2026-11-09
-# (twitch-rules-scroller #1131): only an e2e.sh command line carrying
-# --main-monitor is an `ask` rule, since that run takes over Chris's monitor; a
-# virtual-monitor run needs no go. One pattern covers every start form. It is
-# the only ask rule that names e2e.sh: any other, however broad, would prompt a
-# virtual-monitor run, and the ten per-form rules it replaced stay gone.
-has ask 'Bash(*e2e.sh*--main-monitor*)'
-for rule in 'Bash(./e2e.sh *)' 'Bash(bash e2e.sh *)' 'Bash(bash ./e2e.sh *)' \
-            'Bash(/home/caneff/src/twitch-rules-scroller/e2e.sh *)' \
-            'Bash(bash /home/caneff/src/twitch-rules-scroller/e2e.sh *)' \
-            'Bash(*/.claude/worktrees/*/e2e.sh *)' 'Bash(bash */.claude/worktrees/*/e2e.sh *)' \
-            'Bash(job-run *e2e.sh*)' 'Bash(bash -c *e2e.sh*)' 'Bash(sh -c *e2e.sh*)'; do
-  lacks ask "$rule"
-done
-others=$(jq -r '.permissions.ask[] | select(contains("e2e.sh") and . != "Bash(*e2e.sh*--main-monitor*)")' "$settings" 2>&1)
-if [ $? = 0 ] && [ -z "$others" ]
-then echo "PASS: permissions.ask holds no other e2e.sh rule"
-else echo "FAIL: permissions.ask holds another e2e.sh rule (or jq failed): $others"; fails=1; fi
+# (twitch-rules-scroller #1131): only an e2e.sh run carrying --main-monitor is
+# an `ask` rule, since that run takes over Chris's monitor; a virtual-monitor
+# run needs no go. Anchored at the start of a subcommand (#1725): a leading `*`
+# matched `e2e.sh` and `--main-monitor` anywhere in a command, so a heredoc
+# quoting a repo's AGENTS.md was denied in a `-p` run. Asserted by behaviour:
+# samples are matched against permissions.ask with glob semantics (`*` = any
+# text, whole-string match).
+e2e_check=$(jq -c '.permissions.ask' "$settings" 2>&1 | python3 -c '
+import json, re, sys
+ask = json.loads(sys.stdin.read())
+pats = [r[5:-1] for r in ask if r.startswith("Bash(") and r.endswith(")")]
+def matches(cmd):
+    return [p for p in pats
+            if re.fullmatch(".*".join(map(re.escape, p.split("*"))), cmd, re.S)]
+tw = "/home/caneff/src/twitch-rules-scroller"
+heads = ["./e2e.sh", "bash e2e.sh", "bash ./e2e.sh", tw + "/e2e.sh", "bash " + tw + "/e2e.sh",
+         tw + "/.claude/worktrees/implement-9/e2e.sh", "bash " + tw + "/.claude/worktrees/implement-9/e2e.sh",
+         "/home/caneff/src/.claude/worktrees/twitch-rules-scroller/implement-9/e2e.sh",
+         "bash /home/caneff/src/.claude/worktrees/twitch-rules-scroller/implement-9/e2e.sh",
+         "job-run --name x ./e2e.sh", "bash -c \"./e2e.sh", "sh -c \"./e2e.sh"]
+bad = []
+for h in heads:
+    for tail, want in ((" --main-monitor", True), (" --only foo --main-monitor", True),
+                       ("", False), (" --only foo", False)):
+        cmd = h + tail + ("\"" if "-c" in h else "")
+        if bool(matches(cmd)) != want:
+            bad.append(("should match" if want else "must not match") + ": " + cmd)
+heredoc = "cat > f <<\x27PY\x27\n" + "x" * 4600 + " ./e2e.sh --only x " + "y" * 9000 + " --main-monitor\nPY"
+for cmd in (heredoc, "echo e2e.sh --main-monitor", "grep -n e2e.sh AGENTS.md; echo --main-monitor"):
+    if matches(cmd):
+        bad.append("must not match: " + cmd[:40].replace("\n", " "))
+bad += ["rule starts with *: " + r for r in ask if r.startswith("Bash(*")]
+if bad: print("\n".join(bad))
+' 2>&1; echo "rc=$?")
+if [ "$e2e_check" = "rc=0" ]
+then echo "PASS: ask rules match every e2e.sh --main-monitor start form and nothing else, none starts with *"
+else echo "FAIL: e2e ask rules:"; echo "$e2e_check"; fails=1; fi
 
 # Compute pre-authorization, ruled by Chris 2026-09-28 (#1225): `uv run` and
 # `job-run`, with the narrower `uv run` paths it makes redundant gone.
