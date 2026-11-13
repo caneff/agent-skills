@@ -40,6 +40,14 @@ a deletion".
   and `git push --force-with-lease` to a worker's own `implement-*` branch,
   since `--lease` refuses if anyone else pushed and the branch is disposable
   by design.
+- A commit identity that is not the checkout's own, on an `implement-*`
+  branch's commits not yet on `main`, is rewritten to the checkout's identity
+  without asking (`git rebase <base> --exec 'git commit --amend --no-edit
+  --reset-author'`, then `--force-with-lease` if it was pushed), and the
+  rewrite is reported in one line. Never on `main`, never with
+  `COMMIT_IDENTITY_OVERRIDE`. Why: a fixture identity leaking onto a worker's
+  commit (agent-skills #1728) stopped a build for my go every time, and the
+  answer was always yes (Chris, 2026-11-13).
 - Any force-push to `main`, any `--force` without a lease, and any rebase or
   reset I did not already sanction: still ask.
 - When I approve an irreversible step that a worker or a spec run asked about,
