@@ -376,3 +376,24 @@ def test_the_gutter_note_says_lmd_caps_p_as_well_as_li():
     # max-width: none must follow the `p` mention: the note already said it for ul/li.
     m = re.search(r"caps `p`.*?`<p>`.*?max-width: none", FLAT)
     assert m, "SKILL.md's gutter note no longer says LMD caps `p` and that a `<p>` needs max-width: none"
+
+
+# ---- § Edit a live page (#1720) ----
+
+def test_edit_section_runs_the_stream_gate_before_the_driver():
+    edit = " ".join(section("Edit a live page").split())
+    assert edit.index("stream gate") < edit.index("lmd_driver.mjs")
+    assert "Output steps 3 and 4" in edit
+    assert "--edit <id>" in edit and "--template" in edit
+
+
+def test_edit_section_never_activates_and_reuses_the_one_archive_call():
+    raw = section("Edit a live page")
+    edit = " ".join(raw.split())
+    assert 'never clicks "Aktivieren"' in edit
+    assert "§ Archive's command" in edit and "--lmd <id>" in edit
+    assert not [l for l in raw.splitlines() if "lmd_archive.py" in l]  # the one archive call stays in § Archive
+
+
+def test_edit_section_states_that_a_failure_stops_it():
+    assert "The failure rule above applies" in " ".join(section("Edit a live page").split())
