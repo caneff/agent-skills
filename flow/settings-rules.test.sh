@@ -16,17 +16,19 @@ lacks() { # lacks <list> <rule>
   else echo "PASS: permissions.$1 dropped $2"; fi
 }
 
-# The live e2e lock (#1392): each way an agent starts twitch-rules-scroller's
-# ./e2e.sh is an `ask` rule, since it takes over Chris's monitor. A rule that no
-# start form matches does not stop it, so the forms are named here, `job-run`
-# and `bash -c` included: `Bash(job-run:*)` is allowed, so an unmatched
-# `job-run -- ./e2e.sh` would start with no prompt.
+# The live e2e lock (#1392, narrowed by Chris's ruling 2026-11-09, twitch-rules-
+# scroller #1131): only an e2e.sh command line carrying --main-monitor is an
+# `ask` rule, since that run takes over Chris's monitor; a virtual-monitor run
+# needs no go. One pattern covers every start form (`./e2e.sh`, `bash e2e.sh`,
+# an absolute path, `job-run -- ./e2e.sh`, `bash -c "..."`). The ten per-form
+# rules it replaced stay gone, so a virtual-monitor run is not prompted.
+has ask 'Bash(*e2e.sh*--main-monitor*)'
 for rule in 'Bash(./e2e.sh *)' 'Bash(bash e2e.sh *)' 'Bash(bash ./e2e.sh *)' \
             'Bash(/home/caneff/src/twitch-rules-scroller/e2e.sh *)' \
             'Bash(bash /home/caneff/src/twitch-rules-scroller/e2e.sh *)' \
             'Bash(*/.claude/worktrees/*/e2e.sh *)' 'Bash(bash */.claude/worktrees/*/e2e.sh *)' \
             'Bash(job-run *e2e.sh*)' 'Bash(bash -c *e2e.sh*)' 'Bash(sh -c *e2e.sh*)'; do
-  has ask "$rule"
+  lacks ask "$rule"
 done
 
 # Compute pre-authorization, ruled by Chris 2026-09-28 (#1225): `uv run` and
