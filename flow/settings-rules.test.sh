@@ -16,12 +16,12 @@ lacks() { # lacks <list> <rule>
   else echo "PASS: permissions.$1 dropped $2"; fi
 }
 
-# The live e2e lock (#1392, narrowed by Chris's ruling 2026-11-09, twitch-rules-
-# scroller #1131): only an e2e.sh command line carrying --main-monitor is an
-# `ask` rule, since that run takes over Chris's monitor; a virtual-monitor run
-# needs no go. One pattern covers every start form (`./e2e.sh`, `bash e2e.sh`,
-# an absolute path, `job-run -- ./e2e.sh`, `bash -c "..."`). The ten per-form
-# rules it replaced stay gone, so a virtual-monitor run is not prompted.
+# The live e2e lock (#1392), narrowed by Chris's ruling 2026-11-09
+# (twitch-rules-scroller #1131): only an e2e.sh command line carrying
+# --main-monitor is an `ask` rule, since that run takes over Chris's monitor; a
+# virtual-monitor run needs no go. One pattern covers every start form. It is
+# the only ask rule that names e2e.sh: any other, however broad, would prompt a
+# virtual-monitor run, and the ten per-form rules it replaced stay gone.
 has ask 'Bash(*e2e.sh*--main-monitor*)'
 for rule in 'Bash(./e2e.sh *)' 'Bash(bash e2e.sh *)' 'Bash(bash ./e2e.sh *)' \
             'Bash(/home/caneff/src/twitch-rules-scroller/e2e.sh *)' \
@@ -30,6 +30,10 @@ for rule in 'Bash(./e2e.sh *)' 'Bash(bash e2e.sh *)' 'Bash(bash ./e2e.sh *)' \
             'Bash(job-run *e2e.sh*)' 'Bash(bash -c *e2e.sh*)' 'Bash(sh -c *e2e.sh*)'; do
   lacks ask "$rule"
 done
+others=$(jq -r '.permissions.ask[] | select(contains("e2e.sh") and . != "Bash(*e2e.sh*--main-monitor*)")' "$settings" 2>&1)
+if [ $? = 0 ] && [ -z "$others" ]
+then echo "PASS: permissions.ask holds no other e2e.sh rule"
+else echo "FAIL: permissions.ask holds another e2e.sh rule (or jq failed): $others"; fails=1; fi
 
 # Compute pre-authorization, ruled by Chris 2026-09-28 (#1225): `uv run` and
 # `job-run`, with the narrower `uv run` paths it makes redundant gone.
