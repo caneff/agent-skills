@@ -211,16 +211,31 @@ done
 # --- Setting the gh default (#1716). ---
 # The gh default on origin is what makes a fork standalone (WORKFLOW.md
 # § Gate 1), so an agent setting it would loosen the merge check on its own
-# say-so; gh's "run gh repo set-default" error invites exactly that. Matched
-# as the destroyers are: a word the shell runs, a shell handed the text, or a
-# `$(...)` body. Reading it (`--view`, `git config --get`) is fine.
+# say-so; gh's "run gh repo set-default" error invites exactly that. Judged per
+# segment, so a read (`--view`, `git config --get`) exempts only itself. The
+# key is read with quotes dropped, since `git config "remote.x.gh-resolved"`
+# is the same key, while the verb must be a word the shell runs, so a commit
+# message naming one is data. A shell handed the text, or a `$(...)` body, is
+# read whole and blocks.
 sets_gh_default='gh[[:space:]]+repo[[:space:]]+set-default|git[[:space:]]([^;&|]*[[:space:]])?config[[:space:]][^;&|]*gh-resolved'
 reads_gh_default='set-default[[:space:]]+(-v|--view)([[:space:]]|$)|config[[:space:]]+(--get|--get-regexp)[[:space:]][^;&|]*gh-resolved'
+gh_default_verb='(^|[[:space:](])(gh[[:space:]]+repo|git[[:space:]]([^;&|]*[[:space:]])?config)([[:space:]]|$)'
+writes_gh_default() { # <segment>
+  local plain
+  plain=$(printf '%s' "$1" | tr -d "'\"")
+  printf '%s\n' "$plain" | grep -qE "$sets_gh_default" || return 1
+  printf '%s\n' "$plain" | grep -qE "$reads_gh_default" && return 1
+  quote_views "$1"
+  printf '%s\n' "$BARE" | grep -qE "$gh_default_verb"
+}
 if printf '%s\n' "$COMMAND" | grep -qE "$sets_gh_default"; then
   command_views
-  if { printf '%s\n' "$CMD_BARE" | grep -qE "$sets_gh_default" || [ "$cmd_handed" = 1 ] \
-       || printf '%s\n' "$cmd_substitutions" | grep -qE "$sets_gh_default"; } \
-     && ! printf '%s\n' "$CMD_BARE" | grep -qE "$reads_gh_default"; then
+  gh_default_set=0
+  { [ "$cmd_handed" = 1 ] || printf '%s\n' "$cmd_substitutions" | grep -qE "$sets_gh_default"; } && gh_default_set=1
+  while IFS= read -r segment; do
+    writes_gh_default "$segment" && gh_default_set=1
+  done < <(split_segments "$SCAN" | grep -e set-default -e gh-resolved)
+  if [ "$gh_default_set" = 1 ]; then
     echo "BLOCKED: '$COMMAND' sets the gh default repo, which is what declares a fork standalone and loosens the merge check (WORKFLOW.md § Gate 1). That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh repo set-default <owner/name>' line to run themselves." >&2
     exit 2
   fi

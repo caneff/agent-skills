@@ -512,6 +512,12 @@ git -C "$fork" config remote.upstream.gh-resolved base
 RUN_CWD="$fork" run "gh default on another remote is not the marker" 2 \
   "gh pr merge 12 --squash" "$notmine"
 git -C "$fork" config --unset remote.upstream.gh-resolved
+# gh stores a non-remote default as its slug: origin defaulting to the parent
+# sends the merge to the parent, so only `base` is the marker.
+git -C "$fork" config remote.origin.gh-resolved swaroopg92/penpa-edit
+RUN_CWD="$fork" run "origin's gh default naming the parent is not the marker" 2 \
+  "gh pr merge 12 --squash" "$notmine"
+git -C "$fork" config --unset remote.origin.gh-resolved
 unset STUB_REPOS
 export STUB_LOGIN=caneff STUB_OWNER=caneff
 
@@ -525,6 +531,18 @@ run "reading the gh default allowed" 0 "gh repo set-default --view"
 run "reading the gh-resolved marker allowed" 0 "git config --get remote.origin.gh-resolved"
 run "the marker named in a commit message allowed" 0 \
   "git commit -m 'needs gh repo set-default first'"
+# A read in the same line exempts only its own segment, and a quoted key is
+# still the key.
+run "a read chained before a marker write does not exempt it" 2 \
+  "git config --get remote.origin.gh-resolved || git config remote.origin.gh-resolved base" "standalone"
+run "a --view chained before a set-default does not exempt it" 2 \
+  "gh repo set-default --view && gh repo set-default swaroopg92/penpa-edit" "standalone"
+run "a double-quoted marker key still blocked" 2 \
+  'git config "remote.origin.gh-resolved" base' "standalone"
+run "a single-quoted marker key still blocked" 2 \
+  "git config 'remote.origin.gh-resolved' base" "standalone"
+run "a quoted read of the marker allowed" 0 \
+  'git config --get "remote.origin.gh-resolved"'
 
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
