@@ -13,6 +13,21 @@
 // --image-id names an image already on LMD (an earlier run's upload) and skips the upload; --png is still
 // required and still checked.
 //
+// Edit mode (#1720) changes a puzzle that is already on LMD:
+//
+//   node lmd_driver.mjs --endpoint http://127.0.0.1:9334 --edit <puzzle-id> --template <page.html> \
+//     [--values <values.json>] [--base-url ...] [--timeout-ms ...]
+//
+// It opens that puzzle's edit form (Raetselportal/Eigene/einstellen.php?id=<id>), replaces the English page
+// HTML with the --template file's text as it stands (a literal page: no {{IMAGE_ID}} is filled, and one left in
+// is refused), sets only the fields --values names and clicks "Change". Every other field, the activation
+// choice and its date fields included, goes back as the form served it; it never visits the puzzle page, so
+// it never activates. --values holds any of "title", "code", "difficulty", "labels", "freetags",
+// "codedescr_en", checked as for a create; "slug" and "sudoku" are refused, as the edit form has neither.
+// --png and --image-id are refused. It prints {"puzzle_id", "puzzle_url", "html"}. A failure after "Change"
+// was clicked prints {"failed", "uploaded": false, "image_id": null, "submitted": true} on stdout as well.
+// The caller re-archives the puzzle afterwards (create-lmd-page/SKILL.md § Edit a live page).
+//
 // values.json, every key required: {"slug", "title", "code", "difficulty" (1-5), "sudoku" ("Ja" | "Nein"),
 //   "labels" ([<n> of label_<n>]), "freetags" (string), "codedescr_en" (string, may be empty)}.
 //
@@ -31,6 +46,7 @@ import { parseArgs } from "node:util";
 const IMAGE_PLACEHOLDER = "{{IMAGE_ID}}";
 const UPLOAD_DESCRIPTION = "author created";
 const SAVED_NOTICE = "The puzzle has been saved.";
+const CHANGED_NOTICE = "The puzzle has been changed.";
 const PUZZLE_PAGE = "/Raetselportal/Raetsel/zeigen.php";
 const MAX_UPLOAD_BYTES = 4194304; // the upload form's MAX_FILE_SIZE
 // LMD strips any other character from a solution code silently (its help page and the form's hint:
@@ -38,6 +54,7 @@ const MAX_UPLOAD_BYTES = 4194304; // the upload form's MAX_FILE_SIZE
 const CODE_ALLOWED = /^[A-Za-z0-9()<>~+\-*= /\\|!#$%&]*$/;
 const GERMAN_TEXT = ["htmlcode", "codedescr"];
 const DATE_FIELDS = ["day", "month", "year", "hour", "min", "sec"];
+const EDIT_KEYS = ["title", "code", "difficulty", "labels", "freetags", "codedescr_en"];
 const VALUE_KEYS = ["slug", "title", "code", "difficulty", "sudoku", "labels", "freetags", "codedescr_en"];
 
 class DriverError extends Error {}
@@ -48,50 +65,81 @@ function readText(file, what) {
   try { return readFileSync(file, "utf8"); } catch (e) { fail(`cannot read the ${what} ${file}: ${e.message}`); }
 }
 
+// The checks both modes share on one values key, each refusing what LMD would silently alter or reject.
+function checkValue(v, k) {
+  switch (k) {
+    case "slug": case "title": case "code":
+      if (typeof v[k] !== "string" || !v[k].trim()) fail(`values.${k} must be a non-empty string`);
+      if (k === "code" && !CODE_ALLOWED.test(v.code)) {
+        const bad = [...new Set([...v.code].filter((c) => !CODE_ALLOWED.test(c)))].join("");
+        fail(`the solution code ${JSON.stringify(v.code)} has characters LMD would strip: ${JSON.stringify(bad)}`);
+      }
+      break;
+    case "codedescr_en": case "freetags":
+      if (typeof v[k] !== "string") fail(`values.${k} must be a string`);
+      break;
+    case "difficulty":
+      if (!Number.isInteger(v.difficulty) || v.difficulty < 1 || v.difficulty > 5) fail(`values.difficulty must be 1-5, got ${JSON.stringify(v.difficulty)}`);
+      break;
+    case "sudoku":
+      if (v.sudoku !== "Ja" && v.sudoku !== "Nein") fail(`values.sudoku must be "Ja" or "Nein", got ${JSON.stringify(v.sudoku)}`);
+      break;
+    case "labels":
+      if (!Array.isArray(v.labels) || !v.labels.every(Number.isInteger)) fail("values.labels must be a list of label numbers");
+      break;
+  }
+}
+
+function readValues(file) {
+  let v;
+  try { v = JSON.parse(readText(file, "values file")); } catch (e) { if (e instanceof DriverError) throw e; fail(`the values file ${file} is not JSON: ${e.message}`); }
+  if (v === null || typeof v !== "object" || Array.isArray(v)) fail(`the values file ${file} is not a JSON object`);
+  return v;
+}
+
 function readInputs(argv) {
   const { values: a } = parseArgs({
     args: argv,
     options: {
-      endpoint: { type: "string" }, png: { type: "string" }, template: { type: "string" },
+      endpoint: { type: "string" }, png: { type: "string" }, template: { type: "string" }, edit: { type: "string" },
       values: { type: "string" }, "image-id": { type: "string" }, "base-url": { type: "string", default: "https://logic-masters.de" },
       "timeout-ms": { type: "string", default: "30000" },
     },
   });
-  for (const k of ["endpoint", "png", "template", "values"]) if (!a[k]) throw new UsageError(`--${k} is required`);
+  const edit = a.edit !== undefined;
+  for (const k of edit ? ["endpoint", "template"] : ["endpoint", "png", "template", "values"]) if (!a[k]) throw new UsageError(`--${k} is required`);
   // LMD's ids are digits and capital letters ("001626", "0015HL"); anything else would corrupt <img:ID>.
   if (a["image-id"] !== undefined && !/^[0-9A-Z]+$/.test(a["image-id"])) {
     throw new UsageError(`--image-id must be an LMD image id (digits and capital letters), got ${JSON.stringify(a["image-id"])}`);
   }
+  if (edit) {
+    if (!/^[0-9A-Z]+$/.test(a.edit)) throw new UsageError(`--edit must be an LMD puzzle id (digits and capital letters), got ${JSON.stringify(a.edit)}`);
+    for (const k of ["png", "image-id"]) if (a[k] !== undefined) throw new UsageError(`--${k} does not go with --edit: edit mode uploads nothing`);
+  }
   const timeoutMs = Number(a["timeout-ms"]);
   if (!(timeoutMs > 0)) throw new UsageError(`--timeout-ms must be a positive number, got ${a["timeout-ms"]}`);
+  const common = { endpoint: a.endpoint.replace(/\/+$/, ""), base: a["base-url"].replace(/\/+$/, ""), timeoutMs };
+  const template = readText(a.template, edit ? "page file" : "page template");
+  if (edit) {
+    // An empty file would post a blank page over the live one, and LMD would answer "changed".
+    if (!template.trim()) fail(`the page file ${a.template} is empty: edit mode would blank the live page`);
+    if (template.includes(IMAGE_PLACEHOLDER)) fail(`the page file still has a ${IMAGE_PLACEHOLDER} placeholder: edit mode posts the page as it is`);
+    const v = a.values === undefined ? {} : readValues(a.values);
+    // The edit form has no Sudoku question, and a slug names an upload: a key it would ignore is refused.
+    for (const k of Object.keys(v)) if (!EDIT_KEYS.includes(k)) fail(`values.${k} does not apply to an edit (it takes ${EDIT_KEYS.join(", ")})`);
+    for (const k of Object.keys(v)) checkValue(v, k);
+    return { ...common, edit: a.edit, template, form: v };
+  }
   const png = path.resolve(a.png);
   let size;
   try { size = statSync(png).size; } catch (e) { fail(`cannot read the PNG ${png}: ${e.message}`); }
   if (size > MAX_UPLOAD_BYTES) fail(`the PNG is ${size} bytes, over LMD's upload limit of ${MAX_UPLOAD_BYTES}`);
-  const template = readText(a.template, "page template");
   if (!template.includes(IMAGE_PLACEHOLDER)) fail(`the page template has no ${IMAGE_PLACEHOLDER} placeholder`);
-  const valuesText = readText(a.values, "values file");
-  let v;
-  try { v = JSON.parse(valuesText); } catch (e) { fail(`the values file ${a.values} is not JSON: ${e.message}`); }
-  if (v === null || typeof v !== "object" || Array.isArray(v)) fail(`the values file ${a.values} is not a JSON object`);
+  const v = readValues(a.values);
   // A missing key is refused, never defaulted: each value is one the user confirmed.
   for (const k of VALUE_KEYS) if (!Object.hasOwn(v, k)) fail(`the values file has no "${k}"`);
-  for (const k of ["slug", "title", "code"]) {
-    if (typeof v[k] !== "string" || !v[k].trim()) fail(`values.${k} must be a non-empty string`);
-  }
-  for (const k of ["codedescr_en", "freetags"]) if (typeof v[k] !== "string") fail(`values.${k} must be a string`);
-  if (!CODE_ALLOWED.test(v.code)) {
-    const bad = [...new Set([...v.code].filter((c) => !CODE_ALLOWED.test(c)))].join("");
-    fail(`the solution code ${JSON.stringify(v.code)} has characters LMD would strip: ${JSON.stringify(bad)}`);
-  }
-  if (!Number.isInteger(v.difficulty) || v.difficulty < 1 || v.difficulty > 5) fail(`values.difficulty must be 1-5, got ${JSON.stringify(v.difficulty)}`);
-  if (v.sudoku !== "Ja" && v.sudoku !== "Nein") fail(`values.sudoku must be "Ja" or "Nein", got ${JSON.stringify(v.sudoku)}`);
-  if (!Array.isArray(v.labels) || !v.labels.every(Number.isInteger)) fail("values.labels must be a list of label numbers");
-  return {
-    endpoint: a.endpoint.replace(/\/+$/, ""), base: a["base-url"].replace(/\/+$/, ""), timeoutMs, png, template,
-    imageId: a["image-id"] ?? null,
-    form: Object.fromEntries(VALUE_KEYS.map((k) => [k, v[k]])),
-  };
+  for (const k of VALUE_KEYS) checkValue(v, k);
+  return { ...common, png, template, imageId: a["image-id"] ?? null, form: Object.fromEntries(VALUE_KEYS.map((k) => [k, v[k]])) };
 }
 
 // One HTTP call to Chrome's CDP endpoint, with the deadline; the body is read inside it too.
@@ -294,11 +342,60 @@ async function submitPuzzle(tab, base, form, html) {
   return { id, url: `${base}${PUZZLE_PAGE}?id=${id}` };
 }
 
+// Edit mode: the puzzle's edit form, its page HTML replaced and the fields `form` names set; the rest is
+// submitted as served, activation included (research note, "Edit form").
+async function editPuzzle(tab, base, id, form, html) {
+  await tab.navigate(`${base}/Raetselportal/Eigene/einstellen.php?id=${encodeURIComponent(id)}`);
+  await requirePage(tab, "input[name=einstellen]", "puzzle edit form");
+  const problem = await tab.evaluate(`(() => {
+    const v = ${JSON.stringify({ form, html })};
+    const f = document.querySelector('input[name=einstellen]').form;
+    const el = (name) => f.elements[name] ?? (() => { throw new Error('the edit form has no field ' + name); })();
+    el('htmlcode_en').value = v.html;
+    if ('title' in v.form) el('name').value = v.form.title;
+    if ('code' in v.form) el('code').value = v.form.code;
+    if ('codedescr_en' in v.form) el('codedescr_en').value = v.form.codedescr_en;
+    if ('freetags' in v.form) el('freetags').value = v.form.freetags;
+    if ('difficulty' in v.form) {
+      if (![...el('dif').options].some((o) => o.value === String(v.form.difficulty))) return 'the edit form has no difficulty ' + v.form.difficulty;
+      el('dif').value = String(v.form.difficulty);
+    }
+    if ('labels' in v.form) {
+      const boxes = [...f.querySelectorAll('input[type=checkbox][name^=label_]')];
+      const unknown = v.form.labels.filter((n) => !boxes.some((b) => b.name === 'label_' + n));
+      if (unknown.length) return 'the edit form has no label ' + unknown.join(', ');
+      for (const b of boxes) b.checked = v.form.labels.includes(Number(b.name.slice(6)));
+    }
+    if (!f.checkValidity()) return 'the edit form is not valid: ' + [...f.elements].filter((e) => !e.validity.valid).map((e) => e.name).join(', ');
+    return null;
+  })()`);
+  if (problem) fail(problem);
+  posted.submitted = true;
+  await tab.submit("document.querySelector('input[name=einstellen]').click()", "the puzzle edit");
+  // Live LMD answers on the edit page: "The puzzle has been changed. Edit Puzzle <id> To the puzzle page".
+  // Anything else, or a link to another puzzle, is a refusal.
+  const { changed, ids } = await tab.evaluate(`({
+    changed: (document.body?.innerText ?? '').includes(${JSON.stringify(CHANGED_NOTICE)}),
+    ids: [...new Set([...document.querySelectorAll('a[href]')].map((a) => new URL(a.href))
+      .filter((u) => u.pathname.endsWith(${JSON.stringify(PUZZLE_PAGE)}) && u.searchParams.get('id'))
+      .map((u) => u.searchParams.get('id')))],
+  })`);
+  const why = !changed ? `the page does not say ${JSON.stringify(CHANGED_NOTICE)}`
+    : ids.length !== 1 ? `the page has ${ids.length} puzzle-page links, not one`
+    : ids[0] !== id ? `the puzzle-page link is for ${ids[0]}` : null;
+  if (why) fail(`no "changed" notice for puzzle ${id} after "Change" (${why}): ${await pageReport(tab)}`);
+  return `${base}${PUZZLE_PAGE}?id=${id}`;
+}
+
 // What reached LMD so far, printed on a failure after the upload.
 const posted = { uploaded: false, image_id: null, submitted: false };
 
 async function main() {
   const inputs = readInputs(process.argv.slice(2));
+  if (inputs.edit !== undefined) {
+    const url = await withTab(inputs.endpoint, inputs.timeoutMs, (tab) => editPuzzle(tab, inputs.base, inputs.edit, inputs.form, inputs.template));
+    return JSON.stringify({ puzzle_id: inputs.edit, puzzle_url: url, html: inputs.template }) + "\n";
+  }
   const out = await withTab(inputs.endpoint, inputs.timeoutMs, async (tab) => {
     const imageId = posted.image_id = inputs.imageId ?? await uploadImage(tab, inputs.base, inputs.png, inputs.form.slug);
     const html = inputs.template.replaceAll(IMAGE_PLACEHOLDER, imageId);
@@ -314,6 +411,6 @@ main().then((line) => finish(process.stdout, line, 0), (e) => {
   if (e instanceof UsageError) return finish(process.stderr, `lmd_driver: ${e.message}\n`, 2);
   const message = e instanceof DriverError ? e.message : e.stack;
   const report = () => finish(process.stderr, `lmd_driver: ${message}\n`, 1);
-  if (!posted.uploaded && !posted.image_id) return report();
+  if (!posted.uploaded && !posted.image_id && !posted.submitted) return report();
   process.stdout.write(JSON.stringify({ failed: message, ...posted }) + "\n", report);
 });
