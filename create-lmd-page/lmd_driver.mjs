@@ -121,6 +121,8 @@ function readInputs(argv) {
   const common = { endpoint: a.endpoint.replace(/\/+$/, ""), base: a["base-url"].replace(/\/+$/, ""), timeoutMs };
   const template = readText(a.template, edit ? "page file" : "page template");
   if (edit) {
+    // An empty file would post a blank page over the live one, and LMD would answer "changed".
+    if (!template.trim()) fail(`the page file ${a.template} is empty: edit mode would blank the live page`);
     if (template.includes(IMAGE_PLACEHOLDER)) fail(`the page file still has a ${IMAGE_PLACEHOLDER} placeholder: edit mode posts the page as it is`);
     const v = a.values === undefined ? {} : readValues(a.values);
     // The edit form has no Sudoku question, and a slug names an upload: a key it would ignore is refused.
@@ -378,7 +380,10 @@ async function editPuzzle(tab, base, id, form, html) {
       .filter((u) => u.pathname.endsWith(${JSON.stringify(PUZZLE_PAGE)}) && u.searchParams.get('id'))
       .map((u) => u.searchParams.get('id')))],
   })`);
-  if (!changed || ids.length !== 1 || ids[0] !== id) fail(`no "changed" notice for puzzle ${id} after "Change": ${await pageReport(tab)}`);
+  const why = !changed ? `the page does not say ${JSON.stringify(CHANGED_NOTICE)}`
+    : ids.length !== 1 ? `the page has ${ids.length} puzzle-page links, not one`
+    : ids[0] !== id ? `the puzzle-page link is for ${ids[0]}` : null;
+  if (why) fail(`no "changed" notice for puzzle ${id} after "Change" (${why}): ${await pageReport(tab)}`);
   return `${base}${PUZZLE_PAGE}?id=${id}`;
 }
 

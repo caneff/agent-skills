@@ -234,9 +234,9 @@ archive does not undo it: say that too.
 
 Change the HTML of a puzzle that is already on LMD (#1720), where Chris once pasted it
 into LMD's edit form by hand. Inputs: the LMD puzzle id, the new page HTML (a file, with
-the image id already in it, no `{{IMAGE_ID}}`), the page's slug and SudokuPad link as the
-archive wants them, and optionally a `values.json` holding any of `title`, `code`,
-`difficulty`, `labels`, `freetags`, `codedescr_en` (the driver's header lists the rules).
+the image id already in it, no `{{IMAGE_ID}}`, not empty), the page's slug and SudokuPad
+link as the archive wants them, and optionally a values file holding only the keys that
+change (the driver's header lists the keys and their rules).
 The failure rule above applies: a failing step stops the run, and a driver failure after
 "Change" was clicked means the page may have changed, so say so.
 
@@ -246,15 +246,20 @@ The failure rule above applies: a failing step stops the run, and a driver failu
    "Change", and checks LMD's "The puzzle has been changed." notice for that id:
 
    ```
-   cd ~/lmd-pages/work/<slug> && node.exe "$(wslpath -w ~/.agents/skills/create-lmd-page/lmd_driver.mjs)" --endpoint http://127.0.0.1:9334 --edit <id> --template "$(wslpath -w page.html)" > edit.json
+   mkdir -p ~/lmd-pages/work/<slug>/edit && cd ~/lmd-pages/work/<slug>/edit && node.exe "$(wslpath -w ~/.agents/skills/create-lmd-page/lmd_driver.mjs)" --endpoint http://127.0.0.1:9334 --edit <id> --template "$(wslpath -w page.html)" > edit.json
    ```
 
-   Add `--values "$(wslpath -w values.json)"` when fields change too. It leaves every other
+   Work in the `edit/` subfolder, so a create run's `page.html` (still holding
+   `{{IMAGE_ID}}`) and `values.json` (holding `slug` and `sudoku`) are never reused: the
+   driver refuses both in edit mode. Write the edited page as `edit/page.html`. Add
+   `--values "$(wslpath -w edit-values.json)"` when fields change too. It leaves every other
    field, the activation choice and its date fields included, as the form served it, and
    it never clicks "Aktivieren": activation is Chris's alone. A non-zero exit is a failure.
 3. Re-archive with § Archive's command, the same `<slug>` and `<sudokupad-link>` and
-   `--lmd <id>` set to this puzzle's id; an archive under that slug is replaced.
-   A failed archive does not undo the edit: say that too.
+   `--lmd <id>` set to this puzzle's id; the archive's folder is named by that id, and
+   re-archiving replaces it. Like § Archive, it reads the page logged out, so it runs only
+   for a puzzle that is active: when Chris has not activated it yet, say the archive waits
+   for his "Aktivieren" and stop there. A failed archive does not undo the edit: say that too.
 
 ## Template
 
