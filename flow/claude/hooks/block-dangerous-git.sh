@@ -3,9 +3,8 @@
 #
 # Narrow guards; everything else about a push is the agent's business.
 #   - PUSH is gated on OWNERSHIP, not on branch or file type. If origin's owner
-#     is the `gh` login (resolving a fork to its parent, unless the checkout
-#     made origin the gh default: `gh repo set-default`, stored as
-#     remote.origin.gh-resolved=base, #1716), every push is allowed
+#     is the `gh` login (resolving a fork to its parent, except the standalone
+#     fork of WORKFLOW.md § Gate 1, #1716), every push is allowed
 #     — any branch, any content, default branch included. A repo someone else
 #     owns is blocked, and the agent hands the user the push and PR lines to
 #     run themselves: the outward-facing step is the user's. The ownership
@@ -20,6 +19,9 @@
 #     the user merges that ticket's PR — is enforced by `/implement`'s prose,
 #     not here: a squash merge on the user's own repo is undone with a revert,
 #     so a prose miss there costs a revert, not a merge nobody can take back.
+#   - Setting the gh default (`gh repo set-default`, or a `git config` write
+#     of `gh-resolved`) is refused: it is what declares a fork standalone and
+#     loosens the ownership check, so it is the user's call (#1716).
 #   - `git stash` that adds or takes an entry is refused in a linked worktree
 #     (#1529): the stack is shared by every worktree and session.
 #   - History/worktree destroyers and bare force-pushes stay blocked; those
@@ -186,6 +188,24 @@ for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   fi
 done
 
+# --- Setting the gh default (#1716). ---
+# The gh default on origin is what makes a fork standalone (WORKFLOW.md
+# § Gate 1), so an agent setting it would loosen the ownership check below on
+# its own say-so; gh's "run gh repo set-default" error invites exactly that.
+# Matched as the destroyers are: a word the shell runs, a shell handed the
+# text, or a `$(...)` body. Reading it (`--view`, `git config --get`) is fine.
+sets_gh_default='gh[[:space:]]+repo[[:space:]]+set-default|git[[:space:]]([^;&|]*[[:space:]])?config[[:space:]][^;&|]*gh-resolved'
+reads_gh_default='set-default[[:space:]]+(-v|--view)([[:space:]]|$)|config[[:space:]]+(--get|--get-regexp)[[:space:]][^;&|]*gh-resolved'
+if printf '%s\n' "$COMMAND" | grep -qE "$sets_gh_default"; then
+  command_views
+  if { printf '%s\n' "$CMD_BARE" | grep -qE "$sets_gh_default" || [ "$cmd_handed" = 1 ] \
+       || printf '%s\n' "$cmd_substitutions" | grep -qE "$sets_gh_default"; } \
+     && ! printf '%s\n' "$CMD_BARE" | grep -qE "$reads_gh_default"; then
+    echo "BLOCKED: '$COMMAND' sets the gh default repo, which is what declares a fork standalone and loosens the ownership check (WORKFLOW.md § Gate 1). That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh repo set-default <owner/name>' line to run themselves." >&2
+    exit 2
+  fi
+fi
+
 # --- `git stash` in a linked worktree (#1529). ---
 # The stash stack lives in the common git dir: a push from a worker's worktree
 # lands on the stack every worktree and session shares, and a pop takes
@@ -247,9 +267,10 @@ done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g' | grep -e push)
 ieq() { [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z' 'a-z')" ]; }
 
 # --- Ownership of this repo, cached. ---
-# Verdict is keyed on the origin URL, normalised to owner/name, so a verdict
-# earned once covers every worktree of the repo and a fresh `implement-*`
-# worktree never re-asks gh. Only the OWNED verdict is cached: it's the hot
+# Verdict is keyed on the origin URL, normalised to owner/name (plus a
+# `+standalone` suffix for a standalone fork), so a verdict earned once covers
+# every worktree of the repo and a fresh `implement-*` worktree never re-asks
+# gh. Only the OWNED verdict is cached: it's the hot
 # path (allow), so caching it keeps `gh` off every subsequent Bash call, while
 # a not-owned/lookup-failed verdict is never written — a block is rare, so
 # re-asking costs nothing and a stale "no" (or a cached network blip) can
@@ -300,11 +321,10 @@ repo_is_owned() {
   key=$(printf '%s' "$slug" | tr 'A-Z' 'a-z' | tr '/' '@' | tr -c 'a-z0-9@._-' '_')
 
   # Evaluate ORIGIN explicitly (a bare `gh repo view` would resolve to an
-  # `upstream` remote instead). A fork's real base repo is its parent, where
-  # its work heads through a PR, unless this checkout made origin the gh
-  # default (#1716): the fork is then a product of its own, and `gh pr create`
-  # targets origin too. `+` cannot occur in a slug, so the standalone verdict
-  # has its own cache key and never vouches for a checkout without the marker.
+  # `upstream` remote instead). A fork's base repo is its parent, except the
+  # standalone fork of WORKFLOW.md § Gate 1. `+` cannot occur in a slug, so
+  # the standalone verdict has its own cache key and never vouches for a
+  # checkout without the marker.
   base_q='if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end'
   if [ "$(git config --get remote.origin.gh-resolved 2>/dev/null)" = base ]; then
     base_q='.owner.login + "/" + .name'

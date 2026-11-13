@@ -332,17 +332,14 @@ RUN_FORBID="ownership of caneff-agent/skills" run "merge naming a repo, login re
 unset STUB_ERR
 export STUB_LOGIN=caneff STUB_OWNER=caneff
 
-# A fork resolves to its parent (#1716): work on it heads upstream through a
-# PR, so it is the parent's repo. A checkout that made origin the gh default
-# (`gh repo set-default`, stored as remote.origin.gh-resolved=base) declared
-# the fork standalone, and origin's owner decides; `gh pr create` there targets
-# origin too. The marker is part of the cached verdict's key, so one checkout
-# carrying it never vouches for one that does not.
+# A fork is its parent's repo, except the standalone fork of WORKFLOW.md
+# § Gate 1 (#1716). The marker is part of the cached verdict's key, so one
+# checkout carrying it never vouches for one that does not.
 fork="$tmp/fork"
 git init -q -b main "$fork"
 git -C "$fork" remote add origin https://github.com/caneff/agent-skills.git
 rm -rf "$XDG_CACHE_HOME"
-export STUB_LOGIN=caneff STUB_OWNER=caneff STUB_PARENT=someone-else
+export STUB_PARENT=someone-else
 RUN_CWD="$fork" run "fork without the gh-default marker: push blocked as the parent's" 2 \
   "git push origin main" "pushing to a repo you don't own."
 RUN_CWD="$fork" run "fork without the gh-default marker: merge blocked as the parent's" 2 \
@@ -357,7 +354,16 @@ git -C "$fork" config remote.upstream.gh-resolved base
 RUN_CWD="$fork" run "gh default on another remote is not the marker" 2 \
   "git push origin main" "pushing to a repo you don't own."
 unset STUB_PARENT
-export STUB_LOGIN=caneff STUB_OWNER=caneff
+# Declaring a fork standalone is the user's call, so the agent cannot set the
+# marker that loosens this guard; reading it stays allowed.
+run "agent setting the gh default blocked" 2 "gh repo set-default caneff/agent-skills" "standalone"
+run "agent writing the gh-resolved marker blocked" 2 \
+  "git -C /r config remote.origin.gh-resolved base" "standalone"
+run "agent unsetting the gh default blocked" 2 "gh repo set-default --unset" "standalone"
+run "reading the gh default allowed" 0 "gh repo set-default --view"
+run "reading the gh-resolved marker allowed" 0 "git config --get remote.origin.gh-resolved"
+run "the marker named in a commit message allowed" 0 \
+  "git commit -m 'needs gh repo set-default first'"
 
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
