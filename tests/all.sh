@@ -372,7 +372,7 @@ cpu_budget() { # <label>: prints the suite's budget in seconds
   case $1 in
     flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir) and runs 140+ process-spawning tests
     flow/install.test.sh) echo 160 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME (measured 109s)
-    flow/claude/hooks/block-dangerous-git.test.sh) echo 30 ;; # every case spawns jq, the hook, git and a gh stub: 9.2s CPU on a quiet box, 14-18s at load average 10-16 (2026-10-13, #1571)
+    flow/claude/hooks/block-dangerous-git.test.sh) echo 45 ;; # every case spawns jq, the hook, git and a gh stub: 9.2s CPU on a quiet box, 14-18s at load average 10-16 (2026-10-13, #1571); 17.3s alone after #1717's per-target cases, 19-21s alone with #1716's at load 5-7 and 32.1s in a parallel all.sh run (2026-11-13)
     drain/drain_test.py) echo 100 ;; # one real git repo, bare origin and stub processes per case, 146 cases (measured 65.7s CPU alone, 67.7s in an 8-job run, 2026-10-15; 80.5s seen under drain load, #1586)
     *) echo "$default_cpu_budget" ;;
   esac
