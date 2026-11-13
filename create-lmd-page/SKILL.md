@@ -230,6 +230,32 @@ That archives the puzzle and its LMD page and names the folder by the id. A non-
 or any `FAILED` line on stderr, is a failure. The puzzle is already posted, so a failed
 archive does not undo it: say that too.
 
+## Edit a live page
+
+Change the HTML of a puzzle that is already on LMD (#1720), where Chris once pasted it
+into LMD's edit form by hand. Inputs: the LMD puzzle id, the new page HTML (a file, with
+the image id already in it, no `{{IMAGE_ID}}`), the page's slug and SudokuPad link as the
+archive wants them, and optionally a `values.json` holding any of `title`, `code`,
+`difficulty`, `labels`, `freetags`, `codedescr_en` (the driver's header lists the rules).
+The failure rule above applies: a failing step stops the run, and a driver failure after
+"Change" was clicked means the page may have changed, so say so.
+
+1. Run the stream gate and the stream browser endpoint check, as Output steps 3 and 4.
+2. Run the driver in edit mode through Windows `node.exe`; it opens
+   `Raetselportal/Eigene/einstellen.php?id=<id>`, replaces the English page HTML, clicks
+   "Change", and checks LMD's "The puzzle has been changed." notice for that id:
+
+   ```
+   cd ~/lmd-pages/work/<slug> && node.exe "$(wslpath -w ~/.agents/skills/create-lmd-page/lmd_driver.mjs)" --endpoint http://127.0.0.1:9334 --edit <id> --template "$(wslpath -w page.html)" > edit.json
+   ```
+
+   Add `--values "$(wslpath -w values.json)"` when fields change too. It leaves every other
+   field, the activation choice and its date fields included, as the form served it, and
+   it never clicks "Aktivieren": activation is Chris's alone. A non-zero exit is a failure.
+3. Re-archive with § Archive's command, the same `<slug>` and `<sudokupad-link>` and
+   `--lmd <id>` set to this puzzle's id; an archive under that slug is replaced.
+   A failed archive does not undo the edit: say that too.
+
 ## Template
 
 One shared skeleton with four values that differ by `layout` — see
