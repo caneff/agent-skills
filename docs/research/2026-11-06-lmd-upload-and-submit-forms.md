@@ -127,6 +127,39 @@ or larger than 230 KB. Only an upload test can settle those.
 - The form's character hint and the help page list the same symbols. The
   form's hint also shows a space.
 
+### Edit form (#1720)
+
+**Source and gap.** Everything here is from the 2026-11-06 hand edit above
+(Check-In, 000VX4) and 2026-11-13's hand edit (Hot Property, 000W0N: a
+plain-version play link added to a live page). #1720's worker could not re-read
+the live form over CDP: a `chrome-stream.exe` was running with no control port,
+which only Chris closes (`create-lmd-page/SKILL.md` step 4). So no edit-form
+fixture is a saved copy of the live page; the driver test derives its fake edit
+page from the submit fixture by the differences below. Rerun
+`2026-11-06-lmd-form-capture.mjs` on `?id=<id>` to settle the open questions.
+
+- **URL:** `https://logic-masters.de/Raetselportal/Eigene/einstellen.php?id=<id>`.
+  The form POSTs to `einstellen.php` (the `id` is in the query or a hidden
+  field the driver does not need to know: it submits the form as the page
+  serves it).
+- **Fields:** the submit form's, minus `Sudoku_JaNein`, pre-filled with the
+  puzzle's current values: `name`, `htmlcode`, `codedescr`, `htmlcode_en`,
+  `codedescr_en`, `code`, `dif`, `frei`, `day` `month` `year` `hour` `min`
+  `sec`, `label_<n>`, `freetags`. The page HTML is `htmlcode_en`.
+- **Submit:** `einstellen` with value `Change` (the create form's is `Create`).
+- **Answer:** stays on the edit page, "The puzzle has been changed. Edit Puzzle
+  <id> To the puzzle page", the "To the puzzle page" link being
+  `Raetsel/zeigen.php?id=<id>`.
+- **Activation:** the `frei` select and the date fields are part of this form
+  and come back pre-filled (`frei=nein`, the date fields the save time). The
+  driver leaves all of them as served, so an edit never sets, clears or
+  schedules activation. The "Aktivieren" button is on the puzzle page, which an
+  edit never visits.
+- **Open:** whether the edit page of an *active* puzzle serves `frei` and the
+  date fields differently, or refuses a change to an active puzzle. Chris's
+  2026-11-13 Hot Property edit was of a live page and worked by hand, so it
+  does not refuse.
+
 ### Labels (`label_<n>`)
 
 1 Standard puzzle, 2 Puzzle combination, 3 Puzzle variant, 4 Variant combination,

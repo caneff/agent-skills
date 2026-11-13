@@ -84,6 +84,43 @@ def _saved_page(link=True):
     notice = (f'<p>{SAVED}</p><p><a href="{SUBMIT_PATH}?id={NEW_PUZZLE_ID}">Edit Puzzle '
               f'{NEW_PUZZLE_ID}</a> {to_page}</p>')
     return re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + notice, SUBMIT_PAGE, count=1)
+EDIT_ID = "000W0N"
+CHANGED = "The puzzle has been changed."
+OLD_HTML = "<p>Old page.</p>"
+
+
+def _edit_page():
+    """The edit form as LMD serves it (#1720's research note: no live copy was readable, so it is the submit
+    fixture with the documented differences): no `Sudoku_JaNein`, submit "Change", every field pre-filled
+    with the puzzle's current values. It inherits SUBMIT_PAGE's German text and its `frei` "ja" with the
+    save-time date fields, so an edit that blanked or reset any of them posts a different value."""
+    html = re.sub(r'<p>\s*First things first.*?</p>', "", SUBMIT_PAGE, count=1, flags=re.S)
+    for old, new in [
+        # where the id rides on the real form is not recorded (research note); the driver submits as served
+        ('<form action="einstellen.php" method="POST">', f'<form action="einstellen.php?id={EDIT_ID}" method="POST">'),
+        ('name="name" value=""', 'name="name" value="Old Title"'),
+        ('<textarea name="htmlcode_en" cols="60" rows="15"></textarea>', f'<textarea name="htmlcode_en" cols="60" rows="15">{OLD_HTML}</textarea>'),
+        ('name="code" value=""', 'name="code" value="OLDCODE"'),
+        ('name="freetags" value=""', 'name="freetags" value="Old Tag"'),
+        ('name="einstellen" value="Create"', 'name="einstellen" value="Change"'),
+        # served already scheduled, so a driver that forced "nein" or emptied the dates shows in what it posts
+        ('<textarea name="codedescr_en" cols="60" rows="5"></textarea>', '<textarea name="codedescr_en" cols="60" rows="5">Old description.</textarea>'),
+        ('type="checkbox" name="label_3" value="1">', 'type="checkbox" name="label_3" value="1" checked>'),
+    ]:
+        html = _swap(html, old, new)
+    return html
+
+
+EDIT_PAGE = _edit_page()
+assert "Sudoku_JaNein" not in EDIT_PAGE
+
+
+def _changed_page(id_=EDIT_ID, link=True, notice_text=CHANGED):
+    to_page = f'<a href="{PUZZLE_PATH}?id={id_}">To the puzzle page</a>' if link else ""
+    notice = f'<p>{notice_text}</p><p><a href="{SUBMIT_PATH}?id={id_}">Edit Puzzle {id_}</a> {to_page}</p>'
+    return re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + notice, EDIT_PAGE, count=1)
+
+
 FORM_ERROR = "Please enter a name for the puzzle."
 UPLOAD_ERROR = "Die Datei ist zu groß."
 # A one-pixel PNG: the bytes the recorded upload must carry.
@@ -135,6 +172,7 @@ class FakeLmd:
         self.rows = []  # uploaded files, newest first, (id, name)
         self.upload_mode = "ok"  # ok | noid | login | nolist (the page after the upload has no file list)
         self.submit_mode = "ok"  # ok | error | noid | nolink | elsewhere | alert | login
+        self.edit_mode = "ok"  # ok | error | nolink | nonotice | otherid | login | missing (no such puzzle: the form is absent)
 
 
 def _handler(lmd):
@@ -161,6 +199,8 @@ def _handler(lmd):
                 if lmd.uploads and lmd.upload_mode == "nolist":
                     return self._send("<!doctype html><html><body><p>Wartungsarbeiten.</p></body></html>")
                 return self._send(_upload_page(lmd.rows, form=not lmd.uploads))
+            if path == SUBMIT_PATH and "id=" in urllib.parse.urlsplit(self.path).query:
+                return self._send({"login": LOGIN_PAGE, "missing": "<html><body><p>No such puzzle.</p></body></html>"}.get(lmd.edit_mode, EDIT_PAGE))
             if path == SUBMIT_PATH:
                 return self._send({"login": LOGIN_PAGE, "alert": ALERT_PAGE}.get(lmd.submit_mode, SUBMIT_PAGE))
             if path == OWN_PUZZLES_PATH:
@@ -187,6 +227,12 @@ def _handler(lmd):
                     lmd.rows.insert(0, (NEW_IMAGE_ID, fields.get("name", "")))
                     return self._send(_upload_page(lmd.rows, form=False))
                 return self._send(f"<!doctype html><html><body><p class='fehler'>{UPLOAD_ERROR}</p></body></html>")
+            if path == SUBMIT_PATH and "id=" in urllib.parse.urlsplit(self.path).query:
+                lmd.submits.append(urllib.parse.parse_qs(body.decode("utf-8"), keep_blank_values=True))
+                if lmd.edit_mode == "error":
+                    return self._send(f"<!doctype html><html><body><p class='fehler'>{FORM_ERROR}</p></body></html>")
+                return self._send(_changed_page(id_="000ZZZ" if lmd.edit_mode == "otherid" else EDIT_ID, link=lmd.edit_mode != "nolink",
+                                                notice_text="Saved." if lmd.edit_mode == "nonotice" else CHANGED))
             if path == SUBMIT_PATH:
                 lmd.submits.append(urllib.parse.parse_qs(body.decode("utf-8"), keep_blank_values=True))
                 if lmd.submit_mode in ("ok", "nolink"):
@@ -510,3 +556,134 @@ def test_a_stalled_or_garbled_cdp_endpoint_exits_and_closes_the_tab(lmd, tmp_pat
     finally:
         server.shutdown()
         server.server_close()
+
+
+# ---- edit mode (#1720) ----
+
+def run_edit(endpoint, lmd, tmp_path, html=OLD_HTML + "<p>New.</p>", values=None, puzzle_id=EDIT_ID, extra=()):
+    (tmp_path / "page.html").write_text(html, encoding="utf-8")
+    args = ["--edit", puzzle_id, "--template", str(tmp_path / "page.html")]
+    if values is not None:
+        (tmp_path / "values.json").write_text(json.dumps(values), encoding="utf-8")
+        args += ["--values", str(tmp_path / "values.json")]
+    return subprocess.run(
+        ["node", str(DRIVER), "--endpoint", endpoint, "--base-url", lmd.base, "--timeout-ms", "15000", *args, *extra],
+        capture_output=True, text=True, timeout=60,
+    )
+
+
+def _edit_posted(lmd):
+    """The one edit form posted: all its fields, and the single-valued ones as plain strings."""
+    [submit] = lmd.submits
+    return submit, {k: v[0] for k, v in submit.items() if len(v) == 1}
+
+
+def test_edit_replaces_only_the_html_and_sends_every_other_field_as_served(endpoint, lmd, tmp_path):
+    result = run_edit(endpoint, lmd, tmp_path)
+    assert result.returncode == 0, result.stderr
+    submit, one = _edit_posted(lmd)
+    assert one["htmlcode_en"] == (OLD_HTML + "<p>New.</p>").replace("\n", "\r\n")
+    assert (one["name"], one["code"], one["freetags"], one["dif"]) == ("Old Title", "OLDCODE", "Old Tag", "3")
+    assert (one["htmlcode"], one["codedescr"], one["codedescr_en"]) == ("Rätsel", "Zeile 5", "Old description.")
+    assert [k for k in submit if k.startswith("label_")] == ["label_3"]
+    assert one["einstellen"] == "Change"
+    assert "Sudoku_JaNein" not in submit
+    assert lmd.uploads == []
+
+
+def test_edit_opens_that_puzzles_edit_form_and_prints_the_id_and_html(endpoint, lmd, tmp_path):
+    result = run_edit(endpoint, lmd, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert ("GET", f"{SUBMIT_PATH}?id={EDIT_ID}") in lmd.requests
+    out = json.loads(result.stdout)
+    assert out == {"puzzle_id": EDIT_ID, "puzzle_url": f"{lmd.base}{PUZZLE_PATH}?id={EDIT_ID}",
+                   "html": OLD_HTML + "<p>New.</p>"}
+
+
+def test_edit_never_touches_activation_nor_visits_the_puzzle_page(endpoint, lmd, tmp_path):
+    result = run_edit(endpoint, lmd, tmp_path)
+    assert result.returncode == 0, result.stderr
+    _, one = _edit_posted(lmd)
+    # exactly what the form served: a scheduled activation, not the create path's "nein" and emptied dates
+    assert one["frei"] == "ja"
+    assert [one[k] for k in DATE_FIELDS] == ["06", "11", "2026", "15", "45", "04"]
+    assert not any("aktiv" in p.lower() or p.startswith(PUZZLE_PATH) for _, p in lmd.requests)
+
+
+def test_edit_changes_the_optional_fields_it_is_given(endpoint, lmd, tmp_path):
+    values = {"title": "New Title", "code": "987", "difficulty": 5, "labels": [3, 25], "freetags": "Killer (Variant)",
+              "codedescr_en": "Column 1."}
+    result = run_edit(endpoint, lmd, tmp_path, values=values)
+    assert result.returncode == 0, result.stderr
+    submit, one = _edit_posted(lmd)
+    assert (one["name"], one["code"], one["dif"], one["freetags"], one["codedescr_en"]) == (
+        "New Title", "987", "5", "Killer (Variant)", "Column 1.")
+    assert sorted(k for k in submit if k.startswith("label_")) == ["label_25", "label_3"]
+
+
+def test_edit_leaves_a_field_it_is_not_given_as_served(endpoint, lmd, tmp_path):
+    result = run_edit(endpoint, lmd, tmp_path, values={"title": "Only Title"})
+    assert result.returncode == 0, result.stderr
+    submit, one = _edit_posted(lmd)
+    assert (one["name"], one["code"], one["freetags"]) == ("Only Title", "OLDCODE", "Old Tag")
+    assert [k for k in submit if k.startswith("label_")] == ["label_3"]
+
+
+def test_edit_is_refused_logged_out_before_anything_is_sent(endpoint, lmd, tmp_path):
+    lmd.edit_mode = "login"
+    _assert_refused(run_edit(endpoint, lmd, tmp_path), "login page", "not logged in")
+    assert lmd.submits == []
+
+
+def test_edit_of_a_puzzle_with_no_form_is_refused(endpoint, lmd, tmp_path):
+    lmd.edit_mode = "missing"
+    _assert_refused(run_edit(endpoint, lmd, tmp_path), "puzzle edit form", "No such puzzle.")
+    assert lmd.submits == []
+
+
+@pytest.mark.parametrize("mode, needle", [("error", FORM_ERROR), ("nolink", CHANGED), ("nonotice", "Saved."), ("otherid", "000ZZZ")])
+def test_edit_without_the_changed_notice_for_that_id_is_a_refusal(endpoint, lmd, tmp_path, mode, needle):
+    lmd.edit_mode = mode
+    result = run_edit(endpoint, lmd, tmp_path)
+    assert result.returncode == 1 and 'no "changed" notice' in result.stderr and needle in result.stderr, result.stderr
+    assert json.loads(result.stdout)["submitted"] is True  # Change was clicked: the page may have changed
+
+
+@pytest.mark.parametrize("extra, message", [
+    (("--png", "x.png"), "--png"),
+    (("--image-id", "001626"), "--image-id"),
+])
+def test_edit_refuses_create_only_flags(endpoint, lmd, tmp_path, extra, message):
+    result = run_edit(endpoint, lmd, tmp_path, extra=extra)
+    assert result.returncode == 2 and message in result.stderr, result.stderr
+    assert lmd.requests == []
+
+
+@pytest.mark.parametrize("values, message", [
+    ({"slug": "x"}, "slug"),
+    ({"sudoku": "Ja"}, "sudoku"),
+    ({"difficulty": 9}, "values.difficulty must be 1-5"),
+    ({"code": "a_b"}, "would strip"),
+    ({"title": " "}, "values.title"),
+])
+def test_edit_refuses_bad_or_create_only_values_before_any_request(endpoint, lmd, tmp_path, values, message):
+    _assert_refused(run_edit(endpoint, lmd, tmp_path, values=values), message)
+    assert lmd.requests == []
+
+
+def test_edit_refuses_an_unfilled_image_placeholder_and_a_bad_id(endpoint, lmd, tmp_path):
+    _assert_refused(run_edit(endpoint, lmd, tmp_path, html="<img:{{IMAGE_ID}}>"), "{{IMAGE_ID}}")
+    result = run_edit(endpoint, lmd, tmp_path, puzzle_id="00 W0N")
+    assert result.returncode == 2 and "--edit" in result.stderr
+    assert lmd.requests == []
+
+
+def test_edit_label_the_form_lacks_exits_before_the_submit(endpoint, lmd, tmp_path):
+    _assert_refused(run_edit(endpoint, lmd, tmp_path, values={"labels": [999]}), "no label 999")
+    assert lmd.submits == []
+
+
+@pytest.mark.parametrize("html", ["", "  \n\t\n"])
+def test_edit_refuses_an_empty_page_file_before_any_request(endpoint, lmd, tmp_path, html):
+    _assert_refused(run_edit(endpoint, lmd, tmp_path, html=html), "is empty: edit mode would blank")
+    assert lmd.requests == []
