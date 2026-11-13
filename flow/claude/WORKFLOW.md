@@ -7,7 +7,11 @@ invariants; this file holds their exceptions and mechanics.
 
 A push is judged by the repo it is sent to, so a fork I own is mine (Chris,
 2026-11-09: a fork I publish from, such as `caneff/penpa-edit`); a PR by its
-base repo. Anyone else's repo → hand me the drafted title/body, the `gh pr
+base repo; a merge by origin's base, a fork's parent. A **standalone fork** is
+the exception for merges: its checkout made origin the gh default (`gh repo
+set-default <origin>`, stored as `remote.origin.gh-resolved = base`), so its
+base is origin (Chris, 2026-11-13: penpa-edit never goes upstream, #1716).
+Setting that marker is mine; the hook refuses it. Anyone else's repo → hand me the drafted title/body, the `gh pr
 create ...` line, and a compare command. The ownership-gated git hook
 (`hooks/block-dangerous-git.sh`, whose header says how each repo is
 resolved), not prose, is what blocks pushes and PRs to repos I don't own.

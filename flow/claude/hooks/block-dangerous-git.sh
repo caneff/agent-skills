@@ -18,13 +18,17 @@
 #     PR upstream from an owned fork.
 #   - `gh pr merge` (and `implement/pr_settle.py ... --merge`, which runs one,
 #     #1526) is gated on the same OWNERSHIP (#790): allowed when this
-#     checkout and every repo the line names are the `gh` login's, blocked
-#     everywhere else. Only the command is matched, not the phrase: quoted
+#     checkout's base (a fork's parent, except the standalone fork of
+#     WORKFLOW.md § Gate 1, #1716) and every repo the line names are the `gh`
+#     login's, blocked everywhere else. Only the command is matched, not the phrase: quoted
 #     text (a grep pattern, a commit message) is data unless a shell runs
 #     it. The `ready-for-human` exception —
 #     the user merges that ticket's PR — is enforced by `/implement`'s prose,
 #     not here: a squash merge on the user's own repo is undone with a revert,
 #     so a prose miss there costs a revert, not a merge nobody can take back.
+#   - Setting the gh default (`gh repo set-default`, or a `git config` write
+#     of `gh-resolved`) is refused: it is what declares a fork standalone and
+#     loosens the merge check, so it is the user's call (#1716).
 #   - `git stash` that adds or takes an entry is refused in a linked worktree
 #     (#1529): the stack is shared by every worktree and session.
 #   - History/worktree destroyers and bare force-pushes stay blocked; those
@@ -204,6 +208,39 @@ for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   fi
 done
 
+# --- Setting the gh default (#1716). ---
+# The gh default on origin is what makes a fork standalone (WORKFLOW.md
+# § Gate 1), so an agent setting it would loosen the merge check on its own
+# say-so; gh's "run gh repo set-default" error invites exactly that. Judged per
+# segment, so a read (`--view`, `git config --get`) exempts only itself. The
+# key is read with quotes dropped, since `git config "remote.x.gh-resolved"`
+# is the same key, while the verb must be a word the shell runs, so a commit
+# message naming one is data. A shell handed the text, or a `$(...)` body, is
+# read whole and blocks.
+sets_gh_default='gh[[:space:]]+repo[[:space:]]+set-default|git[[:space:]]([^;&|]*[[:space:]])?config[[:space:]][^;&|]*gh-resolved'
+reads_gh_default='set-default[[:space:]]+(-v|--view)([[:space:]]|$)|config[[:space:]]+(--get|--get-regexp)[[:space:]][^;&|]*gh-resolved'
+gh_default_verb='(^|[[:space:](])(gh[[:space:]]+repo|git[[:space:]]([^;&|]*[[:space:]])?config)([[:space:]]|$)'
+writes_gh_default() { # <segment>
+  local plain
+  plain=$(printf '%s' "$1" | tr -d "'\"")
+  printf '%s\n' "$plain" | grep -qE "$sets_gh_default" || return 1
+  printf '%s\n' "$plain" | grep -qE "$reads_gh_default" && return 1
+  quote_views "$1"
+  printf '%s\n' "$BARE" | grep -qE "$gh_default_verb"
+}
+if printf '%s\n' "$COMMAND" | grep -qE "$sets_gh_default"; then
+  command_views
+  gh_default_set=0
+  { [ "$cmd_handed" = 1 ] || printf '%s\n' "$cmd_substitutions" | grep -qE "$sets_gh_default"; } && gh_default_set=1
+  while IFS= read -r segment; do
+    writes_gh_default "$segment" && gh_default_set=1
+  done < <(split_segments "$SCAN" | grep -e set-default -e gh-resolved)
+  if [ "$gh_default_set" = 1 ]; then
+    echo "BLOCKED: '$COMMAND' sets the gh default repo, which is what declares a fork standalone and loosens the merge check (WORKFLOW.md § Gate 1). That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh repo set-default <owner/name>' line to run themselves." >&2
+    exit 2
+  fi
+fi
+
 # --- `git stash` in a linked worktree (#1529). ---
 # The stash stack lives in the common git dir: a push from a worker's worktree
 # lands on the stack every worktree and session shares, and a pop takes
@@ -368,9 +405,16 @@ base_is_owned() {
   mkdir -p "$cache_dir/base" 2>/dev/null && printf '%s\n' "$GH_ANSWER" > "$map" 2>/dev/null
   return 0
 }
-# This checkout's origin, as a merge judges it: 2 outside a checkout.
+# This checkout's origin, as a merge judges it: 2 outside a checkout. The
+# standalone fork of WORKFLOW.md § Gate 1 is judged as itself (#1716); its
+# verdict is the push cache's, keyed on its own slug, so removing the marker
+# sends the next merge back to the parent.
 origin_base_is_owned() {
   git rev-parse --show-toplevel >/dev/null 2>&1 || { OWNERSHIP_ERR="not inside a git checkout"; return 2; }
+  if [ "$(git config --get remote.origin.gh-resolved 2>/dev/null)" = base ]; then
+    url_is_owned "$(git remote get-url origin 2>/dev/null)"
+    return
+  fi
   base_is_owned "$(git remote get-url origin 2>/dev/null)"
 }
 
