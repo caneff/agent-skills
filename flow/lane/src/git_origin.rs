@@ -31,7 +31,8 @@ fn slug_of_url(url: &str) -> Option<String> {
     Some(url.to_string())
 }
 
-/// `default_of <path>` -> main, master, whatever origin points at.
+/// The branch `origin/HEAD` names, else `main` or `master` whichever origin
+/// has, else `main`.
 pub fn default_branch(repo: &Path) -> String {
     let repo_s = repo.to_string_lossy();
     if let Some(d) = quiet_stdout("git", &["-C", &repo_s, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]) {
@@ -47,14 +48,13 @@ pub fn default_branch(repo: &Path) -> String {
     "main".to_string()
 }
 
-/// `slug_of <path>` -> owner/name, for the gh calls. `None` when there is no
-/// origin remote.
+/// `owner/name` for the gh calls. `None` when there is no origin remote.
 pub fn origin_slug(repo: &Path) -> Option<String> {
     let repo_s = repo.to_string_lossy();
     slug_of_url(&quiet_stdout("git", &["-C", &repo_s, "remote", "get-url", "origin"])?)
 }
 
-/// `default_branch`, bounded (#849): `implement-dispatch` is the only
+/// `default_branch`, bounded: `implement-dispatch` is the only
 /// caller of this variant, so a hang on any of the underlying `git` calls
 /// fails loud — naming the command — rather than falling through to
 /// `default_branch`'s own "main"/"master" guess, which is a legitimate
@@ -76,7 +76,7 @@ pub fn default_branch_timeout(repo: &Path, timeout: Duration) -> Result<String, 
     Ok("main".to_string())
 }
 
-/// `origin_slug`, bounded (#849) — see [`default_branch_timeout`].
+/// `origin_slug`, bounded — see [`default_branch_timeout`].
 pub fn origin_slug_timeout(repo: &Path, timeout: Duration) -> Result<Option<String>, String> {
     let repo_s = repo.to_string_lossy();
     let url = quiet_stdout_bounded("git", &["-C", &repo_s, "remote", "get-url", "origin"], timeout)?;
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(origin_slug(&repo).as_deref(), Some("/some/where/notgithub"));
     }
 
-    // #849: the bounded variants match the unbounded ones on every case that
+    // The bounded variants match the unbounded ones on every case that
     // isn't about a hang — that behavior belongs to implement-dispatch's own
     // contract tests, which can make a real "git" hang; a unit test here
     // cannot without shadowing "git" process-wide for every parallel test.

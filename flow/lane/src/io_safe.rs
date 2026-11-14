@@ -1,5 +1,5 @@
 //! Stdout writes that exit quietly instead of panicking when the pipe
-//! closes early (#758). `println!`/`print!` panic on a write error because
+//! closes early. `println!`/`print!` panic on a write error because
 //! Rust ignores SIGPIPE; piped into `head` or a `less` quit before EOF, the
 //! next one panics with "failed printing to stdout: Broken pipe" and exits
 //! 101. The bash predecessor this replaced died of SIGPIPE (exit 141)
