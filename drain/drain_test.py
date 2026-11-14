@@ -514,6 +514,47 @@ def test_the_nudge_calls_a_drain_a_drain_not_a_run(sb):
         assert mod.nudge_text("why.", pr_up, kind).startswith("Unattended drain, no controller: ")
 
 
+def _drain_mod():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("drain_under_test", DRAIN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_consecutive_failure_stop_fires_at_the_counters_limit_and_names_the_log_dir():
+    mod = _drain_mod()
+    ctx = type("Ctx", (), {"log_dir": "/logs"})()
+    assert mod.consecutive_failure_stop(ctx, mod.MAX_CONSECUTIVE_FAILURES - 1) is None
+    stop = mod.consecutive_failure_stop(ctx, mod.MAX_CONSECUTIVE_FAILURES)
+    assert stop.startswith(f"{mod.MAX_CONSECUTIVE_FAILURES} bundles in a row went to Chris") and "/logs" in stop
+
+
+def test_record_bundle_files_results_resets_failures_and_hands_a_failed_bundle_to_chris():
+    mod = _drain_mod()
+    mod.say = lambda text: None
+    ctx = type("Ctx", (), {"log_dir": "/logs"})()
+    mod.hand_to_chris = lambda ctx, anchor, reason, kind: [anchor, anchor + 1]
+    prog = mod.Progress(None)
+    prog.started.append(1)
+    ok = {"outcome": mod.MERGED, "tickets": [1], "via": "PR #9", "sha": "abc"}
+    assert mod.record_bundle(ctx, prog, 1, mod.TICKET, [ok], None) is None
+    assert (prog.merged, prog.done, prog.failures, prog.started) == ([ok], 1, 0, [])
+    assert mod.record_bundle(ctx, prog, 5, mod.TICKET, None, "red seam") is None
+    assert (prog.handed, prog.done, prog.failures) == ([([5, 6], "red seam")], 3, 1)
+    assert "in a row went to Chris" in mod.record_bundle(ctx, prog, 7, mod.TICKET, None, "red seam")
+
+
+def test_next_anchor_says_why_an_empty_queue_has_no_anchor():
+    mod = _drain_mod()
+    mod.say = lambda text: None
+    mod.resumable = lambda ctx, ended: None
+    mod.survey = lambda ctx, retry=True: ([], [], [], [], [])
+    prog = mod.Progress(None)
+    assert mod.next_anchor(None, prog) is None
+    assert prog.cause == "queue empty"
+
+
 def test_a_candidate_with_no_body_and_no_comments_is_listed_as_empty_not_blank(sb):
     # A ticket unblocked by native dependencies alone can have an empty body; the
     # fake gh's frontier needs a `Blocked by` body to offer one, so call excerpt directly.

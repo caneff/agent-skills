@@ -133,6 +133,17 @@ def count_note(k):
     return f"(of {k} candidates)"
 BUNDLE_MAX = 8
 MAX_CONSECUTIVE_FAILURES = 2
+
+
+def consecutive_failure_stop(ctx, failures):
+    """The stop reason once `failures` bundles in a row went to Chris, else `None`."""
+    if failures < MAX_CONSECUTIVE_FAILURES:
+        return None
+    return (f"{failures} bundles in a row went to Chris; the environment is the likelier "
+            f"cause (auth, quota, herdr, implement-dispatch). Check `herdr agent list` and the "
+            f"logs in {ctx.log_dir}.")
+
+
 # The caps, stated here and nowhere else: the equivalent of `ulimit -v 32G`
 # (address space, not resident memory, hence generous) on the one-shot bundle
 # chooser, and a three-hour wall clock for a worker to finish and for the seam.
@@ -1033,80 +1044,106 @@ def say_waiting(waiting):
             "ready-for-agent, is claimed, or is blocked)")
 
 
+class Progress:
+    """What one drain has done and seen so far: the state `next_anchor` and
+    `record_bundle` read and write, so the loop body holds none of it."""
+
+    def __init__(self, want):
+        self.merged, self.closed, self.handed = [], [], []
+        self.failures, self.done, self.want = 0, 0, want
+        self.started = []  # the tickets of a bundle whose start line is out and whose end line is not
+        self.told = set()  # stranded slices already named this drain (#1485)
+        self.ended = set()  # the anchors this drain has taken up: added before `work()`, so none is taken twice
+        self.cause, self.seen = None, None  # the cause the drain ended on, and the last queue read `(queue, waiting, passed)`
+
+
+def next_anchor(ctx, prog):
+    """`(anchor, kind, resumed, others)` for the next bundle, or `None` when the
+    queue holds nothing startable (`prog.cause` then says which). A resumable
+    anchor comes first; otherwise the queue is read, `--anchor` is put first and
+    the head is noted."""
+    while True:
+        taken = resumable(ctx, prog.ended)
+        if taken is not None:
+            anchor, kind = taken
+            return anchor, kind, True, []
+        queue, waiting, stranded, candidates, passed = survey(ctx)
+        prog.seen = (queue, waiting, passed)
+        for n, why in stranded:
+            if n not in prog.told:  # every exit names them, once
+                prog.told.add(n)
+                say(f"stranded: #{n}, {why}")
+        if not candidates:
+            say_waiting(waiting)
+            prog.cause = "queue empty" if not queue else "no startable ticket"
+            prog.seen = (queue, [], passed)  # named just above
+            return None
+        if prog.want:
+            if not any(t[0] == prog.want for t in candidates):
+                raise DrainStop(f"--anchor #{prog.want} left the ready queue before drain reached it")
+            candidates, prog.want = put_first(candidates, prog.want), None
+        anchor, _, kind = candidates[0]
+        others = [(n, title) for n, title, k in queue if k == TICKET and n != anchor]
+        if note_anchor(ctx, anchor, kind):
+            return anchor, kind, False, others
+
+
+def record_bundle(ctx, prog, anchor, kind, results, reason):
+    """Say how the bundle ended and file it: its results as merged or closed, or,
+    when it failed, hand it to Chris. Returns the stop reason when the failures
+    in a row reach the limit, else `None`."""
+    prog.started.clear()
+    if results:
+        for result in results:
+            if result["outcome"] == MERGED:
+                say(f"bundle ended: {refs(result['tickets'])}  merged  {result['via']}  {result['sha']}")
+            else:
+                say(f"bundle ended: {refs(result['tickets'])}  {result['via']}")
+            (prog.merged if result["outcome"] == MERGED else prog.closed).append(result)
+        prog.done, prog.failures = prog.done + sum(len(r["tickets"]) for r in results), 0
+        return None
+    bundle = hand_to_chris(ctx, anchor, reason, kind)
+    say(f"bundle ended: {refs(bundle)}  handed to Chris: {reason}")
+    prog.handed.append((bundle, reason))
+    prog.done, prog.failures = prog.done + len(bundle), prog.failures + 1
+    return consecutive_failure_stop(ctx, prog.failures)
+
+
 def drain(ctx, limit, limit_name):
     """`Run`: what merged, what closed with no PR, what was handed over, the stop
     reason or `None`, the cause the drain ended on, and the ready tickets it
     passed over as `[(number, why)]`. `passed` is `None` when no queue could be
     read for it, and `unread` then says why. `limit` counts tickets;
-    `limit_name` is how a reached limit is worded, e.g. `--max 3`."""
-    merged, closed, handed, stop, failures, done, want = [], [], [], None, 0, 0, ctx.want
-    started = []  # the tickets of a bundle whose start line is out and whose end line is not
-    told = set()  # stranded slices already named this drain (#1485)
-    ended = set()  # the anchors this drain has taken up: added before `work()`, so none is taken twice
-    cause, seen = None, None  # the cause the drain ended on, and the last queue read `(queue, waiting, passed)`
+    `limit_name` is how a reached limit is worded, e.g. `--max 3`. Each pass of
+    the loop picks an anchor, works its bundle and records the result."""
+    prog, stop = Progress(ctx.want), None
     try:
-        if want:  # refuse before any work, and not only when the loop gets there
+        if prog.want:  # refuse before any work, and not only when the loop gets there
             queue, waiting, _, candidates, passed = survey(ctx)
-            seen = (queue, waiting, passed)
-            put_first(candidates, want)
-        while done < limit:
-            taken = resumable(ctx, ended)
-            resumed, others = taken is not None, []
-            if resumed:
-                anchor, kind = taken
-            else:
-                queue, waiting, stranded, candidates, passed = survey(ctx)
-                seen = (queue, waiting, passed)
-                for n, why in stranded:
-                    if n not in told:  # every exit names them, once
-                        told.add(n)
-                        say(f"stranded: #{n}, {why}")
-                if not candidates:
-                    say_waiting(waiting)
-                    cause = "queue empty" if not queue else "no startable ticket"
-                    seen = (queue, [], passed)  # named just above
-                    break
-                if want:
-                    if not any(t[0] == want for t in candidates):
-                        raise DrainStop(f"--anchor #{want} left the ready queue before drain reached it")
-                    candidates, want = put_first(candidates, want), None
-                anchor, _, kind = candidates[0]
-                others = [(n, title) for n, title, k in queue if k == TICKET and n != anchor]
-                if not note_anchor(ctx, anchor, kind):
-                    continue
-            ended.add(anchor)
-            results, reason = work(ctx, anchor, others, resumed, started, kind)
-            if results:
-                for result in results:
-                    if result["outcome"] == MERGED:
-                        say(f"bundle ended: {refs(result['tickets'])}  merged  {result['via']}  {result['sha']}")
-                    else:
-                        say(f"bundle ended: {refs(result['tickets'])}  {result['via']}")
-                    (merged if result["outcome"] == MERGED else closed).append(result)
-                started.clear()
-                done, failures = done + sum(len(r["tickets"]) for r in results), 0
-            else:
-                bundle = hand_to_chris(ctx, anchor, reason, kind)
-                say(f"bundle ended: {refs(bundle)}  handed to Chris: {reason}")
-                started.clear()
-                handed.append((bundle, reason))
-                done, failures = done + len(bundle), failures + 1
-                if failures >= MAX_CONSECUTIVE_FAILURES:
-                    stop = (f"{failures} bundles in a row went to Chris; the environment is the likelier "
-                            f"cause (auth, quota, herdr, implement-dispatch). Check `herdr agent list` and the "
-                            f"logs in {ctx.log_dir}.")
-                    break
+            prog.seen = (queue, waiting, passed)
+            put_first(candidates, prog.want)
+        while prog.done < limit:
+            pick = next_anchor(ctx, prog)
+            if pick is None:
+                break
+            anchor, kind, resumed, others = pick
+            prog.ended.add(anchor)
+            results, reason = work(ctx, anchor, others, resumed, prog.started, kind)
+            stop = record_bundle(ctx, prog, anchor, kind, results, reason)
+            if stop:
+                break
         else:
-            cause = f"{limit_name} reached"
+            prog.cause = f"{limit_name} reached"
     except (DrainStop, DrainError) as exc:  # a refusal or a tracker failure, said as it is
         stop = str(exc)
     except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
         stop = f"unexpected {type(exc).__name__}: {one_line(exc)}"
-    if started:
-        say(f"bundle ended: {refs(started)}  stopped: {stop}")
+    if prog.started:
+        say(f"bundle ended: {refs(prog.started)}  stopped: {stop}")
     if stop:
-        cause = "stopped"
-    return Run(merged, closed, handed, stop, cause, *passed_at_exit(ctx, cause, seen, ended, merged, closed, handed))
+        prog.cause = "stopped"
+    return Run(prog.merged, prog.closed, prog.handed, stop, prog.cause,
+               *passed_at_exit(ctx, prog.cause, prog.seen, prog.ended, prog.merged, prog.closed, prog.handed))
 
 
 def passed_at_exit(ctx, cause, seen, ended, merged, closed, handed):
