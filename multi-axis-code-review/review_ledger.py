@@ -114,7 +114,7 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "docs" / "research"))
 from tally_review_axes import (  # noqa: E402
     ALL_AXES, OUTCOME_DETAIL_FIELD, find_codex_records, find_sidecar_files, load_jsonl)
-from review_cache import CacheDirError, REVIEWS_ROOT, cache_dir_for, fold_repo, repo_for_checkout, write_cache_file  # noqa: E402,F401
+from review_cache import CacheDirError, REVIEWS_ROOT, cache_dir_for, fold_repo, repo_for_checkout  # noqa: E402
 
 DEFAULT_LEDGER = REVIEWS_ROOT / "ledger.jsonl"
 
@@ -725,6 +725,17 @@ class HarvestFacts:
             row_mappings.append(mapping)
 
 
+@dataclass
+class _RepoHarvest:
+    """One cache directory's harvest state, shared by its findings files and its Codex records:
+    the dispositions read in pass 1, the (group, id) pairs a finding has joined, the finding ids
+    already harvested, and the review-file facts every harvester adds to."""
+    dispositions: dict[str, dict[str, dict]]
+    facts: HarvestFacts
+    joined: set[tuple[str, str]] = field(default_factory=set)
+    seen_finding_ids: set[tuple[str, str]] = field(default_factory=set)
+
+
 def _split_outcome(fid: str, table: dict[str, dict]) -> Joined:
     """The outcome of a Codex finding disposed as two ids, `<id>a` and `<id>b`: one ruling that
     divides it. Halves that agree give their outcome; one valued half (fixed, filed, moved) beside
@@ -768,9 +779,8 @@ def _read_codex_record(path: Path, ticket: int, phase: str) -> dict | None:
     return None
 
 
-def _join_codex_finding(labels: tuple, groups: list[str], dispositions: dict[str, dict[str, dict]],
-                        credited: dict[tuple, str], joined: set, phase: str, stem: str, facts: HarvestFacts,
-                        row_mappings: list[Mapping]) -> Joined:
+def _join_codex_finding(labels: tuple, groups: list[str], state: _RepoHarvest, credited: dict[tuple, str],
+                        phase: str, stem: str, row_mappings: list[Mapping]) -> Joined:
     """The outcome one Codex finding takes from the dispositions: a whole `codex-<phase>-<label>` id
     or its two halves, credited to this record alone. No line, two labels naming it, or a line
     another finding already took is `unknown`."""
@@ -779,9 +789,9 @@ def _join_codex_finding(labels: tuple, groups: list[str], dispositions: dict[str
     for label in labels:
         fid = f"codex-{phase}-{label}"
         for g in groups:
-            if fid in dispositions[g]:
+            if fid in state.dispositions[g]:
                 hits.append((label, g, (fid,)))
-            elif fid + "a" in dispositions[g] or fid + "b" in dispositions[g]:
+            elif fid + "a" in state.dispositions[g] or fid + "b" in state.dispositions[g]:
                 hits.append((label, g, (fid + "a", fid + "b")))
     if not hits:
         return Joined.unknown(f"no dispositions line codex-{phase}-{labels[0]} or -{labels[1]}")
@@ -792,17 +802,16 @@ def _join_codex_finding(labels: tuple, groups: list[str], dispositions: dict[str
     if taken:
         return Joined.unknown(f"{taken[0]} already credits {credited[(g, taken[0])]}")
     credited.update({(g, i): stem for i in ids})
-    joined.update((g, i) for i in ids)
-    outcome = (normalise_outcome(dispositions[g][ids[0]]) if len(ids) == 1
-               else _split_outcome(f"codex-{phase}-{label}", dispositions[g]))
+    state.joined.update((g, i) for i in ids)
+    outcome = (normalise_outcome(state.dispositions[g][ids[0]]) if len(ids) == 1
+               else _split_outcome(f"codex-{phase}-{label}", state.dispositions[g]))
     if not label.isdigit():
-        facts.tally(Mapping(f"codex label {label[0]}<k>", "k-th finding of that severity"), row_mappings)
-    facts.tally(outcome.mapping, row_mappings)
+        state.facts.tally(Mapping(f"codex label {label[0]}<k>", "k-th finding of that severity"), row_mappings)
+    state.facts.tally(outcome.mapping, row_mappings)
     return outcome
 
 
-def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dict[str, dict[str, dict]],
-                  joined: set, facts: HarvestFacts) -> list[dict]:
+def harvest_codex(repo_dir: Path, repo: str, names: list[str], state: _RepoHarvest) -> list[dict]:
     """One row per `codex-adversarial-<n>-<phase>.json` in a repo's cache directory. Findings
     come from the `.out`, outcomes from `codex-<phase>-<label>` lines of the ticket's own
     dispositions sidecar, or from its two halves `<id>a` and `<id>b` (`_split_outcome`); the PR
@@ -819,15 +828,15 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
         where = f"{repo_dir.name}/{name}"
         rec = _read_codex_record(repo_dir / name, int(m.group(1)), m.group(2))
         if rec is None:
-            facts.skipped.append(f"{where}: record is unreadable or disagrees with its file name")
+            state.facts.skipped.append(f"{where}: record is unreadable or disagrees with its file name")
             continue
         phase = _CODEX_PHASES.get(rec["phase"])
         if phase is None:
-            facts.unharvested.append(f"{where} (phase {rec['phase']!r} has no review type)")
+            state.facts.unharvested.append(f"{where} (phase {rec['phase']!r} has no review type)")
             continue
         row_mappings: list[Mapping] = []
         if rec["phase"] != phase:
-            facts.tally(Mapping(f"phase {rec['phase']}", f"codex-{phase}"), row_mappings)
+            state.facts.tally(Mapping(f"phase {rec['phase']}", f"codex-{phase}"), row_mappings)
         ticket, stem = rec["ticket"], name.removesuffix(".json")
         out_path = repo_dir / (stem + ".out")
         out = out_path.read_text(errors="replace") if out_path.exists() else None
@@ -838,10 +847,9 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
         if fstatus["status"] == "refused":
             own_keys["refusal"] = fstatus["reason"]
         else:
-            groups = _ticket_groups(dispositions, ticket)
+            groups = _ticket_groups(state.dispositions, ticket)
             for k, (f, labels) in enumerate(zip(parsed or [], _codex_labels(parsed or [])), 1):
-                joined_outcome = _join_codex_finding(labels, groups, dispositions, credited, joined, phase,
-                                                      stem, facts, row_mappings)
+                joined_outcome = _join_codex_finding(labels, groups, state, credited, phase, stem, row_mappings)
                 findings.append(_finding_entry(f"codex-{phase}-{k}", f["severity"], joined_outcome, f["file"], f["title"]))
             if findings:
                 sources += [f"{repo_dir.name}/dispositions-{g}.jsonl" for g in groups]
@@ -912,30 +920,29 @@ def _findings_file_status(raw_findings: list, lost: int) -> dict:
 
 
 def _harvest_findings_file(cache: Path, repo_dir: str, repo: str, name: str, parsed: tuple,
-                           dispositions: dict[str, dict[str, dict]], joined: set, seen_finding_ids: set,
-                           seen_ids: set[str], facts: HarvestFacts) -> list[dict]:
+                           state: _RepoHarvest, seen_ids: set[str]) -> list[dict]:
     """Pass 2: the rows of one `findings-*` sidecar, one per (type, round) its finding ids name,
     each finding joined to its disposition."""
     axis, group, name_round = parsed
     tickets = [int(t) for t in group.split("-")]
     # A mapping the file name carries is every row's of this file, and counted once.
     file_mappings = [Mapping("verify", "verification (axis in filename)")] if axis == "verify" else []
-    facts.mappings.update(file_mappings)
+    state.facts.mappings.update(file_mappings)
     base = "verification" if axis in ("verify", "verification") else axis
     path = cache / repo_dir / name
-    raw_findings, lost = _read_sidecar(path, facts.skipped)
+    raw_findings, lost = _read_sidecar(path, state.facts.skipped)
     by_type: dict[tuple[str, int], list] = {(base, name_round): []}
-    file_dispositions = dispositions.get(group)
+    file_dispositions = state.dispositions.get(group)
     row_mappings: dict[tuple[str, int], list] = {}
     for raw in raw_findings:
         if not all(isinstance(raw.get(k), str) and raw[k] for k in ("id", "severity", "file", "title")):
-            facts.skipped.append(f"{repo_dir}/{name}: finding without id/severity/file/title")
+            state.facts.skipped.append(f"{repo_dir}/{name}: finding without id/severity/file/title")
             lost += 1
             continue
-        if (group, raw["id"]) in seen_finding_ids:
-            facts.skipped.append(f"{repo_dir}/{name}: duplicate finding id {raw['id']} for ticket {group} "
+        if (group, raw["id"]) in state.seen_finding_ids:
+            state.facts.skipped.append(f"{repo_dir}/{name}: duplicate finding id {raw['id']} for ticket {group} "
                                  "(both kept; they join the same disposition)")
-        seen_finding_ids.add((group, raw["id"]))
+        state.seen_finding_ids.add((group, raw["id"]))
         row_type = "over-engineering" if base == "standards" and _OE_ID_RE.match(raw["id"]) else base
         rm = _ROUND_ID_RE.match(raw["id"])
         key = (row_type, int(rm.group(1)) if rm else name_round)
@@ -944,9 +951,9 @@ def _harvest_findings_file(cache: Path, repo_dir: str, repo: str, name: str, par
         elif raw["id"] not in file_dispositions:
             joined_outcome = Joined.unknown(f"no disposition line for {raw['id']}")
         else:
-            joined.add((group, raw["id"]))
+            state.joined.add((group, raw["id"]))
             joined_outcome = normalise_outcome(file_dispositions[raw["id"]])
-        facts.tally(joined_outcome.mapping, row_mappings.setdefault(key, []))
+        state.facts.tally(joined_outcome.mapping, row_mappings.setdefault(key, []))
         by_type.setdefault(key, []).append(_finding_entry(
             raw["id"], raw["severity"], joined_outcome, raw["file"], raw["title"]))
     # A file named for round 1 whose every id says round 2 holds no round-1 run.
@@ -988,8 +995,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     for repo_dir in sorted(by_repo):
         repo = fold_repo(repo_dir)
         dispositions = _read_dispositions(cache, repo_dir, by_repo[repo_dir], facts)
-        joined: set[tuple[str, str]] = set()
-        seen_finding_ids: set[tuple[str, str]] = set()
+        state = _RepoHarvest(dispositions, facts)
         for name in sorted(by_repo[repo_dir]):
             if not name.startswith("findings-"):
                 continue
@@ -997,15 +1003,14 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
             if parsed is None:
                 facts.unharvested.append(f"{repo_dir}/{name}")
                 continue
-            rows += _harvest_findings_file(cache, repo_dir, repo, name, parsed, dispositions, joined,
-                                           seen_finding_ids, seen_ids, facts)
-        for r in harvest_codex(cache / repo_dir, repo, by_repo[repo_dir], dispositions, joined, facts):
+            rows += _harvest_findings_file(cache, repo_dir, repo, name, parsed, state, seen_ids)
+        for r in harvest_codex(cache / repo_dir, repo, by_repo[repo_dir], state):
             r["row_id"], r["run_id"] = _claim_row_id(seen_ids, repo_dir, repo, r["ticket"], r["type"], r["round"],
                                                      r["run_id"])
             codex_rows.append(r)
         for group, table in sorted(dispositions.items()):
             for fid in sorted(table):
-                if (group, fid) not in joined:
+                if (group, fid) not in state.joined:
                     orphans.append(f"{repo_dir} #{group} `{fid}` ({table[fid].get('outcome')})")
     wanted = {t for r in rows for t in r["tickets"]} if only else None
     runs, unattributed, ignored = read_transcripts(transcripts, wanted) if transcripts else ([], [], 0)
@@ -1412,7 +1417,7 @@ def cmd_append_codex(args) -> int:
                 return 2
             row = mine[0]
             row["findings"] = []
-            row["status"]["fields"]["findings"] = {"status": "refused", "reason": args.refusal}
+            _set_findings_field(row, {"status": "refused", "reason": args.refusal})
             row["refusal"] = args.refusal
     return _write_appended(args, mine)
 
@@ -1642,9 +1647,13 @@ def _row_dollars(row: dict, prices: dict | None) -> float | None:
 
 
 def _findings_field(row: dict) -> dict | None:
-    """The row's status record for its findings, the one path `_keep_known`, `harvest_cache`,
-    `cmd_append` and the report read it by."""
+    """The row's status record for its findings: `_keep_known`, `summarise` and the escapes count
+    read it by this name, and `_set_findings_field` is its one writer outside `_keep_known`'s merge."""
     return row["status"]["fields"].get("findings")
+
+
+def _set_findings_field(row: dict, record: dict) -> None:
+    row["status"]["fields"]["findings"] = record
 
 
 def _findings_state(row: dict) -> str:

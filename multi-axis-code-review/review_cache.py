@@ -11,7 +11,15 @@ import re
 import subprocess
 from pathlib import Path
 
-REVIEWS_ROOT = Path.home() / ".cache" / "agent-reviews"
+
+
+def reviews_root() -> Path:
+    """`~/.cache/agent-reviews`, with home read now: a caller that sets HOME after import (a test
+    fixture) gets the root under that home, which `REVIEWS_ROOT` cannot give it."""
+    return Path.home() / ".cache" / "agent-reviews"
+
+
+REVIEWS_ROOT = reviews_root()
 
 # agent-skills is the same repo as skills, checked out under two directory
 # names historically.
@@ -31,8 +39,11 @@ def fold_repo(repo_dir: str) -> str:
 
 def repo_for_checkout(cwd: Path | str, env: dict | None = None) -> str:
     """The folded repo name of the checkout at `cwd`: the directory holding the common `.git`."""
-    done = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd,
-                          capture_output=True, text=True, env=env)
+    try:
+        done = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd,
+                              capture_output=True, text=True, env=env)
+    except OSError as e:  # a cwd that is missing or no directory: git never started
+        raise CacheDirError(f"git cannot name the repo of {cwd}: {e}") from e
     if done.returncode != 0:
         raise CacheDirError(f"git cannot name the repo of {cwd}: {done.stderr.strip() or 'no output'}")
     return fold_repo(os.path.basename(os.path.dirname(done.stdout.strip())))

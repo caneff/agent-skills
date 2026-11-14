@@ -1,6 +1,7 @@
 """One-function tests for the ledger's harvest and transcript readers (#1776, spec #1735).
 Each test drives one function directly; the output pin (`review_ledger_report_pin_test.py`)
 covers the whole report."""
+import argparse
 import importlib.util
 import json
 import sys
@@ -29,15 +30,28 @@ def test_first_text_is_none_when_the_message_or_its_content_is_unusable():
 
 
 def test_harvest_findings_file_makes_one_row_joined_to_its_disposition(tmp_path):
+    """#1735 P5: one findings file, through `_harvest_findings_file` alone."""
     cache = tmp_path / "cache"
     write_jsonl(cache / "skills" / "findings-standards-100.jsonl", [finding("S1", "hard", "a.py", "Dup")])
-    write_jsonl(cache / "skills" / "dispositions-100.jsonl", [{"id": "S1", "outcome": "fixed", "sha": "abc1234"}])
-    rows, facts = rl.harvest_cache(cache, None, missing="no transcripts here")
-    standards = [r for r in rows if r["type"] == "standards"]
-    assert len(standards) == 1
-    (f,) = standards[0]["findings"]
+    state = rl._RepoHarvest({"100": {"S1": {"id": "S1", "outcome": "fixed", "sha": "abc1234"}}}, rl.HarvestFacts())
+    name = "findings-standards-100.jsonl"
+    rows = rl._harvest_findings_file(cache, "skills", "skills", name, rl.findings_name(name), state, set())
+    assert [(r["type"], r["ticket"]) for r in rows] == [("standards", 100)]
+    (f,) = rows[0]["findings"]
     assert (f["id"], f["outcome"]) == ("S1", "fixed")
-    assert facts["orphans"] == []
+    assert state.joined == {("100", "S1")}
+
+
+def test_write_appended_adds_one_row_marked_as_appended(tmp_path):
+    """#1735 P5: one row, through `_write_appended` alone."""
+    ledger = tmp_path / "ledger.jsonl"
+    row = {"row_id": "skills/100/spec/1/r", "repo": "skills", "ticket": 100, "tickets": [100], "type": "spec",
+           "round": 1, "run_id": "r", "findings": [], "cost": {}, "model": None, "pr": None,
+           "status": {"fields": {"findings": {"status": "known"}}, "mappings": [], "sources": []}}
+    args = argparse.Namespace(ledger=ledger)
+    assert rl._write_appended(args, [row]) == 0
+    (written,) = rl.read_ledger(ledger)
+    assert (written["row_id"], written["origin"]) == ("skills/100/spec/1/r", "append")
 
 
 def test_a_disposition_with_no_finding_is_an_orphan(tmp_path):

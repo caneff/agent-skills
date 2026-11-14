@@ -4,6 +4,9 @@ asserts the line it is about, so a render that fails for another reason (a
 missing input, a bad path) does not pass for the one under test
 (`AGENTS.md` § Recurring defect classes, class 3).
 """
+import argparse
+import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -330,7 +333,6 @@ def cache_dir(home, repo="skills"):
 
 
 def write_sidecar(directory, name, ids, axis="standards"):
-    import json
     open(directory / name.replace(".jsonl", ".done"), "w").close()
     with open(directory / name, "w") as fh:
         for i in ids:
@@ -426,7 +428,6 @@ def test_an_earlier_sidecar_without_its_marker_is_refused(wt, diff, home):
 
 
 def _load_module():
-    import importlib.util
     spec = importlib.util.spec_from_file_location("render_brief_mod", RENDER)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -434,7 +435,6 @@ def _load_module():
 
 
 def _args(mod, tmp_path, **over):
-    import argparse
     diff = tmp_path / "d.diff"
     diff.write_text("a\n")
     base = dict(axis="standards", repo="skills", worktree=str(tmp_path), ticket="1", base="b", diff=str(diff),

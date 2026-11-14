@@ -47,6 +47,7 @@ import argparse
 import os
 import re
 import sys
+from typing import NamedTuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -127,11 +128,10 @@ def bullets(items, empty):
     return "\n".join(f"- {i}" for i in items) if items else empty
 
 
-class Checked:
-    """What `check` found out and `render` needs: the inputs, validated, and nothing rendered."""
-
-    def __init__(self, first_id, lines, ids):
-        self.first_id, self.lines, self.ids = first_id, lines, ids
+class Checked(NamedTuple):
+    """What `check` found out and `render` needs: the diff's line count and a later round's first ids."""
+    lines: int
+    ids: dict | None
 
 
 def parse_first_ids(a):
@@ -159,7 +159,7 @@ def check(a):
         raise BadInput(f"the {a.axis} axis needs --spec <path or pointer> or --no-spec")
     lines = read_diff(a.diff)
     ids = next_ids(review_cache.REVIEWS_ROOT / a.repo, a.axis, a.ticket, a.round, first_id) if a.round > 1 else None
-    return Checked(first_id, lines, ids)
+    return Checked(lines, ids)
 
 
 def defect_classes_text(present):

@@ -30,7 +30,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "multi-axis-code-review"))
-from review_cache import REVIEWS_ROOT, fold_repo  # noqa: E402,F401  (the one cache key)
+from review_cache import REVIEWS_ROOT, fold_repo  # noqa: E402  (the one cache key)
 
 ALL_AXES = ("standards", "spec", "correctness")
 AXIS_ALTS = "|".join(ALL_AXES)

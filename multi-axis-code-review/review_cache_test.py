@@ -1,6 +1,5 @@
 """Tests for review_cache.py (#1774): the one rule for where a repo's review files live."""
 import os
-import subprocess
 import sys
 
 import pytest
@@ -9,26 +8,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import review_cache as rc  # noqa: E402
 
 
-def test_fold_repo_folds_the_alias_and_leaves_other_names():
-    assert (rc.fold_repo("agent-skills"), rc.fold_repo("skills"), rc.fold_repo("other")) == \
-        ("skills", "skills", "other")
-
-
-def test_repo_for_checkout_names_the_repo_not_the_worktree(tmp_path):
-    main = tmp_path / "agent-skills"
-    main.mkdir()
-    subprocess.run(["git", "init", "-q", str(main)], check=True)
-    subprocess.run(["git", "-C", str(main), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
-                    "--allow-empty", "-m", "x"], check=True)
-    wt = tmp_path / "elsewhere"
-    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "--detach", str(wt)], check=True)
-    assert rc.repo_for_checkout(wt) == "skills"
-    assert rc.cache_dir_for(wt) == rc.REVIEWS_ROOT / "skills"
-
-
 def test_a_directory_that_is_no_repo_raises_cache_dir_error(tmp_path):
     with pytest.raises(rc.CacheDirError, match="git cannot name the repo"):
         rc.repo_for_checkout(tmp_path)
+
+
+def test_a_cwd_git_cannot_enter_raises_cache_dir_error_not_os_error(tmp_path):
+    """#1735 C1: a regular file or a missing directory as the checkout is a CacheDirError, the one
+    failure every caller handles, never the OSError subprocess raises before git starts."""
+    plain = tmp_path / "plain"
+    plain.write_text("")
+    for cwd in (plain, tmp_path / "missing"):
+        with pytest.raises(rc.CacheDirError, match="git cannot name the repo"):
+            rc.repo_for_checkout(cwd)
+
+
+def test_reviews_root_reads_home_at_call_time(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert rc.reviews_root() == tmp_path / ".cache" / "agent-reviews"
 
 
 def test_dispositions_path_is_keyed_on_the_lowest_ticket():

@@ -130,7 +130,7 @@ def slice_prs(n):
 
 
 def reviews_dir():
-    """The review cache directory of this repo: `review_ledger.py cache-dir`, the one place it is chosen."""
+    """The review cache directory of this repo, chosen by `review_cache.cache_dir_for`, the one rule for it."""
     try:
         return str(review_cache.cache_dir_for(Path.cwd()))
     except review_cache.CacheDirError as exc:
@@ -391,7 +391,7 @@ def check(n, branch_name):
     sidecar = review_cache.dispositions_path(reviews, n)
     lines = []
     if not os.path.exists(sidecar):
-        problems.append(f"dispositions-{n}.jsonl is missing — the worker writes it, "
+        problems.append(f"{os.path.basename(sidecar)} is missing — the worker writes it, "
                         "empty when every reviewer found nothing")
     else:
         if (fresh := branch.fresh(sidecar)):
