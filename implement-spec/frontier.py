@@ -297,7 +297,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     really a PR, is in no bucket at all — each is off the frontier by its own
     nature, not by a blocking relationship.
 
-    `landed_of(spec_branch) -> {numbers}` and `native_blockers_of(ticket) ->
+    `landed_of(integration_branch) -> {numbers}` and `native_blockers_of(ticket) ->
     [numbers]` carry the landed-blocker rule, stated in
     `references/frontier.md` (#1466); either raises `FrontierError` when it
     cannot answer, and neither supplied means no blocker has landed.
@@ -309,7 +309,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     buckets = {name: [] for name in BUCKETS}
 
     def landed_numbers(issue):
-        """`(numbers, why)`: the blockers landed on the spec branch of this
+        """`(numbers, why)`: the blockers landed on the integration branch of this
         ticket's own parent spec. `why` names a lookup that failed, and the
         ticket then stays blocked with that reason in its entry."""
         if landed_of is None:
@@ -344,7 +344,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             if native and native_blockers_of is not None:
                 landed, failed = landed_numbers(issue)
                 if native_open(issue, landed) == []:
-                    entry["why"] += ", all landed on the spec branch"
+                    entry["why"] += ", all landed on the integration branch"
                     native = False
                 else:
                     entry["why"] += failed
@@ -481,13 +481,13 @@ def fetch_state(repo, number, run=gh_json):
 _CLOSES = re.compile(r"^[ \t]*Closes[ \t]+#(\d+)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 
-def fetch_landed(repo, spec_branch, run=gh_json):
-    """The ticket numbers whose PR merged into `spec_branch` (#1466, ruling
+def fetch_landed(repo, integration_branch, run=gh_json):
+    """The ticket numbers whose PR merged into `integration_branch` (#1466, ruling
     (a)): each merged PR's bare `Closes #<n>` body lines, which a clump's PR
     carries once per ticket. GitHub's own closing references stay empty for a
     PR into a non-default branch, so the body is the record. Raises
     `FrontierError` when the list cannot be read."""
-    prs = run(["pr", "list", "--repo", repo, "--base", spec_branch,
+    prs = run(["pr", "list", "--repo", repo, "--base", integration_branch,
                "--state", "merged", "--json", "body", "--limit", "200"])
     if not isinstance(prs, list):
         raise FrontierError("the merged-PR list was not a list")
@@ -602,7 +602,7 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
             answers[tuple(args)] = run(args)
         return answers[tuple(args)]
 
-    landed = functools.cache(lambda spec_branch: landed_of(repo, spec_branch))
+    landed = functools.cache(lambda integration_branch: landed_of(repo, integration_branch))
 
     return classify(fetch(repo, label), cached,
                     lambda ticket: parent_of(repo, ticket, run=read_once),

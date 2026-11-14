@@ -79,8 +79,8 @@ def test_seat_still_refuses_a_worktree_whose_branch_only_looks_like_a_spec(branc
     assert "worktree" in str(exc.value)
 
 
-def test_seat_refuses_a_spec_branch_in_the_primary_checkout():
-    # The exception is for the linked worktree `--spec` makes; a spec branch
+def test_seat_refuses_a_integration_branch_in_the_primary_checkout():
+    # The exception is for the linked worktree `--spec` makes; an integration branch
     # on the primary checkout is still not the default branch.
     with pytest.raises(loop.LoopError) as exc:
         loop.seat(git_stub(branch="spec-1262"))
@@ -99,7 +99,7 @@ def test_seat_refuses_a_detached_head():
     assert "detached" in str(exc.value)
 
 
-# The #781 fixture, as the burn actually stood after `#453` landed: `#452`,
+# The #781 fixture, as the run actually stood after `#453` landed: `#452`,
 # `#457` and `#458` all include `examples/_shared/line-kind.js`, the same file
 # parked `#455` holds open in its workspace; `#501` is outside `examples/`
 # entirely. Closures as `closure.py` resolves them — the candidates' own files
@@ -126,7 +126,7 @@ def picked_for(candidates, in_flight, free):
 
 def parked_455():
     return [{"tickets": [455], "workspace": "/w/implement-455",
-             "agent": "burn-455", "closure": ["examples/renban.js", HOT],
+             "agent": "run-455", "closure": ["examples/renban.js", HOT],
              "job": NO_JOB}]
 
 
@@ -301,7 +301,7 @@ def test_the_cli_dispatch_names_the_widest_clump_first(tmp):
 
 
 def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run(tmp):
-    # The burn's --run on every plain dispatch was prose only (#1173 S1, P2,
+    # A run's --run on every plain dispatch was prose only (#1173 S1, P2,
     # C2, codex-second-1): the command the controller runs is printed here,
     # with the run id dispatch was itself given. It also carries the run's
     # recorded target checkout, not the cwd's (#1190): `implement-dispatch`
@@ -313,13 +313,13 @@ def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run(tmp):
     with open(cand, "w") as fh:
         json.dump([{"tickets": [500, 502], "closure": ["fresh.py"]}], fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "2", "--processes", "4",
+                  "--run", "run-t", "--free", "2", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
     commands = [line for line in got.stdout.splitlines()
                 if line.startswith("command")]
     assert commands == [
-        f"command   implement-dispatch 500 502 --run burn-t --repo {target}"
+        f"command   implement-dispatch 500 502 --run run-t --repo {target}"
     ], got.stdout
 
 
@@ -329,10 +329,10 @@ def test_the_printed_command_shell_quotes_a_target_path_with_a_space_1190(tmp):
     subprocess.run(["git", "init", "-q", target], check=True)
     cand, live, env = run_file_dispatch(tmp, ("none",), repo=target)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "2", "--processes", "4",
+                  "--run", "run-t", "--free", "2", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
-    assert f"--run burn-t --repo '{target}'" in got.stdout, got.stdout
+    assert f"--run run-t --repo '{target}'" in got.stdout, got.stdout
 
 
 def test_dispatch_refuses_a_run_file_that_names_no_target_repo_1190(tmp):
@@ -340,7 +340,7 @@ def test_dispatch_refuses_a_run_file_that_names_no_target_repo_1190(tmp):
     # `--repo` would claim against the cwd's origin: refuse, never omit.
     cand, live, env = run_file_dispatch(tmp, ("none",), legacy=True)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "2", "--processes", "4",
+                  "--run", "run-t", "--free", "2", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "names no target repo" in got.stderr, got.stderr
@@ -382,7 +382,7 @@ def test_a_clump_clumped_by_subtree_is_checked_on_its_named_files():
     # `closure` key. The exclusion still has to read something.
     candidates = [{"tickets": [601], "files": ["examples/thermo.js"]}]
     live = [{"tickets": [455], "workspace": "/w/implement-455",
-             "agent": "burn-455", "files": ["examples/thermo.js"]}]
+             "agent": "run-455", "files": ["examples/thermo.js"]}]
     assert loop.picks(loop.frontier(candidates, live), 1)[0] == []
 
 
@@ -915,7 +915,7 @@ def test_the_exclusion_reads_the_closure_and_not_the_named_files():
     candidates = [{"tickets": [452], "files": ["examples/thermo.js"],
                    "closure": ["examples/thermo.js", HOT]}]
     live = [{"tickets": [455], "workspace": "/w/implement-455",
-             "agent": "burn-455", "files": ["examples/renban.js"],
+             "agent": "run-455", "files": ["examples/renban.js"],
              "closure": ["examples/renban.js", HOT]}]
     assert loop.picks(loop.frontier(candidates, live), 1)[0] == []
 
@@ -1185,8 +1185,8 @@ def test_a_question_with_a_newline_in_it_is_refused():
 # cleanup gate refuses anyway and the check would witness nothing.
 @pytest.mark.parametrize("args, reason", [
     (("--clump", "454", "--agent", ""), "no agent named"),
-    (("--clump", "0", "--agent", "burn-1"), "ticket number"),
-    (("--clump", "-5", "--agent", "burn-1"), "ticket number"),
+    (("--clump", "0", "--agent", "run-1"), "ticket number"),
+    (("--clump", "-5", "--agent", "run-1"), "ticket number"),
 ])
 def test_the_cli_landing_refuses_an_empty_agent_and_a_non_positive_clump(
         args, reason):
@@ -1208,7 +1208,7 @@ def test_the_cli_landing_survives_a_reader_that_closes_early():
     try:
         got = subprocess.run(
             [sys.executable, LOOP, "landing", "--clump", "454", "--agent",
-             "burn-454", "--outstanding", "may I drop 4x4?"],
+             "run-454", "--outstanding", "may I drop 4x4?"],
             stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=60)
     finally:
         os.close(write_end)
@@ -1234,7 +1234,7 @@ def test_the_cli_landing_survives_a_reader_that_closes_mid_output():
     try:
         got = subprocess.run(
             [sys.executable, LOOP, "landing", "--clump", "454", "--agent",
-             "burn-454", *questions],
+             "run-454", *questions],
             stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=60)
     finally:
         os.close(write_end)
@@ -1332,7 +1332,7 @@ def test_an_unrecognised_status_is_its_own_verdict():
 HERDR_NESTED_AGENT = {
     "id": "cli:agent:get",
     "result": {"agent": {"agent_status": "working", "name": "skills-1",
-                          "pane": "burn-1"}}}
+                          "pane": "run-1"}}}
 
 
 def test_the_sweep_reads_agent_status_nested_under_result_agent():
@@ -1474,11 +1474,11 @@ def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live(tmp):
     # and a closure the candidate shares. The run file's `closed` is what
     # frees its slot and its files — nothing in --in-flight says so.
     cache = os.path.join(tmp, "cache")
-    runfile.start("burn-close", 5, None, root=cache, repo=REPO)
-    runfile.clump("burn-close", [351], "/w/351", "sm-351", root=cache)
-    runfile.clump("burn-close", [412], "/w/412", "sm-412", root=cache)
-    runfile.job("burn-close", 412, "none", root=cache)
-    runfile.close("burn-close", 351, "nested spec run", root=cache)
+    runfile.start("run-close", 5, None, root=cache, repo=REPO)
+    runfile.clump("run-close", [351], "/w/351", "sm-351", root=cache)
+    runfile.clump("run-close", [412], "/w/412", "sm-412", root=cache)
+    runfile.job("run-close", 412, "none", root=cache)
+    runfile.close("run-close", 351, "nested spec run", root=cache)
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -1487,7 +1487,7 @@ def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live(tmp):
         json.dump(in_flight_clumps(), fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
                   "--free", "1", "--processes", "4", "--committed-gb", "4",
-                  "--run", "burn-close", env={"SPEC_RUN_CACHE_DIR": cache})
+                  "--run", "run-close", env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got.stderr
     assert "dispatch  #500" in got.stdout, got.stdout
     assert "held" not in got.stdout, got.stdout
@@ -1497,12 +1497,12 @@ def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed(tmp, 
     # #1313: the candidates file is the frozen set and the run file is the
     # progress, so a landed or closed clump is not offered again.
     cache = os.path.join(tmp, "cache")
-    runfile.start("burn-skip", 5, None, root=cache, repo=REPO)
-    runfile.clump("burn-skip", [1258], "/w/1258", "a-1258", root=cache)
-    runfile.clump("burn-skip", [1293, 1294], "/w/1293", "a-1293", root=cache)
-    runfile.clump("burn-skip", [1278], "/w/1278", "a-1278", root=cache)
-    runfile.land("burn-skip", 1258, "a1b2c3d", root=cache)
-    runfile.close("burn-skip", 1293, "already fixed on main", root=cache)
+    runfile.start("run-skip", 5, None, root=cache, repo=REPO)
+    runfile.clump("run-skip", [1258], "/w/1258", "a-1258", root=cache)
+    runfile.clump("run-skip", [1293, 1294], "/w/1293", "a-1293", root=cache)
+    runfile.clump("run-skip", [1278], "/w/1278", "a-1278", root=cache)
+    runfile.land("run-skip", 1258, "a1b2c3d", root=cache)
+    runfile.close("run-skip", 1293, "already fixed on main", root=cache)
     cand = os.path.join(tmp, "candidates.json")
     with open(cand, "w") as fh:
         json.dump([{"tickets": [1258], "closure": ["a.py"]},
@@ -1511,7 +1511,7 @@ def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed(tmp, 
                    {"tickets": [1400], "closure": ["d.py"]}], fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight",
                   empty_live, "--free", "4", "--processes", "4",
-                  "--committed-gb", "4", "--run", "burn-skip",
+                  "--committed-gb", "4", "--run", "run-skip",
                   env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got.stderr
     for n in (1258, 1293):
@@ -1657,16 +1657,16 @@ def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id(tmp):
         fh.write(HERDR_STUB)
     os.chmod(stub, 0o755)
     cache = os.path.join(tmp, "cache")
-    runfile.start("burn-sweep-run-fixture", slots=2, root=cache, repo=REPO)
-    runfile.clump("burn-sweep-run-fixture", [1], "/w/1", "skills-1", root=cache)
-    runfile.clump("burn-sweep-run-fixture", [3], "/w/3", "skills-3", root=cache)
-    runfile.clump("burn-sweep-run-fixture", [4], "/w/4", "skills-4", root=cache)
-    runfile.land("burn-sweep-run-fixture", 4, "a1b2c3d", root=cache)
+    runfile.start("run-sweep-run-fixture", slots=2, root=cache, repo=REPO)
+    runfile.clump("run-sweep-run-fixture", [1], "/w/1", "skills-1", root=cache)
+    runfile.clump("run-sweep-run-fixture", [3], "/w/3", "skills-3", root=cache)
+    runfile.clump("run-sweep-run-fixture", [4], "/w/4", "skills-4", root=cache)
+    runfile.land("run-sweep-run-fixture", 4, "a1b2c3d", root=cache)
     calls = os.path.join(tmp, "calls")
     env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
                CALLS=calls, SPEC_RUN_CACHE_DIR=cache)
     got = subprocess.run([sys.executable, LOOP, "sweep", "--run",
-                          "burn-sweep-run-fixture"], capture_output=True, text=True,
+                          "run-sweep-run-fixture"], capture_output=True, text=True,
                          timeout=60, env=env)
     assert got.returncode == 0, got
     assert "working   #1" in got.stdout, got.stdout
@@ -1675,10 +1675,10 @@ def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id(tmp):
         assert fh.read().split() == ["skills-1", "skills-3"], \
             "a landed clump is not probed"
     missing = subprocess.run([sys.executable, LOOP, "sweep", "--run",
-                              "burn-none"], capture_output=True,
+                              "run-none"], capture_output=True,
                              text=True, timeout=60, env=env)
     assert missing.returncode == 1, missing
-    assert "burn-none" in missing.stderr, missing.stderr
+    assert "run-none" in missing.stderr, missing.stderr
     assert "Traceback" not in missing.stderr, missing.stderr
 
 
@@ -1869,16 +1869,16 @@ def run_file_dispatch(tmp, recorded, repo=REPO, legacy=False):
     import runfile
     cache = os.path.join(tmp, "cache")
     os.makedirs(cache)
-    runfile.start("burn-t", 5, None, root=cache, repo=repo)
+    runfile.start("run-t", 5, None, root=cache, repo=repo)
     if legacy:
-        drop_repo_field("burn-t", cache)
-    runfile.clump("burn-t", [351], "/w/351", "sm-351", root=cache)
-    runfile.clump("burn-t", [412], "/w/412", "sm-412", root=cache)
-    runfile.job("burn-t", 412, "none", root=cache)
+        drop_repo_field("run-t", cache)
+    runfile.clump("run-t", [351], "/w/351", "sm-351", root=cache)
+    runfile.clump("run-t", [412], "/w/412", "sm-412", root=cache)
+    runfile.job("run-t", 412, "none", root=cache)
     if recorded:
-        runfile.job("burn-t", 351, *recorded, root=cache)
+        runfile.job("run-t", 351, *recorded, root=cache)
     else:
-        drop_job("burn-t", cache, 351)
+        drop_job("run-t", cache, 351)
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -1894,7 +1894,7 @@ def run_file_dispatch(tmp, recorded, repo=REPO, legacy=False):
 def test_dispatch_reads_the_job_record_from_the_run_file_1107(tmp):
     cand, live, env = run_file_dispatch(tmp, ("running", 8))
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
     assert "#351 declared 8 cores" in got.stdout, got.stdout
@@ -1904,7 +1904,7 @@ def test_dispatch_reads_the_job_record_from_the_run_file_1107(tmp):
 def test_dispatch_refuses_a_clump_the_run_file_has_no_job_for_1107(tmp):
     cand, live, env = run_file_dispatch(tmp, None)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#351 is live with no job record" in got.stderr, got.stderr
@@ -1915,7 +1915,7 @@ def test_dispatch_does_not_wait_for_pr_up_on_a_freshly_registered_clump_1311(tmp
     # charges nothing, so the free slot is dispatched into at once.
     cand, live, env = run_file_dispatch(tmp, ("none",))
     cache = env["SPEC_RUN_CACHE_DIR"]
-    runfile.clump("burn-t", [777], "/w/777", "sm-777", root=cache)
+    runfile.clump("run-t", [777], "/w/777", "sm-777", root=cache)
     with open(live) as fh:
         clumps = json.load(fh)
     clumps.append({"tickets": [777], "workspace": "/w/777",
@@ -1923,7 +1923,7 @@ def test_dispatch_does_not_wait_for_pr_up_on_a_freshly_registered_clump_1311(tmp
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
     assert "dispatch  #500" in got.stdout, got.stdout
@@ -1936,12 +1936,12 @@ def test_a_tick_between_the_workers_own_write_and_the_controllers_turn_holds_the
     # must read that record and hold the slots (#1339, owner ruling (b)).
     cand, live, env = run_file_dispatch(tmp, ("none",))
     tick = ("dispatch", "--candidates", cand, "--in-flight", live,
-            "--run", "burn-t", "--free", "1", "--processes", "4",
+            "--run", "run-t", "--free", "1", "--processes", "4",
             "--committed-gb", "4")
     before = loop_py(*tick, env=env)
     assert "dispatch  #500" in before.stdout, before
     wrote = subprocess.run(
-        [sys.executable, runfile.__file__, "job", "burn-t",
+        [sys.executable, runfile.__file__, "job", "run-t",
          "--clump", "351", "--cores", "8"],
         capture_output=True, text=True, timeout=30,
         env={**os.environ, **env})
@@ -1965,20 +1965,20 @@ def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126(tmp):
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#777" in got.stderr and "runfile.py clump" in got.stderr, \
         got.stderr
     assert "no job record" not in got.stderr, got.stderr
     # A registered clump with no job still names `job`.
-    runfile.clump("burn-t", [888], "/w/888", "sm-888", root=cache)
-    drop_job("burn-t", cache, 888)
+    runfile.clump("run-t", [888], "/w/888", "sm-888", root=cache)
+    drop_job("run-t", cache, 888)
     clumps[-1]["tickets"] = [888]
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#888 is live with no job record" in got.stderr, got.stderr
@@ -1996,7 +1996,7 @@ def test_dispatch_names_the_overlap_when_an_unregistered_key_shares_tickets(tmp)
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#300" in got.stderr and "#351" in got.stderr, got.stderr
@@ -2014,7 +2014,7 @@ def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107(tmp)
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#351 is live with no job record" in got.stderr, got.stderr
@@ -2026,9 +2026,9 @@ def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107(tmp):
     import runfile
     cache = os.path.join(tmp, "cache")
     os.makedirs(cache)
-    runfile.start("burn-t", 5, None, root=cache, repo=REPO)
-    runfile.clump("burn-t", [351, 360], "/w/351", "sm-351", root=cache)
-    runfile.job("burn-t", 351, "running", 8, root=cache)
+    runfile.start("run-t", 5, None, root=cache, repo=REPO)
+    runfile.clump("run-t", [351, 360], "/w/351", "sm-351", root=cache)
+    runfile.job("run-t", 351, "running", 8, root=cache)
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -2038,7 +2038,7 @@ def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107(tmp):
                     "agent": "sm-351", "closure": ["verify.py"],
                     "job": NO_JOB}], fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4",
                   env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got
@@ -2069,7 +2069,7 @@ def test_a_job_field_in_the_in_flight_file_is_never_charged_1107(tmp):
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
     assert "declared 8 cores" not in got.stdout, got.stdout
@@ -2078,13 +2078,13 @@ def test_a_job_field_in_the_in_flight_file_is_never_charged_1107(tmp):
 
 def test_load_run_reads_a_run_file_and_wraps_its_refusal_as_a_loop_error(tmp):
     # One loader behind `with_run_jobs` and `sweep --run` (#1209 S2).
-    runfile.start("burn-loader", slots=2, root=tmp, repo=REPO)
-    runfile.clump("burn-loader", [7], "/w/7", "skills-7", root=tmp)
-    run = loop.load_run("burn-loader", tmp)
+    runfile.start("run-loader", slots=2, root=tmp, repo=REPO)
+    runfile.clump("run-loader", [7], "/w/7", "skills-7", root=tmp)
+    run = loop.load_run("run-loader", tmp)
     assert [c["tickets"] for c in run["clumps"]] == [[7]], run
     with pytest.raises(loop.LoopError) as exc:
-        loop.load_run("burn-none", tmp)
-    assert "burn-none" in str(exc.value)
+        loop.load_run("run-none", tmp)
+    assert "run-none" in str(exc.value)
 
 
 def test_a_workspaces_real_diff_joins_its_in_flight_closure():
@@ -2194,7 +2194,7 @@ def make_slice_workspace(tmp, own, landed):
     return work
 
 
-def test_workspace_diff_of_a_slice_is_against_its_spec_branch_1486(tmp):
+def test_workspace_diff_of_a_slice_is_against_its_integration_branch_1486(tmp):
     # A slice branch holds every slice already landed on `spec-<p>`; against
     # the default they all read as its own files and hold unrelated clumps.
     work = make_slice_workspace(tmp, own=["own.txt"],
@@ -2209,7 +2209,7 @@ def test_workspace_diff_of_a_branch_with_no_recorded_base_is_against_default(tmp
     assert sorted(loop.workspace_diff(work)) == ["landed.txt", "own.txt"]
 
 
-def test_workspace_diff_of_a_slice_that_merged_an_advanced_spec_branch_1486(tmp):
+def test_workspace_diff_of_a_slice_that_merged_an_advanced_integration_branch_1486(tmp):
     # The ticket's first criterion: spec-9 moved on after the slice was cut and
     # the slice merged it in; the other slice's file is still not its own.
     work = make_slice_workspace(tmp, own=["own.txt"], landed=[])
@@ -2224,7 +2224,7 @@ def test_workspace_diff_of_a_slice_that_merged_an_advanced_spec_branch_1486(tmp)
     assert loop.workspace_diff(work) == ["own.txt"]
 
 
-def test_workspace_diff_reads_a_base_that_is_not_a_spec_branch_as_no_slice(tmp):
+def test_workspace_diff_reads_a_base_that_is_not_a_integration_branch_as_no_slice(tmp):
     # As `implement/fix_check.py` reads it: only `spec-<n>` marks a slice.
     work = make_slice_workspace(tmp, own=["own.txt"],
                                 landed=["landed.txt"])
@@ -2232,7 +2232,7 @@ def test_workspace_diff_reads_a_base_that_is_not_a_spec_branch_as_no_slice(tmp):
     assert sorted(loop.workspace_diff(work)) == ["landed.txt", "own.txt"]
 
 
-def test_workspace_diff_of_a_slice_whose_spec_branch_is_gone_names_the_key(tmp):
+def test_workspace_diff_of_a_slice_whose_integration_branch_is_gone_names_the_key(tmp):
     work = make_slice_workspace(tmp, own=["own.txt"], landed=[])
     run_in(work, "git", "config", "branch.implement-1.base", "spec-77")
     with pytest.raises(loop.LoopError) as exc:

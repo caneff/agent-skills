@@ -48,7 +48,7 @@ def origin_default(run):
             "origin -a`") from None
 
 
-SPEC_BRANCH = re.compile(r"spec-[0-9]+")
+INTEGRATION_BRANCH = re.compile(r"spec-[0-9]+")
 
 
 def seat(run):
@@ -68,7 +68,7 @@ def seat(run):
     common = os.path.realpath(common)
     branch = run(["branch", "--show-current"]).strip()
     if git_dir != common:
-        if SPEC_BRANCH.fullmatch(branch):
+        if INTEGRATION_BRANCH.fullmatch(branch):
             return (f"{branch} (a spec run's linked worktree: "
                     "a controller's seat)")
         raise LoopError(
@@ -942,7 +942,7 @@ def slice_base(run):
     # stays an error instead of reading as "no recorded base".
     recorded = run(["config", "--default", "", "--get",
                     f"branch.{branch}.base"]).strip()
-    if not SPEC_BRANCH.fullmatch(recorded):
+    if not INTEGRATION_BRANCH.fullmatch(recorded):
         return None
     base = f"origin/{recorded}"
     try:
