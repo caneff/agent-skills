@@ -308,8 +308,8 @@ behind the ranking, and what each source costs when it is read the other way:
    controller as its next turn, about a second after the send (#778). Nothing
    replaces it, and nothing below is read as a report that has not arrived.
 2. **The stop alert is a hint.** It means *read this pane*, and never that a
-   worker is stuck: across the two #781 runs it fired **six times** and was
-   wrong six times, from three benign causes the reference names. So a
+   worker is stuck: it fires on benign causes too, which the
+   reference names. So a
    controller reads the pane the alert names and rules from what that pane
    says; it never parks a clump, holds a slot or calls a worker stalled on
    the alert alone.
@@ -366,8 +366,8 @@ silence is not zero. Whoever writes it, the record is on the clump
 `--done` once the job has finished — and `loop.py dispatch --run <run-id>`
 reads the charge from **that record**, never from its own argv or
 `--in-flight`: a declaration that lived in one command line is a hold a
-restart cannot recover, and the free slot a resumed controller then
-dispatches into is the contention #351 produced.
+restart cannot recover, and a resumed controller then
+dispatches into a slot the job is still using.
 
 The charge is arithmetic, so "heavy" needs no threshold: a slot is one core's
 worth of machine until a worker says otherwise, and the cores past the job's

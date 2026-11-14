@@ -819,10 +819,10 @@ Controller: Chris merges this PR; you dispatched me, so hand him the merge
 
   **A parallel job is any process you caused to exist beyond yourself** —
   a background command, a test run still going, the Codex pass, and **every
-  subagent**: a review axis is one. A subagent is a process on the same shared
-  box, counting against the same 28-process cap as any other. So `none` means
+  subagent**: a review axis is one. A subagent is a Claude session on the same shared
+  box, counting against the same 28-session cap as any other. So `none` means
   none, not "none of the kind I had in mind": three review axes plus the Codex
-  pass are four processes.
+  pass are four parallel jobs.
 - **The cleanup blockers** (#1032, folding in #831) — what `merge-cleanup`
   would refuse the workspace's removal over, named while you can still act
   on it rather than found in the refusal after the merge. A kept `.scratch/`

@@ -77,7 +77,7 @@ per mutation*); its refusal goes on that first line as well.
 
 ## Axes
 
-Read your axis's brief from § 4 of that file:
+Your axis's brief is in the rendered brief file the caller names (`render-brief.py` includes `multi-axis-code-review/briefs/<axis>.md`):
 **standards** (`multi-axis-code-review/SKILL.md` § 3 lenses, ending in the required `### Over-engineering`
 subsection), **spec** (missing, partial, unasked-for, or wrongly implemented
 against the originating issue), or **correctness** — bugs, behaviour the ticket
