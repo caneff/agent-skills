@@ -10,6 +10,9 @@
 # FAKE_GH_ISSUE_STATE=OPEN|CLOSED   issue view --json state (default OPEN)
 # FAKE_GH_ISSUE_STATES="42=CLOSED,43=FAIL"  per-issue override of the above;
 #                                   FAIL makes that `issue view` exit 1
+# FAKE_GH_OPEN_ISSUES='[{"number":9,"body":".."}]'  issue list (open issues
+#                                   with their bodies; default [])
+# FAKE_GH_ISSUE_LIST_EXIT=<n>       issue list exits n, printing nothing
 # FAKE_GH_ISSUE_URL=<url>           issue create prints it
 # FAKE_GH_BODIES=<file>             issue create / issue comment append
 #                                   "=== <argv> ===" then the --body-file's
@@ -45,6 +48,9 @@ case "$1 ${2:-}" in
     state="$(keyed "${FAKE_GH_ISSUE_STATES:-}" "$3" "${FAKE_GH_ISSUE_STATE:-OPEN}")"
     [ "$state" != FAIL ] || { echo "fake gh: issue view $3 failed" >&2; exit 1; }
     printf '{"state":"%s"}\n' "$state" ;;
+  "issue list")
+    [ -z "${FAKE_GH_ISSUE_LIST_EXIT:-}" ] || { echo "fake gh: issue list failed" >&2; exit "$FAKE_GH_ISSUE_LIST_EXIT"; }
+    echo "${FAKE_GH_OPEN_ISSUES:-[]}" ;;
   "issue create"|"issue comment")
     if [ "$2" = comment ] && [ -n "${FAKE_GH_COMMENT_EXIT:-}" ]; then
       echo "fake gh: issue comment failed" >&2

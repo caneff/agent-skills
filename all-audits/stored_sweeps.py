@@ -179,10 +179,38 @@ def latest_record_url(name):
     return urls[-1] if urls else ""
 
 
+SPEC_LIST_LIMIT = 1000
+
+
+def open_specs_of(sweep, rec):
+    """(numbers of the open issues in the record's repo whose body carries a
+    `Sweep run:` line naming this stored sweep, None), or (None, why). The
+    specs the triage filed are found by that line (#1851), the one every spec
+    carries (`harness/GRILLING.md`), not by parsing the record's closing
+    comment. A listing that fails, is not a list of bodies, or fills the
+    limit (so may hide an open spec) is a refusal, never "none open"."""
+    r = run(["gh", "issue", "list", "--repo", record_repo(sweep, rec), "--state", "open",
+             "--limit", str(SPEC_LIST_LIMIT), "--json", "number,body"])
+    if r.returncode != 0:
+        return None, f"open-spec lookup failed (gh exit {r.returncode}): {r.stderr.strip()}"
+    try:
+        issues = [(int(i["number"]), str(i["body"])) for i in json.loads(r.stdout)]
+    except (ValueError, KeyError, TypeError):
+        return None, "open-spec lookup failed (gh reply unreadable)"
+    if len(issues) >= SPEC_LIST_LIMIT:
+        return None, f"open-spec lookup may be incomplete ({SPEC_LIST_LIMIT} open issues listed)"
+    named = re.compile(r"^[\s>*_-]*Sweep run:.*[/\\]%s[/\\]%s(?![\w-])" % (
+        re.escape(os.path.basename(os.path.dirname(sweep))), re.escape(os.path.basename(sweep))), re.M)
+    return [n for n, body in issues if named.search(body)], None
+
+
 def prune_closed_sweeps(ttl_days):
-    """Delete each stored sweep whose audit record is CLOSED on GitHub (#1682).
-    One whose record is open, unreadable, or whose state `gh` does not answer
-    is kept, and a failed lookup is printed, never read as closed. A stored
+    """Delete each stored sweep whose audit record is CLOSED on GitHub and
+    whose filed specs are all closed too (#1682, #1851): the record closes
+    when triage files the specs, and each spec cites the sweep as its
+    evidence. One whose record is open, unreadable, whose state `gh` does not
+    answer, or that an open spec still names (or whose spec lookup fails) is
+    kept, and a failed lookup is printed, never read as closed. A stored
     sweep with no record at all (its issue was never filed) is deleted once it
     is older than `ttl_days`, so nothing grows without bound. A multi-repo
     index (#1721) is deleted once it is that old and no stored sweep carrying
@@ -193,7 +221,14 @@ def prune_closed_sweeps(ttl_days):
             continue
         state, why = issue_state(rec["issue"], record_repo(sweep, rec))
         if state == "CLOSED":
-            shutil.rmtree(sweep, ignore_errors=True)
+            specs, why = open_specs_of(sweep, rec)
+            if specs is None:
+                print(f"stored sweep {sweep}: kept (record #{rec['issue']} closed, {why})", file=sys.stderr)
+            elif specs:
+                print(f"stored sweep {sweep}: kept (record #{rec['issue']} closed, spec "
+                      f"{', '.join('#%d' % n for n in specs)} still open)", file=sys.stderr)
+            else:
+                shutil.rmtree(sweep, ignore_errors=True)
         elif state is None:
             print(f"stored sweep {sweep}: kept (record #{rec['issue']}: {why})", file=sys.stderr)
     cutoff = _dt.datetime.now().timestamp() - ttl_days * 86400
