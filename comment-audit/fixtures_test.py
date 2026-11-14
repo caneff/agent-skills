@@ -70,3 +70,10 @@ def test_three_mis_cuts_are_keyed():
     assert ("sample.py", "citation") in keyed  # module docstring with a citation
     assert ("test_sample.py", "why") in keyed  # test-intent comment
     assert ("sample.rs", "api-contract") in keyed  # API contract on a /// line
+    # The same file and category can be held by another row, so pin each
+    # mis-cut to its own key row: line, bucket and (for the docstring) its salvage.
+    by_row = {(n, ln): (b, c, a) for n, ln, b, c, a in ROWS}
+    assert by_row[("sample.py", 1)][:2] == ("cut", "citation")
+    assert by_row[("sample.py", 1)][2] != GONE, "the docstring is a salvage, not a whole delete"
+    assert by_row[("test_sample.py", 5)][:2] == ("keep", "why")
+    assert by_row[("sample.rs", 1)][:2] == ("keep", "api-contract")

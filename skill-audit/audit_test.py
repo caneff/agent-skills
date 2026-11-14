@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from audit import Skill, add_flag, flip_skill, parse_frontmatter  # noqa: E402
+from audit import Skill, add_flag, flip_picked, flip_skill, parse_frontmatter  # noqa: E402
 
 SRC = "---\nname: foo\ndescription: bar\n---\nbody\n"
 
@@ -153,7 +153,7 @@ def test_cli_flip_flips_picked_numbers_and_reports_the_rest(env, capsys):
     assert "Re-run without --flip to see the updated report." in out
 
 
-def test_cli_flip_twice_says_already_slash_only(env, capsys):
+def test_cli_flip_twice_is_out_of_range(env, capsys):
     import audit
     skills, logs = env
     _make_skill(skills, "only")
@@ -162,6 +162,16 @@ def test_cli_flip_twice_says_already_slash_only(env, capsys):
     # after flipping it is no longer stale, so list is empty → out of range
     audit.main(["--flip", "1"])
     assert "out of range (1–0)" in capsys.readouterr().out
+
+
+def test_flip_picked_says_already_slash_only_for_a_flagged_skill(tmp_path, capsys):
+    path = tmp_path / "SKILL.md"
+    path.write_text(SRC, encoding="utf-8")
+    skill = Skill.make("only", str(path), True, None, NOW, 45)
+    flip_picked([skill], [1])
+    assert "1. only: flipped to slash-only" in capsys.readouterr().out
+    flip_picked([skill], [1])
+    assert "1. only: already slash-only" in capsys.readouterr().out
 
 
 def test_build_rows_orders_never_used_then_oldest_then_slash_only():

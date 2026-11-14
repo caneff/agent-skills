@@ -32,7 +32,6 @@ import {
 } from "node:fs";
 import { join, basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import assert from "node:assert";
 
 // --- parser bootstrap ------------------------------------------------------
 
@@ -1003,12 +1002,8 @@ export {
   LOST_DUPLICATE,
   PRIVATE_SMELL,
   STUB_SMELL,
-  SUITE_ROOTS,
-  TEST_ROOTS,
   VACUOUS_SMELL,
-  assertionsIn,
   gate,
-  importedName,
   isAssertionFree,
   isBroadThrow,
   isEmptyOrSkipped,
@@ -1022,5 +1017,4 @@ export {
   scanPath,
   smellsIn,
   testCalls,
-  walk,
 };

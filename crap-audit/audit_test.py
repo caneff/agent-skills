@@ -115,6 +115,22 @@ def test_normalize_and_score_count_each_class_method_once():
     assert len(rows) == 3
 
 
+def test_cli_scored_count_counts_each_class_method_once(tmp_path):
+    """The CLI's scored count (len of `ranking`) lists a class method once,
+    through the real two-file entry rather than normalize alone."""
+    radon = tmp_path / "radon.json"
+    cov = tmp_path / "coverage.json"
+    radon.write_text(json.dumps({"m.py": _radon_class_fixture()}), encoding="utf-8")
+    cov.write_text(json.dumps({"files": {"m.py": {"functions": {}}}}), encoding="utf-8")
+    out = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(__file__), "audit.py"), str(radon), str(cov)],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    ranking = json.loads(out)["ranking"]
+    assert [(r["name"], r["line"]) for r in ranking].count(("handle", 10)) == 1
+    assert len(ranking) == 3
+
+
 def test_line1_function_does_not_inherit_module_summary():
     """P0 regression: coverage.py's `""` module-scope entry is always
     start_line 1 and is emitted last in `functions`. A real function that

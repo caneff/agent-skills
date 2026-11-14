@@ -6,17 +6,15 @@ import assert from "node:assert";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   EXIT_UNABLE,
   LOST_DUPLICATE,
   PRIVATE_SMELL,
   STUB_SMELL,
-  SUITE_ROOTS,
-  TEST_ROOTS,
   VACUOUS_SMELL,
-  assertionsIn,
   gate,
-  importedName,
   isAssertionFree,
   isBroadThrow,
   isEmptyOrSkipped,
@@ -30,7 +28,6 @@ import {
   scanPath,
   smellsIn,
   testCalls,
-  walk,
 } from "./audit.mjs";
 
 function testCallFrom(src) {
@@ -689,3 +686,19 @@ test('candidate smells: stub asserted called, vacuous loop, private-API access',
   );
 });
 
+
+test('run as a script, audit.mjs scans: its main-module guard fires', () => {
+  // Every other case imports main(); only a real `node audit.mjs` run reaches
+  // the guard. A guard that never fires makes the CLI scan nothing and exit 0,
+  // so the proof is a hollow test file turning the gate red through the CLI.
+  const root = mkdtempSync(join(tmpdir(), "test-audit-guard-"));
+  try {
+    writeFileSync(join(root, "hollow.test.js"), "import { it } from 'vitest';\nit('x', () => { compute(); });\n");
+    const script = fileURLToPath(new URL("./audit.mjs", import.meta.url));
+    const run = spawnSync(process.execPath, [script, "--gate", root], { encoding: "utf8" });
+    assert.equal(run.status, 1, `the CLI gate fails on a hollow test: ${run.stderr}`);
+    assert(run.stdout.includes("hollow.test.js"), `the CLI names the hollow file: ${run.stdout}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

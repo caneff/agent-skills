@@ -86,8 +86,6 @@ def test_is_tautology(source, expected):
 
 def test_unittest_testcase_is_not_collected_as_pytest():
     """unittest.TestCase methods are a different framework, not pytest: skipped, not silently treated as pytest."""
-    # framework detection: unittest.TestCase methods are a different
-    # framework, not pytest — skipped rather than silently treated as pytest.
     unittest_tree = ast.parse(
         "class FooTest(unittest.TestCase):\n"
         "    def test_x(self):\n"
@@ -174,7 +172,6 @@ def test_is_prose_assertion(source, expected):
 
 def test_is_prose_assertion_follows_a_module_constant_prose_path():
     """the prose path may sit in a module-level constant"""
-    # the prose path may sit in a module-level constant
     assert is_prose_assertion(
         _func_from("def test_x():\n    assert 'a sentence' in SKILL.read_text()\n"), {"SKILL"}
     )
@@ -200,8 +197,6 @@ def test_is_shell_prose_test(source, expected):
 
 def test_scan_path_flags_prose_tests_by_language():
     """the detector is wired into scanning: a prose Python test, a prose shell test, and a test that runs code"""
-    # the detector is wired into scanning: a prose Python test (its path in a
-    # module-level constant), a prose shell test, and a test that runs code
     tmp = tempfile.mkdtemp()
     try:
         with open(os.path.join(tmp, "test_prose.py"), "w", encoding="utf-8") as f:
@@ -222,8 +217,6 @@ def test_scan_path_flags_prose_tests_by_language():
 
 def test_scan_path_prunes_dot_dirs():
     """scan_path walks via auditlib.walk_source (#611), so .tox is pruned like every other audit."""
-    # scan_path walks via auditlib.walk_source (#611), so a dot-dir like
-    # .tox is pruned the same way every other audit prunes it.
     tmp = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(tmp, ".tox"))
@@ -369,7 +362,6 @@ def test_xfail_strict_for_reads_the_nearest_pytest_config():
 
 def test_scan_path_wires_in_the_exact_match_smells():
     """the four are wired into scanning, the xfail one reading the ini beside it"""
-    # the four are wired into scanning, the xfail one reading the ini beside it
     tmp = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(tmp, ".git"))
