@@ -42,9 +42,9 @@ nobody is waiting on.
 
 The one exception is a ticket filed **during** the run *because the run is
 stuck on what it fixes* — a blocker discovered by a worker, filed so it can
-be built. That one is dispatched into the run, and `loop.admit` will not take
-it without naming the clump it unblocks: the exception exists for a run that
-cannot finish otherwise, and an unnamed `stuck_on` is how it would quietly
+be built. That one is dispatched into the run, and the controller names the
+clump it unblocks when it adds it: the exception exists for a run that
+cannot finish otherwise, and an unnamed one is how it would quietly
 become "any ticket filed today".
 
 ## Why refill is continuous
@@ -205,20 +205,17 @@ closed clump's worker is finished however its agent looks. A vanished one is
 reconciled or
 parked by hand; messaging an agent nobody can find is not reconciliation.
 
-`loop.announce` takes the messenger as an argument because sending is
-`SendMessage`, which a Python module cannot call, and it raises rather than
-returning a partial list when a send fails: a worker that was not reached is
-a worker still addressing a controller that no longer exists.
+The controller sends these itself: sending is `SendMessage`, which a Python
+module cannot call, and no function stands between the `announce` bucket and
+the send. A send that fails stops the walk, so the worker that was not
+reached is named rather than left addressing a controller that no longer
+exists.
 
 The run file keys each worker by its **herdr agent name**. That name is the
-durable key and not an address — `loop.announce` resolves it to a session
-`send` can reach itself, at **send time**, through its `resolve`
-argument (default: `resolve_via_binary`, which shells out to
-`resolve-controller <herdr agent name>`, the same resolution
-`implement-dispatch` does for the controller, #923). The caller's `send`
-never sees the durable name, only the resolved one — `announce`'s own test
-used to pass a permissive callback that accepted anything, so nothing
-witnessed a resolved recipient, and a resumed controller's re-announcement
-never reached a worker (#1013). A name that does not resolve refuses,
-naming the worker, rather than sending to a guess. A resolved address
+durable key and not an address — the controller runs
+`resolve-controller <herdr agent name>` immediately before each send, the
+same resolution `implement-dispatch` does for the controller (#923), and
+sends to what it prints. Skipping the resolve once sent a resumed
+controller's re-announcement to no worker (#1013). A name that does not
+resolve gets no send, rather than a guess. A resolved address
 written into the run file is what aged and broke the last trial.

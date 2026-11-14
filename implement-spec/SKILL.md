@@ -95,22 +95,27 @@ branch too.
    `counts.py --repo` is checked against (§ Run state). Resuming an existing
    run instead:
    `runfile.py resume`, and then **one message per live, unsettled worker**
-   — its `announce` bucket and only that one, via `loop.announce`. A
-   landed or closed clump's worker gets none however its agent looks; a
-   vanished one
-   gets none either, and is reconciled or parked by hand. The bucket
-   names each worker by its **herdr agent name**, which is
-   the durable key and not an address: resolve it to a reachable session at
-   **send time** (#923), and never write a resolved address into the run
-   file.
+   — its `announce` bucket and only that one, which you send yourself. For
+   each entry run `resolve-controller <agent>` (the entry's **herdr agent
+   name**, the durable key and not an address) and `SendMessage` to the
+   session name it prints: "Your controller is now `<your session name>` —
+   before every send, resolve that name with `resolve-controller` and send
+   your questions and finish notice to what it prints. Run `<run-id>`,
+   clump `<tickets>`, workspace `<workspace>`." Resolve immediately before
+   each send (#923) and never write a resolved address into the run file. A
+   name that does not resolve gets no send: say so and stop for that
+   worker, so a retry covers only the workers not yet reached. A landed or
+   closed clump's worker gets none however its agent looks; a vanished one
+   gets none either, and is reconciled or parked by hand.
 2. Read the frontier (§ The frontier) and clump **only the slices of this spec
    it reports clear** (§ Clumping): `closure.py --json` into the candidates
    file, never built by hand. `loop.py dispatch` reads no blocked-by edge, so a
    blocked slice in the candidates file is dispatched as if clear (#1542). That
    exploration is the run's **frozen** candidate set: a ticket filed while the
-   run is going waits for the next run. The one exception is a ticket filed
-   *during* the run **because the run is stuck on what it fixes** —
-   `loop.admit` takes it only with the clump it unblocks named.
+   run is going waits for the next run, with one exception — a ticket filed
+   *during* the run **because the run is stuck on what it fixes**. You add
+   that one to the candidates file yourself, by running `closure.py --json`
+   for it, and you name the clump it unblocks when you say so.
 3. The **opening report** carries `closure.py`'s announcement line verbatim,
    so the reader can tell all three declaration states apart: a declared
    directive, a **declared None** — the repo has no include graph — and
