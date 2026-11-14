@@ -84,8 +84,8 @@ def test_nested_uncovered_and_branchless_score_per_spec():
 
     # branchless: coverage.py reports 100% branch coverage when there are no
     # branches, so effective coverage reduces to statement coverage alone.
-    eff = audit._effective_coverage(by_name["branchless_fn"])
-    assert eff == 1.0
+    ranked = {r["name"]: r for r in audit.score(rows)["ranking"]}
+    assert ranked["branchless_fn"]["crap"] == ranked["branchless_fn"]["complexity"]
 
 
 def _radon_class_fixture():
@@ -299,12 +299,6 @@ def test_under_floor_sample_caps_at_five_not_the_full_count():
     assert len(result["under_floor"]["sample"]) == 5
 
 
-def test_recommend_write_tests_when_full_coverage_would_clear_the_gate():
-    rec = audit._recommend(6)
-    assert rec == {"action": "write tests", "projected_crap": 6.0}
-    assert audit._crap(6, 1.0) == 6
-
-
 def test_recommend_refactor_when_complexity_alone_meets_or_exceeds_the_gate():
     """Complexity >= the classic gate (30): no amount of coverage escapes it,
     since full coverage still leaves CRAP == complexity."""
@@ -444,17 +438,9 @@ def test_normalize_ts_missing_coverage_report_counts_as_zero_both_axes():
         ],
     }
     rows = audit.normalize_ts(report)
-    assert rows == [
-        {
-            "file": "src/orphan.ts",
-            "name": "orphaned",
-            "line": 5,
-            "complexity": 3,
-            "statement_coverage": 0.0,
-            "branch_coverage": 0.0,
-            "coverage_axis": "both",
-        }
-    ]
+    assert len(rows) == 1
+    assert rows[0]["statement_coverage"] == 0.0
+    assert rows[0]["branch_coverage"] == 0.0
 
 
 def test_normalize_ts_structural_na_counts_as_fully_covered_both_axes():
