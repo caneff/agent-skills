@@ -1,7 +1,8 @@
-//! Shared library for the `/implement` lane's Rust commands. Scope is
-//! exactly what both binaries use today: the base-branch resolver, the
-//! sessions-registry reader, typed herdr output, and a command runner.
-//! Nothing built ahead for the multi-worker supervisor.
+//! Shared library for the `/implement` lane's Rust commands: the
+//! base-branch resolver, the sessions-registry and worker-sidecar readers,
+//! typed herdr and `gh` output, worktree reads, code-target classification,
+//! atomic file replacement and a command runner. A module lands here when a
+//! command uses it, never ahead of one.
 
 pub mod atomic;
 pub mod git_origin;

@@ -73,12 +73,12 @@ const READ_GRACE: Duration = Duration::from_secs(2);
 /// just the direct child) gets killed. Returns whether it timed out
 /// alongside the exit status, since a killed child's status alone doesn't
 /// say why it failed — a caller reporting to a person needs the "why."
-/// (#849 Codex gate on PR #1195): the read side was bounded only past a
-/// timeout of the *direct* child — a child that exits on its own but backgrounds
-/// a descendant still holding stdout/stderr open (a hook that forks a daemon,
-/// e.g.) left `recv_drained`'s bare `rx.recv()` blocking forever, with no
-/// timeout ever having fired to explain it. The drain deadline now applies
-/// unconditionally, whether or not the direct child itself timed out — but
+/// The read side is bounded even when the *direct* child never times out: a
+/// child that exits on its own but backgrounds a descendant still holding
+/// stdout/stderr open (a hook that forks a daemon, e.g.) would otherwise
+/// leave `recv_drained` blocking forever, with no timeout ever having fired
+/// to explain it. The drain deadline applies unconditionally, whether or not
+/// the direct child itself timed out — but
 /// the process-group kill stays timeout-only: a child that exited on its own
 /// may have legitimately started a long-lived process (`herdr` launched by a
 /// hook) that is not this call's to kill just because its own pipe is still
@@ -107,10 +107,9 @@ fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<(ExitStat
 
 /// Spawns a thread draining `pipe`, sending each new chunk once — never the
 /// whole buffer read so far — so the channel's queue stays linear in the
-/// bytes read rather than quadratic (#849 Codex second pass on PR #1195:
-/// sending `buf.clone()` per chunk, with nothing consuming the channel until
-/// the child exits, queued O(n) snapshots of up to O(n) bytes each — roughly
-/// 4 GiB queued for 8 MiB of real output). The receiver accumulates the
+/// bytes read rather than quadratic: sending `buf.clone()` per chunk, with
+/// nothing consuming the channel until the child exits, would queue O(n)
+/// snapshots of up to O(n) bytes each. The receiver accumulates the
 /// chunks itself. The bool is whether this is the final message (the pipe
 /// reached EOF or errored); a pipe left stuck open past the receiver's
 /// deadline leaks this one thread — accepted, since the alternative is the
@@ -206,7 +205,7 @@ fn wait_bounded(child: &mut Child, timeout: Duration) -> std::io::Result<(ExitSt
             // direct child, not anything it forked without exec-replacing.
             // With no `kill` on PATH, or one that failed, `Child::kill` is the
             // fallback: the direct child at least, or the wait below has no
-            // bound at all (#1406 C6).
+            // bound at all.
             let grouped = Command::new("kill")
                 .args(["-9", "--", &format!("-{}", child.id())])
                 .status()
@@ -314,7 +313,7 @@ pub fn quiet_ok_timeout(program: &str, args: &[&str], timeout: Duration) -> bool
 /// indistinguishable from a completed command's own negative answer.
 /// `Ok(None)` is the real negative a caller may read as a fact (no such
 /// ref, no origin remote); `Err` names the program and its arguments and
-/// must never be read that way (#849).
+/// must never be read that way.
 pub fn quiet_stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<Option<String>, String> {
     let run = run_quiet(program, args, timeout)?;
     if let Some(err) = run.incomplete() {
@@ -366,7 +365,7 @@ pub fn quiet_code_bounded(program: &str, args: &[&str], timeout: Duration) -> Re
 /// means a command reading the terminal (a credential prompt) is stopped
 /// rather than answered, and so fails at the bound; and Ctrl-C reaches this
 /// process but not the child, which is left running. Both are accepted
-/// costs of a bound that can kill the whole group (#1406 C6). `Err` names
+/// costs of a bound that can kill the whole group. `Err` names
 /// the command and why: it timed out, or it could not be spawned.
 pub fn status_bounded(program: &str, args: &[&str], drop_stdout: bool, timeout: Duration) -> Result<bool, String> {
     let command = format!("{program} {}", args.join(" "));
@@ -383,16 +382,15 @@ pub fn status_bounded(program: &str, args: &[&str], drop_stdout: bool, timeout: 
 }
 
 fn trim_trailing_newlines(s: &mut String) {
-    // Bash's `$(...)` strips trailing newlines; match that so callers that
-    // parse or compare the captured text see what the bash port saw.
+    // Strip trailing newlines the way shell `$(...)` does, so callers that
+    // parse or compare the captured text see the same string.
     while s.ends_with('\n') {
         s.pop();
     }
 }
 
-/// `out=$(cmd 2>/dev/null)`: stdout only, discarded on failure, trailing
-/// newlines stripped. For calls whose bash original ignored stderr and
-/// treated the result as absent on a nonzero exit.
+/// stdout only, discarded on failure, trailing newlines stripped. For calls
+/// that ignore stderr and treat the result as absent on a nonzero exit.
 pub fn quiet_stdout(program: &str, args: &[&str]) -> Option<String> {
     let out = Command::new(program).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
     if !out.status.success() {
@@ -403,8 +401,8 @@ pub fn quiet_stdout(program: &str, args: &[&str]) -> Option<String> {
     Some(s)
 }
 
-/// `cmd >/dev/null 2>&1; rc=$?`: only whether it succeeded, for the bash
-/// idiom `command -v x` / `git show-ref -q --verify ...`.
+/// Only whether it succeeded, with stdout and stderr discarded: for
+/// existence-style checks such as `git show-ref -q --verify ...`.
 pub fn quiet_ok(program: &str, args: &[&str]) -> bool {
     Command::new(program)
         .args(args)
@@ -425,14 +423,13 @@ pub fn on_path(name: &str) -> bool {
     })
 }
 
-/// `cmd; rc=$?` with stdout and stderr passed through to this process's
-/// own, for the steps whose git output the bash original let the operator
-/// see. A command that cannot be spawned counts as failed.
+/// Stdout and stderr passed through to this process's own, for the steps
+/// whose git output the operator should see. A command that cannot be spawned counts as failed.
 pub fn status(program: &str, args: &[&str]) -> bool {
     Command::new(program).args(args).status().map(|s| s.success()).unwrap_or(false)
 }
 
-/// `cmd 2>/dev/null; rc=$?`: stdout passed through, stderr discarded.
+/// Only whether it succeeded: stdout passed through, stderr discarded.
 pub fn quiet_stderr_ok(program: &str, args: &[&str]) -> bool {
     Command::new(program).args(args).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
 }
@@ -496,7 +493,7 @@ mod tests {
         assert_eq!(out.combined, "hello");
     }
 
-    // Correctness review of #844: killing only the direct child leaves a
+    // Killing only the direct child leaves a
     // grandchild it forked (rather than exec-replaced) holding the pipe
     // open, so the reader thread's `read_to_end` never sees EOF and the
     // bound never actually fires. `sh -c "sleep 5 & wait"` reproduces that
@@ -515,9 +512,8 @@ mod tests {
         assert!(!out.success);
     }
 
-    // Correctness review of #844: a killed child's combined output was
-    // empty, so the operator saw "(no output)" with no clue a timeout ever
-    // fired.
+    // A killed child's combined output is empty, so without the note the
+    // operator would see "(no output)" with no clue a timeout ever fired.
     #[test]
     fn run_timeout_says_it_timed_out_when_the_child_had_nothing_to_say() {
         use std::time::Duration;
@@ -526,12 +522,11 @@ mod tests {
         assert!(out.combined.to_lowercase().contains("timed out"), "combined was {:?}", out.combined);
     }
 
-    // Codex gate on PR #1195 (#849): the direct child here exits almost
-    // immediately with status 0, but backgrounds a descendant that holds
-    // stderr open for far longer than this call's own `timeout` — before
-    // the fix, `recv_drained`'s unconditional `rx.recv()` on the
-    // non-timed-out path blocked on that descendant forever. Bounded by
-    // READ_GRACE now, whether or not the direct child itself timed out.
+    // The direct child here exits almost immediately with status 0, but
+    // backgrounds a descendant that holds stderr open for far longer than
+    // this call's own `timeout` — an unconditional `rx.recv()` on the
+    // non-timed-out path would block on that descendant forever. Bounded by
+    // READ_GRACE whether or not the direct child itself timed out.
     #[test]
     fn run_timeout_does_not_hang_forever_when_a_normally_exiting_child_backgrounds_a_pipe_holding_descendant() {
         use std::time::{Duration, Instant};
@@ -542,9 +537,8 @@ mod tests {
         assert!(out.combined.to_lowercase().contains("truncated"), "combined was {:?}", out.combined);
     }
 
-    // #1209 codex-third-2: a child that printed something and then hung was
-    // reported as an ordinary failure carrying only its output; the timeout
-    // was named only when there was no output at all.
+    // A child that printed something and then hung must be reported with the
+    // timeout named, not as an ordinary failure carrying only its output.
     #[test]
     fn run_timeout_names_the_timeout_even_when_the_child_printed_first() {
         use std::time::Duration;
@@ -554,7 +548,7 @@ mod tests {
         assert!(out.combined.to_lowercase().contains("timed out"), "combined was {:?}", out.combined);
     }
 
-    // #1209 codex-third-1: after the drain deadline `recv_timeout(0)` still
+    // After the drain deadline `recv_timeout(0)` still
     // hands back every queued chunk, so a descendant that keeps writing kept
     // the loop running past READ_GRACE. Driven at the function, with the
     // deadline already past: an end-to-end writer fast enough to show it would
@@ -573,7 +567,7 @@ mod tests {
         drop(tx);
     }
 
-    // #1209 spec P1: stdout is read first and can spend the shared deadline;
+    // Stdout is read first and can spend the shared deadline;
     // what the direct child already wrote to stderr is still queued and kept.
     #[test]
     fn recv_drained_keeps_what_was_already_queued_when_the_deadline_has_passed() {
@@ -587,10 +581,9 @@ mod tests {
         drop(tx);
     }
 
-    // Codex second pass on PR #1195 (#849): `drain` used to send a clone of
-    // the whole buffer-so-far on every 8 KiB chunk, and nothing consumed the
-    // channel until the child exited — several MiB of real output queued
-    // roughly its square in bytes. This drains within the timeout and gets
+    // `drain` used to send a clone of the whole buffer-so-far on every 8 KiB
+    // chunk, and nothing consumed the channel until the child exited — several
+    // MiB of real output queued roughly its square in bytes. This drains within the timeout and gets
     // every byte back; the mutation check (revert `drain` to send
     // `buf.clone()`) is what actually proves the growth was quadratic, since
     // a small size alone wouldn't show it.
@@ -604,7 +597,7 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(5), "waited {:?} to drain 16 MiB", start.elapsed());
     }
 
-    // #849: a bounded query must fail loud when the bound fires, never
+    // A bounded query must fail loud when the bound fires, never
     // fold that into the same `None`/`false` a completed command's own
     // negative answer produces.
     #[test]
