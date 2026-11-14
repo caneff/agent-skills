@@ -48,7 +48,8 @@ rule code named in the one-sentence problem, files, before/after.
 
 ## Present the audit as an HTML report
 
-Deliver the audit as a **HTML report** (a page plus the `assets/` folder `copy_assets` writes beside it), the same way
+Deliver the audit as an **HTML report** (a page plus the `assets/` folder
+`copy_assets` writes beside it), the same way
 `/improve-codebase-architecture` and `/thermo-nuclear-code-quality-review` do —
 not as a wall of terminal one-liners.
 

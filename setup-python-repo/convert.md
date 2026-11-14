@@ -46,17 +46,22 @@ missing entries, don't clobber.
 
 ## 5. Replace ad-hoc hooks with the pre-commit framework
 
-If the repo uses bare `.githooks/` + a hand-written CI mirror (my old pattern),
-retire both: install `templates/pre-commit-config.yaml`, delete the bash mirror
-and `core.hooksPath`, and set the merge gate with
-`git config land.testcmd 'just check'` (`flow/claude/WORKFLOW.md` § CI). One
-source of truth now. A repo that already runs Actions CI keeps it.
+If the repo uses bare `.githooks/` + a hand-written bash CI mirror (my old
+pattern), retire both: install `templates/pre-commit-config.yaml`, delete the
+bash mirror and `core.hooksPath`. One source of truth now.
+
+Every converted repo then gets the merge gate, whatever it had before: set it
+with `git config land.testcmd 'just check'` (`flow/claude/WORKFLOW.md` § CI),
+and give `AGENTS.md` the template's `## End-to-end seam` section (step 6), which
+is what the lane's merges run. A GitHub Actions workflow the repo already has
+stays: add none, delete none.
 
 ## 6. Docs + task runner
 
-Add `justfile`, `AGENTS.md`, `CODING_STANDARDS.md` if absent. If a `CLAUDE.md`
-exists, fold its content into `AGENTS.md` and leave a note (Claude Code reads
-AGENTS.md) — don't maintain both.
+Add `justfile`, `AGENTS.md`, `CODING_STANDARDS.md` if absent; an existing
+`AGENTS.md` gets the template's `## End-to-end seam` section if it has none.
+If a `CLAUDE.md` exists, fold its content into `AGENTS.md` and leave a note
+(Claude Code reads AGENTS.md) — don't maintain both.
 
 ## 7. Rejoin
 

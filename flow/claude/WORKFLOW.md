@@ -99,8 +99,8 @@ ticket labelled `needs-info` goes through `/grill-with-docs` before
 
 An agent files a ticket through `/file-ticket`, never a bare `gh issue
 create`. Why: the skill writes the `## Blocked by` section the frontier
-reader (`implement-spec/frontier.py`) parses; a body without one is `unresolved`,
-never dispatched until someone resolves it by hand.
+reader (`implement-spec/frontier.py`) parses; a body without one is
+`unresolved`, never dispatched until someone resolves it by hand.
 
 ## Before filing a ticket
 
@@ -108,9 +108,9 @@ Before any ticket is filed — a review follow-up, a controller observation, a
 retro digest item — the open issues on the same file or component are
 searched. When one exists, the item goes onto it as a comment
 (`gh issue comment <n>`) instead of a new issue. Work under about two minutes
-is done on the spot, never ticketed. Why: a ticket per observation floods the queue
-with one-paragraph items on components that already have an open ticket
-(`docs/research/2026-10-04-agent-ticket-inflation.md`). The teaching hook
+is done on the spot, never ticketed. Why: a ticket per observation floods
+the queue with one-paragraph items on components that already have an open
+ticket (`docs/research/2026-10-04-agent-ticket-inflation.md`). The teaching hook
 `hooks/teach-filing.sh` shows this section on the first `gh issue create` of
 a session, and on every `gh issue create` lists the open issues its own title
 search found.
@@ -152,8 +152,9 @@ session outside auto mode, where each risky step is one prompt he approves.
 Why: the classifier exists to stop exactly this work, and its rules for it
 (`Self-Modification`, `Auto-Mode Bypass`, `Instruction Poisoning`,
 `Unauthorized Persistence`, and more) are must-name `soft_deny` rules that
-no `autoMode.allow` entry clears. An auto-mode worker on harness work parks at each denial and
-relays it, a round per step (#1389 adds the pre-dispatch check).
+no `autoMode.allow` entry clears. An auto-mode worker on harness work parks
+at each denial and relays it, a round per step (#1389 adds the pre-dispatch
+check).
 
 A denial report names the root-cause fix: the user-level settings or
 `autoMode` entry that produces the denial, never a per-worktree or one-off

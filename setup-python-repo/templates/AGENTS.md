@@ -9,6 +9,11 @@
 - Type check: `uv run ty check`
 - Lint + format: `just fmt`
 
+## End-to-end seam
+
+- **Seam**: `just check`
+- **Blind to**: anything a person sees using the program that no test asserts
+
 ## Where things are
 
 - Coding + testing standards → [`CODING_STANDARDS.md`](CODING_STANDARDS.md)

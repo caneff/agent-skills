@@ -95,9 +95,9 @@ defines them.
   already running on a dead socket, whose clipboard then reads empty.
   The fix that needs no restart is in `VISUAL-INSPECTION.md` § Getting a
   pasted image to an agent as a file; until it is applied the controller
-  reads the clipboard. herdr takes one client at a time — attaching from another terminal
-  drops the current one; the server and panes keep running, so re-running
-  `herdr` is the whole recovery.
+  reads the clipboard. herdr takes one client at a time — attaching from
+  another terminal drops the current one; the server and panes keep
+  running, so re-running `herdr` is the whole recovery.
 - **Zed's terminal attaches herdr by itself.** The hook is in `~/.bashrc`,
   right after the `herdr()` wrapper: `ZED_TERM` is set only in a Zed
   terminal, so an interactive login shell there runs `herdr && exit`. It is
@@ -277,10 +277,11 @@ defines them.
   match fires on the first item and reads as finishing; a success-only
   watch sleeps through a crash.
 - A message that arrives while work is running changes that work. Read
-  it when it wakes you or when your current tool call returns. If it changes a run's parameters, kill the run
-  and restart with the new ones; if it adds to a deliverable, fold it in
-  and grep the deliverable for it before reporting done. Why: a message
-  read after the run is a run done twice.
+  it when it wakes you or when your current tool call returns. If it
+  changes a run's parameters, kill the run and restart with the new ones;
+  if it adds to a deliverable, fold it in and grep the deliverable for it
+  before reporting done. Why: a message read after the run is a run done
+  twice.
 - Scripts, logs and outputs of long runs go in a git-ignored scratch
   directory inside the worktree or the repo's research directory — never
   `/tmp` or the session scratchpad, which a WSL restart wipes. Parallel

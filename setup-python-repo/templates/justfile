@@ -1,4 +1,4 @@
-# One obvious entrypoint for the gate — agents and the merge gate run `just check`.
+# One obvious entrypoint for the gate — agents and merges run `just check`.
 
 # CONTRACT: `check`, `lint` and `typecheck` are named by name outside this file.
 # setup-sandcastle asserts all three at install, and its rendered prompts call

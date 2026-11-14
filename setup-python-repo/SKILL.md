@@ -96,19 +96,24 @@ uv run pre-commit install
 
 Pattern: upstream isolated hooks (ruff, hygiene) + one `local` system hook for
 `ty` (ty needs your venv to resolve imports). **pytest is NOT a hook** — too
-slow for every commit; it runs in the merge gate (`just check`) only. (For a JS/TS repo, use
-`setup-pre-commit` instead — its hook does run tests, a reasonable tradeoff
-for faster JS/TS suites.)
+slow for every commit; it runs in the merge gate (`just check`) only. (For a
+JS/TS repo, use `setup-pre-commit` instead — its hook does run tests, a
+reasonable tradeoff for faster JS/TS suites.)
 
 **Done when:** `uv run pre-commit run --all-files` executes end to end.
 
 ## 6. Gates: merge gate
 
-CI is local, not GitHub Actions. Per
-`~/.agents/skills/flow/claude/WORKFLOW.md` § CI, set the merge gate with
-`git config land.testcmd 'just check'` and copy no workflow files.
+CI is local, not GitHub Actions
+(`~/.agents/skills/flow/claude/WORKFLOW.md` § CI): set the merge gate with
+`git config land.testcmd 'just check'` and copy no workflow files. The lane's
+merges (`drain`, `implement`) run the command in `AGENTS.md`'s
+`## End-to-end seam` section, which the `AGENTS.md` template in step 7
+declares as `just check`.
 
-**Done when:** `git config land.testcmd` prints `just check`.
+**Done when:** `git config land.testcmd` prints `just check`, and after step 7
+`python3 ~/.agents/skills/implement/selector_check.py command --root .` prints
+`just check`.
 
 ## 7. Docs + task runner
 

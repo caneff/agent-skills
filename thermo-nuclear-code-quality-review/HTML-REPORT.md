@@ -1,6 +1,6 @@
 # HTML Report Format
 
-The code-quality review is rendered as a self-contained HTML file in the OS temp directory. It is styled with the **visual-teach** design system — the same vendored, semantic `vt-*` components and `--vt-*` theme tokens the teaching lessons use — so the report opens offline, carries a working light/dark mode, and shares one visual identity with the rest of the skills. No web-framework, no remote diagram library, nothing that phones home.
+The code-quality review is rendered as an HTML report: a page plus the `assets/` folder `copy_assets` writes beside it, in the OS temp directory. It is styled with the **visual-teach** design system — the same vendored, semantic `vt-*` components and `--vt-*` theme tokens the teaching lessons use — so the report opens offline, carries a working light/dark mode, and shares one visual identity with the rest of the skills. No web-framework, no remote diagram library, nothing that phones home.
 
 The centrepiece of most findings is a **before/after code block**, not a graph — a restructuring reads best as source you can compare line for line. Reach for a diagram only when the point is graph-shaped: "this format is written in three places," "this parser is duplicated across two scripts," "this failure is coupled to that flow." Mix the two. Don't force every finding into a diagram.
 
