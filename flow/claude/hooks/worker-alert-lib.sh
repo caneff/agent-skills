@@ -1,4 +1,4 @@
-# Shared helpers for worker-stop-alert.sh (#991): the `/implement`
+# Shared helpers for the two worker alert hooks (#991): the `/implement`
 # brief-capture regex, the `~/.claude/sessions/*.json` registry loop with its
 # `/proc/<pid>/stat` field-22 liveness check, `logline()`'s format, and the
 # herdr agent-name and pane lookup. Sourced, not executed — the hook
@@ -152,6 +152,25 @@ worker_alert_prompt_pane() { # <pane> <alert> <deadline in $SECONDS> -> sets pro
     prompt_msg="herdr agent prompt $pane failed: $(tr '\n' ' ' <<<"$out")"
   fi
   return 1
+}
+
+# The tail both hooks end in (#1773): find the controller's pane from the
+# global `ctl_session` that `worker_alert_resolve_controller` set, submit
+# `alert` into it, and log the outcome under `key` — `not-sent` with the alert
+# text when the controller has no pane. Sets `prompt_status` and `prompt_msg`
+# as `worker_alert_prompt_pane` does.
+worker_alert_deliver() { # <log> <key> <controller> <alert> <deadline in $SECONDS>
+  local log="$1" key="$2" controller="$3" alert="$4" deadline="$5" pane
+  pane="$(worker_alert_controller_pane "${ctl_session:-}")"
+  if [ -z "$pane" ]; then
+    prompt_status=not-sent prompt_msg="no herdr pane for controller $controller: $alert"
+    worker_alert_logline "$log" "$key" "$prompt_status" "$prompt_msg"
+    return 1
+  fi
+  worker_alert_prompt_pane "$pane" "$alert" "$deadline"
+  local rc=$?
+  worker_alert_logline "$log" "$key" "$prompt_status" "$prompt_msg"
+  return "$rc"
 }
 
 # The controller a worker reports to now: the name in the latest `Your

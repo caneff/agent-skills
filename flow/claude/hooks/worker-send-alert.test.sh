@@ -150,4 +150,11 @@ out=$(jq -c --arg t "$transcript" '. + {transcript_path:$t}' <<<"$(send_event tu
       | HOME="$home" PATH="$stubdir:$PATH" bash "$tmp/nolib/worker-send-alert.sh" 2>&1); rc=$?
 if [ "$rc" = 0 ] && grep -q 'lib-missing' "$log"; then pass "a hook with no sibling lib logs lib-missing and exits 0"; else fail "lib-missing — rc $rc log: $(cat "$log" 2>/dev/null) out: $out"; fi
 
+reset_log
+partial="$tmp/partial-deliver"; mkdir -p "$partial"; cp "$hook" "$partial/"
+sed '/^worker_alert_deliver() {/,/^}/d' "$here/worker-alert-lib.sh" > "$partial/worker-alert-lib.sh"
+out=$(jq -c --arg t "$transcript" '. + {transcript_path:$t}' <<<"$(send_event tu-14 skills-b6 "$failed")" \
+      | HOME="$home" PATH="$stubdir:$PATH" bash "$partial/worker-send-alert.sh" 2>&1); rc=$?
+if [ "$rc" = 0 ] && grep -q $'lib-missing\tnot-sent.*worker_alert_deliver' "$log"; then pass "a lib without worker_alert_deliver is named as the missing symbol"; else fail "lib without deliver — rc $rc log: $(cat "$log" 2>/dev/null) out: $out"; fi
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

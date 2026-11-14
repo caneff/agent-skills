@@ -1,7 +1,7 @@
 """Tests for the dispatch loop (#893). The seams the ticket names: a fixture run
-over a stub tracker and a stub agent list, and the resume announce against a
-stub messenger. The loop's prose — its step list, its refusals, its stated
-consequences — has no test: there is no harness that runs a skill's own text.
+over a stub tracker and a stub agent list. The loop's prose — its step list,
+its refusals, its stated consequences — has no test: there is no harness that
+runs a skill's own text.
 """
 import json
 import os
@@ -13,6 +13,7 @@ import time
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import agents  # noqa: E402
 import loop  # noqa: E402
 import runfile  # noqa: E402
 from run_fixtures import drop_job  # noqa: E402
@@ -80,9 +81,9 @@ def test_seat_still_refuses_a_worktree_whose_branch_only_looks_like_a_spec(branc
     assert "worktree" in str(exc.value)
 
 
-def test_seat_refuses_a_spec_branch_in_the_primary_checkout():
-    # The exception is for the linked worktree `--spec` makes; a spec branch
-    # on the primary checkout is still not the default branch.
+def test_seat_refuses_an_integration_branch_in_the_primary_checkout():
+    # The exception is for the linked worktree `--spec` makes; an integration
+    # branch on the primary checkout is still not the default branch.
     with pytest.raises(loop.LoopError) as exc:
         loop.seat(git_stub(branch="spec-1262"))
     assert "spec-1262" in str(exc.value) and "main" in str(exc.value)
@@ -100,7 +101,7 @@ def test_seat_refuses_a_detached_head():
     assert "detached" in str(exc.value)
 
 
-# The #781 fixture, as the burn actually stood after `#453` landed: `#452`,
+# The #781 fixture, as the run actually stood after `#453` landed: `#452`,
 # `#457` and `#458` all include `examples/_shared/line-kind.js`, the same file
 # parked `#455` holds open in its workspace; `#501` is outside `examples/`
 # entirely. Closures as `closure.py` resolves them — the candidates' own files
@@ -121,9 +122,13 @@ def candidates_781():
     ]
 
 
+def picked_for(candidates, in_flight, free):
+    return loop.picks(loop.frontier(candidates, in_flight), free)[0]
+
+
 def parked_455():
     return [{"tickets": [455], "workspace": "/w/implement-455",
-             "agent": "burn-455", "closure": ["examples/renban.js", HOT],
+             "agent": "run-455", "closure": ["examples/renban.js", HOT],
              "job": NO_JOB}]
 
 
@@ -141,17 +146,17 @@ def test_the_freed_slot_goes_outside_the_blocked_family():
     # A controller reading only "open, unblocked, unclaimed" dispatches #452
     # into the collision; the loop takes #501.
     assert [c["tickets"] for c in
-            loop.refill(candidates_781(), parked_455(), 1)] == [[501]]
+            picked_for(candidates_781(), parked_455(), 1)] == [[501]]
 
 
-def test_refill_fills_every_free_slot_widest_first_ticket_ties():
+def test_picks_fills_every_free_slot_widest_first_ticket_ties():
     # No wave: two slots free and nothing in flight, so both go at once.
     # #452, #457 and #458 tie at closure size 2 (widest); #501 is narrower at
     # 1. The same-tick guard holds #457 and #458 over #452's shared file, so
     # #452 and the untied #501 are what actually goes out — this fixture
     # cannot tell widest-first from lowest-ticket-first on its own; the
     # untied case is `test_picks_takes_the_widest_closure_first`.
-    picked = loop.refill(candidates_781(), [], 2)
+    picked = picked_for(candidates_781(), [], 2)
     assert [c["tickets"] for c in picked] == [[452], [501]]
 
 
@@ -274,7 +279,7 @@ def test_a_wide_clump_held_by_a_live_workspace_stays_off_the_frontier():
         {"tickets": [20], "closure": ["b.js", "c.js", "d.js", HOT]},
         {"tickets": [30], "closure": ["f.js", "g.js"]},
     ]
-    picked = loop.refill(candidates, parked_455(), 2)
+    picked = picked_for(candidates, parked_455(), 2)
     assert [c["tickets"] for c in picked] == [[30]]
 
 
@@ -298,7 +303,7 @@ def test_the_cli_dispatch_names_the_widest_clump_first(tmp):
 
 
 def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run(tmp):
-    # The burn's --run on every plain dispatch was prose only (#1173 S1, P2,
+    # A run's --run on every plain dispatch was prose only (#1173 S1, P2,
     # C2, codex-second-1): the command the controller runs is printed here,
     # with the run id dispatch was itself given. It also carries the run's
     # recorded target checkout, not the cwd's (#1190): `implement-dispatch`
@@ -310,13 +315,13 @@ def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run(tmp):
     with open(cand, "w") as fh:
         json.dump([{"tickets": [500, 502], "closure": ["fresh.py"]}], fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "2", "--processes", "4",
+                  "--run", "run-t", "--free", "2", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
     commands = [line for line in got.stdout.splitlines()
                 if line.startswith("command")]
     assert commands == [
-        f"command   implement-dispatch 500 502 --run burn-t --repo {target}"
+        f"command   implement-dispatch 500 502 --run run-t --repo {target}"
     ], got.stdout
 
 
@@ -326,10 +331,10 @@ def test_the_printed_command_shell_quotes_a_target_path_with_a_space_1190(tmp):
     subprocess.run(["git", "init", "-q", target], check=True)
     cand, live, env = run_file_dispatch(tmp, ("none",), repo=target)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "2", "--processes", "4",
+                  "--run", "run-t", "--free", "2", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
-    assert f"--run burn-t --repo '{target}'" in got.stdout, got.stdout
+    assert f"--run run-t --repo '{target}'" in got.stdout, got.stdout
 
 
 def test_dispatch_refuses_a_run_file_that_names_no_target_repo_1190(tmp):
@@ -337,7 +342,7 @@ def test_dispatch_refuses_a_run_file_that_names_no_target_repo_1190(tmp):
     # `--repo` would claim against the cwd's origin: refuse, never omit.
     cand, live, env = run_file_dispatch(tmp, ("none",), legacy=True)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "2", "--processes", "4",
+                  "--run", "run-t", "--free", "2", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "names no target repo" in got.stderr, got.stderr
@@ -360,8 +365,8 @@ def test_the_cli_names_a_same_tick_collision_as_a_held_line(tmp):
     assert "held      #458  by #452 this tick" in got.stdout, got.stdout
 
 
-def test_refill_takes_nothing_when_no_slot_is_free():
-    assert loop.refill(candidates_781(), [], 0) == []
+def test_picks_takes_nothing_when_no_slot_is_free():
+    assert picked_for(candidates_781(), [], 0) == []
 
 
 def test_a_landing_frees_its_slot_without_waiting_for_the_other_clump():
@@ -369,9 +374,9 @@ def test_a_landing_frees_its_slot_without_waiting_for_the_other_clump():
     # blocked family, so the freed slot stays empty rather than colliding —
     # and the run drains out of ticket order.
     left = [c for c in candidates_781() if c["tickets"] != [501]]
-    assert loop.refill(left, parked_455(), 1) == []
+    assert picked_for(left, parked_455(), 1) == []
     # #455 lands too, and the same call now fills from the family it held.
-    assert [c["tickets"] for c in loop.refill(left, [], 1)] == [[452]]
+    assert [c["tickets"] for c in picked_for(left, [], 1)] == [[452]]
 
 
 def test_a_clump_clumped_by_subtree_is_checked_on_its_named_files():
@@ -379,8 +384,8 @@ def test_a_clump_clumped_by_subtree_is_checked_on_its_named_files():
     # `closure` key. The exclusion still has to read something.
     candidates = [{"tickets": [601], "files": ["examples/thermo.js"]}]
     live = [{"tickets": [455], "workspace": "/w/implement-455",
-             "agent": "burn-455", "files": ["examples/thermo.js"]}]
-    assert loop.refill(candidates, live, 1) == []
+             "agent": "run-455", "files": ["examples/thermo.js"]}]
+    assert picked_for(candidates, live, 1) == []
 
 
 def test_the_hot_shared_file_is_the_only_hub():
@@ -398,43 +403,6 @@ def test_a_landing_that_touched_no_hub_does_not():
     assert loop.hub_landing(["tests/all.sh"],
                             loop.hubs(candidates_781())) is False
     assert loop.hub_landing([], loop.hubs(candidates_781())) is False
-
-
-def test_box_check_allows_a_dispatch_with_room_on_the_box():
-    assert loop.box_check(processes=12, committed_gb=6, add_gb=4) == {
-        "ok": True, "refusals": []}
-
-
-def test_box_check_refuses_when_one_more_process_breaks_the_cap():
-    got = loop.box_check(processes=28, committed_gb=0, add_gb=0)
-    assert got["ok"] is False
-    assert any("28" in r for r in got["refusals"]), got
-
-
-def test_box_check_refuses_when_the_ulimit_sum_breaks_the_budget():
-    got = loop.box_check(processes=2, committed_gb=22, add_gb=4)
-    assert got["ok"] is False
-    assert any("24" in r for r in got["refusals"]), got
-
-
-def test_box_check_refuses_at_the_process_cap_boundary():
-    # The cap is the box's, so the reading it is checked against counts
-    # agent processes on the box — a new worker is charged at its peak, so 23
-    # leaves room for one more and 24 does not.
-    assert loop.box_check(processes=23, committed_gb=0, add_gb=0)["ok"] is True
-    assert loop.box_check(processes=24, committed_gb=0, add_gb=0)["ok"] is False
-
-
-def test_a_live_worker_keeps_its_fan_out_headroom_against_the_cap():
-    # #933: a live worker is one process now and five at its review peak, so
-    # 2 live workers on a box measured at 12 project 12+8+5=25 and fit; a
-    # 3rd live worker projects 29 against the cap of 28 and is refused.
-    assert loop.box_check(12, 0, live=2)["ok"] is True
-    got = loop.box_check(12, 0, live=3)
-    assert got["ok"] is False
-    assert any("12 of review fan-out headroom for 3 live" in r
-               for r in got["refusals"]), got
-
 
 def test_the_cli_dispatch_charges_live_workers_at_their_peak(tmp):
     cand = os.path.join(tmp, "candidates.json")
@@ -477,251 +445,6 @@ def test_an_idle_boxs_os_process_count_is_not_the_cap_reading(tmp, empty_live):
     assert "not OS processes" in full.stderr, full.stderr
 
 
-def test_agent_processes_are_counted_by_command_name_not_arguments():
-    listing = "bash\nclaude\nnode\nclaude\nchrome\nclaude-hook\n"
-    assert loop.count_agent_processes(lambda cmd: (0, listing)) == 2
-
-
-# The last: a healthy listing with no claude in it. The controller is one,
-# so zero means the name did not match, and reading it as zero agents
-# would switch the cap off.
-@pytest.mark.parametrize("failed", [(1, ""), (0, ""), (1, "bash\nclaude\n"),
-                                    (0, "bash\nnode\n" * 95)])
-def test_an_unmeasurable_box_is_a_refusal_not_zero_agents(failed):
-    with pytest.raises(loop.LoopError) as exc:
-        loop.count_agent_processes(lambda cmd: failed)
-    assert "count" in str(exc.value) and "--processes" in str(exc.value)
-
-
-def herdr_listing(*agents):
-    """A `herdr agent list` answer: one entry per (session_id, status)."""
-    return json.dumps({"result": {"agents": [
-        {"name": f"a{i}", "agent_status": status,
-         "agent_session": {"value": sid}}
-        for i, (sid, status) in enumerate(agents)]}})
-
-
-def pid_comm_listing(*pids, comm="claude", others=(("9", "bash"),)):
-    """A `ps -eo pid,comm` answer: one `claude` line per pid given, plus
-    whatever non-claude lines `others` names."""
-    lines = [f"{pid} {comm}" for pid in pids]
-    lines += [f"{pid} {name}" for pid, name in others]
-    return "\n".join(lines) + "\n"
-
-
-def sessions_map(mapping):
-    """A `sessions` stand-in: `{sessionId: pid}` returned as-is, the
-    contract `count_working_herdr_agents` reads the registry through."""
-    return lambda: dict(mapping)
-
-
-def test_working_herdr_agents_counts_working_panes_plus_unlisted_pids():
-    # sid-A -> pid 100, working; sid-B -> pid 101, idle (matched, not
-    # working); pid 102 is a claude process no listed pane resolves to (a
-    # subagent or headless run) and fail-closes as working.
-    listing = herdr_listing(("sid-A", "working"), ("sid-B", "idle"))
-    ps = lambda cmd: (0, pid_comm_listing(100, 101, 102))
-    herdr = lambda cmd: (0, listing)
-    sessions = sessions_map({"sid-A": 100, "sid-B": 101})
-    working, unlisted = loop.count_working_herdr_agents(
-        ps=ps, herdr=herdr, sessions=sessions)
-    assert (working, unlisted) == (1, 1), (working, unlisted)
-
-
-def test_an_unresolvable_listed_pane_fails_closed_as_working():
-    # sid-A resolves and is working (so the listing is not a total
-    # mismatch); sid-B cannot be resolved to any pid at all and fails
-    # closed as working rather than being dropped.
-    listing = herdr_listing(("sid-A", "working"), ("sid-B", "idle"))
-    ps = lambda cmd: (0, pid_comm_listing(100, 101, 102))
-    herdr = lambda cmd: (0, listing)
-    sessions = sessions_map({"sid-A": 100})
-    working, unlisted = loop.count_working_herdr_agents(
-        ps=ps, herdr=herdr, sessions=sessions)
-    assert (working, unlisted) == (2, 2), (working, unlisted)
-
-
-def test_a_matched_but_all_idle_listing_is_trusted_at_zero_working():
-    listing = herdr_listing(("sid-A", "idle"), ("sid-B", "done"))
-    ps = lambda cmd: (0, pid_comm_listing(100, 101))
-    herdr = lambda cmd: (0, listing)
-    sessions = sessions_map({"sid-A": 100, "sid-B": 101})
-    working, unlisted = loop.count_working_herdr_agents(
-        ps=ps, herdr=herdr, sessions=sessions)
-    assert (working, unlisted) == (0, 0), (working, unlisted)
-
-
-def test_a_resolved_pane_with_no_or_unknown_status_counts_as_working():
-    # A missing agent_status and an unrecognised string are neither
-    # "idle" nor "done" — only those two exclude a pane, so both count.
-    agents = [
-        {"name": "a0", "agent_session": {"value": "sid-A"}},
-        {"name": "a1", "agent_status": "wedged",
-         "agent_session": {"value": "sid-B"}},
-    ]
-    listing = json.dumps({"result": {"agents": agents}})
-    ps = lambda cmd: (0, pid_comm_listing(100, 101))
-    herdr = lambda cmd: (0, listing)
-    sessions = sessions_map({"sid-A": 100, "sid-B": 101})
-    working, unlisted = loop.count_working_herdr_agents(
-        ps=ps, herdr=herdr, sessions=sessions)
-    assert (working, unlisted) == (2, 0), (working, unlisted)
-
-
-def test_a_stale_session_record_does_not_swallow_a_live_unlisted_pid(tmp):
-    # sid-A's registry record claims pid 100, but its procStart is stale
-    # (pid 100 is now a different, unlisted claude process — a WSL restart
-    # or an ordinary pid reuse). sid-B is a genuine, valid match, so the
-    # listing is not a total mismatch. Before the fix, the stale record
-    # resolved anyway, pid 100 landed in matched_pids, dropped out of
-    # unlisted, and sid-A's idle status added nothing — the live process
-    # at pid 100 went uncounted entirely.
-    with open(os.path.join(tmp, "100.json"), "w") as fh:
-        json.dump({"pid": 100, "sessionId": "sid-A", "procStart": "111"}, fh)
-    with open(os.path.join(tmp, "101.json"), "w") as fh:
-        json.dump({"pid": 101, "sessionId": "sid-B", "procStart": "222"}, fh)
-    proc_start = lambda pid: "222" if pid == 101 else "999"
-    sessions = lambda: loop._session_pids(tmp, proc_start=proc_start)
-    listing = herdr_listing(("sid-A", "idle"), ("sid-B", "working"))
-    ps = lambda cmd: (0, pid_comm_listing(100, 101))
-    herdr = lambda cmd: (0, listing)
-    working, unlisted = loop.count_working_herdr_agents(
-        ps=ps, herdr=herdr, sessions=sessions)
-    # pid 100 is no longer silently absorbed by sid-A's stale match —
-    # it counts, via unlisted; sid-A's own pane fails closed as
-    # working too, since it could not be resolved to any pid at all.
-    assert unlisted == 1, (working, unlisted)
-    assert working == 2, (working, unlisted)
-
-
-# Empty, and non-empty-but-unresolvable, are the same failure: herdr's
-# registry reads as broken, not the box as idle.
-@pytest.mark.parametrize("listing", [herdr_listing(),
-                                     herdr_listing(("sid-Z", "working"))])
-def test_a_herdr_listing_that_matches_none_of_the_boxs_pids_is_a_refusal(listing):
-    ps = lambda cmd: (0, pid_comm_listing(100, 101))
-    with pytest.raises(loop.LoopError) as exc:
-        loop.count_working_herdr_agents(
-            ps=ps, herdr=lambda cmd: (0, listing), sessions=sessions_map({}))
-    assert "claude pid" in str(exc.value) or "none" in str(exc.value)
-
-
-@pytest.mark.parametrize("failed", [
-    (1, ""), (0, "not json"), (0, json.dumps({"result": {}})),
-    (0, json.dumps({"error": {"code": "some_error"}})),
-    (0, json.dumps({"result": {"agents": "nope"}}))])
-def test_an_unreadable_herdr_listing_is_a_refusal_not_zero_agents(failed):
-    ps = lambda cmd: (0, pid_comm_listing(100))
-    with pytest.raises(loop.LoopError) as exc:
-        loop.count_working_herdr_agents(
-            ps=ps, herdr=lambda cmd: failed, sessions=sessions_map({}))
-    assert "herdr agent list" in str(exc.value)
-
-
-@pytest.mark.parametrize("failed", [(1, ""), (0, "")])
-def test_working_herdr_agents_refuses_when_ps_pid_listing_cannot_be_taken(failed):
-    herdr = lambda cmd: (0, herdr_listing())
-    with pytest.raises(loop.LoopError) as exc:
-        loop.count_working_herdr_agents(
-            ps=lambda cmd: failed, herdr=herdr, sessions=sessions_map({}))
-    assert "pid" in str(exc.value)
-
-
-def test_session_pids_reads_the_registry_directory_given(tmp):
-    with open(os.path.join(tmp, "100.json"), "w") as fh:
-        json.dump({"pid": 100, "sessionId": "sid-A", "procStart": "111"}, fh)
-    # Not a session file; skipped rather than raising.
-    with open(os.path.join(tmp, "not-json.json"), "w") as fh:
-        fh.write("{not json")
-    with open(os.path.join(tmp, "ignored.txt"), "w") as fh:
-        fh.write("100")
-    proc_start = lambda pid: "111" if pid == 100 else None
-    assert loop._session_pids(tmp, proc_start=proc_start) == {"sid-A": 100}
-
-
-def test_session_pids_drops_a_record_whose_procstart_no_longer_matches(tmp):
-    # pid 100 is alive, but `/proc`'s own start-time fingerprint no longer
-    # matches the registry record's — a WSL restart or an ordinary pid
-    # reuse left a stale record behind, now naming a different process.
-    with open(os.path.join(tmp, "100.json"), "w") as fh:
-        json.dump({"pid": 100, "sessionId": "sid-A", "procStart": "111"}, fh)
-    proc_start = lambda pid: "999"
-    assert loop._session_pids(tmp, proc_start=proc_start) == {}
-
-
-def test_session_pids_on_a_missing_directory_is_an_empty_mapping():
-    assert loop._session_pids("/no/such/registry/dir") == {}
-
-
-def idle_box_listing(agents):
-    """~190 OS processes, `agents` of them claude sessions."""
-    others = ["bash", "node"] * ((190 - agents) // 2)
-    return "\n".join(["claude"] * agents + others) + "\n"
-
-
-def dual_ps(pid_out, comm_out):
-    """A `ps` stand-in for `agent_count`'s two call shapes: `pid,comm` for
-    the herdr path, bare `comm=` for the process-count fallback."""
-    def ps(cmd):
-        return (0, pid_out) if "pid,comm" in cmd else (0, comm_out)
-    return ps
-
-
-def test_agent_count_prefers_herdrs_working_plus_unlisted_over_ps_alone():
-    class Args:
-        processes = None
-    listing = herdr_listing(("sid-A", "working"), ("sid-B", "idle"))
-    ps = dual_ps(pid_comm_listing(100, 101, 102),
-                "claude\nclaude\nclaude\nbash\n")
-    count, counter, working, unlisted = loop.agent_count(
-        Args, herdr=lambda cmd: (0, listing), ps=ps,
-        sessions=sessions_map({"sid-A": 100, "sid-B": 101}))
-    assert (count, working, unlisted) == (2, 1, 1)
-    assert loop.box_check(count, 0, counter=counter)["ok"] is True
-    assert "herdr" in counter and "working" in counter
-
-
-def test_agent_count_falls_back_to_the_process_count_when_herdr_cannot_answer():
-    class Args:
-        processes = None
-    idle = idle_box_listing(19)
-    count, counter, working, unlisted = loop.agent_count(
-        Args, herdr=lambda cmd: (1, "herdr: connection refused"),
-        ps=lambda cmd: (0, idle))
-    assert count == 19
-    assert (working, unlisted) == (None, None)
-    assert loop.box_check(count, 0, counter=counter)["ok"] is True
-    count, counter, working, unlisted = loop.agent_count(
-        Args, herdr=lambda cmd: (1, ""),
-        ps=lambda cmd: (0, idle_box_listing(28)))
-    refused = loop.box_check(count, 0, counter=counter)
-    assert refused["ok"] is False
-    assert "28 agent processes" in refused["refusals"][0], refused
-    assert "comm=" in refused["refusals"][0], refused
-    assert "herdr" in refused["refusals"][0], refused
-
-
-def test_render_peak_names_the_working_and_unlisted_split():
-    line = loop.render_peak(6, 1, 2, working=4, unlisted=2)
-    assert "6 agent processes measured" in line
-    assert "4 working, 2 unlisted" in line, line
-
-
-def test_render_peak_omits_the_split_when_not_given():
-    line = loop.render_peak(6, 1, 2, working=None, unlisted=None)
-    assert "working" not in line and "unlisted" not in line, line
-    line = loop.render_peak(6, 1, 2)
-    assert "working" not in line and "unlisted" not in line, line
-
-
-def test_a_processes_override_of_zero_is_used_not_measured():
-    class Args:
-        processes = 0
-    got = loop.agent_count(Args, herdr=lambda cmd: (1, ""),
-                           ps=lambda cmd: (1, ""))
-    assert got == (0, "passed by --processes", None, None), got
-
-
 # A negative count would sit under the cap for any workers asked about,
 # so the documented escape hatch would switch the gate off on a typo.
 @pytest.mark.parametrize("cmd", [("box", "--live", "0"),
@@ -751,7 +474,7 @@ def test_the_cli_dispatch_refuses_when_ps_cannot_be_run(tmp, empty_live):
                   env={"PATH": nobin})
     assert got.returncode == 1, got
     assert "dispatch  #" not in got.stdout, got.stdout
-    assert "--processes" in got.stderr, got.stderr
+    assert_refused_without_traceback(got)
 
 
 def test_the_cli_refuses_when_ps_cannot_be_run(tmp):
@@ -760,177 +483,17 @@ def test_the_cli_refuses_when_ps_cannot_be_run(tmp):
                           "0", "--live", "0"], capture_output=True, text=True,
                          timeout=60, env=env)
     assert got.returncode == 1, got
-    assert "--processes" in got.stderr, got.stderr
+    assert_refused_without_traceback(got)
     assert "box ok" not in got.stdout, got.stdout
 
 
-def resume_state():
-    """What `runfile.reconcile` hands a resumed controller: one live worker to
-    re-announce to, one vanished, one landed."""
-    return {
-        "run_id": "burn-781", "slots": 3, "controller": "skills-dc",
-        "free": 1, "held": 2,
-        "announce": [{"tickets": [455], "workspace": "/w/implement-455",
-                      "agent": "burn-455", "landed": None}],
-        "vanished": [{"tickets": [452], "workspace": "/w/implement-452",
-                      "agent": "burn-452", "landed": None}],
-        "landed": [{"tickets": [453], "workspace": "/w/implement-453",
-                    "agent": "burn-453", "landed": "abc1234"}],
-    }
-
-
-def test_resume_sends_exactly_one_message_per_live_unsettled_worker():
-    sent = []
-
-    def send(agent, msg):
-        assert agent != "burn-455", (
-            "send must never see the durable herdr agent name")
-        sent.append((agent, msg))
-
-    def resolve(agent):
-        assert agent == "burn-455", agent
-        return "session-455"
-
-    loop.announce(resume_state(), send, resolve)
-    assert [agent for agent, _ in sent] == ["session-455"]
-    assert sent[0][1].count("skills-dc") == 1, sent[0][1]
-    assert "#455" in sent[0][1]
-    assert "resolve-controller" in sent[0][1], sent[0][1]
-
-
-# One canned answer per name. `burn-bad-exit` and `burn-empty-ok` exist to
-# keep resolve_via_binary's two guards from masking each other (#1013 C1):
-# each fails a different way, so a test can delete either guard on its own
-# and still see a red that only that guard would have caught.
-RESOLVE_CONTROLLER_STUB = """#!/usr/bin/env bash
-case "$1" in
-  burn-455) echo "session-455" ;;
-  burn-bad-exit) echo "not-a-name"; exit 1 ;;
-  burn-empty-ok) exit 0 ;;
-  *) echo "resolve-controller: $1 is neither a herdr agent name nor the name of a live session" >&2
-     exit 1 ;;
-esac
-"""
-
-
-@pytest.fixture
-def resolve_controller_stub(tmp_path, monkeypatch):
-    """Puts a fake `resolve-controller` on `PATH` for the test — the ritual
-    every test below needs, in one place rather than copied three times
-    (#1013 S1). `prepend` sets `PATH` to the stub's directory alone when no
-    `PATH` is set (`env -i`), rather than raising concatenating past it
-    (#1013 S2/C3)."""
-    stub = tmp_path / "resolve-controller"
-    stub.write_text(RESOLVE_CONTROLLER_STUB)
-    stub.chmod(0o755)
-    monkeypatch.setenv("PATH", str(tmp_path), prepend=os.pathsep)
-    return tmp_path
-
-
-def test_resolve_via_binary_prints_the_resolved_session_name(resolve_controller_stub):
-    assert loop.resolve_via_binary("burn-455") == "session-455"
-
-
-def test_resolve_via_binary_refuses_a_name_that_does_not_resolve(resolve_controller_stub):
-    with pytest.raises(loop.LoopError) as exc:
-        loop.resolve_via_binary("burn-999")
-    assert "burn-999" in str(exc.value)
-
-
-def test_resolve_via_binary_refuses_a_nonzero_exit_even_with_stdout_output(
-        resolve_controller_stub):
-    # A binary that exits non-zero after printing something on stdout must
-    # not be read as a resolved name — that reading is the mask deleting
-    # the exit-status check alone would leave in place.
-    with pytest.raises(loop.LoopError) as exc:
-        loop.resolve_via_binary("burn-bad-exit")
-    # No stderr, so the refusal falls back to the stdout it must not
-    # treat as a resolved name.
-    assert "not-a-name" in str(exc.value)
-
-
-def test_resolve_via_binary_refuses_a_zero_exit_with_empty_stdout(resolve_controller_stub):
-    # A binary that exits 0 but prints nothing must not resolve to "" — the
-    # mask deleting the empty-stdout check alone would leave in place.
-    with pytest.raises(loop.LoopError) as exc:
-        loop.resolve_via_binary("burn-empty-ok")
-    assert "burn-empty-ok" in str(exc.value)
-
-
-def test_resolve_via_binary_refuses_when_the_binary_is_missing(tmp, monkeypatch):
-    monkeypatch.setenv("PATH", tmp)
-    with pytest.raises(loop.LoopError) as exc:
-        loop.resolve_via_binary("burn-455")
-    assert "resolve-controller" in str(exc.value)
-
-
-def test_announce_uses_the_default_resolver_when_none_is_passed(resolve_controller_stub):
-    # #1013 P2: every other announce test injects its own `resolve`, so
-    # nothing exercises the wiring between `announce` and its default
-    # (`resolve_via_binary`) — a regression that swapped the default for an
-    # identity function would still pass the suite. This one calls
-    # `announce` with only `send`, over a stubbed `resolve-controller`.
-    sent = []
-
-    def send(agent, msg):
-        assert agent != "burn-455", (
-            "send must never see the durable herdr agent name")
-        sent.append((agent, msg))
-
-    loop.announce(resume_state(), send)
-    assert sent == [("session-455", sent[0][1])]
-
-
-def test_resume_sends_nothing_to_a_landed_or_vanished_worker():
-    sent = []
-    state = resume_state()
-    state["announce"] = []
-    loop.announce(state, lambda agent, message: sent.append((agent, message)))
-    assert sent == []
-
-
-def test_announce_returns_the_agents_it_sent_to_and_reports_a_failure():
-    def send(agent, message):
-        raise RuntimeError("no such peer")
-    state = resume_state()
-    with pytest.raises(loop.LoopError) as exc:
-        loop.announce(state, send, resolve=lambda agent: f"session-{agent}")
-    assert "burn-455" in str(exc.value)
-
-
-def test_announce_refuses_a_worker_whose_name_does_not_resolve():
-    state = resume_state()
-
-    def resolve(agent):
-        raise RuntimeError(f"{agent} is neither a herdr agent nor a live session")
-
-    with pytest.raises(loop.LoopError) as exc:
-        loop.announce(state, lambda agent, msg: None, resolve=resolve)
-    assert "burn-455" in str(exc.value)
-    assert "#455" in str(exc.value)
-
-
-def test_the_candidate_set_is_frozen_against_a_ticket_filed_mid_run():
-    frozen = candidates_781()
-    with pytest.raises(loop.LoopError) as exc:
-        loop.admit(frozen, {"tickets": [700], "closure": ["docs/new.md"]})
-    assert "frozen" in str(exc.value)
-    assert len(frozen) == 4
-
-
-def test_a_ticket_the_run_is_stuck_on_joins_the_run():
-    frozen = candidates_781()
-    grown = loop.admit(frozen, {"tickets": [700], "closure": ["docs/new.md"]},
-                       stuck_on=452)
-    assert [c["tickets"] for c in grown][-1] == [700]
-    assert len(frozen) == 4, "admit returns a new list, never mutates"
-
-
-def test_a_stuck_on_ticket_the_run_never_had_is_refused():
-    with pytest.raises(loop.LoopError) as exc:
-        loop.admit(candidates_781(), {"tickets": [700], "closure": ["d.md"]},
-                   stuck_on=999)
-    assert "#999" in str(exc.value)
+# The count's refusal is an `agents.AgentError`, raised outside `loop.py`: an
+# uncaught one also exits 1 and its traceback also names `--processes`, so
+# only the refusal's own shape tells a handled refusal from a crash.
+def assert_refused_without_traceback(got):
+    assert "Traceback" not in got.stderr, got.stderr
+    assert got.stderr.startswith("loop.py: "), got.stderr
+    assert "--processes" in got.stderr, got.stderr
 
 
 LOOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
@@ -998,7 +561,7 @@ def fixture_run(cache, in_flight_path):
 
 def test_the_cli_box_check_exits_nonzero_on_a_refusal():
     ok = loop_py("box", "--processes", "4", "--committed-gb", "4",
-                 "--add-gb", "4", "--live", "0")
+                 "--live", "0")
     assert ok.returncode == 0, ok.stderr
     refused = loop_py("box", "--processes", "40", "--committed-gb", "0",
                      "--live", "0")
@@ -1081,15 +644,15 @@ def test_the_exclusion_reads_the_closure_and_not_the_named_files():
     candidates = [{"tickets": [452], "files": ["examples/thermo.js"],
                    "closure": ["examples/thermo.js", HOT]}]
     live = [{"tickets": [455], "workspace": "/w/implement-455",
-             "agent": "burn-455", "files": ["examples/renban.js"],
+             "agent": "run-455", "files": ["examples/renban.js"],
              "closure": ["examples/renban.js", HOT]}]
-    assert loop.refill(candidates, live, 1) == []
+    assert picked_for(candidates, live, 1) == []
 
 
-def test_refill_takes_nothing_for_a_free_count_below_zero():
+def test_picks_takes_nothing_for_a_free_count_below_zero():
     # A miscounted budget reads as a negative free count, and "fill every
     # free slot" must not read that as "fill them all".
-    assert loop.refill(candidates_781(), [], -1) == []
+    assert picked_for(candidates_781(), [], -1) == []
 
 
 # A closure that failed to resolve is not an empty closure. Refused with
@@ -1098,12 +661,12 @@ def test_refill_takes_nothing_for_a_free_count_below_zero():
 @pytest.mark.parametrize("in_flight", [[], parked_455()])
 def test_a_clump_with_no_files_is_refused_whatever_is_in_flight(in_flight):
     with pytest.raises(loop.LoopError) as exc:
-        loop.refill([{"tickets": [452]}], in_flight, 1)
+        picked_for([{"tickets": [452]}], in_flight, 1)
     assert "#452" in str(exc.value) and "files" in str(exc.value)
 
 
 def test_the_frontier_itself_refuses_a_clump_with_no_files():
-    # `refill` would also refuse it later, in `picks`; the frontier's own
+    # `picks` would also refuse it later; the frontier's own
     # check is what refuses it to a caller reading only the frontier.
     with pytest.raises(loop.LoopError) as exc:
         loop.frontier([{"tickets": [452]}], [])
@@ -1134,27 +697,6 @@ def test_seat_names_the_remedy_when_origin_head_is_unset():
     with pytest.raises(loop.LoopError) as exc:
         loop.seat(run)
     assert "git remote set-head origin -a" in str(exc.value)
-
-
-def test_announce_names_the_workers_already_reached_when_a_send_fails():
-    # A retry that re-messages an announced worker breaks the one-message
-    # rule, so the refusal has to say who was already reached.
-    state = resume_state()
-    state["announce"] = [
-        {"tickets": [455], "workspace": "/w/455", "agent": "burn-455",
-         "landed": None},
-        {"tickets": [457], "workspace": "/w/457", "agent": "burn-457",
-         "landed": None},
-    ]
-
-    def send(agent, message):
-        if agent == "session-457":
-            raise RuntimeError("no such peer")
-
-    with pytest.raises(loop.LoopError) as exc:
-        loop.announce(state, send, resolve=lambda agent: f"session-{agent[5:]}")
-    assert "burn-457" in str(exc.value)
-    assert "burn-455" in str(exc.value)
 
 
 def test_the_cli_dispatch_refuses_when_the_box_has_no_room(tmp, empty_live):
@@ -1223,16 +765,6 @@ def test_an_in_flight_entry_with_no_workspace_is_one_line_not_a_traceback(tmp):
     assert len(got.stderr.strip().splitlines()) == 1, got.stderr
 
 
-def test_box_check_weighs_every_worker_a_dispatch_would_start():
-    # Three workers at once is three processes and three ulimit caps, not
-    # one: a gate that asks about one more worker passes a tick that starts
-    # three.
-    assert loop.box_check(processes=13, committed_gb=0, workers=3)["ok"] is True
-    assert loop.box_check(processes=14, committed_gb=0, workers=3)["ok"] is False
-    assert loop.box_check(processes=2, committed_gb=21, add_gb=1,
-                          workers=4)["ok"] is False
-
-
 def test_the_cli_dispatch_takes_only_what_the_box_has_room_for(tmp, empty_live):
     cand = os.path.join(tmp, "candidates.json")
     with open(cand, "w") as fh:
@@ -1240,8 +772,7 @@ def test_the_cli_dispatch_takes_only_what_the_box_has_room_for(tmp, empty_live):
                    {"tickets": [457], "closure": ["b.js"]},
                    {"tickets": [458], "closure": ["c.js"]}], fh)
     got = loop_py("dispatch", "--in-flight", empty_live, "--candidates", cand, "--free", "3",
-                  "--processes", "23", "--committed-gb", "23",
-                  "--add-gb", "1")
+                  "--processes", "23", "--committed-gb", "23")
     assert got.returncode == 0, got.stderr
     assert got.stdout.count("dispatch  ") == 1, got.stdout
     assert "room for 1 of 3" in got.stdout, got.stdout
@@ -1375,8 +906,8 @@ def test_a_question_with_a_newline_in_it_is_refused():
 # cleanup gate refuses anyway and the check would witness nothing.
 @pytest.mark.parametrize("args, reason", [
     (("--clump", "454", "--agent", ""), "no agent named"),
-    (("--clump", "0", "--agent", "burn-1"), "ticket number"),
-    (("--clump", "-5", "--agent", "burn-1"), "ticket number"),
+    (("--clump", "0", "--agent", "run-1"), "ticket number"),
+    (("--clump", "-5", "--agent", "run-1"), "ticket number"),
 ])
 def test_the_cli_landing_refuses_an_empty_agent_and_a_non_positive_clump(
         args, reason):
@@ -1398,7 +929,7 @@ def test_the_cli_landing_survives_a_reader_that_closes_early():
     try:
         got = subprocess.run(
             [sys.executable, LOOP, "landing", "--clump", "454", "--agent",
-             "burn-454", "--outstanding", "may I drop 4x4?"],
+             "run-454", "--outstanding", "may I drop 4x4?"],
             stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=60)
     finally:
         os.close(write_end)
@@ -1424,7 +955,7 @@ def test_the_cli_landing_survives_a_reader_that_closes_mid_output():
     try:
         got = subprocess.run(
             [sys.executable, LOOP, "landing", "--clump", "454", "--agent",
-             "burn-454", *questions],
+             "run-454", *questions],
             stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=60)
     finally:
         os.close(write_end)
@@ -1522,7 +1053,7 @@ def test_an_unrecognised_status_is_its_own_verdict():
 HERDR_NESTED_AGENT = {
     "id": "cli:agent:get",
     "result": {"agent": {"agent_status": "working", "name": "skills-1",
-                          "pane": "burn-1"}}}
+                          "pane": "run-1"}}}
 
 
 def test_the_sweep_reads_agent_status_nested_under_result_agent():
@@ -1664,11 +1195,11 @@ def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live(tmp):
     # and a closure the candidate shares. The run file's `closed` is what
     # frees its slot and its files — nothing in --in-flight says so.
     cache = os.path.join(tmp, "cache")
-    runfile.start("burn-close", 5, None, root=cache, repo=REPO)
-    runfile.clump("burn-close", [351], "/w/351", "sm-351", root=cache)
-    runfile.clump("burn-close", [412], "/w/412", "sm-412", root=cache)
-    runfile.job("burn-close", 412, "none", root=cache)
-    runfile.close("burn-close", 351, "nested spec run", root=cache)
+    runfile.start("run-close", 5, None, root=cache, repo=REPO)
+    runfile.clump("run-close", [351], "/w/351", "sm-351", root=cache)
+    runfile.clump("run-close", [412], "/w/412", "sm-412", root=cache)
+    runfile.job("run-close", 412, "none", root=cache)
+    runfile.close("run-close", 351, "nested spec run", root=cache)
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -1677,7 +1208,7 @@ def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live(tmp):
         json.dump(in_flight_clumps(), fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
                   "--free", "1", "--processes", "4", "--committed-gb", "4",
-                  "--run", "burn-close", env={"SPEC_RUN_CACHE_DIR": cache})
+                  "--run", "run-close", env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got.stderr
     assert "dispatch  #500" in got.stdout, got.stdout
     assert "held" not in got.stdout, got.stdout
@@ -1687,12 +1218,12 @@ def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed(tmp, 
     # #1313: the candidates file is the frozen set and the run file is the
     # progress, so a landed or closed clump is not offered again.
     cache = os.path.join(tmp, "cache")
-    runfile.start("burn-skip", 5, None, root=cache, repo=REPO)
-    runfile.clump("burn-skip", [1258], "/w/1258", "a-1258", root=cache)
-    runfile.clump("burn-skip", [1293, 1294], "/w/1293", "a-1293", root=cache)
-    runfile.clump("burn-skip", [1278], "/w/1278", "a-1278", root=cache)
-    runfile.land("burn-skip", 1258, "a1b2c3d", root=cache)
-    runfile.close("burn-skip", 1293, "already fixed on main", root=cache)
+    runfile.start("run-skip", 5, None, root=cache, repo=REPO)
+    runfile.clump("run-skip", [1258], "/w/1258", "a-1258", root=cache)
+    runfile.clump("run-skip", [1293, 1294], "/w/1293", "a-1293", root=cache)
+    runfile.clump("run-skip", [1278], "/w/1278", "a-1278", root=cache)
+    runfile.land("run-skip", 1258, "a1b2c3d", root=cache)
+    runfile.close("run-skip", 1293, "already fixed on main", root=cache)
     cand = os.path.join(tmp, "candidates.json")
     with open(cand, "w") as fh:
         json.dump([{"tickets": [1258], "closure": ["a.py"]},
@@ -1701,7 +1232,7 @@ def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed(tmp, 
                    {"tickets": [1400], "closure": ["d.py"]}], fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight",
                   empty_live, "--free", "4", "--processes", "4",
-                  "--committed-gb", "4", "--run", "burn-skip",
+                  "--committed-gb", "4", "--run", "run-skip",
                   env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got.stderr
     for n in (1258, 1293):
@@ -1847,16 +1378,16 @@ def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id(tmp):
         fh.write(HERDR_STUB)
     os.chmod(stub, 0o755)
     cache = os.path.join(tmp, "cache")
-    runfile.start("burn-sweep-run-fixture", slots=2, root=cache, repo=REPO)
-    runfile.clump("burn-sweep-run-fixture", [1], "/w/1", "skills-1", root=cache)
-    runfile.clump("burn-sweep-run-fixture", [3], "/w/3", "skills-3", root=cache)
-    runfile.clump("burn-sweep-run-fixture", [4], "/w/4", "skills-4", root=cache)
-    runfile.land("burn-sweep-run-fixture", 4, "a1b2c3d", root=cache)
+    runfile.start("run-sweep-run-fixture", slots=2, root=cache, repo=REPO)
+    runfile.clump("run-sweep-run-fixture", [1], "/w/1", "skills-1", root=cache)
+    runfile.clump("run-sweep-run-fixture", [3], "/w/3", "skills-3", root=cache)
+    runfile.clump("run-sweep-run-fixture", [4], "/w/4", "skills-4", root=cache)
+    runfile.land("run-sweep-run-fixture", 4, "a1b2c3d", root=cache)
     calls = os.path.join(tmp, "calls")
     env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
                CALLS=calls, SPEC_RUN_CACHE_DIR=cache)
     got = subprocess.run([sys.executable, LOOP, "sweep", "--run",
-                          "burn-sweep-run-fixture"], capture_output=True, text=True,
+                          "run-sweep-run-fixture"], capture_output=True, text=True,
                          timeout=60, env=env)
     assert got.returncode == 0, got
     assert "working   #1" in got.stdout, got.stdout
@@ -1865,10 +1396,10 @@ def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id(tmp):
         assert fh.read().split() == ["skills-1", "skills-3"], \
             "a landed clump is not probed"
     missing = subprocess.run([sys.executable, LOOP, "sweep", "--run",
-                              "burn-none"], capture_output=True,
+                              "run-none"], capture_output=True,
                              text=True, timeout=60, env=env)
     assert missing.returncode == 1, missing
-    assert "burn-none" in missing.stderr, missing.stderr
+    assert "run-none" in missing.stderr, missing.stderr
     assert "Traceback" not in missing.stderr, missing.stderr
 
 
@@ -1962,7 +1493,7 @@ def test_a_probe_that_never_answers_is_given_up_on(tmp, monkeypatch):
     started = time.monotonic()
     state = loop.sweep(
         [{"tickets": [1], "workspace": "/w/1", "agent": "skills-1"}],
-        loop.herdr_get, budget=0.3)
+        agents.herdr_get, budget=0.3)
     waited = time.monotonic() - started
     assert state["workers"][0]["verdict"] == "unreachable", state
     assert "did not answer" in state["workers"][0]["detail"], state
@@ -2059,16 +1590,16 @@ def run_file_dispatch(tmp, recorded, repo=REPO, legacy=False):
     import runfile
     cache = os.path.join(tmp, "cache")
     os.makedirs(cache)
-    runfile.start("burn-t", 5, None, root=cache, repo=repo)
+    runfile.start("run-t", 5, None, root=cache, repo=repo)
     if legacy:
-        drop_repo_field("burn-t", cache)
-    runfile.clump("burn-t", [351], "/w/351", "sm-351", root=cache)
-    runfile.clump("burn-t", [412], "/w/412", "sm-412", root=cache)
-    runfile.job("burn-t", 412, "none", root=cache)
+        drop_repo_field("run-t", cache)
+    runfile.clump("run-t", [351], "/w/351", "sm-351", root=cache)
+    runfile.clump("run-t", [412], "/w/412", "sm-412", root=cache)
+    runfile.job("run-t", 412, "none", root=cache)
     if recorded:
-        runfile.job("burn-t", 351, *recorded, root=cache)
+        runfile.job("run-t", 351, *recorded, root=cache)
     else:
-        drop_job("burn-t", cache, 351)
+        drop_job("run-t", cache, 351)
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -2084,7 +1615,7 @@ def run_file_dispatch(tmp, recorded, repo=REPO, legacy=False):
 def test_dispatch_reads_the_job_record_from_the_run_file_1107(tmp):
     cand, live, env = run_file_dispatch(tmp, ("running", 8))
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
     assert "#351 declared 8 cores" in got.stdout, got.stdout
@@ -2094,7 +1625,7 @@ def test_dispatch_reads_the_job_record_from_the_run_file_1107(tmp):
 def test_dispatch_refuses_a_clump_the_run_file_has_no_job_for_1107(tmp):
     cand, live, env = run_file_dispatch(tmp, None)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#351 is live with no job record" in got.stderr, got.stderr
@@ -2105,7 +1636,7 @@ def test_dispatch_does_not_wait_for_pr_up_on_a_freshly_registered_clump_1311(tmp
     # charges nothing, so the free slot is dispatched into at once.
     cand, live, env = run_file_dispatch(tmp, ("none",))
     cache = env["SPEC_RUN_CACHE_DIR"]
-    runfile.clump("burn-t", [777], "/w/777", "sm-777", root=cache)
+    runfile.clump("run-t", [777], "/w/777", "sm-777", root=cache)
     with open(live) as fh:
         clumps = json.load(fh)
     clumps.append({"tickets": [777], "workspace": "/w/777",
@@ -2113,7 +1644,7 @@ def test_dispatch_does_not_wait_for_pr_up_on_a_freshly_registered_clump_1311(tmp
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
     assert "dispatch  #500" in got.stdout, got.stdout
@@ -2126,12 +1657,12 @@ def test_a_tick_between_the_workers_own_write_and_the_controllers_turn_holds_the
     # must read that record and hold the slots (#1339, owner ruling (b)).
     cand, live, env = run_file_dispatch(tmp, ("none",))
     tick = ("dispatch", "--candidates", cand, "--in-flight", live,
-            "--run", "burn-t", "--free", "1", "--processes", "4",
+            "--run", "run-t", "--free", "1", "--processes", "4",
             "--committed-gb", "4")
     before = loop_py(*tick, env=env)
     assert "dispatch  #500" in before.stdout, before
     wrote = subprocess.run(
-        [sys.executable, runfile.__file__, "job", "burn-t",
+        [sys.executable, runfile.__file__, "job", "run-t",
          "--clump", "351", "--cores", "8"],
         capture_output=True, text=True, timeout=30,
         env={**os.environ, **env})
@@ -2155,20 +1686,20 @@ def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126(tmp):
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#777" in got.stderr and "runfile.py clump" in got.stderr, \
         got.stderr
     assert "no job record" not in got.stderr, got.stderr
     # A registered clump with no job still names `job`.
-    runfile.clump("burn-t", [888], "/w/888", "sm-888", root=cache)
-    drop_job("burn-t", cache, 888)
+    runfile.clump("run-t", [888], "/w/888", "sm-888", root=cache)
+    drop_job("run-t", cache, 888)
     clumps[-1]["tickets"] = [888]
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#888 is live with no job record" in got.stderr, got.stderr
@@ -2186,7 +1717,7 @@ def test_dispatch_names_the_overlap_when_an_unregistered_key_shares_tickets(tmp)
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#300" in got.stderr and "#351" in got.stderr, got.stderr
@@ -2204,7 +1735,7 @@ def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107(tmp)
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 1, got
     assert "#351 is live with no job record" in got.stderr, got.stderr
@@ -2216,9 +1747,9 @@ def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107(tmp):
     import runfile
     cache = os.path.join(tmp, "cache")
     os.makedirs(cache)
-    runfile.start("burn-t", 5, None, root=cache, repo=REPO)
-    runfile.clump("burn-t", [351, 360], "/w/351", "sm-351", root=cache)
-    runfile.job("burn-t", 351, "running", 8, root=cache)
+    runfile.start("run-t", 5, None, root=cache, repo=REPO)
+    runfile.clump("run-t", [351, 360], "/w/351", "sm-351", root=cache)
+    runfile.job("run-t", 351, "running", 8, root=cache)
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -2228,7 +1759,7 @@ def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107(tmp):
                     "agent": "sm-351", "closure": ["verify.py"],
                     "job": NO_JOB}], fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4",
                   env={"SPEC_RUN_CACHE_DIR": cache})
     assert got.returncode == 0, got
@@ -2259,7 +1790,7 @@ def test_a_job_field_in_the_in_flight_file_is_never_charged_1107(tmp):
     with open(live, "w") as fh:
         json.dump(clumps, fh)
     got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                  "--run", "burn-t", "--free", "1", "--processes", "4",
+                  "--run", "run-t", "--free", "1", "--processes", "4",
                   "--committed-gb", "4", env=env)
     assert got.returncode == 0, got
     assert "declared 8 cores" not in got.stdout, got.stdout
@@ -2268,13 +1799,13 @@ def test_a_job_field_in_the_in_flight_file_is_never_charged_1107(tmp):
 
 def test_load_run_reads_a_run_file_and_wraps_its_refusal_as_a_loop_error(tmp):
     # One loader behind `with_run_jobs` and `sweep --run` (#1209 S2).
-    runfile.start("burn-loader", slots=2, root=tmp, repo=REPO)
-    runfile.clump("burn-loader", [7], "/w/7", "skills-7", root=tmp)
-    run = loop.load_run("burn-loader", tmp)
+    runfile.start("run-loader", slots=2, root=tmp, repo=REPO)
+    runfile.clump("run-loader", [7], "/w/7", "skills-7", root=tmp)
+    run = loop.load_run("run-loader", tmp)
     assert [c["tickets"] for c in run["clumps"]] == [[7]], run
     with pytest.raises(loop.LoopError) as exc:
-        loop.load_run("burn-none", tmp)
-    assert "burn-none" in str(exc.value)
+        loop.load_run("run-none", tmp)
+    assert "run-none" in str(exc.value)
 
 
 def test_a_workspaces_real_diff_joins_its_in_flight_closure():
@@ -2384,7 +1915,7 @@ def make_slice_workspace(tmp, own, landed):
     return work
 
 
-def test_workspace_diff_of_a_slice_is_against_its_spec_branch_1486(tmp):
+def test_workspace_diff_of_a_slice_is_against_its_integration_branch_1486(tmp):
     # A slice branch holds every slice already landed on `spec-<p>`; against
     # the default they all read as its own files and hold unrelated clumps.
     work = make_slice_workspace(tmp, own=["own.txt"],
@@ -2399,7 +1930,7 @@ def test_workspace_diff_of_a_branch_with_no_recorded_base_is_against_default(tmp
     assert sorted(loop.workspace_diff(work)) == ["landed.txt", "own.txt"]
 
 
-def test_workspace_diff_of_a_slice_that_merged_an_advanced_spec_branch_1486(tmp):
+def test_workspace_diff_of_a_slice_that_merged_an_advanced_integration_branch_1486(tmp):
     # The ticket's first criterion: spec-9 moved on after the slice was cut and
     # the slice merged it in; the other slice's file is still not its own.
     work = make_slice_workspace(tmp, own=["own.txt"], landed=[])
@@ -2414,7 +1945,7 @@ def test_workspace_diff_of_a_slice_that_merged_an_advanced_spec_branch_1486(tmp)
     assert loop.workspace_diff(work) == ["own.txt"]
 
 
-def test_workspace_diff_reads_a_base_that_is_not_a_spec_branch_as_no_slice(tmp):
+def test_workspace_diff_reads_a_base_that_is_not_an_integration_branch_as_no_slice(tmp):
     # As `implement/fix_check.py` reads it: only `spec-<n>` marks a slice.
     work = make_slice_workspace(tmp, own=["own.txt"],
                                 landed=["landed.txt"])
@@ -2422,7 +1953,7 @@ def test_workspace_diff_reads_a_base_that_is_not_a_spec_branch_as_no_slice(tmp):
     assert sorted(loop.workspace_diff(work)) == ["landed.txt", "own.txt"]
 
 
-def test_workspace_diff_of_a_slice_whose_spec_branch_is_gone_names_the_key(tmp):
+def test_workspace_diff_of_a_slice_whose_integration_branch_is_gone_names_the_key(tmp):
     work = make_slice_workspace(tmp, own=["own.txt"], landed=[])
     run_in(work, "git", "config", "branch.implement-1.base", "spec-77")
     with pytest.raises(loop.LoopError) as exc:
@@ -2510,3 +2041,53 @@ def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches(tmp)
     refused = loop_py(*args, real_workspaces=True)
     assert refused.returncode == 1, refused.stdout
     assert "431" in refused.stderr, refused.stderr
+
+
+# --- one handler per subcommand (#1769) ---------------------------------
+
+SUBCOMMAND_HANDLERS = {
+    "seat": "cmd_seat", "box": "cmd_box", "dispatch": "cmd_dispatch",
+    "sweep": "cmd_sweep", "hub": "cmd_hub", "landing": "cmd_landing",
+}
+
+
+def test_each_subcommand_parses_to_its_own_handler_1769():
+    argv = {
+        "seat": ["seat"],
+        "box": ["box", "--committed-gb", "1", "--live", "0"],
+        "dispatch": ["dispatch", "--candidates", "c", "--in-flight", "f",
+                     "--run", "r", "--free", "1", "--committed-gb", "1"],
+        "sweep": ["sweep", "--run", "r"],
+        "hub": ["hub", "--candidates", "c", "--landed", "a"],
+        "landing": ["landing", "--clump", "1", "--agent", "a"],
+    }
+    parser = loop.build_parser()
+    for command, handler in SUBCOMMAND_HANDLERS.items():
+        assert parser.parse_args(argv[command]).func is getattr(loop, handler)
+
+
+def test_cmd_dispatch_runs_alone_without_the_parser_1769(tmp, monkeypatch, capsys):
+    import argparse
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [20], "closure": ["b.js"]}], fh)
+    with open(live, "w") as fh:
+        json.dump([], fh)
+    cache = os.path.join(tmp, "cache")
+    os.mkdir(cache)
+    monkeypatch.setenv("SPEC_RUN_CACHE_DIR", cache)
+    run_id = fixture_run(cache, live)
+    args = argparse.Namespace(
+        candidates=cand, in_flight=live, run=run_id, free=1,
+        no_workspace_diff=True, processes=4, committed_gb=4.0)
+    assert loop.cmd_dispatch(args) == 0
+    assert "dispatch  #20  #20" in capsys.readouterr().out
+
+
+def test_run_turns_a_handlers_loop_error_into_a_refusal_1769(monkeypatch, capsys):
+    def refuse(args):
+        raise loop.LoopError("nope")
+    monkeypatch.setattr(loop, "cmd_seat", refuse)
+    assert loop.run(["loop.py", "seat"]) == 1
+    assert "loop.py: nope" in capsys.readouterr().err

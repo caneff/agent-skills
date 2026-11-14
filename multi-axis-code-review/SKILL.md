@@ -424,12 +424,8 @@ its report, rather than reviewing nothing.
 
 If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
-**Render each axis's prompt; do not compose it** (#1216). About sixty
-briefs were
-once hand-composed from one skeleton and drifted: word caps that outlived their
-removal, contradictory `node_modules` instructions, the dispositions grammar
-spelled four ways, claimed dispositions in `/tmp`, the verification report
-named three ways. One script holds the skeleton, and the three bullet lists
+**Render each axis's prompt; do not compose it** (#1216): hand-composed
+briefs drift apart. One script holds the skeleton, and the three bullet lists
 below are what it takes as inputs:
 
 ```
@@ -543,7 +539,7 @@ another route.
 *The bound.* The box cap is 28 claude processes machine-wide, counted
 `ps -eo comm= | grep -cx claude` — by command name, never `ps aux | grep`,
 which matches any process whose arguments merely contain a claude path and
-overcounted by more than double on 2026-09-20. This axis is one of three
+overcounts by more than double. This axis is one of three
 running in parallel and does not own the box, so it takes a third of the
 headroom under that cap, capped at four: past that a CPU-bound covering suite
 stops overlapping and starts contending. A busy box drives the bound to 1 —
@@ -606,7 +602,7 @@ the repo, so a diff adding five tests would pay it five times inside one
 axis, while the covering suite finishes in seconds. The whole gate belongs to
 the worker's own pre-report gate, where it already runs once.
 
-If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs; replace its part (b) with "(b) say 'no spec available'".
+If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs: render it with `--no-spec`, which puts `Spec: no spec available` under its Inputs, so its part (b) reports that instead of judging scope.
 
 **A rate-limited axis did not run** (#1325). An axis whose completion carries an
 HTTP 429 or a usage-limit message is `## <Axis> — NOT RUN (rate limit, resets

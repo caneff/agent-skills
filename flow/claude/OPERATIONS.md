@@ -48,8 +48,8 @@ defines them.
   runs share one 32-core, 39 GB WSL box with other agents; count every
   working Claude session against a 28-session cap, sessions you did not
   start included (idle and done do not count — the cap protects cores).
-  `implement-spec/loop.py`'s counter is the reference: herdr's working panes
-  plus every
+  `implement-spec/agents.py`'s counter, behind `loop.py box`, is the
+  reference: herdr's working panes plus every
   `claude` pid no pane resolves to; without herdr, `ps -eo comm= | grep -cx
   claude` (`ps aux | grep -c '[c]laude'` over-counts more than 2×). Keep the
   sum of per-process `ulimit -v` caps under about 24 GB. A brief that asks an

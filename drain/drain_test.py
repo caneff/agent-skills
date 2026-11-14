@@ -248,7 +248,8 @@ for t in env.get("TAKE_AFTER_BUILD", "").split():  # another worker claims it wh
 # Stands in for herdr. `agent get` answers for the worker: HERDR_STATUS (default
 # idle), HERDR_WORKING_POLLS (that many `working` answers first), HERDR_GONE
 # (agent_not_found), HERDR_DOWN (any other failure), HERDR_FLAKY (that many
-# failures first), HERDR_HOLD_FILE (`working` for as long as that file exists).
+# failures first), HERDR_HANG (`agent get` sleeps past the timeout),
+# HERDR_HOLD_FILE (`working` for as long as that file exists).
 # Every call is logged.
 STUB_HERDR = r"""#!/usr/bin/env python3
 import json, os, sys
@@ -257,6 +258,8 @@ env = os.environ
 with open(env["HERDR_LOG"], "a") as f:
     f.write(json.dumps(args) + "\n")
 if args[:2] == ["agent", "get"]:
+    if env.get("HERDR_HANG"):
+        import time; time.sleep(60)
     flaky = env["HERDR_LOG"] + ".flaky"
     failed = int(open(flaky).read()) if os.path.exists(flaky) else 0
     if env.get("HERDR_DOWN") or failed < int(env.get("HERDR_FLAKY", 0)):
@@ -495,6 +498,81 @@ def test_the_choose_log_holds_the_prompt_the_chooser_judged_from_even_when_it_fa
     assert "- #2 ticket 2: distinctive-excerpt" in log
 
 
+def test_the_chooser_prompt_calls_a_drain_a_drain_not_a_run(sb):
+    sb.write_state({1: {}, 2: {}})
+    r = sb.drain("--once")
+    assert r.returncode == 0, r.stderr
+    prompt = sb.chooser_runs()[0]["prompt"]
+    assert prompt.startswith("Bundle choice for an unattended drain. ")
+
+
+def test_the_nudge_calls_a_drain_a_drain_not_a_run(sb):
+    mod = _drain_mod()
+    for pr_up, kind in ((True, mod.TICKET), (False, mod.TICKET), (False, mod.SPEC)):
+        assert mod.nudge_text("why.", pr_up, kind).startswith("Unattended drain, no controller: ")
+
+
+def _drain_mod():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("drain_under_test", DRAIN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_consecutive_failure_stop_fires_at_the_counters_limit_and_names_the_log_dir():
+    mod = _drain_mod()
+    ctx = type("Ctx", (), {"log_dir": "/logs"})()
+    assert mod.consecutive_failure_stop(ctx, mod.MAX_CONSECUTIVE_FAILURES - 1) is None
+    stop = mod.consecutive_failure_stop(ctx, mod.MAX_CONSECUTIVE_FAILURES)
+    assert stop.startswith(f"{mod.MAX_CONSECUTIVE_FAILURES} bundles in a row went to Chris") and "/logs" in stop
+
+
+def test_record_bundle_files_results_resets_failures_and_hands_a_failed_bundle_to_chris():
+    mod = _drain_mod()
+    mod.say = lambda text: None
+    ctx = type("Ctx", (), {"log_dir": "/logs"})()
+    mod.hand_to_chris = lambda ctx, anchor, reason, kind: [anchor, anchor + 1]
+    prog = mod.Progress(None)
+    prog.started.append(1)
+    prog.failures = 1
+    ok = {"outcome": mod.MERGED, "tickets": [1], "via": "PR #9", "sha": "abc"}
+    assert mod.record_bundle(ctx, prog, 1, mod.TICKET, [ok], None) is None
+    assert (prog.merged, prog.done, prog.failures, prog.started) == ([ok], 1, 0, [])
+    assert mod.record_bundle(ctx, prog, 5, mod.TICKET, None, "red seam") is None
+    assert (prog.handed, prog.done, prog.failures) == ([([5, 6], "red seam")], 3, 1)
+    assert "in a row went to Chris" in mod.record_bundle(ctx, prog, 7, mod.TICKET, None, "red seam")
+
+
+def test_a_failed_hand_off_still_prints_the_bundle_ended_line_for_the_stopped_bundle():
+    mod = _drain_mod()
+    said = []
+    mod.say = said.append
+    mod.consecutive_failure_stop = lambda ctx, failures: None
+
+    def refuse(ctx, anchor, reason, kind):
+        raise mod.DrainError("gh issue edit failed: HTTP 502")
+    mod.hand_to_chris = refuse
+    ctx = type("Ctx", (), {"log_dir": "/logs", "repo": "o/r", "root": "/nowhere", "default": "main",
+                           "bundle_max": 8, "want": None})()
+    mod.survey = lambda ctx, retry=True: ([], [], [], [], [])
+    mod.resumable = lambda ctx, ended: (1, mod.TICKET) if not ended else None
+    mod.work = lambda ctx, anchor, others, resumed, started, kind: (started.append(1), (None, "red seam"))[1]
+    result = mod.drain(ctx, 5, "--max 5")
+    assert result.stop == "gh issue edit failed: HTTP 502"
+    assert "bundle ended: #1  stopped: gh issue edit failed: HTTP 502" in said
+
+
+def test_next_anchor_says_why_an_empty_queue_has_no_anchor():
+    mod = _drain_mod()
+    mod.say = lambda text: None
+    mod.resumable = lambda ctx, ended: None
+    mod.survey = lambda ctx, retry=True: ([], [], [], [], [])
+    prog = mod.Progress(None)
+    assert mod.next_anchor(None, prog) is None
+    assert prog.cause == "queue empty"
+
+
 def test_a_candidate_with_no_body_and_no_comments_is_listed_as_empty_not_blank(sb):
     # A ticket unblocked by native dependencies alone can have an empty body; the
     # fake gh's frontier needs a `Blocked by` body to offer one, so call excerpt directly.
@@ -725,9 +803,9 @@ def test_a_candidate_count_is_never_read_as_a_ticket(sb):
     assert sb.handed_comment(3) == []
 
 
-def test_a_bundle_comment_left_by_an_earlier_run_touches_nothing(sb):
+def test_a_bundle_comment_left_by_an_earlier_drain_touches_nothing(sb):
     # Ticket 5 is another worker's live ticket; the old note naming it
-    # predates this run's claim of ticket 1, so a failed bundle leaves it be.
+    # predates this drain's claim of ticket 1, so a failed bundle leaves it be.
     sb.write_state({1: {}, 5: {"labels": ["in-progress"]}}, comments=[["1", "drain bundle: 5"]])
     sb.drain("--once", env={"FAIL_TICKETS": "1"})
     assert "ready-for-human" in sb.labels(1)
@@ -744,7 +822,7 @@ def test_two_bundles_in_a_row_handed_over_stop_the_loop(sb):
     assert sb.labels(4) == ["ready-for-agent"]
 
 
-def test_a_dispatch_refusal_stops_the_run_and_leaves_the_ticket_ready(sb):
+def test_a_dispatch_refusal_stops_the_drain_and_leaves_the_ticket_ready(sb):
     sb.write_state({1: {}, 2: {}})
     r = sb.drain(env={"DISPATCH_REFUSE": "1"})
     assert r.returncode == 1
@@ -837,11 +915,19 @@ def test_a_worker_that_is_gone_with_no_pr_is_a_failed_build(sb):
     assert not any(c[:2] == ["agent", "prompt"] for c in sb.herdr_calls()), "nothing to prompt"
 
 
-def test_a_herdr_that_cannot_be_asked_stops_the_run(sb):
+def test_a_herdr_that_cannot_be_asked_stops_the_drain(sb):
     sb.write_state({1: {}})
     r = sb.drain("--once", env={"HERDR_DOWN": "1"})
     assert r.returncode == 1
     assert "stopped: herdr agent get repo-1 failed" in r.stdout
+    assert "ready-for-human" not in sb.labels(1)
+
+
+def test_a_herdr_that_hangs_stops_the_drain_naming_herdr(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"HERDR_HANG": "1", "DRAIN_HERDR_SECONDS": "0.5"})
+    assert r.returncode == 1, (r.stdout, r.stderr)
+    assert "stopped: herdr agent get repo-1 timed out after 0.5s" in r.stdout
     assert "ready-for-human" not in sb.labels(1)
 
 

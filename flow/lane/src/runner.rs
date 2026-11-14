@@ -22,16 +22,28 @@ pub fn run(program: &str, args: &[&str]) -> std::io::Result<CommandOutput> {
 }
 
 pub fn run_in(dir: Option<&Path>, program: &str, args: &[&str]) -> std::io::Result<CommandOutput> {
+    let out = command_in(dir, program, args).output()?;
+    Ok(CommandOutput { success: out.status.success(), combined: combine(&out.stdout, &out.stderr) })
+}
+
+/// The one command [`run_in`] and [`run_in_timeout`] both run: `program`
+/// with `args`, stdin closed, in `dir` when one is given.
+fn command_in(dir: Option<&Path>, program: &str, args: &[&str]) -> Command {
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null());
     if let Some(d) = dir {
         cmd.current_dir(d);
     }
-    let out = cmd.output()?;
-    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
-    combined.push_str(&String::from_utf8_lossy(&out.stderr));
+    cmd
+}
+
+/// stdout then stderr, trailing newlines trimmed: the `combined` both
+/// runners report.
+fn combine(stdout: &[u8], stderr: &[u8]) -> String {
+    let mut combined = String::from_utf8_lossy(stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(stderr));
     trim_trailing_newlines(&mut combined);
-    Ok(CommandOutput { success: out.status.success(), combined })
+    combined
 }
 
 /// Polling gap while waiting on a bounded child: coarse enough not to burn
@@ -219,15 +231,8 @@ pub fn run_timeout(program: &str, args: &[&str], timeout: Duration) -> std::io::
 /// `combined`, with or without output, rather than reporting an ordinary
 /// failure with no clue a bound ever fired.
 pub fn run_in_timeout(dir: Option<&Path>, program: &str, args: &[&str], timeout: Duration) -> std::io::Result<CommandOutput> {
-    let mut cmd = Command::new(program);
-    cmd.args(args).stdin(Stdio::null());
-    if let Some(d) = dir {
-        cmd.current_dir(d);
-    }
-    let (status, stdout, stderr, timed_out, truncated) = run_bounded(cmd, timeout)?;
-    let mut combined = String::from_utf8_lossy(&stdout).into_owned();
-    combined.push_str(&String::from_utf8_lossy(&stderr));
-    trim_trailing_newlines(&mut combined);
+    let (status, stdout, stderr, timed_out, truncated) = run_bounded(command_in(dir, program, args), timeout)?;
+    let mut combined = combine(&stdout, &stderr);
     if timed_out {
         if combined.is_empty() {
             combined = format!("(no output; timed out after {timeout:?})");
@@ -259,8 +264,7 @@ struct Quiet {
 }
 
 fn run_quiet(program: &str, args: &[&str], timeout: Duration) -> Result<Quiet, String> {
-    let mut cmd = Command::new(program);
-    cmd.args(args).stdin(Stdio::null());
+    let cmd = command_in(None, program, args);
     let command = format!("{program} {}", args.join(" "));
     let (status, stdout, stderr, timed_out, truncated) = run_bounded(cmd, timeout).map_err(|e| format!("{command}: {e}"))?;
     Ok(Quiet { status, stdout, stderr, timed_out, truncated, command, timeout })

@@ -37,24 +37,27 @@ fn parse(line: &str) -> IssueState {
     }
 }
 
+/// The `gh issue view` argv [`read`] and [`read_timeout`] both run: the
+/// one line [`parse`] reads.
+fn read_argv<'a>(slug: &'a str, n: &'a str) -> [&'a str; 9] {
+    [
+        "issue",
+        "view",
+        n,
+        "--repo",
+        slug,
+        "--json",
+        "state,labels,assignees",
+        "-q",
+        ".state + \"\\t\" + ([.labels[].name] | join(\",\")) + \"\\t\" + ([.assignees[].login] | join(\",\"))",
+    ]
+}
+
 /// Reads issue `n`'s state, labels and assignees from `gh`. `None` when the
 /// call fails (gh not on PATH, no such issue, network error) — the same
 /// shape both call sites already skip or refuse on.
 pub fn read(slug: &str, n: &str) -> Option<IssueState> {
-    let out = quiet_stdout(
-        "gh",
-        &[
-            "issue",
-            "view",
-            n,
-            "--repo",
-            slug,
-            "--json",
-            "state,labels,assignees",
-            "-q",
-            ".state + \"\\t\" + ([.labels[].name] | join(\",\")) + \"\\t\" + ([.assignees[].login] | join(\",\"))",
-        ],
-    )?;
+    let out = quiet_stdout("gh", &read_argv(slug, n))?;
     Some(parse(&out))
 }
 
@@ -72,21 +75,7 @@ pub fn body(slug: &str, n: &str) -> Option<String> {
 /// fact about the issue — the bound firing says nothing about the issue at
 /// all.
 pub fn read_timeout(slug: &str, n: &str, timeout: Duration) -> Result<Option<IssueState>, String> {
-    let out = quiet_stdout_bounded(
-        "gh",
-        &[
-            "issue",
-            "view",
-            n,
-            "--repo",
-            slug,
-            "--json",
-            "state,labels,assignees",
-            "-q",
-            ".state + \"\\t\" + ([.labels[].name] | join(\",\")) + \"\\t\" + ([.assignees[].login] | join(\",\"))",
-        ],
-        timeout,
-    )?;
+    let out = quiet_stdout_bounded("gh", &read_argv(slug, n), timeout)?;
     Ok(out.map(|s| parse(&s)))
 }
 

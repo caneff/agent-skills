@@ -712,6 +712,20 @@ else
   echo "FAIL: incomplete lib — rc $rc, log: $(cat "$log" 2>/dev/null), out: $out"; fails=1
 fi
 
+# The shared delivery step (#1773): a lib without worker_alert_deliver is named
+# as the missing symbol, so the hook's symbol list covers it.
+reset_log
+partial="$tmp/partial-deliver"; mkdir -p "$partial"; cp "$hook" "$partial/"
+sed '/^worker_alert_deliver() {/,/^}/d' "$here/worker-alert-lib.sh" > "$partial/worker-alert-lib.sh"
+out=$(jq -n --arg t "$t" '{hook_event_name:"Stop",session_id:"w",transcript_path:$t,stop_hook_active:false}' \
+      | HOME="$home" HERDR_PANE_ID="w2W:p1" PATH="$stubdir:$PATH" bash "$partial/$(basename "$hook")" 2>&1)
+rc=$?
+if [ "$rc" = 0 ] && grep -q $'lib-missing\tnot-sent.*worker_alert_deliver' "$log" 2>/dev/null; then
+  echo "PASS: a lib without worker_alert_deliver is named as the missing symbol"
+else
+  echo "FAIL: lib without worker_alert_deliver — rc $rc, log: $(cat "$log" 2>/dev/null), out: $out"; fails=1
+fi
+
 # The installed layout is a symlink in ~/.claude/hooks/ pointing at this
 # directory. The lib is found beside the symlink's target, not beside the
 # symlink: from #1066's landing until someone re-ran install.sh, every stop on

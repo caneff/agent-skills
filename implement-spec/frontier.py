@@ -31,7 +31,10 @@ from urllib.parse import quote
 # `##` is what `/to-tickets` emits and what the grammar specifies.
 _HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
                       re.IGNORECASE)
-_ANY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
+# The one heading rule every ticket reader uses (#1772): CommonMark's ATX
+# heading, up to three spaces before the `#`. `closing_ticket` imports it and
+# `closure` reads through `section`, rather than either carrying its own.
+HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
 # The inline forms the tree also writes: `Blocked by: #7, #8` at the top of a
 # /wayfinder child (docs/agents/issue-tracker.md), and `**Blocked by:** ...`
 # in to-tickets' local ticket template. Anchored at the line start and
@@ -171,6 +174,32 @@ def key_line(line):
     return key.strip().lower(), match.group("value").strip()
 
 
+def sections(lines, heading_re):
+    """The text under every heading in `lines` (`visible()` output) that
+    `heading_re` matches, in order: the lines up to the next heading of any
+    level, stripped. The section reader `section` and `blocked_by_section`
+    share."""
+    found = []
+    for pos, (_, line) in enumerate(lines):
+        if not heading_re.match(line):
+            continue
+        body = []
+        for _, rest in lines[pos + 1:]:
+            if HEADING.match(rest):
+                break
+            body.append(rest)
+        found.append("\n".join(body).strip())
+    return found
+
+
+def section(text, heading_re):
+    """The lines under the first visible heading `heading_re` matches, up to
+    the next heading, or `None` when the document has no such heading —
+    silence, which is not an empty section."""
+    found = sections(visible((text or "").splitlines()), heading_re)
+    return found[0] if found else None
+
+
 def blocked_by_section(body):
     """What the ticket states about its blockers, or `None` when it states
     nothing at all — a ticket that never mentions the relationship is not a
@@ -184,18 +213,9 @@ def blocked_by_section(body):
     `**Blocked by:**` line in the preamble. Every visible occurrence of
     either form is one declaration."""
     lines = visible((body or "").splitlines())
-    answers = []
-    for pos, (_, line) in enumerate(lines):
-        if not _HEADING.match(line):
-            continue
-        section = []
-        for _, rest in lines[pos + 1:]:
-            if _ANY_HEADING.match(rest):
-                break
-            section.append(rest)
-        answers.append("\n".join(section).strip())
+    answers = sections(lines, _HEADING)
     for _, line in lines:
-        if _ANY_HEADING.match(line):
+        if HEADING.match(line):
             break  # the preamble ends at the first heading
         inline = _INLINE.match(line)
         if inline:
@@ -297,8 +317,9 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     really a PR, is in no bucket at all — each is off the frontier by its own
     nature, not by a blocking relationship.
 
-    `landed_of(spec_branch) -> {numbers}` and `native_blockers_of(ticket) ->
-    [numbers]` carry the landed-blocker rule, stated in
+    `landed_of(integration_branch) -> {numbers}` and
+    `native_blockers_of(ticket) -> [numbers]` carry the landed-blocker rule,
+    stated in
     `references/frontier.md` (#1466); either raises `FrontierError` when it
     cannot answer, and neither supplied means no blocker has landed.
 
@@ -309,8 +330,8 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     buckets = {name: [] for name in BUCKETS}
 
     def landed_numbers(issue):
-        """`(numbers, why)`: the blockers landed on the spec branch of this
-        ticket's own parent spec. `why` names a lookup that failed, and the
+        """`(numbers, why)`: the blockers landed on the integration branch of
+        this ticket's own parent spec. `why` names a lookup that failed, and the
         ticket then stays blocked with that reason in its entry."""
         if landed_of is None:
             return set(), ""
@@ -344,7 +365,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             if native and native_blockers_of is not None:
                 landed, failed = landed_numbers(issue)
                 if native_open(issue, landed) == []:
-                    entry["why"] += ", all landed on the spec branch"
+                    entry["why"] += ", all landed on the integration branch"
                     native = False
                 else:
                     entry["why"] += failed
@@ -481,13 +502,13 @@ def fetch_state(repo, number, run=gh_json):
 _CLOSES = re.compile(r"^[ \t]*Closes[ \t]+#(\d+)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 
-def fetch_landed(repo, spec_branch, run=gh_json):
-    """The ticket numbers whose PR merged into `spec_branch` (#1466, ruling
-    (a)): each merged PR's bare `Closes #<n>` body lines, which a clump's PR
-    carries once per ticket. GitHub's own closing references stay empty for a
-    PR into a non-default branch, so the body is the record. Raises
-    `FrontierError` when the list cannot be read."""
-    prs = run(["pr", "list", "--repo", repo, "--base", spec_branch,
+def fetch_landed(repo, integration_branch, run=gh_json):
+    """The ticket numbers whose PR merged into `integration_branch` (#1466,
+    ruling (a)): each merged PR's bare `Closes #<n>` body lines, which a
+    clump's PR carries once per ticket. GitHub's own closing references stay
+    empty for a PR into a non-default branch, so the body is the record.
+    Raises `FrontierError` when the list cannot be read."""
+    prs = run(["pr", "list", "--repo", repo, "--base", integration_branch,
                "--state", "merged", "--json", "body", "--limit", "200"])
     if not isinstance(prs, list):
         raise FrontierError("the merged-PR list was not a list")
@@ -560,7 +581,7 @@ def _parent_number(body, repo):
         part = _PART_OF.match(line)
         if part and part.group(1):
             return int(part.group(1))
-        if _ANY_HEADING.match(line):
+        if HEADING.match(line):
             in_parent = bool(_PARENT_HEADING.match(line))
             if in_parent and unread is None:
                 unread = ""
@@ -602,7 +623,7 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
             answers[tuple(args)] = run(args)
         return answers[tuple(args)]
 
-    landed = functools.cache(lambda spec_branch: landed_of(repo, spec_branch))
+    landed = functools.cache(lambda integration_branch: landed_of(repo, integration_branch))
 
     return classify(fetch(repo, label), cached,
                     lambda ticket: parent_of(repo, ticket, run=read_once),

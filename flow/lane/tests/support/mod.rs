@@ -308,6 +308,12 @@ fn run_ok(program: &str, args: &[&str], cwd: Option<&Path>) {
     assert!(status.success(), "{program} {:?} failed", args);
 }
 
+/// A binary's stdout alone, trimmed: what a test compares a printed answer
+/// against.
+pub fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 pub fn out_text(out: &Output) -> String {
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
     s.push_str(&String::from_utf8_lossy(&out.stderr));

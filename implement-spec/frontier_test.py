@@ -5,6 +5,7 @@ GitHub issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
 the point of the seam.
 """
 import os
+import re
 import subprocess
 import sys
 
@@ -311,8 +312,8 @@ def test_a_spec_parent_moves_out_of_unresolved_rather_than_vanishing():
     # of spec parents, because each one lands in `spec` instead. A drop that
     # left the queue smaller by one would pass a count check and still hide
     # the work, so the destination is asserted beside the count.
-    # The spec branch reads the label off the issue, so no swap is involved
-    # here and this is the shipped behaviour end to end.
+    # The integration branch reads the label off the issue, so no swap is
+    # involved here and this is the shipped behaviour end to end.
     queue = [
         issue(1, labels=("ready-for-agent", "spec"),
               body="No declaration at all.\n"),
@@ -1098,7 +1099,7 @@ SECTION_ON_1 = "## Blocked by\n\n- #1\n"
 SPEC_483 = {"spec-483": {1}}
 
 
-def test_a_section_blocker_landed_on_its_spec_branch_is_met():
+def test_a_section_blocker_landed_on_its_integration_branch_is_met():
     got = read([issue(2, body=SECTION_ON_1)], states={1: "open"},
                landed=SPEC_483, parents={2: spec_parent(483)})
     assert numbers(got["slice"]) == [2], got
@@ -1130,7 +1131,7 @@ def test_one_landed_blocker_does_not_free_a_ticket_with_another_open_one():
     assert got["blocked"][0]["blockers"] == [2], got
 
 
-def test_native_open_blocker_landed_on_its_spec_branch_is_met():
+def test_native_open_blocker_landed_on_its_integration_branch_is_met():
     got = read([issue(2, blocked_by=1, total_blocked_by=1)], landed=SPEC_483,
                native={2: [1]}, parents={2: spec_parent(483)})
     assert numbers(got["slice"]) == [2], got
@@ -1168,7 +1169,7 @@ def test_landed_is_not_asked_about_a_closed_blocker():
     assert numbers(got["slice"]) == [2], got
 
 
-def test_a_spec_branch_is_asked_once_however_many_tickets_need_it():
+def test_an_integration_branch_is_asked_once_however_many_tickets_need_it():
     asked = []
     issues = [issue(2, body=SECTION_ON_1), issue(3, body=SECTION_ON_1)]
     F.frontier("owner/repo", "ready-for-agent",
@@ -1314,3 +1315,39 @@ def test_the_rendered_report_names_a_stranded_slice():
     line = F.render(read([issue(491, body=NO_BLOCKERS, title="S")],
                          parents={491: foreign_spec()})).splitlines()[0]
     assert line.startswith("stranded    491 S  ("), line
+
+
+# --- one heading rule for all three readers (#1772, spec #1734) -------------
+
+# A `#` line indented to column four is a code block in CommonMark, not a
+# heading. `visible()` drops a line opening with four spaces or a tab, but not
+# one opening with a space and then a tab — the tab still reaches column four.
+# That line reaches every reader, so only the shared `HEADING` rule keeps it
+# from opening or ending a section: the same body must read the same in all
+# three.
+def test_heading_rule_allows_three_spaces_and_refuses_four():
+    assert F.HEADING.match("   ## Blocked by")
+    assert not F.HEADING.match("    ## Blocked by")
+    assert not F.HEADING.match("\t## Blocked by")
+
+
+def test_section_reads_to_next_heading():
+    body = "## A\n\none\ntwo\n\n  ## B\n\nthree\n"
+    assert F.section(body, re.compile(r"^ {0,3}#{1,6}[ \t]+a[ \t]*$", re.I)) == "one\ntwo"
+    assert F.section(body, re.compile(r"^ {0,3}#{1,6}[ \t]+nope$", re.I)) is None
+
+
+def test_three_readers_agree_on_an_indented_heading():
+    import closing_ticket as T
+    import closure as C
+    code = " \t"  # a space then a tab: column four, and `visible()` keeps it
+    body = (f"{code}## Include closure\n- decoy\n\n"
+            f"{code}## End-to-end seam\n- **Seam**: `decoy`\n\n"
+            f"## Blocked by\n\n- #7\n{code}# ends nothing\nmore\n\n"
+            f"## Include closure\n\n- None\n{code}# ends nothing\nmore\n\n"
+            f"## End-to-end seam\n\n- **Seam**: `make`\n{code}# wrapped\n"
+            "- **Blind to**: x\n")
+    assert F.visible([f"{code}# x"]) == [(0, f"{code}# x")]
+    assert F.blocked_by_section(body) == f"- #7\n{code}# ends nothing\nmore"
+    assert C.declaration_section(body) == f"- None\n{code}# ends nothing\nmore"
+    assert T.declaration(body) == {"seam": "`make` # wrapped", "blind to": "x"}

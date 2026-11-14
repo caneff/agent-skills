@@ -77,14 +77,15 @@ per mutation*); its refusal goes on that first line as well.
 
 ## Axes
 
-Read your axis's brief from § 4 of that file:
-**standards** (`multi-axis-code-review/SKILL.md` § 3 lenses, ending in the required `### Over-engineering`
-subsection), **spec** (missing, partial, unasked-for, or wrongly implemented
-against the originating issue), or **correctness** — bugs, behaviour the ticket
-did not ask for, and every new test checked as a witness: strip the constraint
-under test and see whether the assertion still passes. One that survives is a
-hollow witness. Run the mutations with
-`multi-axis-code-review/witness-check.sh`, which puts each in its own throwaway
-worktree: never in the checkout and never in a copy of it, since a byte copy
-of a linked worktree shares the checkout's index, so a staged mutation lands in
-the real repository.
+Your axis's brief is in the rendered brief file the caller names
+(`render-brief.py` includes `multi-axis-code-review/briefs/<axis>.md`):
+**standards** (`multi-axis-code-review/SKILL.md` § 3 lenses, ending in the
+required `### Over-engineering` subsection), **spec** (missing, partial,
+unasked-for, or wrongly implemented against the originating issue), or
+**correctness** — bugs, behaviour the ticket did not ask for, and every new
+test checked as a witness: strip the constraint under test and see whether the
+assertion still passes. One that survives is a hollow witness. Run the
+mutations with `multi-axis-code-review/witness-check.sh`, which puts each in
+its own throwaway worktree: never in the checkout and never in a copy of it,
+since a byte copy of a linked worktree shares the checkout's index, so a
+staged mutation lands in the real repository.

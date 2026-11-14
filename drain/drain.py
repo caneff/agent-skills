@@ -9,7 +9,7 @@ drain picks, the ticket or spec `--anchor <n>` names (refused unless `<n>` is
 open, ready, unblocked and without a kept workspace; a resumed bundle goes
 first and the anchor waits for the next pick). Tickets numbered
 below the anchor never join its bundle, because the worker's branch and herdr
-agent are named for the lowest ticket of a clump.
+agent are named for the lowest ticket of a bundle.
 
 `drain` leaves a `drain anchor:` comment on it, has one headless one-turn
 `claude -p` session choose the **bundle** (the other unblocked ready tickets
@@ -80,10 +80,10 @@ PR is recorded as what closed it, from its `closed` event: `(landed on main,
 no PR)` with that commit's sha, or with the sha of the main commit whose
 message says `Closes #<n>` when a hand closed it after the trailer did not
 fire; `moot (closed, no PR)` with no sha when neither exists; or an unverified
-close with the reason, never as main's tip. The run's last lines are one
+close with the reason, never as main's tip. This drain's last lines are one
 `passed over: #<n> <why>` per ready ticket it did not build (human-held,
 claimed, blocked, a kept workspace, not started), read fresh when a limit ends
-the run, and one
+the drain, and one
 `ended: <cause>`: `queue empty`, `no startable ticket` (every queued ticket has
 a kept workspace), `--once reached`, `--max <n> reached`, or `stopped` beside
 its `stopped:` line. `ended:` is no `stopped:` line and leaves the exit code
@@ -133,6 +133,17 @@ def count_note(k):
     return f"(of {k} candidates)"
 BUNDLE_MAX = 8
 MAX_CONSECUTIVE_FAILURES = 2
+
+
+def consecutive_failure_stop(ctx, failures):
+    """The stop reason once `failures` bundles in a row went to Chris, else `None`."""
+    if failures < MAX_CONSECUTIVE_FAILURES:
+        return None
+    return (f"{failures} bundles in a row went to Chris; the environment is the likelier "
+            f"cause (auth, quota, herdr, implement-dispatch). Check `herdr agent list` and the "
+            f"logs in {ctx.log_dir}.")
+
+
 # The caps, stated here and nowhere else: the equivalent of `ulimit -v 32G`
 # (address space, not resident memory, hence generous) on the one-shot bundle
 # chooser, and a three-hour wall clock for a worker to finish and for the seam.
@@ -159,14 +170,17 @@ CHOOSER_SECONDS = float(os.environ.get("DRAIN_CHOOSER_SECONDS", 15 * 60))
 # the chooser may still open a ticket in full.
 EXCERPT_CHARS = 400
 # How long an empty queue read waits before it is read once more: GitHub's label
-# listing lags a relabel by about 30 s, so a ticket readied just before the run
+# listing lags a relabel by about 30 s, so a ticket readied just before the drain
 # starts is not listed yet.
 FRONTIER_RETRY_SECONDS = float(os.environ.get("DRAIN_FRONTIER_RETRY_SECONDS", 45))
+# How long one `herdr agent get` may take: a herdr that hangs would otherwise stall
+# an unattended drain with no message. Test hook, not an option.
+HERDR_SECONDS = float(os.environ.get("DRAIN_HERDR_SECONDS", 30))
 IDLE = ("idle", "done")
 # `blocked` is a permission or question dialog nobody here can answer.
 STALLED = ("blocked",)
 # Consecutive failed looks at a worker (a `gh` or `herdr` call) before the wait
-# gives up, so one transient error is not a failed build or a stopped run.
+# gives up, so one transient error is not a failed build or a stopped drain.
 LOOK_ERRORS = 5
 # The controller named in every brief. No session bears it: the worker's "PR up"
 # send to it finds nobody and the worker stops idle, which is what drain waits
@@ -283,8 +297,8 @@ def read_queue(ctx):
     (not ready-for-agent, claimed, blocked), which drain cannot start.
     `stranded` is `[(number, why)]`: slices whose spec is closed or in another
     repo, which no spec run can build (#1485). `passed` is `[(number, why)]`:
-    the other open ready tickets, which a run passes over (human-held, claimed,
-    blocked, unresolved, or carrying a non-dispatchable label)."""
+    the other open ready tickets, which a drain passes over (human-held,
+    claimed, blocked, unresolved, or carrying a non-dispatchable label)."""
     issues = {}
 
     def fetch(r, label):
@@ -350,7 +364,7 @@ def anchors(ctx, queue):
     """The queue's tickets that may anchor a bundle: those with no kept
     workspace. A ticket drain handed to Chris keeps its workspace, and
     `implement-dispatch` refuses to start where one exists, so a re-readied one
-    would stop every later run at it."""
+    would stop every later drain at it."""
     return [t for t in queue if not os.path.isdir(workspace_path(ctx, t[0], t[2]))]
 
 
@@ -413,7 +427,7 @@ def resumable(ctx, ended):
     `implement-dispatch` started has none, and a ticket drain handed to Chris
     ends in `HANDED_NOTE`, so neither is taken.
     The open list can still carry a ticket just closed, so each candidate's
-    state and labels are read again, and an anchor this run already took up
+    state and labels are read again, and an anchor this drain already took up
     (`ended`) is never taken twice."""
     try:
         claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
@@ -443,7 +457,7 @@ def noted(ctx, anchor):
             for x in re.findall(r"\d+", CANDIDATES.sub("", c["body"]))} - {anchor}
 
 
-_PARENTS = {}  # (repo, number) -> parent number or None; a ticket's parent does not change mid-run
+_PARENTS = {}  # (repo, number) -> parent number or None; a ticket's parent does not change mid-drain
 
 
 def parent_number(ctx, issue):
@@ -515,7 +529,11 @@ def agent_info(name):
     """The worker's herdr record (`agent_status`, `pane_id`, ...), or `None` when
     herdr has no such agent. Any other herdr failure is a `DrainStop`: a herdr
     that cannot be asked is not a worker that is gone."""
-    out = subprocess.run(["herdr", "agent", "get", name], capture_output=True, text=True)
+    try:
+        out = subprocess.run(["herdr", "agent", "get", name], capture_output=True, text=True,
+                             timeout=HERDR_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise DrainStop(f"herdr agent get {name} timed out after {HERDR_SECONDS:g}s") from None
     body = {}
     for text in (out.stdout, out.stderr):  # herdr prints a result on stdout and an error on stderr
         with contextlib.suppress(ValueError):
@@ -560,7 +578,7 @@ def excerpt(ctx, n):
 def chooser_prompt(anchor, others, bundle_max):
     """`others` is `(number, title, excerpt)` per candidate."""
     listing = "\n".join(f"- #{n} {title}: {text}" for n, title, text in others) or "- (none)"
-    return (f"Bundle choice for an unattended run. #{anchor} is the anchor ticket to build next. Other unblocked "
+    return (f"Bundle choice for an unattended drain. #{anchor} is the anchor ticket to build next. Other unblocked "
             f"ready tickets, each with the start of its body and comments:\n{listing}\n"
             f"Open any that look related to #{anchor} in full (`gh issue view <n>`, body and comments) and pick those "
             f"you would naturally fix in the same PR, at most {bundle_max - 1} of them. Change nothing. "
@@ -602,7 +620,7 @@ def dispatch(ctx, bundle, kind):
     """Start the bundle's worker through `implement-dispatch`, the one dispatch
     path: claim, worktree, herdr pane, brief. A refusal claims and creates
     nothing, so it is the environment's (herdr down, onboarding) and stops the
-    run rather than looping over one ticket. A failure after the claim (herdr
+    drain rather than looping over one ticket. A failure after the claim (herdr
     failing once the workspace exists) leaves the claim and the workspace in
     place: that is this bundle's failed build, not the environment's."""
     which = ["--spec", str(bundle[0])] if kind == SPEC else [str(n) for n in bundle]
@@ -725,7 +743,7 @@ def seam(ctx, head, log, pr):
     run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
     log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
     with contextlib.suppress(FileNotFoundError):
-        os.remove(log)  # a conflict writes no log, and an earlier run's must not answer for it
+        os.remove(log)  # a conflict writes no log, and an earlier drain's must not answer for it
     state = shlex.quote(os.path.splitext(log)[0] + "-selector.json")
     tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
     base = f"--root . --rev {shlex.quote(ctx.default)}"
@@ -902,7 +920,7 @@ def finish(ctx, anchor, branch, view, kind):
 
 
 def nudge_text(reason, pr_up, kind):
-    head = "Unattended run, no controller: "
+    head = "Unattended drain, no controller: "
     if pr_up:
         return (head + f"the PR is up but drain's check of it failed: {reason} Fix that, push to the PR branch, "
                 "and send no messages.")
@@ -948,12 +966,12 @@ def announce(ctx, anchor, tickets, kind):
 def work(ctx, anchor, others, resumed, started, kind):
     """`([result, ...], None)` or `(None, the second failure's one-line reason)`;
     appends the bundle's tickets to `started` once its worker exists.
-    Attempt 1 starts the worker (a resumed run finds it or its PR already
+    Attempt 1 starts the worker (a resumed bundle finds it or its PR already
     there); attempt 2 prompts the same worker with the first failure's reason,
     since its workspace exists and a second dispatch would refuse it."""
     branch, agent, reason, bundle = branch_of(anchor, kind), agent_name(ctx, anchor, kind), "", [anchor]
     # The worker's branch and agent are named for the lowest ticket in the
-    # clump, so every ticket bundled with the anchor is a higher number.
+    # bundle, so every ticket bundled with the anchor is a higher number.
     others = [t for t in others if t[0] > anchor]
     for attempt in (1, 2):
         try:
@@ -1007,7 +1025,7 @@ def hand_to_chris(ctx, anchor, reason, kind):
     return bundle
 
 
-Run = collections.namedtuple("Run", "merged closed handed stop ended passed unread")
+Result = collections.namedtuple("Result", "merged closed handed stop ended passed unread")
 
 
 def survey(ctx, retry=True):
@@ -1026,89 +1044,117 @@ def say_waiting(waiting):
             "ready-for-agent, is claimed, or is blocked)")
 
 
+class Progress:
+    """What one drain has done and seen so far: the state `next_anchor` and
+    `record_bundle` read and write, so the loop body holds none of it."""
+
+    def __init__(self, want):
+        self.merged, self.closed, self.handed = [], [], []
+        self.failures, self.done, self.want = 0, 0, want
+        self.started = []  # the tickets of a bundle whose start line is out and whose end line is not
+        self.told = set()  # stranded slices already named this drain (#1485)
+        self.ended = set()  # the anchors this drain has taken up: added before `work()`, so none is taken twice
+        self.cause, self.seen = None, None  # the cause the drain ended on, and the last queue read `(queue, waiting, passed)`
+
+
+def next_anchor(ctx, prog):
+    """`(anchor, kind, resumed, others)` for the next bundle, or `None` when the
+    queue holds nothing startable (`prog.cause` then says which). A resumable
+    anchor comes first; otherwise the queue is read, `--anchor` is put first and
+    the head is noted."""
+    while True:
+        taken = resumable(ctx, prog.ended)
+        if taken is not None:
+            anchor, kind = taken
+            return anchor, kind, True, []
+        queue, waiting, stranded, candidates, passed = survey(ctx)
+        prog.seen = (queue, waiting, passed)
+        for n, why in stranded:
+            if n not in prog.told:  # every exit names them, once
+                prog.told.add(n)
+                say(f"stranded: #{n}, {why}")
+        if not candidates:
+            say_waiting(waiting)
+            prog.cause = "queue empty" if not queue else "no startable ticket"
+            prog.seen = (queue, [], passed)  # named just above
+            return None
+        if prog.want:
+            if not any(t[0] == prog.want for t in candidates):
+                raise DrainStop(f"--anchor #{prog.want} left the ready queue before drain reached it")
+            candidates, prog.want = put_first(candidates, prog.want), None
+        anchor, _, kind = candidates[0]
+        others = [(n, title) for n, title, k in queue if k == TICKET and n != anchor]
+        if note_anchor(ctx, anchor, kind):
+            return anchor, kind, False, others
+
+
+def record_bundle(ctx, prog, anchor, kind, results, reason):
+    """Say how the bundle ended and file it: its results as merged or closed, or,
+    when it failed, hand it to Chris. Returns the stop reason when the failures
+    in a row reach the limit, else `None`."""
+    if results:
+        for result in results:
+            if result["outcome"] == MERGED:
+                say(f"bundle ended: {refs(result['tickets'])}  merged  {result['via']}  {result['sha']}")
+            else:
+                say(f"bundle ended: {refs(result['tickets'])}  {result['via']}")
+            (prog.merged if result["outcome"] == MERGED else prog.closed).append(result)
+        prog.started.clear()
+        prog.done, prog.failures = prog.done + sum(len(r["tickets"]) for r in results), 0
+        return None
+    bundle = hand_to_chris(ctx, anchor, reason, kind)
+    say(f"bundle ended: {refs(bundle)}  handed to Chris: {reason}")
+    prog.started.clear()
+    prog.handed.append((bundle, reason))
+    prog.done, prog.failures = prog.done + len(bundle), prog.failures + 1
+    return consecutive_failure_stop(ctx, prog.failures)
+
+
 def drain(ctx, limit, limit_name):
-    """`Run`: what merged, what closed with no PR, what was handed over, the stop
-    reason or `None`, the cause the run ended on, and the ready tickets it
+    """`Result`: what merged, what closed with no PR, what was handed over,
+    the stop reason or `None`, the cause the drain ended on, and the ready tickets it
     passed over as `[(number, why)]`. `passed` is `None` when no queue could be
     read for it, and `unread` then says why. `limit` counts tickets;
-    `limit_name` is how a reached limit is worded, e.g. `--max 3`."""
-    merged, closed, handed, stop, failures, done, want = [], [], [], None, 0, 0, ctx.want
-    started = []  # the tickets of a bundle whose start line is out and whose end line is not
-    told = set()  # stranded slices already named this run (#1485)
-    ended = set()  # the anchors this run has taken up: added before `work()`, so none is taken twice
-    cause, seen = None, None  # the cause the run ended on, and the last queue read `(queue, waiting, passed)`
+    `limit_name` is how a reached limit is worded, e.g. `--max 3`. Each pass of
+    the loop picks an anchor, works its bundle and records the result."""
+    prog, stop = Progress(ctx.want), None
     try:
-        if want:  # refuse before any work, and not only when the loop gets there
+        if prog.want:  # refuse before any work, and not only when the loop gets there
             queue, waiting, _, candidates, passed = survey(ctx)
-            seen = (queue, waiting, passed)
-            put_first(candidates, want)
-        while done < limit:
-            taken = resumable(ctx, ended)
-            resumed, others = taken is not None, []
-            if resumed:
-                anchor, kind = taken
-            else:
-                queue, waiting, stranded, candidates, passed = survey(ctx)
-                seen = (queue, waiting, passed)
-                for n, why in stranded:
-                    if n not in told:  # every exit names them, once
-                        told.add(n)
-                        say(f"stranded: #{n}, {why}")
-                if not candidates:
-                    say_waiting(waiting)
-                    cause = "queue empty" if not queue else "no startable ticket"
-                    seen = (queue, [], passed)  # named just above
-                    break
-                if want:
-                    if not any(t[0] == want for t in candidates):
-                        raise DrainStop(f"--anchor #{want} left the ready queue before drain reached it")
-                    candidates, want = put_first(candidates, want), None
-                anchor, _, kind = candidates[0]
-                others = [(n, title) for n, title, k in queue if k == TICKET and n != anchor]
-                if not note_anchor(ctx, anchor, kind):
-                    continue
-            ended.add(anchor)
-            results, reason = work(ctx, anchor, others, resumed, started, kind)
-            if results:
-                for result in results:
-                    if result["outcome"] == MERGED:
-                        say(f"bundle ended: {refs(result['tickets'])}  merged  {result['via']}  {result['sha']}")
-                    else:
-                        say(f"bundle ended: {refs(result['tickets'])}  {result['via']}")
-                    (merged if result["outcome"] == MERGED else closed).append(result)
-                started.clear()
-                done, failures = done + sum(len(r["tickets"]) for r in results), 0
-            else:
-                bundle = hand_to_chris(ctx, anchor, reason, kind)
-                say(f"bundle ended: {refs(bundle)}  handed to Chris: {reason}")
-                started.clear()
-                handed.append((bundle, reason))
-                done, failures = done + len(bundle), failures + 1
-                if failures >= MAX_CONSECUTIVE_FAILURES:
-                    stop = (f"{failures} bundles in a row went to Chris; the environment is the likelier "
-                            f"cause (auth, quota, herdr, implement-dispatch). Check `herdr agent list` and the "
-                            f"logs in {ctx.log_dir}.")
-                    break
+            prog.seen = (queue, waiting, passed)
+            put_first(candidates, prog.want)
+        while prog.done < limit:
+            pick = next_anchor(ctx, prog)
+            if pick is None:
+                break
+            anchor, kind, resumed, others = pick
+            prog.ended.add(anchor)
+            results, reason = work(ctx, anchor, others, resumed, prog.started, kind)
+            stop = record_bundle(ctx, prog, anchor, kind, results, reason)
+            if stop:
+                break
         else:
-            cause = f"{limit_name} reached"
+            prog.cause = f"{limit_name} reached"
     except (DrainStop, DrainError) as exc:  # a refusal or a tracker failure, said as it is
         stop = str(exc)
     except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
         stop = f"unexpected {type(exc).__name__}: {one_line(exc)}"
-    if started:
-        say(f"bundle ended: {refs(started)}  stopped: {stop}")
+    if prog.started:
+        say(f"bundle ended: {refs(prog.started)}  stopped: {stop}")
     if stop:
-        cause = "stopped"
-    return Run(merged, closed, handed, stop, cause, *passed_at_exit(ctx, cause, seen, ended, merged, closed, handed))
+        prog.cause = "stopped"
+    return Result(prog.merged, prog.closed, prog.handed, stop, prog.cause,
+               *passed_at_exit(ctx, prog))
 
 
-def passed_at_exit(ctx, cause, seen, ended, merged, closed, handed):
-    """`(passed, unread)`: the ready tickets this run passed over, read fresh at
+def passed_at_exit(ctx, prog):
+    """`(passed, unread)`: the ready tickets this drain passed over, read fresh at
     an exit that left work behind (a limit, or no queue read yet) so a list
-    from the start of an hours-long run is not reported as current; a stopped
-    run, whose environment may be failing, keeps its last read. Ready tickets
-    this run never started carry the cause as their reason."""
-    worked = set(ended) | {n for r in merged + closed for n in r["tickets"]} | {n for b, _ in handed for n in b}
+    from the start of an hours-long drain is not reported as current; a stopped
+    drain, whose environment may be failing, keeps its last read. Ready tickets
+    this drain never started carry the cause as their reason."""
+    cause, seen = prog.cause, prog.seen
+    worked = set(prog.ended) | {n for r in prog.merged + prog.closed for n in r["tickets"]} | {n for b, _ in prog.handed for n in b}
     fresh = cause != "stopped" and (seen is None or cause.endswith("reached"))
     unread = None
     if fresh:
@@ -1121,35 +1167,35 @@ def passed_at_exit(ctx, cause, seen, ended, merged, closed, handed):
     if seen is not None:  # specs the loop's own break did not already name
         say_waiting(seen[1])
     if seen is None:
-        return None, unread or "not read (the run stopped before the queue was listed)"
+        return None, unread or "not read (the drain stopped before the queue was listed)"
     queue, _, passed = seen
     listed = {n for n, _ in passed}
     return passed + [(n, f"ready, not started ({cause})") for n, _, _ in queue
                      if n not in worked and n not in listed], None
 
 
-def summary(run):
+def summary(result):
     """The result lines, `passed over:` for each ready ticket left, and the
     closing `ended:` line. It is not a `stopped:` line and does not change the
     exit code."""
     lines = []
-    if run.merged:
+    if result.merged:
         lines += ["merged:"] + [f"  {refs(m['tickets'])}  {m['via']}  {m['sha']}"
-                                 + (f"  ({m['note']})" if m["note"] else "") for m in run.merged]
-    if run.closed:
+                                 + (f"  ({m['note']})" if m["note"] else "") for m in result.merged]
+    if result.closed:
         lines += ["closed, no PR:"] + [f"  {refs(m['tickets'])}  {m['via']}"
-                                        + (f"  ({m['note']})" if m["note"] else "") for m in run.closed]
-    if run.handed:
-        lines += ["handed to Chris:"] + [f"  {refs(b)}  {r}" for b, r in run.handed]
-    if run.stop:
-        lines.append(f"stopped: {run.stop}")
-    if not (run.merged or run.closed or run.handed or run.stop):
+                                        + (f"  ({m['note']})" if m["note"] else "") for m in result.closed]
+    if result.handed:
+        lines += ["handed to Chris:"] + [f"  {refs(b)}  {r}" for b, r in result.handed]
+    if result.stop:
+        lines.append(f"stopped: {result.stop}")
+    if not (result.merged or result.closed or result.handed or result.stop):
         lines.append("nothing to drain")
-    if run.passed is None:
-        lines.append(f"passed over: {run.unread}")
+    if result.passed is None:
+        lines.append(f"passed over: {result.unread}")
     else:
-        lines += [f"passed over: #{n} {why}" for n, why in run.passed]
-    lines.append(f"ended: {run.ended}")
+        lines += [f"passed over: #{n} {why}" for n, why in result.passed]
+    lines.append(f"ended: {result.ended}")
     return "\n".join(lines)
 
 
