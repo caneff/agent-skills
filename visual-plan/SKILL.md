@@ -52,7 +52,7 @@ surface.
 - **Research before you draft.** Read the real files, actions, schema, and
   patterns first; name actual files, symbols, and data shapes instead of
   inventing them. Check existing `actions/` before proposing endpoints and prefer
-  named client helpers over raw fetch. Delegate wide exploration to a sub-agent.
+  named client helpers over raw fetch.
   Lead with reuse: for each step, name what it reuses — existing actions, schema,
   components, helpers — before what it adds, so the plan explains the genuinely new
   delta instead of redescribing what already exists.
@@ -303,9 +303,7 @@ folding framework chrome into the product UI.
   mocks where useful.
 
 For mixed canvas + prototype plans, reuse labels and IDs; patch surfaces
-together unless explicitly single-surface. For output audits, read the
-observability skill: support single-app and workspace tables, preserve app
-previews, and keep audit, synthesis, diffs, and applying changes admin-gated.
+together unless explicitly single-surface.
 
 Treat “higher fidelity,” “pixel-accurate,” “polished mockup,” “production-like,”
 “real design,” and “not a sketch/wireframe” as design-first language even when
