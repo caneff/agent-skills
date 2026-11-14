@@ -649,14 +649,54 @@ def test_edit_without_the_changed_notice_for_that_id_is_a_refusal(endpoint, lmd,
     assert json.loads(result.stdout)["submitted"] is True  # Change was clicked: the page may have changed
 
 
-@pytest.mark.parametrize("extra, message", [
-    (("--png", "x.png"), "--png"),
-    (("--image-id", "001626"), "--image-id"),
+IMG_HTML = OLD_HTML + "<img:{{IMAGE_ID}} width=\"600\">"
+
+
+def run_edit_png(endpoint, lmd, tmp_path, values=None, html=IMG_HTML, extra=()):
+    """An edit that uploads a new board image (#1847): --png, named by values.slug."""
+    (tmp_path / "board.png").write_bytes(PNG)
+    return run_edit(endpoint, lmd, tmp_path, html=html, values={"slug": "test-puzzle"} if values is None else values,
+                    extra=("--png", str(tmp_path / "board.png"), *extra))
+
+
+def test_edit_with_a_png_uploads_it_by_slug_and_fills_the_image_id(endpoint, lmd, tmp_path):
+    result = run_edit_png(endpoint, lmd, tmp_path, values={"slug": "test-puzzle", "code": "987"})
+    assert result.returncode == 0, result.stderr
+    [upload] = lmd.uploads
+    assert (upload["datei"], upload["name"], upload["anmerkung"]) == (PNG, "test-puzzle", "author created")
+    assert "offen" not in upload
+    _, one = _edit_posted(lmd)
+    html = IMG_HTML.replace("{{IMAGE_ID}}", NEW_IMAGE_ID)
+    assert (one["htmlcode_en"], one["code"]) == (html, "987")
+    assert json.loads(result.stdout) == {"puzzle_id": EDIT_ID, "puzzle_url": f"{lmd.base}{PUZZLE_PATH}?id={EDIT_ID}",
+                                         "image_id": NEW_IMAGE_ID, "html": html}
+
+
+def test_edit_with_an_image_id_fills_it_and_uploads_nothing(endpoint, lmd, tmp_path):
+    result = run_edit(endpoint, lmd, tmp_path, html=IMG_HTML, extra=("--image-id", "0099AB"))
+    assert result.returncode == 0, result.stderr
+    assert lmd.uploads == []
+    _, one = _edit_posted(lmd)
+    assert one["htmlcode_en"] == IMG_HTML.replace("{{IMAGE_ID}}", "0099AB")
+    assert json.loads(result.stdout)["image_id"] == "0099AB"
+
+
+@pytest.mark.parametrize("values, html, extra, message", [
+    ({}, IMG_HTML, (), "values.slug"),                                   # an upload needs its name
+    (None, OLD_HTML, (), "no {{IMAGE_ID}} placeholder"),                 # an image with nowhere to go
+    (None, IMG_HTML, ("--image-id", "0099AB"), "--image-id"),            # two images
 ])
-def test_edit_refuses_create_only_flags(endpoint, lmd, tmp_path, extra, message):
-    result = run_edit(endpoint, lmd, tmp_path, extra=extra)
-    assert result.returncode == 2 and message in result.stderr, result.stderr
+def test_edit_with_a_png_refuses_what_it_cannot_place_before_any_request(endpoint, lmd, tmp_path, values, html, extra, message):
+    result = run_edit_png(endpoint, lmd, tmp_path, values=values, html=html, extra=extra)
+    assert result.returncode in (1, 2) and message in result.stderr, result.stderr
     assert lmd.requests == []
+
+
+def test_edit_whose_upload_yields_no_id_reports_the_upload_and_changes_nothing(endpoint, lmd, tmp_path):
+    lmd.upload_mode = "noid"
+    _assert_refused(run_edit_png(endpoint, lmd, tmp_path), 'no new image named "test-puzzle"',
+                    posted={"uploaded": True, "image_id": None, "submitted": False})
+    assert lmd.submits == []
 
 
 @pytest.mark.parametrize("values, message", [

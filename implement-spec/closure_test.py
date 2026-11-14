@@ -254,7 +254,7 @@ def test_a_live_clump_holds_those_sharing_its_files_and_another_dispatches(repo)
     assert [c["tickets"] for c in state["dispatchable"]] == [[4]], state
     assert sorted(h["clump"]["tickets"] for h in state["held"]) == [[2], [3]], state
     assert all(h["over"] == ["hub.md"] for h in state["held"]), state
-    assert [c["tickets"] for c in loop.refill(rest, live, 3)] == [[4]]
+    assert [c["tickets"] for c in loop.picks(loop.frontier(rest, live), 3)[0]] == [[4]]
 
 
 def test_the_hold_reads_a_closure_the_named_files_do_not_show(repo):

@@ -79,11 +79,11 @@ def write_sidecar(reviews_dir, lowest, lines):
 
 
 def test_counts_sums_fixed_and_moved_across_landed_clumps(root, reviews):
-    runfile.start("burn-c", slots=2, root=root, repo=REPO)
-    runfile.clump("burn-c", [901], "/w/a", "agent-a", root=root)
-    runfile.clump("burn-c", [905], "/w/b", "agent-b", root=root)
-    runfile.land("burn-c", 901, "abc1234", root=root)
-    runfile.land("burn-c", 905, "def5678", root=root)
+    runfile.start("run-c", slots=2, root=root, repo=REPO)
+    runfile.clump("run-c", [901], "/w/a", "agent-a", root=root)
+    runfile.clump("run-c", [905], "/w/b", "agent-b", root=root)
+    runfile.land("run-c", 901, "abc1234", root=root)
+    runfile.land("run-c", 905, "def5678", root=root)
     write_sidecar(reviews, 901, [
         {"id": "S1", "outcome": "fixed", "sha": "aaa"},
         {"id": "S2", "outcome": "fixed", "sha": "bbb"},
@@ -92,45 +92,45 @@ def test_counts_sums_fixed_and_moved_across_landed_clumps(root, reviews):
     write_sidecar(reviews, 905, [
         {"id": "P1", "outcome": "moved", "ticket": 1234},
     ])
-    run = runfile.load("burn-c", root=root)
+    run = runfile.load("run-c", root=root)
     got = counts_mod.counts(run, reviews)
     assert got == {"fixed": 2, "moved": 1, "carried": 0, "closed": []}, got
 
 
 def test_counts_ignores_an_unlanded_clumps_sidecar(root, reviews):
-    runfile.start("burn-d", slots=2, root=root, repo=REPO)
-    runfile.clump("burn-d", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-d", 901, "abc1234", root=root)
-    runfile.clump("burn-d", [905], "/w/b", "agent-b", root=root)
+    runfile.start("run-d", slots=2, root=root, repo=REPO)
+    runfile.clump("run-d", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-d", 901, "abc1234", root=root)
+    runfile.clump("run-d", [905], "/w/b", "agent-b", root=root)
     write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
     # 905 is not landed and has no sidecar file at all — its absence must
     # not be refused, only a *landed* clump's missing sidecar is.
-    run = runfile.load("burn-d", root=root)
+    run = runfile.load("run-d", root=root)
     got = counts_mod.counts(run, reviews)
     assert got == {"fixed": 1, "moved": 0, "carried": 0, "closed": []}, got
 
 
 def test_a_pre_1401_sidecar_still_counts_filed_as_moved_and_names_the_leftovers_nothing_sweeps(root, reviews):
-    runfile.start("burn-l", slots=1, root=root, repo=REPO)
-    runfile.clump("burn-l", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-l", 901, "abc1234", root=root)
+    runfile.start("run-l", slots=1, root=root, repo=REPO)
+    runfile.clump("run-l", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-l", 901, "abc1234", root=root)
     write_sidecar(reviews, 901, [
         {"id": "S1", "outcome": "fixed", "sha": "a"},
         {"id": "S2", "outcome": "filed", "ticket": 5},
         {"id": "S3", "outcome": "leftover", "file": "f", "title": "t", "severity": "hard", "text": "x"},
         {"id": "S4", "outcome": "handed-back", "command": "gh issue create"},
     ])
-    got = cli(root, "burn-l", "--reviews-dir", reviews)
+    got = cli(root, "run-l", "--reviews-dir", reviews)
     assert got.returncode == 0, got.stderr
     assert "fixed: 1  moved: 1" in got.stdout, got.stdout
     assert "swept by nothing: 2" in got.stdout, got.stdout
 
 
 def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero(root, reviews):
-    runfile.start("burn-e", slots=1, root=root, repo=REPO)
-    runfile.clump("burn-e", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-e", 901, "abc1234", root=root)
-    run = runfile.load("burn-e", root=root)
+    runfile.start("run-e", slots=1, root=root, repo=REPO)
+    runfile.clump("run-e", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-e", 901, "abc1234", root=root)
+    run = runfile.load("run-e", root=root)
     with pytest.raises(runfile.RunFileError, match="901"):
         counts_mod.counts(run, reviews)
 
@@ -139,15 +139,15 @@ def test_counts_names_a_closed_clump_as_skipped_rather_than_refusing_it(root, re
     # burn-skills-2026-09-30: #1236 (already fixed on main) and #1262 (a
     # nested spec run) closed with no PR here, so neither has a sidecar. The
     # report names them, so a reader can tell them from a clump never read.
-    runfile.start("burn-g", slots=3, root=root, repo=REPO)
-    runfile.clump("burn-g", [901], "/w/a", "agent-a", root=root)
-    runfile.clump("burn-g", [1236], "/w/b", "agent-b", root=root)
-    runfile.clump("burn-g", [1262], "/w/c", "agent-c", root=root)
-    runfile.land("burn-g", 901, "abc1234", root=root)
-    runfile.close("burn-g", 1236, "duplicate of #1202", root=root)
-    runfile.close("burn-g", 1262, "nested spec run", root=root)
+    runfile.start("run-g", slots=3, root=root, repo=REPO)
+    runfile.clump("run-g", [901], "/w/a", "agent-a", root=root)
+    runfile.clump("run-g", [1236], "/w/b", "agent-b", root=root)
+    runfile.clump("run-g", [1262], "/w/c", "agent-c", root=root)
+    runfile.land("run-g", 901, "abc1234", root=root)
+    runfile.close("run-g", 1236, "duplicate of #1202", root=root)
+    runfile.close("run-g", 1262, "nested spec run", root=root)
     write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
-    got = cli(root, "burn-g", "--reviews-dir", reviews)
+    got = cli(root, "run-g", "--reviews-dir", reviews)
     assert got.returncode == 0, got.stderr
     assert "fixed: 1" in got.stdout, got.stdout
     assert ("skipped, closed without a landing: #1236 (duplicate of #1202), "
@@ -157,39 +157,39 @@ def test_counts_names_a_closed_clump_as_skipped_rather_than_refusing_it(root, re
 def test_spec_counts_read_the_specs_one_sidecar_and_need_none_per_slice(root, reviews):
     # #1542 (c): a slice runs no review wave, so it has no sidecar; the
     # spec's own `dispositions-<spec>.jsonl` is the only record.
-    runfile.start("burn-s", slots=2, root=root, repo=REPO)
-    runfile.clump("burn-s", [901], "/w/a", "agent-a", root=root)
-    runfile.clump("burn-s", [902], "/w/b", "agent-b", root=root)
-    runfile.land("burn-s", 901, "abc1234", root=root)
-    runfile.land("burn-s", 902, "def5678", root=root)
+    runfile.start("run-s", slots=2, root=root, repo=REPO)
+    runfile.clump("run-s", [901], "/w/a", "agent-a", root=root)
+    runfile.clump("run-s", [902], "/w/b", "agent-b", root=root)
+    runfile.land("run-s", 901, "abc1234", root=root)
+    runfile.land("run-s", 902, "def5678", root=root)
     write_sidecar(reviews, 500, [
         {"id": "S1", "outcome": "fixed", "sha": "a"},
         {"id": "C1", "outcome": "moved", "ticket": 5},
         {"id": "P1", "outcome": "disputed", "reason": "x"},
     ])
-    got = cli(root, "burn-s", "--reviews-dir", reviews, "--spec", "500")
+    got = cli(root, "run-s", "--reviews-dir", reviews, "--spec", "500")
     assert got.returncode == 0, got.stderr
     assert "fixed: 1  moved: 1" in got.stdout, got.stdout
 
 
 def test_spec_counts_still_refuse_when_the_specs_own_sidecar_is_missing(root, reviews):
-    runfile.start("burn-t", slots=1, root=root, repo=REPO)
-    runfile.clump("burn-t", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-t", 901, "abc1234", root=root)
+    runfile.start("run-t", slots=1, root=root, repo=REPO)
+    runfile.clump("run-t", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-t", 901, "abc1234", root=root)
     # A slice's own sidecar must not stand in for the spec's.
     write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
-    got = cli(root, "burn-t", "--reviews-dir", reviews, "--spec", "500")
+    got = cli(root, "run-t", "--reviews-dir", reviews, "--spec", "500")
     assert got.returncode == 1, got
     assert "#500" in got.stderr and "refused" in got.stderr, got.stderr
 
 
 def test_spec_counts_do_not_double_count_a_slices_stray_sidecar(root, reviews):
-    runfile.start("burn-u", slots=1, root=root, repo=REPO)
-    runfile.clump("burn-u", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-u", 901, "abc1234", root=root)
+    runfile.start("run-u", slots=1, root=root, repo=REPO)
+    runfile.clump("run-u", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-u", 901, "abc1234", root=root)
     write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
     write_sidecar(reviews, 500, [])
-    got = cli(root, "burn-u", "--reviews-dir", reviews, "--spec", "500")
+    got = cli(root, "run-u", "--reviews-dir", reviews, "--spec", "500")
     assert got.returncode == 0, got.stderr
     assert "fixed: 0  moved: 0" in got.stdout, got.stdout
 
@@ -200,12 +200,12 @@ def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low(
         root, reviews, landed_run, bad):
     # `runfile.read_dispositions` refuses these lines; a reader that skipped them
     # would report a low count with a clean exit (codex-second-M1, #1097).
-    landed_run("burn-m", REPO)
+    landed_run("run-m", REPO)
     path = counts_mod.dispositions_path(reviews, 901)
     with open(path, "w") as fh:
         fh.write('{"id": "S0", "outcome": "fixed", "sha": "aaa"}\n')
         fh.write(bad + "\n")
-    got = cli(root, "burn-m", "--reviews-dir", reviews)
+    got = cli(root, "run-m", "--reviews-dir", reviews)
     assert got.returncode == 1, (bad, got)
     assert "dispositions-901.jsonl:2" in got.stderr, (bad, got.stderr)
 
@@ -217,14 +217,14 @@ def test_cli_counts_accepts_the_primary_checkout_of_a_run_started_in_a_worktree_
     # name one target and read one sidecar directory.
     target = git_repo(home, "target-repo")
     linked = linked_worktree(target, "linked")
-    runfile.start("burn-x", slots=1, root=root, repo=linked)
-    runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-x", 901, "abc1234", root=root)
+    runfile.start("run-x", slots=1, root=root, repo=linked)
+    runfile.clump("run-x", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-x", 901, "abc1234", root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "sha": "a",
                             "ticket": 5}])
-    got = cli(root, "burn-x", "--repo", {"primary": target, "linked": linked}[which],
+    got = cli(root, "run-x", "--repo", {"primary": target, "linked": linked}[which],
               home=home)
     assert got.returncode == 0, (which, got)
     assert "moved: 1" in got.stdout, got.stdout
@@ -240,14 +240,14 @@ def test_cli_counts_keys_the_cache_on_the_common_git_dir_not_the_checkout_name_1
     os.makedirs(work)
     subprocess.run(["git", "init", "-q", "--separate-git-dir", gitdir, work],
                    check=True)
-    runfile.start("burn-x", slots=1, root=root, repo=work)
-    runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-x", 901, "abc1234", root=root)
+    runfile.start("run-x", slots=1, root=root, repo=work)
+    runfile.clump("run-x", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-x", 901, "abc1234", root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "gitdirs")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "sha": "a",
                             "ticket": 5}])
-    got = cli(root, "burn-x", "--repo", work, home=home)
+    got = cli(root, "run-x", "--repo", work, home=home)
     assert got.returncode == 0, got
     assert "moved: 1" in got.stdout, got.stdout
 
@@ -258,15 +258,15 @@ def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd(root, home,
     # cwd's — and a same-named sidecar under the cwd repo must not be read.
     target = git_repo(home, "target-repo")
     other = git_repo(home, "other-repo")
-    runfile.start("burn-x", slots=1, root=root, repo=target)
-    runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-x", 901, "abc1234", root=root)
+    runfile.start("run-x", slots=1, root=root, repo=target)
+    runfile.clump("run-x", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-x", 901, "abc1234", root=root)
     for name, outcome in (("target-repo", "moved"), ("other-repo", "fixed")):
         d = os.path.join(home, ".cache", "agent-reviews", name)
         os.makedirs(d)
         write_sidecar(d, 901, [{"id": "S1", "outcome": outcome, "sha": "a",
                                 "ticket": 5}])
-    got = cli(root, "burn-x", "--repo", target, cwd=other, home=home)
+    got = cli(root, "run-x", "--repo", target, cwd=other, home=home)
     assert got.returncode == 0, got
     assert "moved: 1" in got.stdout, got.stdout
     assert "fixed: 0" in got.stdout, got.stdout
@@ -275,8 +275,8 @@ def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd(root, home,
 def test_cli_counts_refuses_with_neither_repo_nor_reviews_dir(root, home, git_repo):
     # No cwd default: from the wrong repo it reads another repo's sidecars
     # or reports every landed clump missing.
-    runfile.start("burn-y", slots=1, root=root, repo=REPO)
-    got = cli(root, "burn-y", cwd=git_repo(home, "any"))
+    runfile.start("run-y", slots=1, root=root, repo=REPO)
+    got = cli(root, "run-y", cwd=git_repo(home, "any"))
     assert got.returncode == 1, got
     assert "--repo" in got.stderr, got.stderr
 
@@ -284,8 +284,8 @@ def test_cli_counts_refuses_with_neither_repo_nor_reviews_dir(root, home, git_re
 def test_cli_counts_refuses_a_repo_that_is_not_a_git_checkout(root, home):
     # A path git cannot resolve must not read as some other repo's cache
     # directory (#1093 C1, C2).
-    runfile.start("burn-z", slots=1, root=root, repo=REPO)
-    got = cli(root, "burn-z", "--repo", os.path.join(home, "nope"),
+    runfile.start("run-z", slots=1, root=root, repo=REPO)
+    got = cli(root, "run-z", "--repo", os.path.join(home, "nope"),
               home=home)
     assert got.returncode == 1 and "not a git checkout" in got.stderr, got
     assert "Traceback" not in got.stderr, got.stderr
@@ -296,11 +296,11 @@ def test_cli_counts_refuses_a_repo_other_than_the_runs_target_1190(root, home, g
     # run's recorded target decides, so it is refused before any is read.
     target = git_repo(home, "target-repo")
     other = git_repo(home, "other-repo")
-    landed_run("burn-o", target)
+    landed_run("run-o", target)
     d = os.path.join(home, ".cache", "agent-reviews", "other-repo")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
-    got = cli(root, "burn-o", "--repo", other, home=home)
+    got = cli(root, "run-o", "--repo", other, home=home)
     assert got.returncode == 1, got
     assert os.path.realpath(target) in got.stderr, got.stderr
     assert os.path.realpath(other) in got.stderr, got.stderr
@@ -313,28 +313,28 @@ def test_cli_counts_accepts_the_recorded_checkout_from_a_subdirectory_1190(
     target = git_repo(home, "target-repo")
     sub = os.path.join(target, "deep")
     os.makedirs(sub)
-    landed_run("burn-s", target)
+    landed_run("run-s", target)
     d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "ticket": 5}])
     spelled = {"root": target, "subdir": sub, "slash": target + "/"}[spelling]
-    got = cli(root, "burn-s", "--repo", spelled, home=home)
+    got = cli(root, "run-s", "--repo", spelled, home=home)
     assert got.returncode == 0, (spelled, got)
     assert "moved: 1" in got.stdout, got.stdout
 
 
 def test_cli_counts_refuses_a_run_file_that_names_no_target_repo_1190(root, home, git_repo, landed_run):
     target = git_repo(home, "target-repo")
-    landed_run("burn-l", target)
-    drop_repo_field("burn-l", root)
-    got = cli(root, "burn-l", "--repo", target, home=home)
+    landed_run("run-l", target)
+    drop_repo_field("run-l", root)
+    got = cli(root, "run-l", "--repo", target, home=home)
     assert got.returncode == 1, got
     assert "names no target repo" in got.stderr, got.stderr
     # `--reviews-dir` is the explicit escape and is not checked.
     d = os.path.join(home, "sidecars")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "ticket": 5}])
-    got = cli(root, "burn-l", "--reviews-dir", d, home=home)
+    got = cli(root, "run-l", "--reviews-dir", d, home=home)
     assert got.returncode == 0, got
 
 
@@ -344,21 +344,21 @@ def test_cli_counts_ignores_a_git_dir_in_the_environment(root, home, git_repo):
     # refuse the landed clump as missing.
     target = git_repo(home, "target-repo")
     other = git_repo(home, "other-repo")
-    runfile.start("burn-g", slots=1, root=root, repo=target)
-    runfile.clump("burn-g", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-g", 901, "abc1234", root=root)
+    runfile.start("run-g", slots=1, root=root, repo=target)
+    runfile.clump("run-g", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-g", 901, "abc1234", root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "ticket": 5}])
-    got = cli(root, "burn-g", "--repo", target, home=home,
+    got = cli(root, "run-g", "--repo", target, home=home,
               extra_env={"GIT_DIR": os.path.join(other, ".git")})
     assert got.returncode == 0, got
     assert "moved: 1" in got.stdout, got.stdout
 
 
 def test_cli_counts_refuses_both_repo_and_reviews_dir(root):
-    runfile.start("burn-w", slots=1, root=root, repo=REPO)
-    got = cli(root, "burn-w", "--repo", "/x", "--reviews-dir", "/y")
+    runfile.start("run-w", slots=1, root=root, repo=REPO)
+    got = cli(root, "run-w", "--repo", "/x", "--reviews-dir", "/y")
     assert got.returncode == 2, got
     assert "not allowed with" in got.stderr, got.stderr
 
@@ -370,12 +370,12 @@ def test_cli_counts_reads_the_folded_cache_directory_for_a_repo_named_agent_skil
     os.makedirs(os.path.dirname(gitdir))
     os.makedirs(work)
     subprocess.run(["git", "init", "-q", "--separate-git-dir", gitdir, work], check=True)
-    runfile.start("burn-x", slots=1, root=root, repo=work)
-    runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-x", 901, "abc1234", root=root)
+    runfile.start("run-x", slots=1, root=root, repo=work)
+    runfile.clump("run-x", [901], "/w/a", "agent-a", root=root)
+    runfile.land("run-x", 901, "abc1234", root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "skills")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "sha": "a", "ticket": 5}])
-    got = cli(root, "burn-x", "--repo", work, home=home)
+    got = cli(root, "run-x", "--repo", work, home=home)
     assert got.returncode == 0, got
     assert "moved: 1" in got.stdout, got.stdout

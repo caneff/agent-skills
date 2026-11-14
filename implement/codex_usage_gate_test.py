@@ -226,6 +226,19 @@ def test_percent_with_no_cache_is_unknown(newdir):
     assert run(newdir, None, "--percent") == (30, "unknown\n")
 
 
+# An unreadable reading keeps stdout's `unknown` and says why on stderr, as the sibling path does.
+def test_percent_names_the_cause_on_stderr_and_keeps_stdout(newdir):
+    d = newdir()
+    # A copy of the gate with no helper beside it: the helper load raises FileNotFoundError.
+    (d / "implement").mkdir()
+    gate = d / "implement" / "codex-usage-gate.py"
+    gate.write_text(open(GATE).read())
+    env = {"CODEX_HOME": str(d), "HOME": str(d), "PATH": "/nonexistent"}
+    p = subprocess.run([sys.executable, str(gate), "--percent"], env=env, capture_output=True, text=True)
+    assert (p.returncode, p.stdout) == (30, "unknown\n"), (p.returncode, p.stdout, p.stderr)
+    assert "codex usage unknown: FileNotFoundError:" in p.stderr, p.stderr
+
+
 # --- the kill switch ---------------------------------------------------------
 # The kill switch (#1354): `~/.config/agent-skills/codex-reviews-off`, any content, turns the
 # gate to CAPPED before any cache read or live fetch.

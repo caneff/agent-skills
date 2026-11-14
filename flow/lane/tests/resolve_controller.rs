@@ -4,7 +4,7 @@
 
 mod support;
 use std::os::unix::net::UnixListener;
-use support::{out_text, Fixture};
+use support::{out_text, stdout, Fixture};
 
 fn resolve(f: &Fixture, arg: &str) -> std::process::Output {
     resolve_with_env(f, arg, &[])
@@ -49,10 +49,6 @@ fn write_session(f: &Fixture, id: &str, name: &str, socket: Option<&std::path::P
         format!(r#"{{"pid":{pid},"sessionId":"{id}","procStart":"{}","name":"{name}"{socket}}}"#, stat.start),
     )
     .unwrap();
-}
-
-fn stdout(out: &std::process::Output) -> String {
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
 #[test]

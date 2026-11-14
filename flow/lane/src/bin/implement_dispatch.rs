@@ -1084,7 +1084,11 @@ fn run() -> Result<(), ExitCode> {
     }
 
     let repo = args.repo.clone().unwrap_or_else(|| env::current_dir().map(|p| p.display().to_string()).unwrap_or_default());
-    let primary = worktree::primary_timeout(&repo, git_query_timeout()).map_err(die)?;
+    // The one listing a dispatch takes: it names the primary checkout and,
+    // after the fetch, answers whether the workspace path is already
+    // registered. A listing that failed is an error, never "not registered".
+    let listing = worktree::list_timeout(&repo, git_query_timeout()).map_err(die)?;
+    let primary = listing.primary().to_string();
     let slug = git_origin::origin_slug_timeout(Path::new(&primary), git_query_timeout()).map_err(die)?.unwrap_or_default();
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
@@ -1264,10 +1268,7 @@ fn run() -> Result<(), ExitCode> {
     if !quiet_ok_timeout("git", &["-C", &primary, "fetch", "-q", "--prune", "origin"], fetch_timeout) {
         return Err(die(format!("git fetch failed or exceeded its {fetch_timeout:?} bound in {primary}")));
     }
-    let registered_worktree = quiet_stdout_bounded("git", &["-C", &primary, "worktree", "list", "--porcelain"], git_query_timeout())
-        .map_err(die)?
-        .map(|out| out.lines().any(|l| l == format!("worktree {}", wt.display())))
-        .unwrap_or(false);
+    let registered_worktree = listing.all().iter().any(|w| Path::new(&w.path) == wt);
     if wt.exists() || registered_worktree {
         return Err(die(format!("{} already exists", wt.display())));
     }
@@ -1587,7 +1588,7 @@ mod tests {
     #[test]
     fn run_id_grammar_matches_runfile_py() {
         let ids = [
-            "burn-2026-09-27", "a", "1", "A.b_c-9", "burn.x", "a.", "-a", ".a", "_a", "a..b", "..", "a/b", "a b", "a\"b", "a\n", "",
+            "run-2026-09-27", "a", "1", "A.b_c-9", "run.x", "a.", "-a", ".a", "_a", "a..b", "..", "a/b", "a b", "a\"b", "a\n", "",
             "\u{e9}t\u{e9}", "a\u{e9}",
         ];
         let script = r#"

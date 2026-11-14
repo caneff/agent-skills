@@ -29,8 +29,8 @@ fn fail(msg: &str) -> ExitCode {
 /// top level; `Err` names why not.
 fn primary_checkout(cwd: &str) -> Result<String, String> {
     let top = quiet_stdout("git", &["-C", cwd, "rev-parse", "--show-toplevel"]).ok_or_else(|| format!("{cwd} is not in a git repo"))?;
-    let primary = worktree::primary_checked(cwd)?;
-    let (top, primary) = (workers::canonical_workspace_path(top.trim()), workers::canonical_workspace_path(&primary));
+    let listing = worktree::list(cwd)?;
+    let (top, primary) = (workers::canonical_workspace_path(top.trim()), workers::canonical_workspace_path(listing.primary()));
     if top != primary {
         return Err(format!("{top} is not the primary checkout ({primary}); adopt from there"));
     }

@@ -58,7 +58,7 @@ source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
 for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
           worker_alert_worker_agent_name worker_alert_controller_pane \
           worker_alert_resolve_controller worker_alert_prompt_pane \
-          worker_alert_current_controller; do
+          worker_alert_current_controller worker_alert_deliver; do
   declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
 done
 
@@ -200,8 +200,6 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
 key="$session"$'\t'"$stop"
 grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
-logline() { worker_alert_logline "$log" "$key" "$1" "$2"; }
-
 # Every herdr call below ends by a 10 s deadline, measured from here — not
 # 12 s, because the controller resolution above already spent up to its own
 # 2 s budget on the same 15 s hook timeout, and this deadline has to leave
@@ -211,12 +209,5 @@ deadline=$((SECONDS + 10))
 worker_agent="$(worker_alert_worker_agent_name)"
 alert="[worker-stop-alert] worker #$n stopped without reporting to $controller (herdr agent $worker_agent)"
 
-pane="$(worker_alert_controller_pane "$ctl_session")"
-if [ -z "$pane" ]; then
-  logline "not-sent" "no herdr pane for controller $controller: $alert"
-  exit 0
-fi
-
-worker_alert_prompt_pane "$pane" "$alert" "$deadline"
-logline "$prompt_status" "$prompt_msg"
+worker_alert_deliver "$log" "$key" "$controller" "$alert" "$deadline"
 exit 0

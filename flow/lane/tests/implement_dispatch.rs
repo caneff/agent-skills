@@ -2196,14 +2196,14 @@ fn a_run_id_is_carried_in_the_brief_so_the_worker_knows_a_run_file_is_under_it()
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    seed_run_file(&f, None, "burn-2026-09-23-0700");
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-2026-09-23-0700", "412"], &default_scenario());
+    seed_run_file(&f, None, "run-2026-09-23-0700");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "run-2026-09-23-0700", "412"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(
         prompt_line(&f),
-        "herdr agent prompt sudokumaker-custom-constrain-412 /implement 412 --tier heavy --controller \"skills-ctl\" --run burn-2026-09-23-0700 --wait --until working --timeout 120000"
+        "herdr agent prompt sudokumaker-custom-constrain-412 /implement 412 --tier heavy --controller \"skills-ctl\" --run run-2026-09-23-0700 --wait --until working --timeout 120000"
     );
-    assert!(out_text(&out).contains("dispatched #412 (sonnet, heavy tier, run burn-2026-09-23-0700, controller skills-ctl)"), "{}", out_text(&out));
+    assert!(out_text(&out).contains("dispatched #412 (sonnet, heavy tier, run run-2026-09-23-0700, controller skills-ctl)"), "{}", out_text(&out));
 }
 
 #[test]
@@ -2213,7 +2213,7 @@ fn a_run_id_outside_the_run_file_grammar_is_refused_before_the_claim() {
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     // runfile.py's own run-id grammar: a space or quote would split the
     // one-line brief, a `/` or `..` names no run file, empty names none.
-    for bad in ["burn x", "burn\"x", "../burn", "burn..x", "-burn", ".burn", "", "burn\n"] {
+    for bad in ["run x", "run\"x", "../run", "run..x", "-run", ".run", "", "run\n"] {
         let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", bad, "413"], &default_scenario());
         assert!(refused(&out, &f.calls(), &repo, "413", "run id"), "--run {bad:?}: {}", out_text(&out));
     }
@@ -2225,7 +2225,7 @@ fn a_run_id_on_a_spec_dispatch_is_refused() {
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-2026-09-23-0700", "--spec", "395"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "run-2026-09-23-0700", "--spec", "395"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "395", "--run"), "{}", out_text(&out));
 }
 
@@ -2234,12 +2234,12 @@ fn a_clumps_run_id_sits_before_the_clump_note() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    seed_run_file(&f, None, "burn-2026-09-23-0700");
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-2026-09-23-0700", "424", "423"], &default_scenario());
+    seed_run_file(&f, None, "run-2026-09-23-0700");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "run-2026-09-23-0700", "424", "423"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let line = prompt_line(&f);
     assert!(
-        line.starts_with("herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 424 --tier heavy --controller \"skills-ctl\" --run burn-2026-09-23-0700 -- Clump:"),
+        line.starts_with("herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 424 --tier heavy --controller \"skills-ctl\" --run run-2026-09-23-0700 -- Clump:"),
         "{line}"
     );
 }
@@ -2264,12 +2264,12 @@ fn a_run_id_naming_no_run_file_is_refused_before_the_claim_and_the_prompt() {
     std::fs::create_dir_all(&runs).unwrap();
     // A run file under the default dir does not count once the override
     // names another: the override is the only place looked.
-    seed_run_file(&f, None, "burn-typo");
+    seed_run_file(&f, None, "run-typo");
     let scenario = with(&default_scenario(), &[("SPEC_RUN_CACHE_DIR", runs.to_str().unwrap())]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-typo", "414"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "run-typo", "414"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "414", "no run file"), "{}", out_text(&out));
     assert!(!f.calls().contains("herdr agent prompt"), "{}", f.calls());
-    assert!(out_text(&out).contains(&runs.join("burn-typo.json").display().to_string()), "{}", out_text(&out));
+    assert!(out_text(&out).contains(&runs.join("run-typo.json").display().to_string()), "{}", out_text(&out));
 }
 
 #[test]
@@ -2277,8 +2277,8 @@ fn a_directory_where_the_run_file_should_be_is_refused() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    std::fs::create_dir_all(f.home().join(".cache/spec-run/burn-dir.json")).unwrap();
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-dir", "415"], &default_scenario());
+    std::fs::create_dir_all(f.home().join(".cache/spec-run/run-dir.json")).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "run-dir", "415"], &default_scenario());
     assert!(refused(&out, &f.calls(), &repo, "415", "no run file"), "{}", out_text(&out));
 }
 
@@ -2287,11 +2287,11 @@ fn the_run_file_is_found_under_a_tilde_spec_run_cache_dir() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    seed_run_file(&f, Some(&f.home().join("runs")), "burn-2026-09-23-0700");
+    seed_run_file(&f, Some(&f.home().join("runs")), "run-2026-09-23-0700");
     let scenario = with(&default_scenario(), &[("SPEC_RUN_CACHE_DIR", "~/runs")]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-2026-09-23-0700", "416"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "run-2026-09-23-0700", "416"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
-    assert!(prompt_line(&f).contains("--run burn-2026-09-23-0700"), "{}", prompt_line(&f));
+    assert!(prompt_line(&f).contains("--run run-2026-09-23-0700"), "{}", prompt_line(&f));
 }
 
 // #849: implement-dispatch's git and gh subprocess calls previously had no
@@ -2347,14 +2347,14 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     // its own `_timeout(`/`_bounded(` sibling as a false positive.
     // `worktree::primary(` (#849 correctness gate, C3/spec P1): dispatch's
     // own first git call, missed in the initial pass — bounded via
-    // `worktree::primary_timeout`; `worktree::primary_checked` is
-    // controller-adopt's, out of scope.
+    // `worktree::list_timeout`; `worktree::list` is controller-adopt's
+    // and merge-cleanup's, out of scope.
     let unbounded_shared = [
         "git_origin::default_branch(",
         "git_origin::origin_slug(",
         "issue_state::read(",
         "issue_state::body(",
-        "worktree::primary_checked(",
+        "worktree::list(",
     ];
     for pat in unbounded_shared {
         assert!(!stripped.contains(pat), "implement_dispatch.rs still calls the unbounded shared function {pat:?}");
@@ -2423,7 +2423,7 @@ fn origin_of(f: &Fixture, name: &str) -> std::path::PathBuf {
 
 /// Pushes `branch` to origin one commit past origin/main, standing in for an
 /// integration branch slices have already landed on; returns its sha.
-fn push_spec_branch(repo: &std::path::Path, branch: &str) -> String {
+fn push_integration_branch(repo: &std::path::Path, branch: &str) -> String {
     let run = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(repo).args(args).status().unwrap().success(), "git {args:?}");
     run(&["checkout", "-q", "-b", "landed-slice", "origin/main"]);
     std::fs::write(repo.join("slice"), "landed\n").unwrap();
@@ -2458,7 +2458,7 @@ fn spec_mode_reuses_an_existing_integration_branch_without_moving_it() {
     f.reset_home(true);
     let name = "sudokumaker-custom-constraints";
     let repo = f.mkfixture(name, "main");
-    let landed = push_spec_branch(&repo, "spec-395");
+    let landed = push_integration_branch(&repo, "spec-395");
     let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "3")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
@@ -2496,7 +2496,7 @@ fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let landed = push_spec_branch(&repo, "spec-500");
+    let landed = push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
@@ -2522,7 +2522,7 @@ fn a_slice_is_heavy_even_when_it_carries_the_documentation_label() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    push_spec_branch(&repo, "spec-500");
+    push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500"), ("GH_LABELS", "documentation,ready-for-agent")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
@@ -2533,11 +2533,11 @@ fn a_slice_is_heavy_even_when_it_carries_the_documentation_label() {
 }
 
 #[test]
-fn a_lone_ticket_dispatches_from_origin_default_even_with_a_spec_branch_on_origin() {
+fn a_lone_ticket_dispatches_from_origin_default_even_with_an_integration_branch_on_origin() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    push_spec_branch(&repo, "spec-500");
+    push_integration_branch(&repo, "spec-500");
     // No GH_PARENT_395: the parent endpoint answers 404, no parent.
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
@@ -2555,7 +2555,7 @@ fn a_slice_whose_spec_has_no_integration_branch_dispatches_from_origin_default()
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     // Another spec's integration branch exists; this slice's spec has none.
-    push_spec_branch(&repo, "spec-600");
+    push_integration_branch(&repo, "spec-600");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
     // Red here, not below, when a parent with no origin/spec-500 is read as
@@ -2573,7 +2573,7 @@ fn a_parent_that_cannot_be_read_refuses_the_dispatch() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    push_spec_branch(&repo, "spec-500");
+    push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_PARENT_FAIL_395", "1")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "395", "parent of #395"), "{}", out_text(&out));
@@ -2584,7 +2584,7 @@ fn a_clump_mixing_a_slice_with_a_lone_ticket_is_refused() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    push_spec_branch(&repo, "spec-500");
+    push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395", "396"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "395", "one base"), "{}", out_text(&out));
@@ -2595,7 +2595,7 @@ fn a_clump_of_slices_of_one_spec_builds_on_its_integration_branch() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let landed = push_spec_branch(&repo, "spec-500");
+    let landed = push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500"), ("GH_PARENT_396", "500")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395", "396"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
@@ -2622,7 +2622,7 @@ fn a_ticket_whose_body_names_a_parent_with_no_sub_issue_link_is_refused() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    push_spec_branch(&repo, "spec-500");
+    push_integration_branch(&repo, "spec-500");
     for body in ["## Parent\n\n#500\n", "Part of [Spec: x](https://github.com/caneff/sudokumaker-custom-constraints/issues/500).\n"] {
         f.reset_home(true);
         let scenario = with(&default_scenario(), &[("GH_BODY_395", body)]);
@@ -2636,7 +2636,7 @@ fn a_ticket_whose_body_says_its_parent_is_none_dispatches_as_a_lone_ticket() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    push_spec_branch(&repo, "spec-500");
+    push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_BODY_395", "## Parent\n\nNone\n\n## Blocked by\n\n- #12\n")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
@@ -2644,11 +2644,11 @@ fn a_ticket_whose_body_says_its_parent_is_none_dispatches_as_a_lone_ticket() {
 }
 
 #[test]
-fn a_spec_branch_deleted_on_origin_is_not_read_as_present() {
+fn an_integration_branch_deleted_on_origin_is_not_read_as_present() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    push_spec_branch(&repo, "spec-500");
+    push_integration_branch(&repo, "spec-500");
     let git = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&repo).args(args).status().unwrap().success(), "git {args:?}");
     git(&["fetch", "-q", "origin"]);
     // Deleted on origin itself, as GitHub deletes a branch: this clone's
@@ -2708,7 +2708,7 @@ fn dispatch_records_the_sha_a_slice_branched_from_as_its_fork_point() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let landed = push_spec_branch(&repo, "spec-500");
+    let landed = push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));

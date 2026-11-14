@@ -252,7 +252,11 @@ The failure rule above applies: a failing step stops the run, and a driver failu
    Work in the `edit/` subfolder, so a create run's `page.html` (still holding
    `{{IMAGE_ID}}`) and `values.json` (holding `slug` and `sudoku`) are never reused: the
    driver refuses both in edit mode. Write the edited page as `edit/page.html`. Add
-   `--values "$(wslpath -w edit-values.json)"` when fields change too. It leaves every other
+   `--values "$(wslpath -w edit-values.json)"` when fields change too. When the board changes, render the new image as
+   Output step 2 does (into `edit/board.png`), put `{{IMAGE_ID}}` in `edit/page.html` where the old id
+   was, add `"slug": "<slug>"` to `edit-values.json`, and add `--png "$(wslpath -w board.png)"`: the
+   driver uploads it under that slug and fills the placeholder (#1847). After a failure past the upload,
+   rerun with `--image-id <id>` in place of `--png`, as Output step 6's retry does, never a second upload. It leaves every other
    field, the activation choice and its date fields included, as the form served it, and
    it never clicks "Aktivieren": activation is Chris's alone. A non-zero exit is a failure.
 3. Re-archive with § Archive's command, the same `<slug>` and `<sudokupad-link>` and

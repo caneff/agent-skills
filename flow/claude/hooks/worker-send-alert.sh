@@ -37,7 +37,8 @@ source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
 for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
           worker_alert_worker_agent_name worker_alert_controller_pane \
           worker_alert_resolve_controller worker_alert_prompt_pane \
-          worker_alert_current_controller worker_alert_is_controller_target; do
+          worker_alert_current_controller worker_alert_is_controller_target \
+          worker_alert_deliver; do
   declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
 done
 
@@ -82,11 +83,5 @@ deadline=$((SECONDS + 10))
 worker_agent="$(worker_alert_worker_agent_name)"
 alert="[worker-send-alert] worker #$n's SendMessage to $to failed: ${reason:-no reason given} (herdr agent $worker_agent)"
 
-pane="$(worker_alert_controller_pane "$ctl_session")"
-if [ -z "$pane" ]; then
-  logline "not-sent" "no herdr pane for controller $controller: $alert"
-  exit 0
-fi
-worker_alert_prompt_pane "$pane" "$alert" "$deadline"
-logline "$prompt_status" "$prompt_msg"
+worker_alert_deliver "$log" "$key" "$controller" "$alert" "$deadline"
 exit 0

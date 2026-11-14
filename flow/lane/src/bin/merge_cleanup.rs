@@ -7,6 +7,8 @@ use lane::git_origin::{default_branch, origin_slug};
 use lane::herdr::{self, Agent};
 use lane::runner::{on_path, quiet_code_bounded, quiet_ok, quiet_stderr_ok, quiet_stdout, status_bounded};
 use lane::sessions::{self, in_tree};
+use lane::worktree::{self, Worktrees};
+use lane::worktree_files::{CACHE_DIRS, DirtyKind, WorktreeFiles, collapse_nested_worktrees, first_names, names_shown};
 use lane::{safe_print, safe_println};
 use std::env;
 use std::io::IsTerminal;
@@ -244,13 +246,6 @@ fn pr_url_tail(arg: &str) -> Option<&str> {
     Some(&after[i + "/pull/".len()..])
 }
 
-/// The repo's primary (non-linked) worktree, or empty.
-fn primary_of(path: &str) -> String {
-    quiet_stdout("git", &["-C", path, "worktree", "list", "--porcelain"])
-        .and_then(|o| o.lines().next().and_then(|l| l.strip_prefix("worktree ")).map(str::to_string))
-        .unwrap_or_default()
-}
-
 fn head_of(path: &str) -> Option<String> {
     quiet_stdout("git", &["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])
 }
@@ -359,487 +354,11 @@ fn blockers(agents: &[Agent]) -> Vec<String> {
         .collect()
 }
 
-/// What `git worktree remove --force` would throw away: a worktree's
-/// `git status --porcelain --ignored` entries, by kind. Git collapses an
-/// untracked or ignored directory to one entry; `file_ignored` expands
-/// the ignored ones by what is on disk beneath them.
-#[derive(Default)]
-struct WorktreeFiles {
-    modified: Vec<String>,
-    untracked: Vec<String>,
-    /// Ignored entries that are not regenerable caches — `.scratch/` evidence —
-    /// and the modified, untracked and ignored files of a nested worktree,
-    /// prefixed by its path.
-    ignored: Vec<String>,
-    /// Ignored entries `is_cache` accepts.
-    caches: Vec<String>,
-    /// Ignored directory paths, without the trailing slash, holding no file
-    /// anywhere beneath them: the removal takes them and nothing is lost, so
-    /// they are not work (#946).
-    empty_dirs: Vec<String>,
-    /// Ignored entries the repo's own AGENTS.md declares discardable (#1326),
-    /// listed apart from `caches` so the output says who approved the loss.
-    declared: Vec<String>,
-    /// Registered linked worktrees nested anywhere beneath this one, outer
-    /// before inner. `git worktree remove --force` on the parent deletes their
-    /// files and leaves each registered, so they are removed first, inner
-    /// first (#1326). Their own uncommitted work is in `ignored`, prefixed.
-    nested: Vec<NestedWorktree>,
-}
-
-/// A linked worktree found inside another worktree's files.
-struct NestedWorktree {
-    path: String,
-    /// The git directory of the repo it is registered with, which may not be
-    /// the parent's: `git worktree remove` has to run against that one.
-    common_dir: String,
-}
-
-/// One `!!` or `??` porcelain entry, decoded once at the boundary in
-/// `WorktreeFiles::read` (#949): the path git means, with the trailing `/`
-/// git appends to a directory taken off and recorded as `is_dir`. Nothing
-/// downstream re-derives either from the shape of a string — a quoted
-/// directory ends in `"` on the wire, so a slash test on the raw text
-/// misread it as a file (#946).
-struct IgnoredEntry {
-    path: String,
-    is_dir: bool,
-}
-
-impl IgnoredEntry {
-    /// `raw` is the text after the status code, quoted or not.
-    fn parse(raw: &str) -> Self {
-        let decoded = unquote(raw);
-        match decoded.strip_suffix('/') {
-            Some(dir) => Self { path: dir.to_string(), is_dir: true },
-            None => Self { path: decoded, is_dir: false },
-        }
-    }
-
-    /// The name as printed: a directory keeps its trailing slash.
-    fn shown(&self) -> String {
-        if self.is_dir { format!("{}/", self.path) } else { self.path.clone() }
-    }
-}
-
-/// How many names a message lists before "and <n> more".
-const NAMES_SHOWN: usize = 5;
-
-/// The ignored directory names a removal may discard unasked. Deny by
-/// default (#801): an unknown ignored name is kept, because a wrongly kept
-/// cache costs a --discard and a wrongly discarded note cannot be undone.
-const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".hypothesis", ".pants.d"];
-
 /// `HELP` with its cache-name list filled from `CACHE_DIRS`, so the help
 /// cannot name a set of caches the guard does not use (#875).
 fn help_text() -> String {
     let (last, rest) = CACHE_DIRS.split_last().expect("CACHE_DIRS is not empty");
     HELP.replace("{cache_names}", &format!("{} or {last}", rest.join(", ")))
-}
-
-/// An ignored entry in worktree `wt` is a cache when its own name is in
-/// `CACHE_DIRS` (a directory, or a symlink git lists with no trailing
-/// slash), or when it sits inside a directory so named that marks itself
-/// wholly ignored with a `*` .gitignore — pytest, ruff, mypy and venv write
-/// one, so git lists their contents rather than the directory. A file under
-/// a directory merely named `target/` is not a cache.
-fn is_cache(wt: &str, entry: &IgnoredEntry) -> bool {
-    let parts: Vec<&str> = entry.path.split('/').collect();
-    let last = parts.len() - 1;
-    parts.iter().enumerate().any(|(i, name)| {
-        CACHE_DIRS.contains(name) && (i == last || ignores_all(&Path::new(wt).join(parts[..=i].join("/"))))
-    })
-}
-
-/// Git quotes a porcelain path holding a non-ASCII byte, a `"`, a backslash
-/// or a control character (`core.quotePath`, on by default): it wraps the
-/// path in `"` and C-escapes the inside, so a quoted directory entry ends
-/// with `"` rather than `/` and reads as a plain file to anything matching on
-/// the slash. Left encoded, an ignored `café/` holding hundreds of files was
-/// never walked and still refused as "1 ignored file(s)" — both of the bugs
-/// #946 fixes, surviving for every name git quotes. Decode once here, at the
-/// boundary, so `is_cache`, the walk and every printed name see the path git
-/// means rather than its transport encoding. Bytes that are not UTF-8 decode
-/// lossily: the replacement character names no file on disk, so the walk
-/// cannot open it and the entry stays `ignored` — fail closed, the same
-/// answer #801 wants for any directory we cannot read. A string git did not
-/// quote is returned untouched.
-fn unquote(entry: &str) -> String {
-    let Some(inner) = entry.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
-        return entry.to_string();
-    };
-    let mut out: Vec<u8> = Vec::with_capacity(inner.len());
-    let mut bytes = inner.bytes().peekable();
-    while let Some(b) = bytes.next() {
-        if b != b'\\' {
-            out.push(b);
-            continue;
-        }
-        match bytes.next() {
-            Some(b'n') => out.push(b'\n'),
-            Some(b't') => out.push(b'\t'),
-            Some(b'r') => out.push(b'\r'),
-            Some(b'b') => out.push(0x08),
-            Some(b'f') => out.push(0x0c),
-            Some(b'v') => out.push(0x0b),
-            Some(b'a') => out.push(0x07),
-            // Up to three octal digits: how git writes any byte it has to
-            // escape, one escape per byte of a multi-byte character.
-            Some(d @ b'0'..=b'7') => {
-                let mut v = u32::from(d - b'0');
-                for _ in 0..2 {
-                    let Some(n @ b'0'..=b'7') = bytes.peek().copied() else { break };
-                    bytes.next();
-                    v = v * 8 + u32::from(n - b'0');
-                }
-                out.push(v as u8);
-            }
-            // An escaped quote or backslash, and anything else: the byte.
-            Some(c) => out.push(c),
-            // A trailing backslash is malformed; keep it rather than guess.
-            None => out.push(b'\\'),
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// `dir/.gitignore` has a `*` line: the tool that made `dir` ignores it whole.
-fn ignores_all(dir: &Path) -> bool {
-    std::fs::read_to_string(dir.join(".gitignore")).is_ok_and(|s| s.lines().any(|l| l.trim() == "*"))
-}
-
-/// The names the repo declares discardable (#1326): the backtick spans on the
-/// `**Discardable**:` line of its primary checkout's AGENTS.md, a trailing `/`
-/// dropped. One path component each, with at most a leading or trailing `*`;
-/// `.git`, `.scratch` and a bare `*` are never honoured, since a declaration
-/// that reached them would discard the evidence this guard exists to keep.
-/// An unreadable file or a missing line declares nothing.
-fn declared_discardable(wt: &str) -> Vec<String> {
-    let primary = primary_of(wt);
-    // An empty answer would read AGENTS.md from the process's cwd.
-    if primary.is_empty() {
-        return Vec::new();
-    }
-    let Ok(text) = std::fs::read_to_string(Path::new(&primary).join("AGENTS.md")) else { return Vec::new() };
-    let Some(line) = text.lines().find_map(|l| l.strip_prefix("**Discardable**:")) else { return Vec::new() };
-    line.split('`')
-        .skip(1)
-        .step_by(2)
-        .map(|n| n.trim_end_matches('/').to_string())
-        .filter(|n| !n.is_empty() && !n.contains('/') && !matches!(n.as_str(), ".git" | ".scratch" | "*" | "." | ".."))
-        .collect()
-}
-
-/// A path component of `entry` matches a declared name, which covers
-/// everything beneath it. Unlike a cache, no `.gitignore` is required: the
-/// repo's own word is the approval.
-fn is_declared(names: &[String], entry: &IgnoredEntry) -> bool {
-    // A glob can match a name the parse refused (`.*` matches `.scratch`), so
-    // the evidence and git directories are excluded here too, at any depth.
-    if entry.path.split('/').any(|c| matches!(c, ".git" | ".scratch")) {
-        return false;
-    }
-    entry.path.split('/').any(|c| {
-        names.iter().any(|n| match (n.strip_prefix('*'), n.strip_suffix('*')) {
-            (Some(suffix), _) => c.ends_with(suffix),
-            (_, Some(prefix)) => c.starts_with(prefix),
-            _ => c == n,
-        })
-    })
-}
-
-/// `dir` is the root of a linked worktree registered with some repo: its
-/// `.git` is a file and git can name that repo's git directory. A directory
-/// with a made-up `.git` file, or a full clone, is not.
-fn nested_worktree(dir: &Path) -> Option<NestedWorktree> {
-    if !dir.join(".git").is_file() {
-        return None;
-    }
-    let path = dir.to_str()?;
-    let common_dir = quiet_stdout("git", &["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"])?;
-    // Registered with that repo: a byte copy of a worktree keeps a `.git`
-    // pointer that resolves, but is listed nowhere, and `worktree remove`
-    // refuses it.
-    let here = dir.canonicalize().ok()?;
-    let listed = quiet_stdout("git", &["--git-dir", &common_dir, "worktree", "list", "--porcelain"])?;
-    let registered = listed.lines().filter_map(|l| l.strip_prefix("worktree ")).any(|p| Path::new(p).canonicalize().is_ok_and(|p| p == here));
-    registered.then(|| NestedWorktree { path: path.to_string(), common_dir })
-}
-
-impl WorktreeFiles {
-    /// `None` when git cannot read the status of a worktree that is on disk.
-    /// A worktree whose directory is already gone holds nothing to lose. The
-    /// untracked and ignored modes are spelled out, so a
-    /// `status.showUntrackedFiles=no` config cannot hide files from the guard.
-    /// Untracked files one by one, so `recheck` sees a file new inside `dir/`.
-    /// `matching`, not `traditional`: a directory holding only an ignored
-    /// cache is not collapsed to its parent (`sub/`), which `is_cache` could
-    /// not tell from work.
-    fn read(wt: &str) -> Option<Self> {
-        let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"]) else {
-            return (!Path::new(wt).exists()).then(Self::default);
-        };
-        let declared_names = declared_discardable(wt);
-        let mut files = Self::default();
-        for line in out.lines().filter(|l| l.len() > 3) {
-            let (code, rest) = (&line[..2], &line[3..]);
-            if code == "??" {
-                let entry = IgnoredEntry::parse(rest);
-                if entry.is_dir && files.take_nested(wt, &Path::new(wt).join(&entry.path)) {
-                    continue;
-                }
-            }
-            if code == "!!" {
-                files.file_ignored(wt, &declared_names, IgnoredEntry::parse(rest));
-                continue;
-            }
-            // Porcelain v1 writes a rename or a copy as `<orig> -> <new>`,
-            // each path quoted on its own, so those decode by halves:
-            // unquoting the line whole strips the outer pair and strands the
-            // inner quotes. Only for R and C — in any other entry ` -> ` is
-            // just part of a filename, and splitting on it would corrupt one.
-            let name = match code.as_bytes()[0] {
-                b'R' | b'C' => rest
-                    .split_once(" -> ")
-                    .map_or_else(|| unquote(rest), |(from, to)| format!("{} -> {}", unquote(from), unquote(to))),
-                _ => unquote(rest),
-            };
-            match code {
-                "??" => files.untracked.push(name),
-                _ => files.modified.push(name),
-            }
-        }
-        Some(files)
-    }
-
-    /// Files one ignored entry as cache, declared-discardable (`declared_names`,
-    /// the repo's AGENTS.md list), a nested worktree, work or empty. A directory entry
-    /// stands for whatever is inside it:
-    /// `--ignored=matching` collapses it to one line whether it holds nothing
-    /// or hundreds of files, and counting entries was wrong both ways (#946)
-    /// — an empty directory forced a needless `--discard`, and a full one
-    /// reported "1 file(s) would be lost" against hundreds, so `--discard`
-    /// was approved against a count that understated the loss. Classify by
-    /// contents, not by the entry: zero files is `empty` and not work; one or
-    /// more land in `ignored` under their real names, so the refusal states
-    /// the true count and the true loss. A non-directory entry, and a
-    /// directory the walk cannot read, stay `ignored` as themselves — an
-    /// unreadable directory fails closed (#801), never read as "nothing in
-    /// there".
-    fn file_ignored(&mut self, wt: &str, declared_names: &[String], entry: IgnoredEntry) {
-        if is_cache(wt, &entry) {
-            self.caches.push(entry.shown());
-        } else if is_declared(declared_names, &entry) {
-            // Discarded unasked, but a registered worktree beneath it is
-            // found first, so it is removed properly and its uncommitted
-            // work is not discarded by a declaration about build output.
-            if entry.is_dir {
-                self.find_nested(wt, &Path::new(wt).join(&entry.path));
-            }
-            self.declared.push(entry.shown());
-        } else if !entry.is_dir {
-            self.ignored.push(entry.shown());
-        } else if !self.take_nested(wt, &Path::new(wt).join(&entry.path)) {
-            match files_under(&Path::new(wt).join(&entry.path), &mut |d| self.take_nested(wt, d)) {
-                Some(f) if f.is_empty() => self.empty_dirs.push(entry.path),
-                Some(f) => self.ignored.extend(f.into_iter().map(|rel| format!("{}/{rel}", entry.path))),
-                None => self.ignored.push(entry.shown()),
-            }
-        }
-    }
-
-    /// When `dir` is the root of a registered linked worktree, file it under
-    /// `nested` (and anything nested inside it after it), put its own
-    /// uncommitted work into `ignored` under its path from `wt`, and say so:
-    /// the walk then skips it. Its checkout is not work; what git does not
-    /// hold in it is, and `--discard` covers that like any other ignored file.
-    fn take_nested(&mut self, wt: &str, dir: &Path) -> bool {
-        let Some(nested) = nested_worktree(dir) else { return false };
-        let prefix = dir.strip_prefix(wt).unwrap_or(dir).display().to_string();
-        let inner = Self::read(&nested.path);
-        self.nested.push(nested);
-        match inner {
-            // Unreadable: not known clean, so it refuses under its own name.
-            None => self.ignored.push(format!("{prefix}/")),
-            Some(inner) => {
-                let held = inner.modified.iter().chain(&inner.untracked).chain(&inner.ignored);
-                self.ignored.extend(held.map(|f| format!("{prefix}/{f}")));
-                self.caches.extend(inner.caches.iter().map(|f| format!("{prefix}/{f}")));
-                self.declared.extend(inner.declared.iter().map(|f| format!("{prefix}/{f}")));
-                self.nested.extend(inner.nested);
-            }
-        }
-        true
-    }
-
-    /// `take_nested` for every directory beneath `dir` (and `dir`), looking at
-    /// directories only and not descending into a worktree it takes.
-    fn find_nested(&mut self, wt: &str, dir: &Path) {
-        let mut stack = vec![dir.to_path_buf()];
-        while let Some(d) = stack.pop() {
-            if self.take_nested(wt, &d) {
-                continue;
-            }
-            let Ok(entries) = std::fs::read_dir(&d) else { continue };
-            stack.extend(entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()));
-        }
-    }
-
-    /// Modified, untracked or non-cache ignored files: work a removal would
-    /// lose. Caches are not — every worktree holds `.venv/` or `target/`
-    /// after a merge.
-    fn is_dirty(&self) -> bool {
-        !self.modified.is_empty() || !self.untracked.is_empty() || !self.ignored.is_empty()
-    }
-
-    /// The modified, untracked and non-cache ignored entries of `self` that
-    /// `earlier` did not have: what appeared between two reads.
-    fn since(&self, earlier: &WorktreeFiles) -> WorktreeFiles {
-        let new = |now: &[String], then: &[String]| now.iter().filter(|e| !then.contains(e)).cloned().collect();
-        WorktreeFiles {
-            modified: new(&self.modified, &earlier.modified),
-            untracked: new(&self.untracked, &earlier.untracked),
-            ignored: new(&self.ignored, &earlier.ignored),
-            ..WorktreeFiles::default()
-        }
-    }
-
-    /// "1 modified, 2 untracked, 3 ignored, 4 cache".
-    fn counts(&self) -> String {
-        format!(
-            "{} modified, {} untracked, {} ignored, {} cache",
-            self.modified.len(),
-            self.untracked.len(),
-            self.ignored.len(),
-            self.caches.len()
-        )
-    }
-
-    /// The standing fix for a regenerable ignored name that stopped the run
-    /// (#1545): declare it on the repo's `**Discardable**:` line. Empty when
-    /// nothing ignored sits outside `.scratch/`, which is evidence and is
-    /// never offered for declaring.
-    fn declare_hint(&self) -> &'static str {
-        if self.ignored.iter().any(|n| n.split('/').next() != Some(".scratch")) {
-            "; if it is regenerable, a `**Discardable**:` line in the repo's AGENTS.md naming it stops this for good"
-        } else {
-            ""
-        }
-    }
-
-    /// "1 modified, 2 untracked file(s) would be lost: f, a, b" — the kinds
-    /// that are present, then their first names. Ignored names are never
-    /// capped, and lead the list: `--discard` destroys them unseen, so none
-    /// may fall into `first_names`' "and N more" (#838, and the six-or-more
-    /// case Codex caught on PR #847). Modified and untracked are capped.
-    fn dirty_text(&self) -> String {
-        let kinds: Vec<String> = [("modified", &self.modified), ("untracked", &self.untracked), ("ignored", &self.ignored)]
-            .iter()
-            .filter(|(_, v)| !v.is_empty())
-            .map(|(k, v)| format!("{} {k}", v.len()))
-            .collect();
-        // One list of modified and untracked names, capped as `Modified` is.
-        let others: Vec<String> = self.modified.iter().chain(&self.untracked).cloned().collect();
-        let names: Vec<String> = (!self.ignored.is_empty())
-            .then(|| names_shown(DirtyKind::Ignored, &self.ignored))
-            .into_iter()
-            .chain((!others.is_empty()).then(|| names_shown(DirtyKind::Modified, &others)))
-            .collect();
-        format!("{} file(s) would be lost: {}", kinds.join(", "), names.join(", "))
-    }
-}
-
-/// Every file anywhere beneath `dir`, as paths relative to it, or `None` when
-/// any part of the walk cannot be read — the caller must not read an
-/// unreadable directory as an empty one. A symlink counts as a file and is
-/// never descended, so the walk cannot cycle.
-fn files_under(dir: &Path, skip: &mut dyn FnMut(&Path) -> bool) -> Option<Vec<String>> {
-    let mut out = Vec::new();
-    let mut stack = vec![(dir.to_path_buf(), String::new())];
-    while let Some((d, prefix)) = stack.pop() {
-        for entry in std::fs::read_dir(&d).ok()? {
-            let entry = entry.ok()?;
-            let rel = format!("{prefix}{}", entry.file_name().to_string_lossy());
-            if entry.file_type().ok()?.is_dir() {
-                // A registered worktree is handed to `skip`, which owns it.
-                if !skip(&entry.path()) {
-                    stack.push((entry.path(), format!("{rel}/")));
-                }
-            } else {
-                out.push(rel);
-            }
-        }
-    }
-    out.sort();
-    Some(out)
-}
-
-/// `names`, relative to `wt`, with every file under a nested git worktree
-/// replaced by that directory once, as `dir/`: a verification subagent's
-/// checkout is one fact, not thousands. The outermost `.git` wins. A bare
-/// `.git` stat, not `is_worktree_root`'s `git rev-parse` per directory: this
-/// runs on every prefix of every scratch file, and a wrong guess only
-/// changes how a name is shown, never whether it blocks.
-fn collapse_nested_worktrees(wt: &str, names: &[String]) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for name in names {
-        let parts: Vec<&str> = name.split('/').collect();
-        let nested = (1..parts.len()).map(|n| parts[..n].join("/")).find(|dir| Path::new(wt).join(dir).join(".git").exists());
-        let shown = nested.map_or_else(|| name.clone(), |dir| format!("{dir}/"));
-        if seen.insert(shown.clone()) {
-            out.push(shown);
-        }
-    }
-    out
-}
-
-/// A kind of file a removal would lose, as the refusal and the dry run's
-/// blocker lines name it. An enum, not a string, so a new call site cannot
-/// misspell `Ignored` into the capped branch (#838).
-#[derive(Clone, Copy)]
-enum DirtyKind {
-    Modified,
-    Untracked,
-    Ignored,
-    Scratch,
-}
-
-impl DirtyKind {
-    fn label(self) -> &'static str {
-        match self {
-            DirtyKind::Modified => "modified",
-            DirtyKind::Untracked => "untracked",
-            DirtyKind::Ignored => "ignored",
-            DirtyKind::Scratch => "scratch",
-        }
-    }
-
-    /// Whether `names_shown` may cut this kind's names to "and N more".
-    /// Ignored names never are: `--discard` destroys them unseen (#838). No
-    /// wildcard arm, so a new kind must answer this before it compiles.
-    fn capped(self) -> bool {
-        match self {
-            DirtyKind::Ignored => false,
-            DirtyKind::Modified | DirtyKind::Untracked | DirtyKind::Scratch => true,
-        }
-    }
-}
-
-/// How the refusal and the dry run's blocker lines show the `names` of one
-/// `kind` of dirty file — the one place the capping rule lives: a capped kind
-/// shows its first `NAMES_SHOWN`, an uncapped one all of them.
-fn names_shown(kind: DirtyKind, names: &[String]) -> String {
-    if kind.capped() { first_names(names) } else { names.join(", ") }
-}
-
-/// The first `NAMES_SHOWN` names, comma-separated, then "and <n> more".
-fn first_names(names: &[String]) -> String {
-    let shown = names[..names.len().min(NAMES_SHOWN)].join(", ");
-    match names.len().saturating_sub(NAMES_SHOWN) {
-        0 => shown,
-        more => format!("{shown} and {more} more"),
-    }
 }
 
 fn refuse_live(wt: &str, items: &[String], suffix: &str) {
@@ -873,19 +392,19 @@ impl Cleanup {
     /// name them at PR-up while the branch is unmerged; `blockers: none`
     /// when there are none, so a run that printed nothing is never read as
     /// a clean one.
-    fn report_blockers(&self, path: &str, b: &str) {
+    fn report_blockers(&self, listing: Result<&Worktrees, &String>, b: &str) {
         let mut lines = Vec::new();
         // A listing git could not produce is a blocker, not "no workspace".
-        let held = match worktree_holding(path, b) {
-            Err(()) => {
-                lines.push("unreadable git worktree list failed".to_string());
+        let held = match listing {
+            Ok(w) => w.linked_holding(b).map(|wt| (wt, w.primary())),
+            Err(e) => {
+                lines.push(format!("unreadable {e}"));
                 None
             }
-            Ok(wt) => wt.filter(|wt| *wt != primary_of(path)),
         };
         let unheld = if held.is_none() { format!(" (no linked worktree holds {b})") } else { String::new() };
-        if let Some(wt) = held {
-            match WorktreeFiles::read(&wt) {
+        if let Some((wt, primary)) = held {
+            match WorktreeFiles::read(wt, primary) {
                 None => lines.push("unreadable git status failed".to_string()),
                 Some(files) => {
                     let (scratch, ignored): (Vec<String>, Vec<String>) =
@@ -895,7 +414,7 @@ impl Cleanup {
                     // tree can hold thousands of files: the count stays the
                     // file count, the names collapse nested worktrees.
                     let scratch_count = scratch.len();
-                    let scratch = collapse_nested_worktrees(&wt, &scratch);
+                    let scratch = collapse_nested_worktrees(wt, &scratch);
                     for (kind, names, count) in [
                         (DirtyKind::Modified, files.modified.clone(), files.modified.len()),
                         (DirtyKind::Untracked, files.untracked.clone(), files.untracked.len()),
@@ -908,7 +427,7 @@ impl Cleanup {
                     }
                 }
             }
-            let live = self.occupancy(&wt).live_items();
+            let live = self.occupancy(wt).live_items();
             if !live.is_empty() {
                 lines.push(format!("live-session {}", live.join(", ")));
             }
@@ -1007,9 +526,9 @@ impl Cleanup {
     /// fails reads as a new ignored entry, so it refuses here as it does
     /// there. The window between this read and git's removal is not zero;
     /// only dropping `--force` would close it, and that was ruled out.
-    fn recheck(&self, wt: &str, approved: &WorktreeFiles, closed: &[(String, String)]) -> bool {
+    fn recheck(&self, wt: &str, primary: &str, approved: &WorktreeFiles, closed: &[(String, String)]) -> bool {
         const LATE: &str = " (appeared after the guards passed)";
-        let Some(now) = WorktreeFiles::read(wt) else {
+        let Some(now) = WorktreeFiles::read(wt, primary) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there{LATE}");
             return false;
         };
@@ -1066,8 +585,8 @@ impl Cleanup {
     /// asks that the output stay a full account of what cleanup touched, and
     /// this guard runs before `guard_live`, so a line printed here would
     /// announce a removal that a live session then goes on to refuse.
-    fn guard_files(&self, wt: &str) -> Option<WorktreeFiles> {
-        let Some(files) = WorktreeFiles::read(wt) else {
+    fn guard_files(&self, wt: &str, primary: &str) -> Option<WorktreeFiles> {
+        let Some(files) = WorktreeFiles::read(wt, primary) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
             return None;
         };
@@ -1095,11 +614,10 @@ impl Cleanup {
     /// listed for the owner, never removed. A folder there that git no
     /// longer tracks as a worktree is listed too, marked. This run's removal
     /// targets are not "other".
-    fn stale_worktrees(&self, repo: &str) -> Vec<String> {
-        let primary = primary_of(repo);
+    fn stale_worktrees(&self, repo: &str, primary: &str) -> Vec<String> {
         let default = default_branch(Path::new(repo));
         let mut base = format!("origin/{default}");
-        if !quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/remotes/{base}")]) {
+        if !quiet_ok("git", &["-C", primary, "show-ref", "-q", "--verify", &format!("refs/remotes/{base}")]) {
             base = default;
         }
         let mut stale = Vec::new();
@@ -1118,7 +636,7 @@ impl Cleanup {
                 if quiet_stdout("git", &["-C", &e, "rev-list", "--count", &format!("{base}..HEAD")]).as_deref() != Some("0") {
                     continue;
                 }
-                if !WorktreeFiles::read(&e).is_some_and(|f| !f.is_dirty() && f.caches.is_empty()) {
+                if !WorktreeFiles::read(&e, primary).is_some_and(|f| !f.is_dirty() && f.caches.is_empty()) {
                     continue;
                 }
                 ""
@@ -1130,11 +648,13 @@ impl Cleanup {
         stale
     }
 
-    fn report_stale(&self, repos: &[String]) {
+    /// `repos` pairs each repo with its primary checkout, as the caller's
+    /// listing named it; a repo git could not list is the caller's to skip.
+    fn report_stale(&self, repos: &[(String, String)]) {
         if quiet() {
             return;
         }
-        let list: Vec<String> = repos.iter().flat_map(|r| self.stale_worktrees(r)).collect();
+        let list: Vec<String> = repos.iter().flat_map(|(r, primary)| self.stale_worktrees(r, primary)).collect();
         if list.is_empty() {
             return;
         }
@@ -1220,13 +740,17 @@ impl Cleanup {
             if !quiet_ok("git", &["-C", &d, "rev-parse", "--git-dir"]) {
                 continue;
             }
-            repos.push(d.clone());
+            let listing = worktree::list(&d);
+            match &listing {
+                Ok(w) => repos.push((d.clone(), w.primary().to_string())),
+                Err(e) => skip("the stale-worktree report", e),
+            }
             let default = default_branch(Path::new(&d));
             let heads = quiet_stdout("git", &["-C", &d, "for-each-ref", "--format=%(refname:short)", "refs/heads/"]).unwrap_or_default();
             for b in heads.lines().filter(|b| !b.is_empty() && *b != default) {
                 if let Some(m) = self.is_merged(&d, b) {
                     let n = quiet_stdout("git", &["-C", &d, "rev-list", "--count", &format!("{}..{b}", m.at)]).unwrap_or_else(|| "?".into());
-                    let (files, held) = worktree_plan(&d, b);
+                    let (files, held) = worktree_plan(listing.as_ref().ok(), b);
                     plan.push(PlanRow { repo: d.clone(), branch: b.to_string(), unlanded: unlanded_text(&n, &m.by), files, held });
                 }
             }
@@ -1275,7 +799,16 @@ impl Cleanup {
                 continue;
             }
             safe_println!("== {} {}", row.repo.trim_end_matches('/'), row.branch);
-            let verdict = if !self.cleanup_branch(&row.repo, &row.branch) {
+            // Listed again for each row: an earlier row's cleanup in the
+            // same repo has removed a worktree since pass 1 read it.
+            let cleaned = match worktree::list(&row.repo) {
+                Ok(listing) => self.cleanup_branch(&row.repo, &row.branch, &listing),
+                Err(e) => {
+                    eprintln!("merge-cleanup: {e}");
+                    false
+                }
+            };
+            let verdict = if !cleaned {
                 rc = ExitCode::FAILURE;
                 "FAILED".to_string()
             } else if self.claim_clear_failed || self.remote_delete_failed {
@@ -1310,14 +843,15 @@ impl Cleanup {
         // run started inside a workspace would `git -C` its way into the
         // directory it had just removed — reaping one workspace and then
         // calling every workspace after it unmerged (the correctness axis on
-        // PR #876). A repo with no primary checkout git can name is left as
-        // it was passed.
-        let anchor = match primary_of(repo) {
-            p if p.is_empty() => repo.to_string(),
-            p => p,
+        // PR #876). A repo whose primary checkout git cannot name stops the
+        // run (#1762): a failed listing is not "nothing to reap".
+        let listing = match worktree::list(repo) {
+            Ok(w) => w,
+            Err(e) => return die(e),
         };
-        let root = worktrees_root(repo);
-        let candidates = implement_workspaces(repo);
+        let anchor = listing.primary().to_string();
+        let root = worktrees_root(&anchor);
+        let candidates = implement_workspaces(&listing);
         if candidates.is_empty() {
             safe_println!("nothing to reap under {root}");
             return ExitCode::SUCCESS;
@@ -1414,18 +948,18 @@ impl Cleanup {
         // listing `git worktree list` could not produce is not "no holder"
         // either (#975): read that way, it reaped a branch this re-check
         // could no longer actually vouch for, so it refuses instead.
-        let now = match worktree_holding(anchor, b) {
-            Err(()) => {
-                return Reaped::Refused(format!("could not list worktrees at {anchor}, not removed: git worktree list failed"));
-            }
-            Ok(now) => now,
+        let listing = match worktree::list(anchor) {
+            Ok(w) => w,
+            Err(e) => return Reaped::Refused(format!("could not list worktrees, not removed: {e}")),
         };
-        if let Some(now) = &now
+        if let Some(now) = listing.holding(b)
             && now != wt
         {
             return Reaped::Refused(format!("moved since the plan, not removed: {now} now holds {b}"));
         }
-        if !self.cleanup_branch(anchor, b) {
+        // The same listing the scope was just proved on is the one the
+        // cleanup acts on, so nothing can move between the two reads.
+        if !self.cleanup_branch(anchor, b, &listing) {
             // Which guard refused is on stderr already; ask again what holds
             // the workspace, so a refusal reads as one rather than as a
             // failure of the run.
@@ -1452,7 +986,7 @@ impl Cleanup {
         if self.is_merged(anchor, b).is_none() && self.moot_without_commits(anchor, b).is_none() {
             return Some("not merged, not removed".into());
         }
-        match WorktreeFiles::read(wt) {
+        match WorktreeFiles::read(wt, anchor) {
             None => return Some("unreadable, not removed: git status failed".into()),
             Some(files) if files.is_dirty() => return Some(format!("dirty, not removed: {}", files.dirty_text())),
             Some(_) => {}
@@ -1608,15 +1142,18 @@ impl Cleanup {
         run_status("git", &["-C", path, "branch", "-D", b])
     }
 
-    /// Steps 3-6 for one branch.
-    fn cleanup_branch(&mut self, path: &str, b: &str) -> bool {
+    /// Steps 3-6 for one branch. `listing` is the caller's one read of
+    /// `git worktree list` for this cleanup (#1762: a listing git could not
+    /// produce has already stopped the caller, so nothing here guesses which
+    /// checkout holds what).
+    fn cleanup_branch(&mut self, path: &str, b: &str, listing: &Worktrees) -> bool {
         // Reset here, not by each caller: every path through this function
         // that reaches step 5 or 7 can set either flag, and a caller doing
         // several branches (the sweep) must not read a previous branch's
         // failure onto this one.
         self.claim_clear_failed = false;
         self.remote_delete_failed = false;
-        let primary = primary_of(path);
+        let primary = listing.primary();
         let default = default_branch(Path::new(path));
         if b == default {
             eprintln!("merge-cleanup: refusing to delete the default branch {b}");
@@ -1649,7 +1186,7 @@ impl Cleanup {
         // Step 3 — the workspace. A linked worktree holding the branch makes
         // `git branch -d` fail with "used by worktree", so it goes first, by
         // the path git itself reports — but never while a session is alive.
-        if let Some(wt) = linked_worktree_holding(path, b) {
+        if let Some(wt) = listing.linked_holding(b).map(str::to_string) {
             // #1040: canonicalized here, before removal, while the
             // directory still exists to resolve — `remove_workspace`
             // compares this against `implement-dispatch`'s own
@@ -1658,7 +1195,7 @@ impl Cleanup {
             let wt_canonical = lane::workers::canonical_workspace_path(&wt);
             // Before the live-session guard, which closes idle panes: a
             // removal refused for its files must not have touched herdr.
-            let Some(approved) = self.guard_files(&wt) else {
+            let Some(approved) = self.guard_files(&wt, primary) else {
                 return false;
             };
             let Some(closed) = self.guard_live(&wt) else {
@@ -1671,7 +1208,7 @@ impl Cleanup {
                 // that appears after the guards passed (#879).
                 let _ = std::process::Command::new("sh").arg("-c").arg(cmd).status();
             }
-            if !self.recheck(&wt, &approved, &closed) {
+            if !self.recheck(&wt, primary, &approved, &closed) {
                 return false;
             }
             // Inner first: `remove --force` on the parent deletes a nested
@@ -1713,14 +1250,14 @@ impl Cleanup {
 
         // Step 4 — the local branch. Git refuses to delete a branch a
         // checkout holds, so move the primary off it first.
-        if !primary.is_empty() && head_of(&primary).as_deref() == Some(b) {
-            let switched = if quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/heads/{default}")]) {
-                self.step(&format!("switching {primary} off {b} onto {default}"), "git", &["-C", &primary, "checkout", "-q", &default])
+        if head_of(primary).as_deref() == Some(b) {
+            let switched = if quiet_ok("git", &["-C", primary, "show-ref", "-q", "--verify", &format!("refs/heads/{default}")]) {
+                self.step(&format!("switching {primary} off {b} onto {default}"), "git", &["-C", primary, "checkout", "-q", &default])
             } else {
                 self.step(
                     &format!("switching {primary} off {b} onto a fresh {default}"),
                     "git",
-                    &["-C", &primary, "checkout", "-q", "-b", &default, "--track", &format!("origin/{default}")],
+                    &["-C", primary, "checkout", "-q", "-b", &default, "--track", &format!("origin/{default}")],
                 )
             };
             if !switched {
@@ -1758,8 +1295,8 @@ impl Cleanup {
 
         // Step 6 — fast-forward the primary checkout, so the next branch
         // starts from the merge rather than from behind it.
-        if !primary.is_empty() && head_of(&primary).as_deref() == Some(default.as_str()) {
-            self.fast_forward_and_rebuild(&primary, &default);
+        if head_of(primary).as_deref() == Some(default.as_str()) {
+            self.fast_forward_and_rebuild(primary, &default);
         } else {
             skip("the fast-forward", &format!("{primary} is not on {default}"));
         }
@@ -1924,14 +1461,13 @@ struct PlanRow {
 /// A sweep plan row's worktree counts and hold: the modified, untracked and
 /// ignored counts of the linked worktree holding `b`, and a hold when it has
 /// work a removal would lose — or when git cannot say whether it does. Row
-/// only, never a removal target: `linked_worktree_holding`'s own failed-listing
-/// case reads as `None` here too, so a `git worktree list` failure prints an
-/// unheld row rather than an accurate "could not tell" one (#975 S1/P2) —
-/// misleading, not destructive, since nothing downstream of this row removes
-/// anything.
-fn worktree_plan(repo: &str, b: &str) -> (Option<String>, Option<&'static str>) {
-    let Some(wt) = linked_worktree_holding(repo, b) else { return (None, None) };
-    match WorktreeFiles::read(&wt) {
+/// only, never a removal target: a `listing` git could not produce (`None`)
+/// prints an unheld row rather than an accurate "could not tell" one (#975
+/// S1/P2) — misleading, not destructive, since nothing downstream of this
+/// row removes anything.
+fn worktree_plan(listing: Option<&Worktrees>, b: &str) -> (Option<String>, Option<&'static str>) {
+    let Some((wt, primary)) = listing.and_then(|w| Some((w.linked_holding(b)?, w.primary()))) else { return (None, None) };
+    match WorktreeFiles::read(wt, primary) {
         None => (Some("git status failed".into()), Some("unreadable, not removed")),
         Some(f) => (Some(f.counts()), f.is_dirty().then_some("dirty, not removed")),
     }
@@ -2160,79 +1696,35 @@ fn resolved_under(p: &str) -> Option<String> {
 }
 
 /// Where one repo keeps its workspaces: `<primary>/.claude/worktrees`.
-fn worktrees_root(repo: &str) -> String {
-    format!("{}/.claude/worktrees", primary_of(repo))
+fn worktrees_root(primary: &str) -> String {
+    format!("{primary}/.claude/worktrees")
 }
 
-/// The reaper's candidates: this repo's linked worktrees that sit under its
-/// own `.claude/worktrees/` and hold a branch named `implement-*`, as
-/// (worktree path, branch), in path order. Nothing outside the repo can
-/// appear — `git worktree list` only ever reports the repo's own — and a
-/// worktree elsewhere on disk is left out however its branch is named.
-fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
-    let primary = primary_of(repo);
-    let Some(root) = resolved_under(&worktrees_root(repo)) else { return Vec::new() };
-    let out = quiet_stdout("git", &["-C", repo, "worktree", "list", "--porcelain"]).unwrap_or_default();
-    let mut found = Vec::new();
-    let mut current = "";
-    for line in out.lines() {
-        if let Some(p) = line.strip_prefix("worktree ") {
-            current = p;
-        } else if let Some(b) = line.strip_prefix("branch refs/heads/")
-            // The primary checkout cannot sit under its own
-            // .claude/worktrees, so this is belt and braces on top of
-            // in_tree — kept, and deliberately unwitnessed, because the
-            // cost of being wrong is a repo's own checkout's branch.
-            && current != primary
-            // Both sides resolved, the same way the cwd hold resolves them:
-            // a path that cannot be proved inside the root is not a
-            // candidate. git records a worktree by its resolved path, so
-            // this is the class closed rather than a hole plugged (the
-            // Codex pass on PR #878).
-            && resolved_under(current).is_some_and(|here| in_tree(&here, &root))
-            && b.starts_with("implement-")
-        {
-            found.push((current.to_string(), b.to_string()));
-        }
-    }
+/// The reaper's candidates: the linked worktrees in `listing` that sit under
+/// the primary checkout's own `.claude/worktrees/` and hold a branch named
+/// `implement-*`, as (worktree path, branch), in path order. Nothing outside
+/// the repo can appear — `git worktree list` only ever reports the repo's
+/// own — and a worktree elsewhere on disk is left out however its branch is
+/// named.
+fn implement_workspaces(listing: &Worktrees) -> Vec<(String, String)> {
+    let Some(root) = resolved_under(&worktrees_root(listing.primary())) else { return Vec::new() };
+    let mut found: Vec<(String, String)> = listing
+        .linked()
+        .iter()
+        .filter_map(|w| Some((w.path.as_str(), w.branch.as_deref()?)))
+        .filter(|(path, b)| {
+            b.starts_with("implement-")
+                // Both sides resolved, the same way the cwd hold resolves
+                // them: a path that cannot be proved inside the root is not
+                // a candidate. git records a worktree by its resolved path,
+                // so this is the class closed rather than a hole plugged
+                // (the Codex pass on PR #878).
+                && resolved_under(path).is_some_and(|here| in_tree(&here, &root))
+        })
+        .map(|(path, b)| (path.to_string(), b.to_string()))
+        .collect();
     found.sort();
     found
-}
-
-/// The linked worktree — not the primary checkout — that has `b` checked
-/// out. A listing that could not be read is treated as no holder here, same
-/// as before (#975). That's safe at `cleanup_branch`'s own call site: `git
-/// branch -d` still refuses "used by worktree" on its own if a linked
-/// worktree really holds `b`, so nothing is removed out of scope. At
-/// `worktree_plan`'s call site there is no such backstop — a failed listing
-/// there just reads as an accurate "nothing holds this" sweep row instead of
-/// the "unreadable, not removed" hold its sibling `WorktreeFiles::read`
-/// failure gets — but that row is informational only, never a removal
-/// target, so the cost is a misleading row, not a removal.
-fn linked_worktree_holding(path: &str, b: &str) -> Option<String> {
-    let wt = worktree_holding(path, b).ok().flatten()?;
-    (wt != primary_of(path)).then_some(wt)
-}
-
-/// The path of the worktree that has `b` checked out: `Ok(None)` when the
-/// listing was read and nothing holds `b`, `Ok(Some(path))` when it does,
-/// and `Err(())` when `git worktree list` itself could not be read. #975:
-/// the old signature returned an empty string for both "listed, no holder"
-/// and "could not list", and `reap_one`'s destructive-time re-check read a
-/// failed listing as no holder and went on to remove the workspace and
-/// delete the branch.
-fn worktree_holding(path: &str, b: &str) -> Result<Option<String>, ()> {
-    let want = format!("branch refs/heads/{b}");
-    let mut current = "";
-    let out = quiet_stdout("git", &["-C", path, "worktree", "list", "--porcelain"]).ok_or(())?;
-    for line in out.lines() {
-        if let Some(p) = line.strip_prefix("worktree ") {
-            current = p;
-        } else if line == want {
-            return Ok(Some(current.to_string()));
-        }
-    }
-    Ok(None)
 }
 
 /// `dir` is the top of a git worktree.
@@ -2373,35 +1865,28 @@ fn main() -> ExitCode {
     if branch.is_empty() {
         return die("name a branch, a PR number or URL, or pass --sweep");
     }
+    // The one listing this cleanup reads (#1767): the dry run's blockers and
+    // every step after them ask it, rather than each listing for itself.
+    let listing = worktree::list(&repo);
     if a.dry {
-        c.report_blockers(&repo, &branch);
+        c.report_blockers(listing.as_ref(), &branch);
     }
-    let ok = c.cleanup_branch(&repo, &branch);
-    if ok {
+    let ok = match &listing {
+        Ok(listing) => c.cleanup_branch(&repo, &branch, listing),
+        // A listing git cannot produce stops the run (#1762): with no
+        // primary to anchor on, nothing knows which checkout holds what.
+        Err(e) => {
+            eprintln!("merge-cleanup: {e}");
+            false
+        }
+    };
+    if let (true, Ok(listing)) = (ok, &listing) {
         // #832 / #842: report_stale is about this repo's other worktrees,
         // not whether the ticket's claim or its remote branch got cleared —
         // it still runs when git cleanup succeeded, even if
         // claim_clear_failed or remote_delete_failed will fail the exit.
-        c.report_stale(&[repo]);
+        c.report_stale(&[(repo, listing.primary().to_string())]);
     }
     c.close_removed_herdr_workspaces();
     if ok && !c.claim_clear_failed && !c.remote_delete_failed { ExitCode::SUCCESS } else { ExitCode::FAILURE }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn names(n: usize) -> Vec<String> {
-        (1..=n).map(|i| format!("f{i}")).collect()
-    }
-
-    #[test]
-    fn names_shown_caps_every_kind_but_ignored() {
-        let seven = names(NAMES_SHOWN + 2);
-        assert_eq!(names_shown(DirtyKind::Ignored, &seven), "f1, f2, f3, f4, f5, f6, f7");
-        for kind in [DirtyKind::Modified, DirtyKind::Untracked, DirtyKind::Scratch] {
-            assert_eq!(names_shown(kind, &seven), "f1, f2, f3, f4, f5 and 2 more", "{}", kind.label());
-        }
-    }
 }
