@@ -14,7 +14,7 @@ that gets the head commit sha.
 
 Subcommands: `status` (skills-status.sh's report), `prelock` (safe-update.sh's
 pre-update hash dump), `sync-extras` (safe-update.sh's hand-installed-skill
-sync). `--selfcheck` runs the offline checks below with no `gh`/network use.
+sync). Tests: `upstream_test.py`.
 """
 import argparse
 import io
@@ -32,7 +32,7 @@ def _default_gh_runner(*args):
 
 
 # Every `gh api` call in this module goes through this one indirection, so
-# --selfcheck can swap in canned responses instead of touching the network.
+# tests can swap in canned responses instead of touching the network.
 _gh_runner = _default_gh_runner
 
 
@@ -208,104 +208,8 @@ def sync_extras(extras_path):
     return out
 
 
-def selfcheck():
-    import tempfile
-
-    failures = []
-
-    def check(desc, cond):
-        if not cond:
-            failures.append(desc)
-
-    with tempfile.TemporaryDirectory() as d:
-        lock_path = os.path.join(d, "lock.json")
-        extras_path = os.path.join(d, "extras.json")
-        json.dump({"skills": {"foo": {
-            "sourceUrl": "https://github.com/acme/repo",
-            "skillPath": "skills/foo/SKILL.md",
-            "skillFolderHash": "abc123",
-        }}}, open(lock_path, "w"))
-        json.dump({"bar": {"repo": "acme/other", "path": "bar", "treeSha": "def456"}},
-                   open(extras_path, "w"))
-
-        items = load_items(lock_path, extras_path)
-        check("load_items reads a lock skill's owner/repo/dir/hash",
-              any(i == {"name": "foo", "owner": "acme", "repo": "repo",
-                        "dir": "skills/foo", "hash": "abc123", "tag": ""} for i in items))
-        check("load_items merges an extra skill tagged [extra]",
-              any(i == {"name": "bar", "owner": "acme", "repo": "other",
-                        "dir": "bar", "hash": "def456", "tag": " [extra]"} for i in items))
-        check("load_items orders lock items before extras",
-              [i["name"] for i in items] == ["foo", "bar"])
-        check("prelock_lines emits name<TAB>hash for both sources",
-              prelock_lines(lock_path, extras_path) == ["foo\tabc123", "bar\tdef456"])
-        check("load_items tolerates a missing extras file",
-              [i["name"] for i in load_items(lock_path, os.path.join(d, "nope.json"))] == ["foo"])
-
-    calls = []
-
-    def fake_gh(*args):
-        calls.append(args)
-        r = subprocess.CompletedProcess(args, 0)
-        if args == ("api", "repos/acme/repo/commits/HEAD", "--jq", ".sha+\" \"+.commit.tree.sha"):
-            r.stdout = b"headsha1234 roottreeSHA\n"
-        elif args == ("api", "repos/acme/repo/git/trees/headsha1234?recursive=1"):
-            r.stdout = json.dumps({"tree": [
-                {"path": "skills/foo", "type": "tree", "sha": "foosha"},
-                {"path": "skills/foo/SKILL.md", "type": "blob", "sha": "blobsha"},
-            ]}).encode()
-        else:
-            r.returncode = 1
-            r.stdout = b""
-        return r
-
-    prev = set_gh_runner(fake_gh)
-    try:
-        t = upstream_tree("acme", "repo", {})
-        check("upstream_tree seeds the root entry from the commits API's tree sha",
-              t is not None and t["tree"].get("") == "roottreeSHA")
-        check("upstream_tree takes the head sha from the same commits-API call",
-              t is not None and t["head"] == "headsha1234")
-        check("upstream_tree maps a non-root dir from the trees API",
-              t is not None and t["tree"].get("skills/foo") == "foosha")
-        check("upstream_tree only maps tree entries, not blobs",
-              t is not None and "skills/foo/SKILL.md" not in t["tree"])
-
-        # round 2: a failed recursive trees call must not lose the root entry
-        def trees_down(*args):
-            r = fake_gh(*args)
-            if "git/trees" in args[1]:
-                r.returncode, r.stdout = 1, b""
-            return r
-        set_gh_runner(trees_down)
-        t = upstream_tree("acme", "repo", {})
-        check("a root-path extra resolves from the commits API when the trees call fails",
-              upstream_dir(t, "") == (True, "roottreeSHA"))
-        check("a non-root dir is unknown, not orphaned, when the trees call fails",
-              upstream_dir(t, "skills/foo") == (False, None))
-        set_gh_runner(fake_gh)
-
-        cache = {}
-        upstream_tree("acme", "repo", cache)
-        n = len(calls)
-        upstream_tree("acme", "repo", cache)
-        check("the per-repo cache serves a second lookup with no new gh call",
-              len(calls) == n)
-    finally:
-        set_gh_runner(prev)
-
-    if failures:
-        print("SELFCHECK FAILED:")
-        for f in failures:
-            print(f"  - {f}")
-        return 1
-    print("selfcheck: all checks passed")
-    return 0
-
-
 def build_parser():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--selfcheck", action="store_true", help="run offline checks and exit")
     sub = p.add_subparsers(dest="cmd")
 
     sp = sub.add_parser("status", help="print skills-status.sh's report")
@@ -325,8 +229,6 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    if args.selfcheck:
-        return selfcheck()
     if args.cmd == "status":
         for status, name in status_rows(args.base, args.lock, args.extras):
             print(f"{name:<32}{status}")
