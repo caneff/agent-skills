@@ -31,7 +31,10 @@ from urllib.parse import quote
 # `##` is what `/to-tickets` emits and what the grammar specifies.
 _HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
                       re.IGNORECASE)
-_ANY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
+# The one heading rule every ticket reader uses (#1772): CommonMark's ATX
+# heading, up to three spaces before the `#`. `closure` and `closing_ticket`
+# import it rather than carry their own.
+HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
 # The inline forms the tree also writes: `Blocked by: #7, #8` at the top of a
 # /wayfinder child (docs/agents/issue-tracker.md), and `**Blocked by:** ...`
 # in to-tickets' local ticket template. Anchored at the line start and
@@ -171,6 +174,33 @@ def key_line(line):
     return key.strip().lower(), match.group("value").strip()
 
 
+def sections(lines, heading_re):
+    """`[(index, text)]` for every heading in `lines` (`visible()` output)
+    that `heading_re` matches: `text` is the lines under it up to the next
+    heading of any level, stripped, and `index` is the heading's position in
+    `lines`. The one section reader for `blocked_by_section`, `section` and
+    the closing-ticket reader, which needs the positions."""
+    found = []
+    for pos, (_, line) in enumerate(lines):
+        if not heading_re.match(line):
+            continue
+        body = []
+        for _, rest in lines[pos + 1:]:
+            if HEADING.match(rest):
+                break
+            body.append(rest)
+        found.append((pos, "\n".join(body).strip()))
+    return found
+
+
+def section(text, heading_re):
+    """The lines under the first visible heading `heading_re` matches, up to
+    the next heading, or `None` when the document has no such heading —
+    silence, which is not an empty section."""
+    found = sections(visible((text or "").splitlines()), heading_re)
+    return found[0][1] if found else None
+
+
 def blocked_by_section(body):
     """What the ticket states about its blockers, or `None` when it states
     nothing at all — a ticket that never mentions the relationship is not a
@@ -184,18 +214,9 @@ def blocked_by_section(body):
     `**Blocked by:**` line in the preamble. Every visible occurrence of
     either form is one declaration."""
     lines = visible((body or "").splitlines())
-    answers = []
-    for pos, (_, line) in enumerate(lines):
-        if not _HEADING.match(line):
-            continue
-        section = []
-        for _, rest in lines[pos + 1:]:
-            if _ANY_HEADING.match(rest):
-                break
-            section.append(rest)
-        answers.append("\n".join(section).strip())
+    answers = [text for _, text in sections(lines, _HEADING)]
     for _, line in lines:
-        if _ANY_HEADING.match(line):
+        if HEADING.match(line):
             break  # the preamble ends at the first heading
         inline = _INLINE.match(line)
         if inline:
@@ -560,7 +581,7 @@ def _parent_number(body, repo):
         part = _PART_OF.match(line)
         if part and part.group(1):
             return int(part.group(1))
-        if _ANY_HEADING.match(line):
+        if HEADING.match(line):
             in_parent = bool(_PARENT_HEADING.match(line))
             if in_parent and unread is None:
                 unread = ""

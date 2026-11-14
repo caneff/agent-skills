@@ -30,14 +30,13 @@ import sys
 # of its own to drop it. The import is the same coupling this skill already
 # has — the readers it imports live beside it in `implement-spec`.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from frontier import key_line, unfenced, visible  # noqa: E402
+from frontier import HEADING, key_line, unfenced, visible  # noqa: E402
 from loop import LoopError, origin_default  # noqa: E402
 
-_ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 # A list item's marker: a bare `**Key**:` line also matches `key_line`, by
 # its first `*`, but is no list item.
 _LIST_ITEM = re.compile(r"^[ \t]*[-*+][ \t]+")
-_SEAM_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
+_SEAM_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
                            re.IGNORECASE)
 
 
@@ -74,7 +73,7 @@ def _continuation(raw, start, reachable):
                 continue
             break
         if (index not in reachable or _indent(line) <= depth
-                or _ANY_HEADING.match(line) or key_line(line)):
+                or HEADING.match(line) or key_line(line)):
             break
         wrapped.append(line.strip())
         end = index + 1
@@ -95,7 +94,7 @@ def declaration(text):
         found = {}
         skip_to = 0
         for index, rest in lines[pos + 1:]:
-            if _ANY_HEADING.match(rest):
+            if HEADING.match(rest):
                 break
             if index < skip_to:
                 continue

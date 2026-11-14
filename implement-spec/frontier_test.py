@@ -5,6 +5,7 @@ GitHub issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
 the point of the seam.
 """
 import os
+import re
 import subprocess
 import sys
 
@@ -1314,3 +1315,31 @@ def test_the_rendered_report_names_a_stranded_slice():
     line = F.render(read([issue(491, body=NO_BLOCKERS, title="S")],
                          parents={491: foreign_spec()})).splitlines()[0]
     assert line.startswith("stranded    491 S  ("), line
+
+
+# --- one heading rule for all three readers (#1772, spec #1734) -------------
+
+# A `#` line indented four spaces is a code block in CommonMark, not a heading.
+# `visible()` already drops indented lines, but each reader's own heading rule
+# must agree anyway: the same body must give the same sections in all three.
+def test_heading_rule_allows_three_spaces_and_refuses_four():
+    assert F.HEADING.match("   ## Blocked by")
+    assert not F.HEADING.match("    ## Blocked by")
+    assert not F.HEADING.match("\t## Blocked by")
+
+
+def test_section_reads_to_next_heading():
+    body = "## A\n\none\ntwo\n\n  ## B\n\nthree\n"
+    assert F.section(body, re.compile(r"^ {0,3}#{1,6}[ \t]+a[ \t]*$", re.I)) == "one\ntwo"
+    assert F.section(body, re.compile(r"^ {0,3}#{1,6}[ \t]+nope$", re.I)) is None
+
+
+def test_three_readers_agree_on_an_indented_heading():
+    import closing_ticket as T
+    import closure as C
+    body = ("## Blocked by\n\n- #7\n\n    ## Include closure\n    not a heading\n\n"
+            "## Include closure\n\n- None\n\n    # indented, ends nothing\nmore\n\n"
+            "## End-to-end seam\n\n- **Seam**: `make`\n- **Blind to**: x\n")
+    assert F.blocked_by_section(body) == "- #7"
+    assert C.declaration_section(body) == "- None\n\nmore"
+    assert T.declaration(body) == {"seam": "`make`", "blind to": "x"}

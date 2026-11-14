@@ -40,10 +40,9 @@ import warnings
 # fence — and neither reader has a filter of its own to drop it. Imported
 # rather than copied — a second parser is a second place for the
 # quoted-template bug.
-from frontier import key_line, visible
+from frontier import key_line, section, visible
 
-_ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
-_CLOSURE_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+include closure[ \t]*:?[ \t]*$",
+_CLOSURE_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+include closure[ \t]*:?[ \t]*$",
                               re.IGNORECASE)
 # `- **Directive**: `#include <path>`` — the key line grammar is
 # `frontier.key_line`, shared with `implement-spec/closing_ticket.py` (#1000).
@@ -89,17 +88,7 @@ Declaration.__new__.__defaults__ = (None, None, "file")
 def declaration_section(text):
     """The lines under an `## Include closure` heading, or `None` when the
     document has no such section — silence, which is not a declaration."""
-    lines = visible((text or "").splitlines())
-    for pos, (_, line) in enumerate(lines):
-        if not _CLOSURE_HEADING.match(line):
-            continue
-        section = []
-        for _, rest in lines[pos + 1:]:
-            if _ANY_HEADING.match(rest):
-                break
-            section.append(rest)
-        return "\n".join(section).strip()
-    return None
+    return section(text, _CLOSURE_HEADING)
 
 
 def parse_declaration(text):
