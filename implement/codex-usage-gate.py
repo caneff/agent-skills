@@ -273,8 +273,9 @@ def main() -> int:
     if args.percent:
         try:
             worst = reading(live_only=True)
-        except Exception:
+        except Exception as exc:
             worst = None
+            print(f"codex usage unknown: {type(exc).__name__}: {exc}", file=sys.stderr)
         print("unknown" if worst is None else f"{worst[0]:g} {int(worst[1])}")
         return UNKNOWN if worst is None else PROCEED
     try:
