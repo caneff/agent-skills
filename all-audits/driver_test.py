@@ -13,10 +13,13 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("AUDITS_NO_OPEN", "1")
 os.environ.setdefault("AUDITS_NO_SYNTH", "1")
 import driver  # noqa: E402
+import mutation_run  # noqa: E402
 
 
 def _run_driver(*args):
@@ -807,41 +810,6 @@ def _rec(sha, date):
     return {"sha": sha, "date": date}
 
 
-def test_order_never_run_then_changed_then_oldest_run():
-    cands = ["a.py", "b.py", "c.py", "d.py"]
-    record = {"a.py": _rec("s", "2026-10-01"), "b.py": _rec("s", "2026-09-01"), "c.py": _rec("s", "2026-10-02")}
-    # d never ran; c changed since its sha (though the newest run); of the
-    # unchanged, b (Sep) is older than a (Oct).
-    assert driver.order_mutation_targets(cands, [], record, {"c.py"}) == ["d.py", "c.py", "b.py", "a.py"]
-
-
-def test_order_recency_outranks_prepass_risk_and_nothing_is_dropped():
-    cands = ["risky.py", "boring.py"]
-    record = {"risky.py": _rec("s", "2026-10-11")}
-    # boring.py is ranked last by the prepass but never ran, so it goes first.
-    assert driver.order_mutation_targets(cands, ["risky.py", "boring.py"], record, set()) == ["boring.py", "risky.py"]
-
-
-def test_order_prepass_rank_breaks_ties_inside_each_group():
-    cands = ["a.py", "b.py", "c.py", "d.py", "e.py"]
-    record = {"c.py": _rec("s", "2026-09-01"), "d.py": _rec("s", "2026-09-01"), "e.py": _rec("s", "2026-08-01")}
-    rank = ["b.py", "a.py", "d.py", "c.py"]
-    # never-run: b before a by rank; same run date: d before c by rank;
-    # e is older, so first.
-    assert driver.order_mutation_targets(cands, rank, record, set()) == ["b.py", "a.py", "e.py", "d.py", "c.py"]
-
-
-def test_order_unranked_follow_ranked_and_a_malformed_entry_counts_as_never_run():
-    cands = ["a.py", "b.py", "c.py"]
-    record = {"b.py": {"sha": "s"}, "c.py": _rec("s", "2026-09-01")}  # b.py has no date
-    assert driver.order_mutation_targets(cands, ["b.py"], record, set()) == ["b.py", "a.py", "c.py"]
-
-
-def test_parse_rank_keeps_only_candidates_once_in_printed_order():
-    out = "b.py\n  a.py \nfake.py\nb.py\n\n"
-    assert driver.parse_mutation_rank(out, ["a.py", "b.py", "c.py"]) == ["b.py", "a.py"]
-
-
 def test_record_mutation_sits_beside_audit_records(tmp_path):
     repo, cache = _mkdirs(tmp_path, "repo", "cache")
     _init_git_repo(repo)
@@ -849,29 +817,14 @@ def test_record_mutation_sits_beside_audit_records(tmp_path):
     driver.record_mutation(repo, "a.py", base=cache)
     rec = driver.load_record(driver._record_file(repo, cache))
     assert rec["dead-code"]["report_dir"] == "/r"
-    assert rec[driver.MUTATION_KEY]["a.py"]["sha"] == driver.head_sha(repo)
-    assert rec[driver.MUTATION_KEY]["a.py"]["date"]
+    assert rec[mutation_run.MUTATION_KEY]["a.py"]["sha"] == driver.head_sha(repo)
+    assert rec[mutation_run.MUTATION_KEY]["a.py"]["date"]
 
 
 def _commit_all(repo, msg):
     env = driver.scrubbed_env()
     subprocess.run(["git", "-C", repo, "add", "."], check=True, env=env)
     subprocess.run(["git", "-C", repo, "commit", "-q", "-m", msg], check=True, env=env)
-
-
-def test_changed_modules_since_recorded_sha(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    _init_git_repo(repo)
-    for n in ("a", "b"):
-        open(os.path.join(repo, f"{n}.py"), "w").write("x = 1\n")
-    _commit_all(repo, "two")
-    sha = driver.head_sha(repo)
-    open(os.path.join(repo, "b.py"), "w").write("x = 2\n")
-    _commit_all(repo, "b changes")
-    record = {"a.py": _rec(sha, "2026-10-01"), "b.py": _rec(sha, "2026-10-01"), "c.py": _rec("deadbeef", "2026-10-01")}
-    # an unresolvable sha proves nothing, so it reads as changed, never as clean
-    assert driver.mutation_changed(repo, record) == {"b.py", "c.py"}
 
 
 def _mutation_repo(path, modules):
@@ -904,13 +857,13 @@ def test_mutation_without_a_value_runs_the_mechanical_list_unranked_and_records(
     assert r.returncode == 0, r.stdout + r.stderr
     assert "mutation-target: m.py" in r.stdout and "mutation-target: n.py" in r.stdout, r.stdout
     rec = _cache_record(repo, tmp)
-    assert sorted(rec[driver.MUTATION_KEY]) == ["m.py", "n.py"], rec
+    assert sorted(rec[mutation_run.MUTATION_KEY]) == ["m.py", "n.py"], rec
 
 
 def test_mutation_prepass_ranks_but_never_adds_and_never_run_goes_first(tmp_path):
     repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _mutation_repo(repo, ["m.py", "n.py", "o.py"])
-    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {driver.MUTATION_KEY: {
+    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {mutation_run.MUTATION_KEY: {
         "o.py": _rec(driver.head_sha(repo), "2026-10-01T00:00:00+00:00")}})
     r = _mutation_no_modules(repo, tmp, AUDITS_NO_SYNTH="0", MUTATION_MAX="2",
                              FAKE_CLAUDE_PREPASS="o.py\nghost.py\nn.py\nm.py")
@@ -928,14 +881,14 @@ def test_explicit_mutation_run_records_too(tmp_path):
     r = _mutation_with_fake_claude(repo, tmp, os.path.join(tmp, "out"))
     assert r.returncode == 0, r.stdout + r.stderr
     rec = _cache_record(repo, tmp)
-    assert rec[driver.MUTATION_KEY]["solver.py"]["sha"] == driver.head_sha(repo)
+    assert rec[mutation_run.MUTATION_KEY]["solver.py"]["sha"] == driver.head_sha(repo)
     # a dotted spelling of the same module is the same key, never a second one
     again = subprocess.run(
         [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), repo,
          "--mutation", "./solver.py", "--out", os.path.join(tmp, "out2")],
         capture_output=True, text=True, env=_fake_tools_env(tmp))
     assert again.returncode == 0, again.stdout + again.stderr
-    assert list(_cache_record(repo, tmp)[driver.MUTATION_KEY]) == ["solver.py"]
+    assert list(_cache_record(repo, tmp)[mutation_run.MUTATION_KEY]) == ["solver.py"]
 
 
 def test_failed_module_is_not_recorded(tmp_path):
@@ -944,7 +897,7 @@ def test_failed_module_is_not_recorded(tmp_path):
     r = _mutation_with_fake_claude(repo, tmp, os.path.join(tmp, "out"), FAKE_CLAUDE_EXIT_MUTATION="3")
     assert r.returncode != 0
     rec = _cache_record(repo, tmp)
-    assert "solver.py" not in rec.get(driver.MUTATION_KEY, {}), rec
+    assert "solver.py" not in rec.get(mutation_run.MUTATION_KEY, {}), rec
 
 
 def test_prepass_prompt_names_the_candidates_and_drops_solver_oracle(tmp_path):
@@ -954,33 +907,11 @@ def test_prepass_prompt_names_the_candidates_and_drops_solver_oracle(tmp_path):
     assert "wrong result" in p
 
 
-def test_missing_or_empty_recorded_sha_reads_as_changed(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    _init_git_repo(repo)
-    runs = {"a.py": {"date": "2026-10-01"}, "b.py": _rec("", "2026-10-01")}
-    assert driver.mutation_changed(repo, runs) == {"a.py", "b.py"}
-
-
-def test_a_changed_sibling_test_counts_as_the_module_changed(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    _init_git_repo(repo)
-    for f in ("m.py", "test_m.py", "n.py", "test_n.py"):
-        open(os.path.join(repo, f), "w").write("x = 1\n")
-    _commit_all(repo, "pairs")
-    sha = driver.head_sha(repo)
-    open(os.path.join(repo, "test_m.py"), "w").write("x = 2\n")
-    _commit_all(repo, "weaken m's test")
-    runs = {"m.py": _rec(sha, "2026-10-01"), "n.py": _rec(sha, "2026-10-01")}
-    assert driver.mutation_changed(repo, runs) == {"m.py"}
-
-
 def test_record_mutation_keys_a_dotted_path_as_the_repo_relative_one(tmp_path):
     repo, cache = _mkdirs(tmp_path, "repo", "cache")
     _init_git_repo(repo)
     driver.record_mutation(repo, "./a.py", base=cache)
-    assert list(driver.load_record(driver._record_file(repo, cache))[driver.MUTATION_KEY]) == ["a.py"]
+    assert list(driver.load_record(driver._record_file(repo, cache))[mutation_run.MUTATION_KEY]) == ["a.py"]
 
 
 def test_changed_module_runs_first_and_max_cuts_after_ordering(tmp_path):
@@ -992,7 +923,7 @@ def test_changed_module_runs_first_and_max_cuts_after_ordering(tmp_path):
     open(os.path.join(repo, "o.py"), "w").write("x = 2\n")
     _commit_all(repo, "o changes")
     now = driver.head_sha(repo)
-    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {driver.MUTATION_KEY: {
+    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {mutation_run.MUTATION_KEY: {
         "m.py": _rec(now, "2026-10-01T00:00:00+00:00"),
         "n.py": _rec(now, "2026-09-01T00:00:00+00:00"),
         "o.py": _rec(before, "2026-10-05T00:00:00+00:00")}})
@@ -1002,31 +933,21 @@ def test_changed_module_runs_first_and_max_cuts_after_ordering(tmp_path):
     assert targets == ["mutation-target: o.py"], r.stdout
 
 
-def _fake_python3(tmp, body):
-    """A `python3` first on PATH, so the driver's own `python3` probes get it."""
-    path = os.path.join(tmp, "python3")
-    with open(path, "w") as f:
-        f.write(f"#!/bin/sh\n{body}\n")
-    os.chmod(path, 0o755)
-
-
-def test_a_crashed_suggest_probe_fails_the_run_not_an_empty_target_list(tmp_path):
+def test_a_failed_plan_fails_the_run_not_an_empty_target_list(tmp_path, monkeypatch, capsys):
     repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _mutation_repo(repo, ["m.py"])
-    _fake_python3(tmp, "echo boom >&2; exit 2")
-    r = _mutation_no_modules(repo, tmp)
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "mutation-target probe failed" in r.stderr and "boom" in r.stderr, r.stderr
-    assert "mutation-target:" not in r.stdout
+    monkeypatch.setenv("XDG_CACHE_HOME", tmp)
 
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
 
-def test_an_unparseable_suggest_probe_fails_the_run(tmp_path):
-    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
-    _mutation_repo(repo, ["m.py"])
-    _fake_python3(tmp, "echo not-json")
-    r = _mutation_no_modules(repo, tmp)
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "mutation-target probe failed" in r.stderr, r.stderr
+    monkeypatch.setattr(driver.mutation_run, "run", boom)
+    with pytest.raises(SystemExit) as e:
+        driver.mutation_mode(repo, None, os.path.join(tmp, "out"))
+    assert e.value.code == 1
+    err = capsys.readouterr()
+    assert "mutation-target probe failed" in err.err and "boom" in err.err, err.err
+    assert "mutation-target:" not in err.out
 
 
 def test_a_failed_prepass_is_named_and_the_run_orders_by_recency_alone(tmp_path):
@@ -1075,7 +996,7 @@ def _mutation_all(repo, tmp, out, *flags, **extra_env):
 def _recorded_mutation_modules(repo, tmp):
     os.environ["XDG_CACHE_HOME"], old = tmp, os.environ.get("XDG_CACHE_HOME")
     try:
-        return set(driver.mutation_runs(driver.load_record(driver._record_file(repo))))
+        return set(mutation_run.recorded_runs(driver.load_record(driver._record_file(repo))))
     finally:
         if old is None:
             del os.environ["XDG_CACHE_HOME"]

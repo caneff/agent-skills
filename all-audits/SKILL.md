@@ -56,8 +56,8 @@ Mutation mode runs up to `MUTATION_JOBS` modules at once (default 4). No
 module's run opens its report; the driver opens the mutation index
 (`collection/mutation/index.html`, printed as `index:`) once, when the run
 finishes, and nothing when no page exists. A standalone `/mutation-audit <module>` still opens its own.
-With no value, `--mutation` takes its candidates from `mutation-audit/audit.py
---suggest` (the model's prepass only ranks that list) and orders them never-run
+With no value, `--mutation` takes its candidates from `mutation-audit/audit.py`'s
+`plan` (the same list `--suggest` prints; the model's prepass only ranks that list) and orders them never-run
 first, then changed since their recorded sha, then oldest run first, before
 `MUTATION_MAX` cuts. Each finished module is recorded under `mutation_modules`
 in the per-repo cache file.
