@@ -3,7 +3,7 @@
 # `*_test.py` suites beside them.
 set -euo pipefail
 dir=$(cd "$(dirname "$0")" && pwd)
-seg="$dir/helpers/usage-segment.sh"
+seg="$dir/usage-segment.sh"
 # Offsets sit ~30s past each minute boundary so the ~1s render drift between
 # this `date +%s` and jq's `now` can't flip a floor (2d3h30m vs 2d3h29m).
 s='{"rate_limits":{"five_hour":{"used_percentage":12.9,"resets_at":'"$(( $(date +%s) + 3*3600 + 10*60 + 30 ))"'},"seven_day":{"used_percentage":42.1,"resets_at":'"$(( $(date +%s) + 2*86400 + 3*3600 + 30*60 + 30 ))"'}}}'

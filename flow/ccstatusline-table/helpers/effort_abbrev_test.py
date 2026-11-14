@@ -70,9 +70,24 @@ def test_cell_blank_without_level(home):
     assert p.stdout == ""
 
 
-def test_get_level_does_not_swallow_programming_errors(home, monkeypatch):
+def test_stdin_parse_does_not_swallow_programming_errors(home, monkeypatch):
     stdin(monkeypatch, "{}")
     monkeypatch.setattr(ea.json, "load", lambda f: (_ for _ in ()).throw(TypeError("bug")))
+    with pytest.raises(TypeError):
+        ea.get_level()
+
+
+def test_settings_read_does_not_swallow_programming_errors(home, monkeypatch):
+    (home / ".claude/settings.json").write_text(json.dumps({"effortLevel": "low"}))
+    stdin(monkeypatch, "{}")
+    real = json.load
+
+    def load(f):
+        if f is sys.stdin:
+            return real(f)
+        raise TypeError("bug")
+
+    monkeypatch.setattr(ea.json, "load", load)
     with pytest.raises(TypeError):
         ea.get_level()
 

@@ -59,11 +59,9 @@ Git branch/changes and context tokens are computed in-script.
 
 ## Test
 
-```
-uv run --with pytest pytest table_statusline_test.py helpers/codex_usage_test.py helpers/effort_abbrev_test.py claude_usage_cache_test.py
-bash statusline.test.sh   # usage-segment.sh
-```
+From the repo root, the gate's own runner, which finds every `*_test.py` and
+`*.test.sh` here (`helpers/usage-segment.test.sh` covers the shell helper):
 
-`tests/all.sh` picks up each `*_test.py` and `*.test.sh` itself.
-`claude_usage_cache_test.py` (the usage cache the status line writes) runs as
-its own suite, found by `tests/all.sh`'s `*_test.py` glob.
+```
+bash tests/all.sh --changed origin/main
+```
