@@ -68,3 +68,16 @@ def test_cell_blank_without_level(home):
     p = subprocess.run([sys.executable, str(SCRIPT)], input="{}", capture_output=True, text=True,
                        env={"HOME": str(home), "PATH": "/usr/bin"})
     assert p.stdout == ""
+
+
+def test_get_level_does_not_swallow_programming_errors(home, monkeypatch):
+    stdin(monkeypatch, "{}")
+    monkeypatch.setattr(ea.json, "load", lambda f: (_ for _ in ()).throw(TypeError("bug")))
+    with pytest.raises(TypeError):
+        ea.get_level()
+
+
+def test_get_level_settings_not_an_object_is_none(home, monkeypatch):
+    (home / ".claude/settings.json").write_text("[1]")
+    stdin(monkeypatch, "{}")
+    assert ea.get_level() is None
