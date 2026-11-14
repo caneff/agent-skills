@@ -446,7 +446,7 @@ def test_binary_file_counts_zero(newdir):
 def test_every_discovered_suite_is_skipped_by_the_size_check(newdir):
     suites = subprocess.run(["bash", os.path.join(HERE, "..", "tests", "all.sh"), "--list"],
                             cwd=HERE, capture_output=True, text=True, check=True).stdout.split("\n")
-    suites = [x.removesuffix(" --selfcheck") for x in suites if x and not x.endswith("Cargo.toml")]
+    suites = [x for x in suites if x and not x.endswith("Cargo.toml")]
     # A mod folder (`flow/mods/<name>`) is one suite label for the `*.test.ts` files inside it.
     repo = os.path.join(HERE, "..")
     mod_tests = [os.path.relpath(os.path.join(d, f), repo)

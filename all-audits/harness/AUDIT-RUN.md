@@ -18,7 +18,7 @@ branch — never an assumed `main`.
 
 A parser-style audit (one with an `audit.py`) imports
 [`auditlib.py`](auditlib.py) via a two-line path hook instead of carrying its
-own excluded-directory set, source walk, or parse/`--selfcheck` CLI dispatch
+own excluded-directory set, source walk, or parse CLI dispatch
 — see `dead-code/audit.py` for the pattern. `auditlib.EXCLUDED_DIRS` is the
 one definition of the excluded-directory set; regenerate its JSON mirror
 (`excluded-dirs.json`, read by the `test-audit/audit.mjs` JS twin) with

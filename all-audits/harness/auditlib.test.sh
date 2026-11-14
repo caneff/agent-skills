@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Behavioral test for auditlib's walk exclusion (#555): a fixture tree with a
 # vendor/ and node_modules/ dir must yield no files from either. The unit
-# selfcheck (auditlib.py --selfcheck) covers a smaller case; this exercises a
+# test (auditlib_test.py) covers a smaller case; this exercises a
 # tree matching the ticket's own AC wording via the public CLI surface.
 #
 # The second fixture (#611) covers `walk_source`'s `skip=` predicate: passing

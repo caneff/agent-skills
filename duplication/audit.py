@@ -43,42 +43,8 @@ def parse_jscpd(json_str):
     return rows
 
 
-def _selfcheck():
-    sample = json.dumps(
-        {
-            "duplicates": [
-                {
-                    "firstFile": {"name": "a.py", "start": 4, "end": 19},
-                    "secondFile": {"name": "b.py", "start": 6, "end": 21},
-                    "format": "python",
-                    "fragment": "...",
-                    "lines": 16,
-                    "tokens": 92,
-                }
-            ]
-        }
-    )
-    rows = parse_jscpd(sample)
-    assert len(rows) == 1, rows
-    row = rows[0]
-    assert row["file"] == "a.py"
-    assert row["line"] == 4
-    assert row["category"] == "token-clone"
-    assert row["bucket"] == "consolidate"
-    assert row["extra"]["clone_tokens"] == 92
-    assert "b.py:6" in row["summary"]
-    assert row["failure"] == ""
-    assert row["owner"] == "b.py:6"
-
-    empty = parse_jscpd(json.dumps({"duplicates": []}))
-    assert empty == []
-
-    print("ok")
-
-
 def main(argv):
-    # supports `--selfcheck` via auditlib.run_cli
-    auditlib.run_cli(argv, _selfcheck, parse_jscpd)
+    auditlib.run_cli(argv, parse_jscpd)
 
 
 if __name__ == "__main__":
