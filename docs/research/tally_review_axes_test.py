@@ -583,3 +583,46 @@ def test_tally_sidecars_counts_a_fixed_and_a_disputed_oe_id(tmp_path):
     row = t.tally_sidecars(root)["skills/standards"]
     assert row == {"raised": 2, "undisposed": 0, "fixed": 1, "disputed": 1,
                    "moved": 0, "filed": 0, "handed-back": 0, "leftover": 0}
+
+
+def test_build_issue_to_pr_live_asks_gh_once_per_known_repo_and_skips_an_unmapped_one(monkeypatch):
+    asked = []
+
+    def fake_fetch(gh_repo):
+        asked.append(gh_repo)
+        return [{"number": 7, "body": "Closes #5", "title": "t", "headRefName": "x"}]
+
+    monkeypatch.setattr(t, "fetch_merged_prs", fake_fetch)
+    monkeypatch.setattr(t, "GH_REPO_FOR", {"skills": "o/skills"})
+    index = {("skills", 5): {}, ("skills", 6): {}, ("unmapped", 1): {}}
+    assert t.build_issue_to_pr_live(index) == {"skills": {5: [7]}, "unmapped": {}}
+    assert asked == ["o/skills"]
+
+
+def test_main_sidecars_prints_the_table_and_a_missing_cache_exits_1(monkeypatch, capsys):
+    monkeypatch.setattr(t.sys, "argv", ["tally", "--sidecars"])
+
+    def missing():
+        raise FileNotFoundError("reviews cache not found: /x")
+
+    monkeypatch.setattr(t, "tally_sidecars", missing)
+    with pytest.raises(SystemExit) as exc:
+        t.main()
+    assert exc.value.code == 1
+    assert "reviews cache not found: /x" in capsys.readouterr().err
+    monkeypatch.setattr(t, "tally_sidecars", lambda: {"skills/standards": {"raised": 1}})
+    t.main()
+    assert json.loads(capsys.readouterr().out) == {"skills/standards": {"raised": 1}}
+
+
+def test_main_joins_reports_to_the_issue_to_pr_override_and_prints_the_index(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "cache"
+    (root / "skills").mkdir(parents=True)
+    (root / "skills" / "review-standards-42.md").write_text("x")
+    override = tmp_path / "map.json"
+    override.write_text(json.dumps({"skills": {"42": [99]}}))
+    monkeypatch.setattr(t, "find_report_files", lambda: t._walk_cache_layout(root, ("*.md",)))
+    monkeypatch.setattr(t.sys, "argv", ["tally", "--issue-to-pr", str(override)])
+    t.main()
+    printed = json.loads(capsys.readouterr().out)
+    assert [e["pr"] for e in printed.values()] == [99]

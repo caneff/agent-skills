@@ -38,11 +38,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "docs" / "research"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "multi-axis-code-review"))
 from gitcmd import GitError, git  # noqa: E402
 from review_ledger import read_ledger  # noqa: E402
-from tally_review_axes import fold_repo  # noqa: E402
+from review_cache import fold_repo  # noqa: E402
 
 # `unmeasured`: the gate answered exit 30 (size or usage unread), so the PR may have been large (#1405).
 AUDITED_REASONS = ("size", "ceiling", "unmeasured")

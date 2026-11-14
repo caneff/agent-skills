@@ -126,6 +126,26 @@ class TestEscape:
         assert got == {"standards:ablation": {"prs": 1, "escapes": 1},
                        "codex-gate:size": {"prs": 1, "escapes": 0}}
 
+    def test_a_linked_worktree_reads_the_repos_rows_not_the_worktrees_name(self, repo):
+        """#1735 C2: the repo is named off the common `.git`, so a worktree called `implement-11`
+        still reads the `skills` rows."""
+        fix = repo.land({"a.py": "a1\nFIXED\na3\na4\na5\na6\n"}, "fix: crash in a.py", 4)
+        repo.publish()
+        wt = repo.tmp / "implement-11"
+        repo.git(repo.repo, "worktree", "add", "-q", "--detach", str(wt))
+        r = repo.run("escapes", "--repo-dir", wt, "--ledger", repo.ledger, "--format", "json")
+        assert r.returncode == 0, r.stderr
+        got = json.loads(r.stdout)
+        assert ([(e["ticket"], e["fix"]) for e in got["escapes"]], got["reviewed"]) == ([(11, fix)], 2)
+
+    def test_a_repo_dir_git_cannot_enter_is_refused_by_name_not_a_traceback(self, repo):
+        """#1735 C1: a regular file as `--repo-dir` is the escape check's refusal, exit 2."""
+        plain = repo.tmp / "plain"
+        plain.write_text("")
+        r = repo.run("escapes", "--no-fetch", "--repo-dir", plain, "--ledger", repo.ledger)
+        assert (r.returncode, "Traceback" in r.stderr) == (2, False), r.stderr
+        assert "git cannot name the repo" in r.stderr, r.stderr
+
     def test_a_fix_after_the_window_is_not_an_escape(self, repo):
         repo.land({"b.py": "b1\nb2\nb3\nb4\nLATE\nb6\n"}, "fix: b.py much later", 2 + 20)
         repo.publish()

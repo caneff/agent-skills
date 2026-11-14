@@ -81,9 +81,9 @@ import sys
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "docs", "research"))
 sys.path.insert(0, os.path.join(HERE, "..", "multi-axis-code-review"))
 sys.path.insert(0, os.path.join(HERE, "..", "implement-spec"))
+import review_cache  # noqa: E402
 import review_ledger  # noqa: E402
 import runfile  # noqa: E402
 
@@ -130,10 +130,10 @@ def slice_prs(n):
 
 
 def reviews_dir():
-    """The review cache directory of this repo: `review_ledger.py cache-dir`, the one place it is chosen."""
+    """The review cache directory of this repo, chosen by `review_cache.cache_dir_for`, the one rule for it."""
     try:
-        return str(review_ledger.cache_dir_for(Path.cwd()))
-    except review_ledger.CacheDirError as exc:
+        return str(review_cache.cache_dir_for(Path.cwd()))
+    except review_cache.CacheDirError as exc:
         raise Unanswerable(str(exc))
 
 
@@ -162,7 +162,7 @@ def ledger_types(reviews, n):
     before #1555 carries none, so adds none; a row with no `round` is round 1, one with a
     malformed `round` counts for none); `skipped` is the types it records as not run, which
     excuses round 1 only. A skip row is no evidence a review ran."""
-    repo = review_ledger.fold_repo(os.path.basename(reviews))
+    repo = review_cache.fold_repo(os.path.basename(reviews))
     try:
         rows = review_ledger.read_ledger(review_ledger.DEFAULT_LEDGER)
     except FileNotFoundError:
@@ -388,10 +388,10 @@ def check(n, branch_name):
     ids += codex_findings(reviews, n, branch, skipped, problems, notes)
     for fid in sorted({i for i in ids if ids.count(i) > 1}):
         problems.append(f"{fid} is raised twice across the findings sidecars")
-    sidecar = os.path.join(reviews, f"dispositions-{n}.jsonl")
+    sidecar = review_cache.dispositions_path(reviews, n)
     lines = []
     if not os.path.exists(sidecar):
-        problems.append(f"dispositions-{n}.jsonl is missing — the worker writes it, "
+        problems.append(f"{os.path.basename(sidecar)} is missing — the worker writes it, "
                         "empty when every reviewer found nothing")
     else:
         if (fresh := branch.fresh(sidecar)):

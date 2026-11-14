@@ -6,7 +6,7 @@ would otherwise turn the merge check into "no sidecar" for a worker whose
 sidecar is where the skill says, or the closing counts into a refusal.
 
 Seam: the sidecar is written where `counts.default_reviews_dir` and
-`runfile.dispositions_path` say, then the script is run from a linked
+`review_cache.dispositions_path` say, then the script is run from a linked
 worktree of a throwaway repo and must find it.
 """
 import json
@@ -70,9 +70,9 @@ def test_no_sidecar_is_refused_naming_the_file(ticket):
     assert code == 1 and "dispositions-5.jsonl is missing" in out, (code, out)
 
 
-def test_the_merge_check_reads_the_sidecar_runfile_dispositions_path_names(ticket):
+def test_the_merge_check_reads_the_sidecar_dispositions_path_names(ticket):
     work, env, reviews = ticket
-    sidecar = runfile.dispositions_path(reviews, 5)
+    sidecar = counts.dispositions_path(reviews, 5)
     with open(sidecar, "w") as fh:
         fh.write(json.dumps({"id": "S1", "outcome": "disputed", "reason": "no"}) + "\n")
     code, out = run(["bash", CHECK, "5"], work, env)

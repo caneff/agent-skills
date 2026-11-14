@@ -461,11 +461,6 @@ def read_dispositions(sidecar_path, legacy=False):
     return out
 
 
-def dispositions_path(reviews_dir, lowest):
-    """The sidecar of clump `<lowest>`."""
-    return os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
-
-
 def job(run_id, lowest, state, cores=0, root=None):
     """Record what parallel job a clump's worker has out: `running` with its
     core count, `none` when the worker declared it launched none, or `done`
