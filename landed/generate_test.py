@@ -23,13 +23,17 @@ def _git(repo, *args):
     subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True, env=env)
 
 
-@pytest.fixture
-def repo(tmp_path):
-    repo = str(tmp_path / "myrepo")
+def _init_repo(repo):
     os.makedirs(repo)
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "a@b.com")
     _git(repo, "config", "user.name", "Tester")
+    return repo
+
+
+@pytest.fixture
+def repo(tmp_path):
+    repo = _init_repo(str(tmp_path / "myrepo"))
     with open(os.path.join(repo, "a.txt"), "w") as f:
         f.write("hello\n")
     _git(repo, "add", "a.txt")
@@ -56,11 +60,22 @@ def test_page_contains_commit_subjects_and_hashes(repo, tmp_path):
     assert short_hash in page
 
 
-def test_page_has_one_h2_per_day(repo, tmp_path):
+def test_page_has_one_h2_per_day(tmp_path, monkeypatch):
+    # Author dates are pinned, so a run across local midnight cannot move a commit
+    # onto another day: two commits on one day, a third a day later.
+    repo = _init_repo(str(tmp_path / "dated"))
+    for i, when in enumerate(["2026-03-10T10:00:00+0000", "2026-03-10T14:00:00+0000",
+                              "2026-03-11T10:00:00+0000"]):
+        with open(os.path.join(repo, "a.txt"), "a") as f:
+            f.write(f"{i}\n")
+        _git(repo, "add", "a.txt")
+        monkeypatch.setenv("GIT_AUTHOR_DATE", when)
+        monkeypatch.setenv("GIT_COMMITTER_DATE", when)
+        _git(repo, "commit", "-q", "-m", f"commit {i}")
     out = str(tmp_path / "landed.html")
     generate.main(["--roots", repo, "--out", out, "100"])
     page = open(out, encoding="utf-8").read()
-    assert page.count('<h2 class="day"') == 1  # both commits land the same day
+    assert page.count('<h2 class="day"') == 2  # three commits, two days
 
 
 def test_page_links_the_shell_assets_and_writes_them_beside_it(repo, tmp_path):

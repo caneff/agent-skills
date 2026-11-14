@@ -214,6 +214,7 @@ def test_a_section_of_unreadable_prose_is_unresolved():
 
 def test_every_unresolved_entry_says_why():
     got = read([issue(1, body="nothing here"), issue(2, body="## Blocked by\n\n")])
+    assert numbers(got["unresolved"]) == [1, 2], got
     assert all(entry["why"] for entry in got["unresolved"]), got
 
 
@@ -409,9 +410,11 @@ def test_each_blocker_state_is_read_once_per_number():
 
     issues = [issue(1, body="## Blocked by\n\n- #7\n"),
               issue(2, body="## Blocked by\n\n- #7\n")]
-    F.frontier("owner/repo", "ready-for-agent",
-               fetch=lambda repo, label: issues, state_of=state_of)
+    got = F.frontier("owner/repo", "ready-for-agent",
+                     fetch=lambda repo, label: issues, state_of=state_of,
+                     parent_of=lambda repo, ticket, run: None)
     assert calls == [7], calls
+    assert numbers(got["unblocked"]) == [1, 2], got
 
 
 # --- The printed report ----------------------------------------------------
@@ -711,11 +714,6 @@ def test_two_inline_lines_in_the_preamble_are_ambiguous():
     assert "more than once" in got["unresolved"][0]["why"], got
 
 
-def test_one_declaration_is_unchanged():
-    got = read([issue(1, body="## Blocked by\n\n- #7\n")], states={7: "open"})
-    assert numbers(got["blocked"]) == [1], got
-
-
 def test_an_ambiguous_spec_parent_stays_unresolved():
     got = read([issue(1, body=QUOTED_THEN_REAL, labels=("ready-for-agent", "spec"))])
     assert numbers(got["unresolved"]) == [1], got
@@ -870,13 +868,11 @@ def test_the_rendered_report_names_the_slice_handoff():
 
 def test_the_parent_is_read_for_the_ticket_not_a_spec_parent():
     # A spec parent is already its own bucket; its own parent is not asked.
-    asked = []
-    F.frontier("owner/repo", "ready-for-agent",
-               fetch=lambda repo, label: [issue(1, labels=("ready-for-agent", "spec"),
-                                                body=NO_BLOCKERS)],
-               state_of=lambda repo, number: None,
-               parent_of=lambda repo, ticket, run: asked.append(ticket["number"]))
-    assert asked == [], asked
+    # Were it read, this answer would make ticket 1 a slice.
+    got = read([issue(1, labels=("ready-for-agent", "spec"), body=NO_BLOCKERS)],
+               parents={1: spec_parent(483)})
+    assert numbers(got["spec"]) == [1], got
+    assert got["slice"] == [], got
 
 
 def gh_answers(table):
@@ -1163,11 +1159,13 @@ def test_a_failed_landing_lookup_keeps_the_ticket_blocked_and_says_so():
 def test_landed_is_not_asked_about_a_closed_blocker():
     asked = []
     issues = [issue(2, body=SECTION_ON_1)]
-    F.frontier("owner/repo", "ready-for-agent",
-               fetch=lambda repo, label: issues,
-               state_of=lambda repo, number: "closed",
-               landed_of=lambda repo, branch: asked.append(branch))
+    got = F.frontier("owner/repo", "ready-for-agent",
+                     fetch=lambda repo, label: issues,
+                     state_of=lambda repo, number: "closed",
+                     parent_of=lambda repo, ticket, run: spec_parent(483),
+                     landed_of=lambda repo, branch: asked.append(branch))
     assert asked == [], asked
+    assert numbers(got["slice"]) == [2], got
 
 
 def test_a_spec_branch_is_asked_once_however_many_tickets_need_it():
@@ -1288,11 +1286,6 @@ def test_a_slice_of_a_closed_spec_is_stranded():
     assert numbers(got["stranded"]) == [491], got
     assert numbers(got["slice"]) == [], got
     assert "#259" in got["stranded"][0]["why"] and "closed" in got["stranded"][0]["why"]
-
-
-def test_a_slice_of_an_open_spec_in_this_repo_is_still_a_slice():
-    got = read([issue(491, body=NO_BLOCKERS)], parents={491: spec_parent(483)})
-    assert numbers(got["slice"]) == [491], got
 
 
 def test_a_parent_whose_repo_was_not_read_is_not_handed_off():

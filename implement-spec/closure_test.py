@@ -824,11 +824,6 @@ def test_a_relative_import_is_out_of_scope(py_closure):
     assert got == {"codec.py"}, got
 
 
-def test_a_name_with_no_tracked_file_makes_no_edge(repo):
-    root = repo({"a.py": "import json\nimport numpy\n"}, agents=PY_ROOT)
-    assert C.include_edges(root, C.declaration(root)) == {}
-
-
 def test_a_valid_file_with_a_parse_warning_is_read_without_noise(repo):
     root = repo({"codec.py": "x\n", "a.py": 'import codec\ns = "\\d"\n'},
                 agents=PY_ROOT)

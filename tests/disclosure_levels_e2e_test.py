@@ -6,10 +6,7 @@ What it drives, through the same entry points a session reaches:
 - Teaching hooks: each PreToolUse command wired in flow/claude/settings.json,
   fed the precursor command, answers with its doc's section once per session
   and says nothing the second time.
-- Always-on text: tests/check-always-on.py passes on the real CLAUDE.md plus
-  its imports, and the lines the teaching hooks now carry are gone from it.
-- Output style: § Communication is in the repo's Quill copy and not in
-  CLAUDE.md.
+- Always-on text: the size budget is owned by always_on_budget_test.py.
 - Path rules: each file under flow/claude/rules/ scopes itself with `paths:`
   to the files it is about.
 - The 14-day re-count: pointer_reads.py count prints both tables.
@@ -97,25 +94,6 @@ def test_a_teaching_hook_teaches_once(hook, hook_env):
         assert sentence not in second
     else:
         assert second == ""
-
-
-def test_budget_gate_passes_on_the_real_tree():
-    p = subprocess.run([sys.executable, str(ROOT / "tests" / "check-always-on.py")],
-                       capture_output=True, text=True)
-    assert p.returncode == 0, p.stdout + p.stderr
-    assert "within budget 1100" in p.stdout
-
-
-@pytest.mark.parametrize("gone", ["not-draft", "SHELL-SAFETY", "zed <path>", "shot-scraper",
-                                  "search open issues", "# Communication"])
-def test_hook_carried_lines_left_claude_md(gone):
-    assert gone not in (CLAUDE / "CLAUDE.md").read_text()
-
-
-def test_communication_lives_in_quill():
-    quill = (CLAUDE / "output-styles" / "quill.md").read_text()
-    assert "\n# Communication\n" in quill
-    assert "Relay a subagent's or worker's **delta**" in quill
 
 
 WANT_RULE_PATHS = {

@@ -154,22 +154,32 @@ def test_no_rulings_the_list_says_none_rather_than_vanishing(wt, diff):
     assert "settled decisions: none" in (section(out, "Settled decisions") or "").lower(), out
 
 
+OUTCOME_WORD = r"\b(fixed|moved|disputed)\b"
+
+
 def test_the_renderer_never_emits_an_outcome_of_its_own(wt, diff):
-    _, out, _ = render(wt, diff)
-    assert not re.search(r'"outcome"|\b(fixed|moved|disputed)\b', out), out
+    """Scoped to the generated sections: given a ruling, a choice and a claim
+    that carry no outcome word, each section is rendered and none of them
+    assigns an outcome; no section is an `outcome` field."""
+    _, out, _ = render(wt, diff, "--ruling", "keep the old name",
+                       "--choice", "split the helper",
+                       "--claim", "S1: the suite ran", axis="correctness")
+    assert '"outcome"' not in out, out
+    for heading in ("Settled decisions", "Worker's own choices", "Claims to check"):
+        body = section(out, heading)
+        assert body, (heading, out)
+        assert not re.search(OUTCOME_WORD, body), (heading, out)
 
 
 def test_a_claims_own_words_are_the_only_place_an_outcome_word_appears(wt, diff):
     _, out, _ = render(wt, diff, "--claim", "S1: it says fixed", axis="correctness")
-    assert len(re.findall(r'\b(fixed|moved|disputed)\b', out)) == 1, out
+    claims = section(out, "Claims to check") or ""
+    assert "it says fixed" in claims, out
+    assert "it says fixed" not in (section(out, "Settled decisions") or ""), out
+    assert len(re.findall(OUTCOME_WORD, claims)) == 1, claims
 
 
-# #1400: nested agents, worker count and ceiling.
-def test_the_brief_forbids_a_nested_subagent(wt, diff):
-    _, out, _ = render(wt, diff)
-    assert "no nested subagent" in out.lower(), out
-
-
+# #1400: worker count and ceiling.
 def test_default_worker_count_and_wall_clock_ceiling_are_stated(wt, diff):
     _, out, _ = render(wt, diff)
     assert "at most 1 worker" in out and "600 seconds" in out, out

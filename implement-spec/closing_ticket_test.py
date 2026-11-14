@@ -100,7 +100,7 @@ def test_the_fix_worker_runs_the_per_change_command_not_the_full_seam(repo):
 def test_main_is_merged_in_never_rebased(repo):
     got = body(repo(), spec=366, surfaces=[])
     assert "git merge --no-edit origin/main" in got, got
-    assert "rebase" in got and "never" in got, got
+    assert "git rebase" not in got.split("```\n", 2)[1], got
 
 
 def test_the_landed_slices_are_brought_in_before_main(repo):
