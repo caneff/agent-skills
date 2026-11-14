@@ -36,7 +36,7 @@ set -u
 # been re-run since the lib was added, and every stop then logs lib-missing.
 hook_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 log="$HOME/.claude/worker-stop-alerts.log"
-lib_missing() {
+lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
   mkdir -p "$(dirname "$log")"
   printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" "$1" >> "$log"
   exit 0
@@ -72,6 +72,7 @@ session="$(jq -r '.session_id // ""' <<<"$event" 2>/dev/null)"
 # harness is still writing).
 entries() { jq -nc '[inputs | fromjson? | objects]' -R "$transcript" 2>/dev/null; }
 
+# The brief: ticket number and controller name, or nothing for a non-worker.
 IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 [ -n "${controller:-}" ] || exit 0
 
@@ -105,6 +106,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
           | any(($c, $names[]); . as $nm | $to == $nm or ($to | startswith($nm + " [")))
             or IN($socks[]))
       | .id] as $sends
+  # Every delivered report, by its position in the transcript.
   | [$all[] | select(.value.type == "user" and (.value.toolUseResult | type) == "object"
         and .value.toolUseResult.success == true)
       | select([.value.message.content[]? | select(.type == "tool_result")
@@ -193,6 +195,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   | "\($verdict)\t\(last.uuid // "line \(length)")"')
 [ "${verdict:-}" = "silent" ] || exit 0
 
+# One alert per stop: a stop already in the log never alerts again.
 key="$session"$'\t'"$stop"
 grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 

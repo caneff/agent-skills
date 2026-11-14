@@ -36,6 +36,7 @@ CFG = Path(__file__).resolve().parent / "helpers"
 
 
 def run(cmd: list[str], stdin: bytes, cwd: str | None = None) -> str:
+    """Run a helper, feed it the session JSON, return its trimmed stdout."""
     try:
         out = subprocess.run(
             cmd, input=stdin, capture_output=True, timeout=1.5, cwd=cwd
@@ -150,7 +151,7 @@ def frame_color(tokens: int | None) -> str:
     if tokens is None:
         return ORANGE
     if tokens <= 0:
-        return PURPLE
+        return PURPLE  # no data yet
     if tokens >= 180_000:
         return RED
     if tokens >= 140_000:

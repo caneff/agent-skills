@@ -38,7 +38,7 @@ worker_alert_read_brief() { # <transcript> -> "n\tcontroller" on stdout, or empt
 # position it's in. Live means the pid's /proc starttime (field 22, after
 # the `(comm)` field) equals the record's procStart — a stale record whose
 # pid was reused has another, as in flow/lane's sessions reader.
-worker_alert_resolve_session() {
+worker_alert_resolve_session() { # <mode: sid|name> <val> -> "sid\x1fname\x1fsock" per line on stdout (sid mode: every live match), 0; else 1
   local mode="$1" val="$2" f pid start sid nm sock stat fields found=1
   for f in "$HOME"/.claude/sessions/*.json; do
     [ -e "$f" ] || continue
@@ -64,18 +64,22 @@ worker_alert_resolve_session() {
 
 # One alert-log line, in every hook's shared format: date, the caller's key
 # (already tab-joined), status, message.
-worker_alert_logline() {
+worker_alert_logline() { # <log> <key> <status> <message>
   local log="$1" key="$2" status="$3" msg="$4"
   mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$status" "$msg" >> "$log"
 }
 
-worker_alert_worker_agent_name() {
+# This worker's own herdr agent name, via its pane id — falling back to the
+# bare pane id, then to "unknown pane".
+worker_alert_worker_agent_name() { # -> name
   local n
   n="$(timeout 2 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
   printf '%s\n' "${n:-${HERDR_PANE_ID:-unknown pane}}"
 }
 
-worker_alert_controller_pane() {
+# The herdr pane id for a live session id, or empty (including when
+# ctl_session itself is empty).
+worker_alert_controller_pane() { # <ctl_session> -> pane_id or empty
   local ctl_session="$1"
   [ -n "$ctl_session" ] || return 0
   timeout 2 herdr agent list 2>/dev/null | jq -r --arg s "$ctl_session" \
@@ -92,7 +96,7 @@ worker_alert_controller_pane() {
 # `uds:` address) a report to the controller could carry. A worktree without
 # `herdr`, or a `herdr agent list` that fails or times out, falls back to the
 # literal the way an older brief already carrying a session name does.
-worker_alert_resolve_controller() {
+worker_alert_resolve_controller() { # <controller from the brief> -> sets herdr_sid ctl_session names sockets
   local controller="$1" resolved="" by_name_sid widened r_sid r_name r_sock
   herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
     | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
@@ -127,7 +131,7 @@ worker_alert_resolve_controller() {
 # input, so that refusal is retried with backoff while `deadline` (a $SECONDS
 # value) allows. Sets `prompt_status` (`sent` or `not-sent`) and `prompt_msg`,
 # the alert-log line's text; returns 0 only when sent.
-worker_alert_prompt_pane() {
+worker_alert_prompt_pane() { # <pane> <alert> <deadline in $SECONDS> -> sets prompt_status prompt_msg
   local pane="$1" alert="$2" deadline="$3" attempts=0 backoff=1 out blocked=""
   while :; do
     attempts=$((attempts + 1))
@@ -154,7 +158,7 @@ worker_alert_prompt_pane() {
 # `alert` into it, and log the outcome under `key` — `not-sent` with the alert
 # text when the controller has no pane. Sets `prompt_status` and `prompt_msg`
 # as `worker_alert_prompt_pane` does.
-worker_alert_deliver() {
+worker_alert_deliver() { # <log> <key> <controller> <alert> <deadline in $SECONDS>
   local log="$1" key="$2" controller="$3" alert="$4" deadline="$5" pane
   pane="$(worker_alert_controller_pane "${ctl_session:-}")"
   if [ -z "$pane" ]; then
@@ -173,7 +177,7 @@ worker_alert_deliver() {
 # worker when its dispatcher's process exited), else the brief's
 # literal. Only a peer-origin entry counts, so text a ticket or a web page
 # carried into the transcript cannot name a controller.
-worker_alert_current_controller() {
+worker_alert_current_controller() { # <transcript> <brief controller> -> name on stdout
   local adopted
   adopted="$(jq -nc '[inputs | fromjson? | objects]' -R "$1" 2>/dev/null | jq -r '
     [.[] | select(.type == "user" and .origin.kind == "peer") | .message.content
@@ -188,7 +192,7 @@ worker_alert_current_controller() {
 # `names` and `sockets`, each optionally followed by SendMessage's ` [ref]`.
 # worker-stop-alert.sh reads the same rule in jq over the transcript, where
 # this function cannot be called; a change to one is a change to both.
-worker_alert_is_controller_target() {
+worker_alert_is_controller_target() { # <to> <brief controller> -> 0 when it is
   local to="$1" nm
   for nm in "$2" ${names[@]+"${names[@]}"} ${sockets[@]+"${sockets[@]}"}; do
     [ "$to" = "$nm" ] && return 0

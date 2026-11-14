@@ -51,11 +51,13 @@ brief='<command-message>implement</command-message>\n<command-name>/implement</c
 
 human() { printf '{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
 assistant_text() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"%s"}]}}\n' "$1"; }
+# send <id> <to> ; ok <id> ; denied <id>
 send() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"%s","name":"SendMessage","input":{"to":"%s","message":"x"}}]}}\n' "$1" "$2"; }
 ok() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"sent"}]},"toolUseResult":{"success":true,"message":"sent"}}\n' "$1"; }
 denied() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
 peer() { printf '{"type":"user","isMeta":true,"origin":{"kind":"peer","name":"skills-b6"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
 notification() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
+# launch <agentId> ; teammate_launch <agentId> [name] ; handback <agentId>
 launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"%s"}}\n' "$1" "$1"; }
 # The Agent-tool-as-teammate shape: status teammate_spawned, id under
 # agent_id (snake_case), no agentId field at all. <name> defaults to <agentId>
@@ -73,6 +75,7 @@ teammate_report() { printf '{"type":"user","message":{"role":"user","content":"A
 # It is resolved by a `<task-id>` notification carrying a `<status>`.
 bg_launch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-%s","name":"Bash","input":{"command":"just check-full","run_in_background":true}}]}}\n' "$1"
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-%s","content":"Command running in background with ID: %s"}]},"toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"%s"}}\n' "$1" "$1" "$1"; }
+# monitor_launch <task-id> : the Monitor tool's launch result.
 monitor_launch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-%s","name":"Monitor","input":{"command":"tail -F progress","description":"job progress"}}]}}\n' "$1"
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-%s","content":"Monitor started (task %s)"}]},"toolUseResult":{"taskId":"%s","timeoutMs":1800000,"persistent":false}}\n' "$1" "$1" "$1"; }
 # task_done <task-id> [status] : the terminal notification for a background
@@ -90,12 +93,14 @@ monitor_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"}
 # misread as the monitor's own timeout (the match has to be the exact
 # marker inside `<event>`, not a bare substring test).
 monitor_event_mentioning_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: job progress</summary>\\n<event>13:45:43 note: the other Monitor timed out, re-armed it</event>\\n</task-notification>"}}\n' "$1"; }
+# task_stop <task-id> : the worker stopping a monitor itself.
 task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ts-%s","name":"TaskStop","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
 # work : a tool call that is not a report — the mark of a turn that did
 # something and therefore owes the controller a report.
 work() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e-1","name":"Edit","input":{"file_path":"a.js"}}]}}\n'
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e-1","content":"ok"}]},"toolUseResult":{"filePath":"a.js"}}\n'; }
 
+# task_poll <id> : a TaskOutput poll of a background task or subagent.
 task_poll() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"still running"}]},"toolUseResult":{"retrieval_status":"not_ready"}}\n' "$1"; }
 # task_poll_denied / task_poll_errored <id> : the same poll, answered by a
@@ -122,6 +127,7 @@ run() {
     echo "FAIL: $name — want exit 0, got $rc"; echo "  out: $out"; fails=1
   fi
 }
+# expect_alert <name> [ticket]
 expect_alert() {
   local name=$1 n=${2:-820}
   if [ "$pane" = "w9:p1" ] && printf '%s' "$text" | grep -q "worker #$n stopped without reporting" \
@@ -151,6 +157,7 @@ expect_reported() {
 }
 reset_log() { rm -f "$log"; }
 
+# A worker whose turn ended with no report alerts the controller.
 reset_log
 t="$tmp/no-report.jsonl"
 { human "$brief"; assistant_text "done, report in my pane"; } > "$t"
@@ -163,6 +170,7 @@ else
   echo "FAIL: alert text is not one plain line: $text"; fails=1
 fi
 
+# The same stop, evaluated again, does not re-fire; a later stop does.
 run "same stop again" "$t"
 expect_none "a re-evaluated stop that already alerted does not re-fire"
 assistant_text "woke on a notification, still no report" >> "$t"
@@ -515,6 +523,7 @@ t="$tmp/herdr-name-silent.jsonl"
 { human "$herdr_brief"; assistant_text "done, no report"; } > "$t"
 run "herdr-name controller, no report" "$t"
 expect_alert "a herdr-name controller with no report still resolves the pane and alerts"
+# Restore the registry and agent list the tests below expect.
 printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
@@ -630,6 +639,7 @@ run "reused pid" "$t"
 expect_alert "a same-name record with a reused pid does not hide the real controller"
 rm -f "$home/.claude/sessions/0.json"
 
+# Failure paths log and exit 0.
 reset_log
 HERDR_PROMPT_RC=1 run "prompt rejected" "$t"
 if grep -q 'not-sent' "$log" 2>/dev/null; then
@@ -638,6 +648,7 @@ else
   echo "FAIL: a rejected prompt left no not-sent log line"; fails=1
 fi
 
+# A blocked controller: retry with backoff inside the hook's budget.
 reset_log; rm -f "$tmp/prompt.tries"
 HERDR_PROMPT_BLOCKED=2 run "blocked, then free" "$t"
 expect_alert "a prompt refused as blocked is retried until the controller accepts it"

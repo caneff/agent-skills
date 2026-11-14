@@ -27,7 +27,7 @@ set -u
 
 hook_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 log="$HOME/.claude/worker-send-alerts.log"
-lib_missing() {
+lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
   mkdir -p "$(dirname "$log")"
   printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" "$1" >> "$log"
   exit 0
@@ -64,6 +64,7 @@ worker_alert_is_controller_target "$to" "$controller" || exit 0
 key="$(jq -r '.tool_use_id // empty' <<<"$event" 2>/dev/null)"
 [ -n "$key" ] || key="event-$(sha1sum <<<"$event" | cut -c1-16)"
 logline() { worker_alert_logline "$log" "$key" "$1" "$2"; }
+# One alert per send: a send already in the log never alerts again.
 grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
 # The answer, three ways: delivered, failed, or absent. `success` must be

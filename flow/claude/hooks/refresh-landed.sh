@@ -14,6 +14,7 @@ set -u
 hook_path="$(readlink -f "$0")"
 repo_root="$(cd "$(dirname "$hook_path")/../../.." && pwd)"
 
+# The command that just ran (empty string if absent / jq missing).
 cmd="$(jq -r '.tool_input.command // ""' 2>/dev/null)"
 
 # Cheap pre-filter: bail unless this was a push. A stray match only costs a
@@ -23,6 +24,7 @@ case "$cmd" in
   *) exit 0 ;;
 esac
 
+# Any push: refresh the landed review page in the background (~1s, 0 tokens).
 python3 "$repo_root/landed/generate.py" >/dev/null 2>&1 &
 
 exit 0

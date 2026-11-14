@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Contract test for worker-send-alert.sh: a synthetic PostToolUse event
+# for a SendMessage on stdin, a synthetic transcript, a scratch HOME holding
+# the sessions registry, and a stubbed `herdr` on PATH -> exactly one `herdr
+# agent prompt` to the controller's pane when the send to the controller came
+# back failed, or none. Runs offline; no real session is touched.
 # Run: bash flow/claude/hooks/worker-send-alert.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,6 +45,7 @@ other="$tmp/other.jsonl"; human 'just a chat' > "$other"
 drain="$tmp/drain.jsonl"; human "${brief//skills-b6/drain}" > "$drain"
 
 fails=0
+# run <name> <transcript> <event-json> [env...] -> sets $pane, $text, $count
 run() {
   local name=$1 t=$2 event=$3 out rc; shift 3
   rm -f "$tmp/prompt.pane" "$tmp/prompt.text" "$tmp/prompt.count"
@@ -52,6 +58,7 @@ run() {
   [ "$rc" = 0 ] || { echo "FAIL: $name — want exit 0, got $rc"; echo "  out: $out"; fails=1; }
   last_out=$out
 }
+# send_event <tool_use_id> <to> <response-json> [tool_name]
 send_event() { jq -nc --arg id "$1" --arg to "$2" --argjson r "$3" --arg tool "${4:-SendMessage}" \
   '{hook_event_name:"PostToolUse",tool_name:$tool,tool_use_id:$id,tool_input:{to:$to,message:"PR up"},tool_response:$r}'; }
 failed='{"success":false,"message":"No agent named '"'"'x'"'"' is reachable.\nUse ListAgents."}'

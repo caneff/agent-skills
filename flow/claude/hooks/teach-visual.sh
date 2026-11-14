@@ -19,6 +19,7 @@ for opener in zed wslview xdg-open explorer.exe eog feh mspaint.exe; do
     break
   fi
 done
+# `cmd.exe /c start <file>` opens it in the Windows default viewer.
 if runs cmd.exe /c start; then
   teach VISUAL-INSPECTION.md "Showing me a file" "\`cmd.exe /c start\` opens a file for Chris"
 fi

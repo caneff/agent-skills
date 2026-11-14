@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Contract test for wrap-background-jobs.sh: synthetic PreToolUse JSON on stdin
+# -> exit code and emitted JSON out. Nothing live is touched; `job-run` is a
+# stub on a scratch PATH, so the job-run-absent branch is reachable too.
 # Run: bash flow/claude/hooks/wrap-background-jobs.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,13 +12,14 @@ fails=0
 ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; [ $# -gt 1 ] && printf '  %s\n' "$2"; fails=1; }
 
+# Two PATHs: one where job-run exists, one where it does not.
 mkdir -p "$tmp/withjr" "$tmp/nojr"
 for t in cat jq tr cut sed; do
   p=$(command -v "$t") && { ln -sf "$p" "$tmp/withjr/$t"; ln -sf "$p" "$tmp/nojr/$t"; }
 done
 printf '#!/usr/bin/env bash\nexit 0\n' > "$tmp/withjr/job-run"; chmod +x "$tmp/withjr/job-run"
 
-fire() {
+fire() { # fire <path-dir> <json> ; prints "<rc>|<stdout>"
   local out rc
   out=$(printf '%s' "$2" | PATH="$tmp/$1" "$hook" 2>/dev/null); rc=$?
   printf '%s|%s' "$rc" "$out"
@@ -48,6 +52,8 @@ name3=$(printf '%s' "$different" | jq -r '.hookSpecificOutput.updatedInput.comma
   && ok "a different call gets a different run name" \
   || no "a different call gets a different run name" "both $name"
 
+# With no tool_use_id there is no stable key, so uniqueness wins: two such calls
+# must not share a run directory and trip job-run's live-name refusal.
 noid='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"sleep 30; echo done","run_in_background":true}}'
 n1=$(fire withjr "$noid"); n1=$(printf '%s' "${n1#*|}" | jq -r '.hookSpecificOutput.updatedInput.command' | sed -n 's/.*--name \([^ ]*\).*/\1/p')
 n2=$(fire withjr "$noid"); n2=$(printf '%s' "${n2#*|}" | jq -r '.hookSpecificOutput.updatedInput.command' | sed -n 's/.*--name \([^ ]*\).*/\1/p')
@@ -68,7 +74,7 @@ sn=$(fire withjr "$short"); sn=$(printf '%s' "${sn#*|}" | jq -r '.hookSpecificOu
   && ok "an id shorter than the slice still lands in the name" \
   || no "an id shorter than the slice still lands in the name" "$sn"
 
-name_for() {
+name_for() { # name_for <command> <description-json-fragment, e.g. ,"description":"x">
   local j
   j='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AbCdEfGhIjKlMnOp","tool_input":{"command":'"$(printf '%s' "$1" | jq -Rs .)"$2',"run_in_background":true}}'
   fire withjr "$j" | sed 's/^[^|]*|//' | jq -r '.hookSpecificOutput.updatedInput.command' \
@@ -118,12 +124,14 @@ got=$(fire withjr "$extra"); body2=${got#*|}
   || no "description and timeout survive the rewrite" "$body2"
 
 # A call the hook has no business touching says nothing at all.
-silent() {
+silent() { # silent <name> <path-dir> <json>
   local got rc body
   got=$(fire "$2" "$3"); rc=${got%%|*}; body=${got#*|}
   [ "$rc" = 0 ] && [ -z "$body" ] && ok "$1" || no "$1" "rc=$rc body=$body"
 }
-passthrough() {
+# A call it wanted to wrap and could not passes through, but is not silent —
+# see the systemMessage assertions below.
+passthrough() { # passthrough <name> <path-dir> <json>
   local got rc body
   got=$(fire "$2" "$3"); rc=${got%%|*}; body=${got#*|}
   [ "$rc" = 0 ] && ! printf '%s' "$body" | grep -q updatedInput \
@@ -132,7 +140,9 @@ passthrough() {
 silent "a foreground Bash call passes through untouched" withjr "$fg"
 silent "a Bash call with no run_in_background field passes through untouched" withjr "$noflag"
 silent "a command already running under job-run passes through untouched" withjr "$wrapped"
-mentions_wrapped() {
+# A command is "already wrapped" only where a command can start. Merely naming
+# the phrase, even in full, is an ordinary job and deserves its record.
+mentions_wrapped() { # mentions_wrapped <expectation> <command>
   local want=$1 cmd=$2 body
   body=$(fire withjr "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01AbCdEfGhIjKlMnOp\",\"tool_input\":{\"command\":$(printf '%s' "$cmd" | jq -Rs .),\"run_in_background\":true}}")
   body=${body#*|}

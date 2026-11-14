@@ -58,7 +58,7 @@ case "$cmd" in
 job-run "*) exit 0 ;;
 esac
 
-skip() {
+skip() { # skip <why> — pass the call through, and say a record will not exist
   jq -nc --arg m "job-run: $1, so this background job runs unwrapped and will leave no record. \`job-run --status\` will not find it." \
     '{systemMessage:$m}'
   exit 0
@@ -71,7 +71,7 @@ command -v job-run >/dev/null 2>&1 || skip "job-run is not on PATH (run flow/ins
 # (what the job is, which the job-wake prompt then shows), else the first word
 # of the command. The id makes concurrent runs of the same command distinct, so
 # the wrapper's name-collision refusal can never turn into a failed tool call.
-slugify() {
+slugify() { # slugify <max-length> ; stdin -> legal name fragment, may be empty
   tr -c 'A-Za-z0-9' '-' | tr -s '-' | sed 's/^-//' | cut -c1-"$1" | sed 's/-*$//'
 }
 desc=$(field '.tool_input.description // "" | if type == "string" then . else "" end')
