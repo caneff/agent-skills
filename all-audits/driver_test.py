@@ -1852,6 +1852,15 @@ def test_suggest_with_an_unreadable_gh_reply_exits_nonzero(tmp_path):
     r = _suggest(roots, env, FAKE_GH_PRS="not json")
     assert r.returncode != 0
     assert "suggest:" not in r.stdout
+    assert "JSONDecodeError" in r.stderr and "not json" in r.stderr, r.stderr
+
+
+def test_suggest_names_the_missing_field_of_a_reply_with_the_wrong_shape(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS='[{"repo": 1}]')
+    assert r.returncode != 0
+    assert "KeyError" in r.stderr and "repository" in r.stderr, r.stderr
 
 
 def test_suggest_with_no_recent_prs_says_so_and_exits_zero(tmp_path):
