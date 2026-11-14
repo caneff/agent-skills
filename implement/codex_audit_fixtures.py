@@ -27,12 +27,15 @@ def skip_row(ticket, reason, repo="skills", phase="gate"):
 
 
 class GitRepoCase:
-    """Mixin for a plain test-environment class holding `self.env` (the git identity) and `self.repo` (a checkout)."""
+    """Mixin for a plain test-environment class holding `self.env` (the git identity), `self.repo` (a checkout) and `self.ledger` (its ledger file)."""
 
     def git(self, *args, date=None):
         env = {**self.env, **({"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else {})}
         return subprocess.run(["git", *args], cwd=self.repo, env=env, check=True,
                               capture_output=True, text=True).stdout.strip()
+
+    def write_ledger(self, rows):
+        self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
 
     def commit(self, message, date, path="f"):
         """A commit rewriting `path` with `message`, dated `date`; its sha."""
@@ -124,9 +127,6 @@ class AuditEnv(GitRepoCase):
         d = self.tmp / ".config" / "agent-skills"
         d.mkdir(parents=True)
         (d / "codex-reviews-off").write_text("")
-
-    def write_ledger(self, rows):
-        self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
 
     def rows(self, kind="codex-audit"):
         return [r for r in map(json.loads, self.ledger.read_text().splitlines()) if r.get("type") == kind]

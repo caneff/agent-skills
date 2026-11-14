@@ -37,9 +37,6 @@ class Case(GitRepoCase):
         """A squash merge as GitHub writes it: the subject ends `(#<pr>)`, the body closes the ticket."""
         return self.commit(f"Work for {ticket} (#{pr})\n\n* a commit\n\nCloses #{ticket}\n", date)
 
-    def write_ledger(self, rows):
-        self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
-
     def run_script(self, mark, *extra, cwd=None):
         return subprocess.run([sys.executable, SCRIPT, "--ledger", self.ledger, "--repo", "skills",
                                "--base", "main", "--mark", mark, *extra],

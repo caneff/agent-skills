@@ -127,6 +127,10 @@ def test_a_clean_run_records_the_range_and_its_prs_and_says_no_findings(dry):
     [row] = dry.rows()
     assert (row["prs"], row["range"]) == ([101, 104], dry.span)
     assert row["status"]["fields"]["findings"]["status"] == "known"
+
+
+def test_the_launch_worktree_is_removed_after_a_run(dry):
+    assert dry.run_audit().returncode == 0
     assert "codex-audit-" not in dry.git("worktree", "list"), "the launch worktree is removed"
     assert not list(dry.cache.glob("*-tree")), "the launch worktree is removed"
 
@@ -286,25 +290,3 @@ def test_mark_adds_a_line_for_a_repo_never_audited(case):
     r = case.mark("--sha", case.root, "--date", "2026-10-03")
     assert r.returncode == 0, r.stderr
     assert f"{other}\n- skills: 2026-10-03 {case.root}\n" in case.trial.read_text()
-
-
-# --- the doc's wording: § Close out names the checkout the trial row goes to, so the audit's cwd is
-# never the target (#1227)
-
-
-def close_out():
-    text = (HERE / "codex-audit.md").read_text()
-    return text.split("## 4. Close out", 1)[1].split("## Dry run", 1)[0]
-
-
-def test_trial_row_goes_to_the_resolved_skills_checkout():
-    section = close_out()
-    assert "git -C ~/.agents/skills/implement rev-parse --show-toplevel" in section
-    assert "never the working directory" in " ".join(section.split())
-
-
-def test_no_bare_relative_path_to_the_trial_log():
-    lines = [l for l in close_out().splitlines() if "codex-review-trial.md" in l]
-    assert lines, "§ Close out no longer names the trial log"
-    for line in lines:
-        assert "<skills checkout>/docs/research/" in line

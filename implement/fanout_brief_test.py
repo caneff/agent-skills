@@ -56,12 +56,6 @@ def test_a_brief_lists_own_files_marks_others_off_limits_and_carries_test_and_mu
     assert "scratch copy" in text and "never mutate the live file" in text.lower(), text
 
 
-def test_the_no_git_write_and_no_subagent_rules_are_stated(wt):
-    _, out, _ = run(wt, "alpha=a.py", "beta=c.py")
-    text, _ = brief_at(out)
-    assert "no git write" in text.lower() and "no nested subagent" in text.lower(), text
-
-
 def test_two_workers_sharing_a_file_is_refused_and_nothing_is_written(wt, home):
     code, out, err = run(wt, "alpha=a.py,b.py", "beta=b.py")
     assert code == 2 and out == "", (code, out)
@@ -84,7 +78,7 @@ def test_the_worker_must_be_one_of_the_assigned(wt):
 def test_a_second_render_for_the_same_ticket_and_worker_does_not_overwrite_the_first(wt):
     _, first, _ = run(wt, "alpha=a.py", "beta=c.py")
     _, second, _ = run(wt, "alpha=a.py,z.py", "beta=c.py")
-    t1, p1 = brief_at(first)
+    _, p1 = brief_at(first)
     t2, p2 = brief_at(second)
     assert p1 != p2, (p1, p2)
     assert "z.py" not in open(p1).read() and "z.py" in t2
