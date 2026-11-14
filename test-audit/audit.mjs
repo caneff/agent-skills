@@ -331,7 +331,7 @@ function assertBindings(tree) {
 }
 
 // A file that binds nothing: `assert.*` still reads as an assertion, which is
-// what the snippet-level selfchecks below parse without an import.
+// what the snippet-level snippet tests in audit.test.mjs parse without an import.
 const NO_ASSERT_BINDINGS = { roots: new Set(["assert"]), matchers: new Set() };
 
 /**
