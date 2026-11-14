@@ -162,3 +162,14 @@ def test_cli_flip_twice_says_already_slash_only(env, capsys):
     # after flipping it is no longer stale, so list is empty → out of range
     audit.main(["--flip", "1"])
     assert "out of range (1–0)" in capsys.readouterr().out
+
+
+def test_build_rows_orders_never_used_then_oldest_then_slash_only():
+    import audit
+    # insertion order is the reverse of the expected order, so a missing sort fails
+    model_inv = {"manual": False, "recent": True, "old": True, "never": True}
+    paths = {n: f"/{n}" for n in model_inv}
+    last = {"recent": datetime(2020, 2, 28, tzinfo=timezone.utc),
+            "old": datetime(2020, 1, 1, tzinfo=timezone.utc)}
+    rows = audit.build_rows(paths, model_inv, last, NOW, 45)
+    assert [r.name for r in rows] == ["never", "old", "recent", "manual"]
