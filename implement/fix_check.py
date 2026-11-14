@@ -86,6 +86,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "implement-spec"))
 import review_cache  # noqa: E402
 import review_ledger  # noqa: E402
 import runfile  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "common"))
+import shellcmd  # noqa: E402  (#1782)
 
 AXES = ("standards", "spec", "correctness")
 RATINGS = ("CONFIRMED", "PLAUSIBLE")
@@ -100,19 +102,19 @@ class Unanswerable(Exception):
     """The environment cannot answer (git, gh or the cache): exit 2, not a verdict."""
 
 
-def git(*args, absent=None):
-    """git's stdout; None when it exits with `absent`, git's own "not there" code for the call."""
-    done = subprocess.run(["git", *args], capture_output=True, text=True)
-    if absent is not None and done.returncode == absent:
-        return None
-    if done.returncode != 0:
-        raise Unanswerable(f"`git {' '.join(args)}` failed: {done.stderr.strip()}")
-    return done.stdout.strip()
+def git(*args, ok=(0,)):
+    """git's stdout; None when it exits with a status in `ok` other than 0 (git's own "not there"
+    code for the call, `config --get`'s 1). Any exit outside `ok` is Unanswerable."""
+    try:
+        done = shellcmd.git(list(args), ok=ok)
+    except shellcmd.CmdError as e:
+        raise Unanswerable(f"`git {' '.join(args)}` failed: {e}") from None
+    return done.stdout.strip() if done.returncode == 0 else None
 
 
 def slice_base(n):
     """`spec-<p>` when dispatch recorded ticket `n` as a slice of spec <p>, else None."""
-    base = git("config", "--get", f"branch.implement-{n}.base", absent=1)
+    base = git("config", "--get", f"branch.implement-{n}.base", ok=(0, 1))
     return base if base and SPEC_BASE.match(base) else None
 
 
@@ -197,7 +199,10 @@ class Branch:
 
     def __init__(self, name):
         self.name = name
-        self.base = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+        try:
+            self.base = shellcmd.default_branch(".")
+        except shellcmd.CmdError as e:
+            raise Unanswerable(str(e)) from None
         self.commits = set(git("rev-list", f"{self.base}..{name}").split())
         log = git("log", f"{self.base}..{name}", "--format=%at%n%B%n==end==").split("==end==")
         stamps = [int(chunk.strip().split("\n", 1)[0]) for chunk in log if chunk.strip()]
@@ -346,9 +351,7 @@ def check_disposition(obj, n, branch):
         sha = str(obj.get("sha", ""))
         resolved = None
         if SHA.match(sha):
-            done = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],
-                                  capture_output=True, text=True)
-            resolved = done.stdout.strip() if done.returncode == 0 else None
+            resolved = git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}", ok=(0, 1))
         if resolved not in branch.commits:
             return (f"{fid}: fixed sha {sha or '(none)'} is not a hex commit on {branch.name} past "
                     f"{branch.base}")
@@ -367,7 +370,7 @@ def check_disposition(obj, n, branch):
 def check(n, branch_name):
     if (spec := slice_base(n)):
         git("rev-parse", "--verify", f"{branch_name}^{{commit}}")
-        if git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{spec}", absent=1) is None:
+        if git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{spec}", ok=(0, 1)) is None:
             return [f"branch.implement-{n}.base names {spec}, but origin/{spec} does not exist — a key "
                     "left from an ended spec or set by hand is no slice; fetch, or remove the key"], ""
         summary = (f"{branch_name} is a slice of {spec}, no review wave: the spec is reviewed once on "

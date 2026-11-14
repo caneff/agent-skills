@@ -8,7 +8,7 @@ Run from a checkout of the repo. Reads the review ledger (`multi-axis-code-revie
 gate skip rows of repo R whose skip reason is exactly `size`, `ceiling` or `unmeasured` (`SKILL.md`
 § The Codex pass): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass
 that ran.
-Finds each skipped ticket's merge commit on `--base` (default `origin/HEAD`): a squash commit whose
+Finds each skipped ticket's merge commit on `--base` (default: the recorded `origin/HEAD`): a squash commit whose
 subject ends `(#<pr>)` and either names `(#<ticket>)` earlier in the subject or has a body line
 closing it. A ledger row carries no date, so "since the mark" is read off that merge commit: not an
 ancestor of the mark sha, or committed after the mark date (an ISO date or date-time; one with no
@@ -39,7 +39,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "multi-axis-code-review"))
-from gitcmd import GitError, git  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+from shellcmd import CmdError, default_branch, git as _git  # noqa: E402  (#1782)
 from review_ledger import read_ledger  # noqa: E402
 from review_cache import fold_repo  # noqa: E402
 
@@ -58,6 +59,11 @@ def skipped_tickets(rows: list[dict], repo: str) -> dict[int, str]:
             for t in r.get("tickets") or [r.get("ticket")]:
                 out.setdefault(t, r["skip_reason"])
     return out
+
+
+def git(*args: str, ok: tuple[int, ...] = (0,)):
+    """`git <args>` through the shared helper; a failure is its `CmdError`."""
+    return _git(list(args), ok=ok)
 
 
 def merges(base: str) -> list[tuple[str, datetime, int, str]]:
@@ -122,14 +128,15 @@ def main(argv=None) -> int:
     p.add_argument("--ledger", type=Path, required=True)
     p.add_argument("--repo", required=True, help="the ledger's repo name, as the review cache's directory names it")
     p.add_argument("--mark", required=True, help="the last audit mark: the newest sha it covered, or its date")
-    p.add_argument("--base", default="origin/HEAD", help="the default branch (default origin/HEAD)")
+    p.add_argument("--base", default=None, help="the default branch (default: origin/HEAD, which must be recorded)")
     args = p.parse_args(argv)
     try:
         skipped = skipped_tickets(read_ledger(args.ledger), args.repo)
         is_after = after_mark(args.mark)
-        history = merges(args.base)
-        picked, left_out = pick(skipped, history, is_after, args.base)
-    except (OSError, ValueError, GitError) as e:
+        base = args.base or default_branch(".")
+        history = merges(base)
+        picked, left_out = pick(skipped, history, is_after, base)
+    except (OSError, ValueError, CmdError) as e:
         print(f"codex-audit-range: {e}", file=sys.stderr)
         return ERROR
     if not picked:
@@ -138,7 +145,7 @@ def main(argv=None) -> int:
         return EMPTY
     try:
         parent = git("rev-parse", "--verify", f"{picked[0][1]}~1").stdout.strip()
-    except GitError as e:
+    except CmdError as e:
         print(f"codex-audit-range: the oldest merge {picked[0][1]} has no parent: {e}", file=sys.stderr)
         return ERROR
     print(f"range {parent}..{picked[-1][1]}")
