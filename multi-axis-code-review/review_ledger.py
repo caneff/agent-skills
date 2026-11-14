@@ -113,28 +113,11 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "docs" / "research"))
 from tally_review_axes import (  # noqa: E402
-    ALL_AXES, OUTCOME_DETAIL_FIELD, REVIEWS_ROOT, find_codex_records, find_sidecar_files, fold_repo, load_jsonl)
+    ALL_AXES, OUTCOME_DETAIL_FIELD, find_codex_records, find_sidecar_files, load_jsonl)
+from review_cache import CacheDirError, REVIEWS_ROOT, cache_dir_for, fold_repo, repo_for_checkout, write_cache_file  # noqa: E402,F401
 
 DEFAULT_LEDGER = REVIEWS_ROOT / "ledger.jsonl"
 
-
-def write_cache_file(repo: str, stem: str, text: str) -> Path:
-    """Write `text` to `<REVIEWS_ROOT>/<repo>/<stem>.md` and return the path, taking `<stem>-2.md`,
-    `-3`, ... when the name is held: `O_EXCL` is the never-overwrite. `repo` is already folded; a
-    character of `stem` outside `[A-Za-z0-9._-]` becomes `-`, so a branch name cannot name a directory."""
-    directory = REVIEWS_ROOT / repo
-    directory.mkdir(parents=True, exist_ok=True)
-    stem, k = re.sub(r"[^A-Za-z0-9._-]", "-", stem), 1
-    while True:
-        path = directory / (f"{stem}.md" if k == 1 else f"{stem}-{k}.md")
-        try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-        except FileExistsError:
-            k += 1
-            continue
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-        return path
 DEFAULT_TRANSCRIPTS = Path.home() / ".claude" / "projects"
 TOKEN_KINDS = ("input", "output", "cache_write", "cache_read")
 _USAGE_FIELDS = {"input": "input_tokens", "output": "output_tokens",
@@ -1743,8 +1726,10 @@ def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str, 
     anywhere is an error, never a smaller count."""
     if fetch:
         _git(repo_dir, "fetch", "-q", "origin")
-    common = _git(repo_dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
-    repo = fold_repo(os.path.basename(os.path.dirname(common)))
+    try:
+        repo = repo_for_checkout(repo_dir)
+    except CacheDirError as exc:
+        raise EscapeError(str(exc))
     try:
         default = _git(repo_dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
     except EscapeError as exc:
@@ -1850,20 +1835,6 @@ def cmd_report(args) -> int:
     for note in result["notes"]:
         print(note)
     return 0
-
-
-class CacheDirError(Exception):
-    """The repo whose cache directory was asked for cannot be named."""
-
-
-def cache_dir_for(cwd: Path | str) -> Path:
-    """The review cache directory of the repo `cwd` is in (#1527): the repo's own name off the
-    common `.git`, never the worktree's, folded by `fold_repo`. The one place it is chosen."""
-    done = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd,
-                          capture_output=True, text=True)
-    if done.returncode != 0:
-        raise CacheDirError(f"git cannot name the repo of {cwd}: {done.stderr.strip() or 'no output'}")
-    return REVIEWS_ROOT / fold_repo(os.path.basename(os.path.dirname(done.stdout.strip())))
 
 
 def cmd_cache_dir(args) -> int:
