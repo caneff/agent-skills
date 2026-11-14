@@ -16,16 +16,18 @@
 // Edit mode (#1720) changes a puzzle that is already on LMD:
 //
 //   node lmd_driver.mjs --endpoint http://127.0.0.1:9334 --edit <puzzle-id> --template <page.html> \
-//     [--values <values.json>] [--base-url ...] [--timeout-ms ...]
+//     [--values <values.json>] [--png <board.png> | --image-id <id>] [--base-url ...] [--timeout-ms ...]
 //
 // It opens that puzzle's edit form (Raetselportal/Eigene/einstellen.php?id=<id>), replaces the English page
-// HTML with the --template file's text as it stands (a literal page: no {{IMAGE_ID}} is filled, and one left in
-// is refused), sets only the fields --values names and clicks "Change". Every other field, the activation
+// HTML with the --template file's text as it stands (a literal page: a {{IMAGE_ID}} left in is refused), sets only
+// the fields --values names and clicks "Change". With a new board image (#1847) the page file must hold
+// {{IMAGE_ID}}, and it is filled with --image-id (an image already on LMD), or with the id of --png, uploaded
+// first as a create uploads it, under values.slug, which an edit takes only with --png. Every other field, the activation
 // choice and its date fields included, goes back as the form served it; it never visits the puzzle page, so
 // it never activates. --values holds any of "title", "code", "difficulty", "labels", "freetags",
-// "codedescr_en", checked as for a create; "slug" and "sudoku" are refused, as the edit form has neither.
-// --png and --image-id are refused. It prints {"puzzle_id", "puzzle_url", "html"}. A failure after "Change"
-// was clicked prints {"failed", "uploaded": false, "image_id": null, "submitted": true} on stdout as well.
+// "codedescr_en", checked as for a create; "sudoku" is refused, as the edit form has none. It prints
+// {"puzzle_id", "puzzle_url", "image_id" (only with a new image), "html"}. A failure once an image was
+// uploaded or "Change" was clicked prints the {"failed", "uploaded", "image_id", "submitted"} record below.
 // The caller re-archives the puzzle afterwards (create-lmd-page/SKILL.md § Edit a live page).
 //
 // values.json, every key required: {"slug", "title", "code", "difficulty" (1-5), "sudoku" ("Ja" | "Nein"),
@@ -114,26 +116,36 @@ function readInputs(argv) {
   }
   if (edit) {
     if (!/^[0-9A-Z]+$/.test(a.edit)) throw new UsageError(`--edit must be an LMD puzzle id (digits and capital letters), got ${JSON.stringify(a.edit)}`);
-    for (const k of ["png", "image-id"]) if (a[k] !== undefined) throw new UsageError(`--${k} does not go with --edit: edit mode uploads nothing`);
+    if (a.png !== undefined && a["image-id"] !== undefined) throw new UsageError("--png and --image-id do not go together with --edit: give the one image the page shows");
   }
   const timeoutMs = Number(a["timeout-ms"]);
   if (!(timeoutMs > 0)) throw new UsageError(`--timeout-ms must be a positive number, got ${a["timeout-ms"]}`);
   const common = { endpoint: a.endpoint.replace(/\/+$/, ""), base: a["base-url"].replace(/\/+$/, ""), timeoutMs };
   const template = readText(a.template, edit ? "page file" : "page template");
+  const readPng = () => {
+    const png = path.resolve(a.png);
+    let size;
+    try { size = statSync(png).size; } catch (e) { fail(`cannot read the PNG ${png}: ${e.message}`); }
+    if (size > MAX_UPLOAD_BYTES) fail(`the PNG is ${size} bytes, over LMD's upload limit of ${MAX_UPLOAD_BYTES}`);
+    return png;
+  };
   if (edit) {
     // An empty file would post a blank page over the live one, and LMD would answer "changed".
     if (!template.trim()) fail(`the page file ${a.template} is empty: edit mode would blank the live page`);
-    if (template.includes(IMAGE_PLACEHOLDER)) fail(`the page file still has a ${IMAGE_PLACEHOLDER} placeholder: edit mode posts the page as it is`);
+    // A new image (--png or --image-id, #1847) fills the page's placeholder; without one the page goes as it is.
+    const image = a.png !== undefined || a["image-id"] !== undefined;
+    if (image && !template.includes(IMAGE_PLACEHOLDER)) fail(`the page file has no ${IMAGE_PLACEHOLDER} placeholder for the new image`);
+    if (!image && template.includes(IMAGE_PLACEHOLDER)) fail(`the page file still has a ${IMAGE_PLACEHOLDER} placeholder: edit mode posts the page as it is`);
     const v = a.values === undefined ? {} : readValues(a.values);
-    // The edit form has no Sudoku question, and a slug names an upload: a key it would ignore is refused.
-    for (const k of Object.keys(v)) if (!EDIT_KEYS.includes(k)) fail(`values.${k} does not apply to an edit (it takes ${EDIT_KEYS.join(", ")})`);
+    // The edit form has no Sudoku question; a slug names an upload, so only an edit with --png takes one.
+    const keys = a.png !== undefined ? [...EDIT_KEYS, "slug"] : EDIT_KEYS;
+    for (const k of Object.keys(v)) if (!keys.includes(k)) fail(`values.${k} does not apply to this edit (it takes ${keys.join(", ")})`);
+    if (a.png !== undefined && !Object.hasOwn(v, "slug")) fail("an edit with --png needs values.slug, the name the image is uploaded under");
     for (const k of Object.keys(v)) checkValue(v, k);
-    return { ...common, edit: a.edit, template, form: v };
+    const { slug, ...form } = v;
+    return { ...common, edit: a.edit, template, form, png: a.png === undefined ? null : readPng(), slug, imageId: a["image-id"] ?? null };
   }
-  const png = path.resolve(a.png);
-  let size;
-  try { size = statSync(png).size; } catch (e) { fail(`cannot read the PNG ${png}: ${e.message}`); }
-  if (size > MAX_UPLOAD_BYTES) fail(`the PNG is ${size} bytes, over LMD's upload limit of ${MAX_UPLOAD_BYTES}`);
+  const png = readPng();
   if (!template.includes(IMAGE_PLACEHOLDER)) fail(`the page template has no ${IMAGE_PLACEHOLDER} placeholder`);
   const v = readValues(a.values);
   // A missing key is refused, never defaulted: each value is one the user confirmed.
@@ -393,8 +405,13 @@ const posted = { uploaded: false, image_id: null, submitted: false };
 async function main() {
   const inputs = readInputs(process.argv.slice(2));
   if (inputs.edit !== undefined) {
-    const url = await withTab(inputs.endpoint, inputs.timeoutMs, (tab) => editPuzzle(tab, inputs.base, inputs.edit, inputs.form, inputs.template));
-    return JSON.stringify({ puzzle_id: inputs.edit, puzzle_url: url, html: inputs.template }) + "\n";
+    const out = await withTab(inputs.endpoint, inputs.timeoutMs, async (tab) => {
+      const imageId = posted.image_id = inputs.imageId ?? (inputs.png && await uploadImage(tab, inputs.base, inputs.png, inputs.slug));
+      const html = imageId ? inputs.template.replaceAll(IMAGE_PLACEHOLDER, imageId) : inputs.template;
+      const url = await editPuzzle(tab, inputs.base, inputs.edit, inputs.form, html);
+      return { puzzle_id: inputs.edit, puzzle_url: url, ...(imageId && { image_id: imageId }), html };
+    });
+    return JSON.stringify(out) + "\n";
   }
   const out = await withTab(inputs.endpoint, inputs.timeoutMs, async (tab) => {
     const imageId = posted.image_id = inputs.imageId ?? await uploadImage(tab, inputs.base, inputs.png, inputs.form.slug);
