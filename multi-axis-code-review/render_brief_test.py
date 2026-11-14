@@ -423,3 +423,31 @@ def test_an_earlier_sidecar_without_its_marker_is_refused(wt, diff, home):
     (d / "findings-spec-1395.done").unlink()
     code, _, err = render_line(wt, diff, "--round", "2", repo="agent-skills", axis="spec")
     assert code == 2 and "findings-spec-1395.done is missing" in err, (code, err)
+
+
+def _load_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("render_brief_mod", RENDER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _args(mod, tmp_path, **over):
+    import argparse
+    diff = tmp_path / "d.diff"
+    diff.write_text("a\n")
+    base = dict(axis="standards", repo="skills", worktree=str(tmp_path), ticket="1", base="b", diff=str(diff),
+                diff_command="c", commit=[], spec=None, no_spec=False, ruling=[], choice=[], claim=[],
+                round=1, first_id=[], workers=1, ceiling=600, test_command=None, capture_stat=None)
+    base.update(over)
+    return argparse.Namespace(**base)
+
+
+def test_check_step_validates_without_rendering(tmp_path):
+    """#1777: `check` accepts good inputs, reports the diff's line count, and refuses a bad one by itself,
+    before any brief file is read."""
+    mod = _load_module()
+    assert mod.check(_args(mod, tmp_path)).lines == 1
+    with pytest.raises(mod.BadInput, match="needs --spec"):
+        mod.check(_args(mod, tmp_path, axis="spec"))
