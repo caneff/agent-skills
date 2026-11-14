@@ -6,12 +6,15 @@ Usage: generate.py [RANGE]
   Default: 7d. Output: ~/.claude/landed.html — one tab per repo with commits.
 """
 import os
-import subprocess, html, re, sys, datetime
+import html, re, sys, datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "all-audits", "harness"))
 import pagelib  # noqa: E402
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+from shellcmd import CmdError, default_branch, git as _git, origin_slug  # noqa: E402  (#1780)
 
 # Dracula Theme Soft — the user's VS Code theme. Landed is dark-only by
 # choice (see `.audit-ignore.md`), so it keeps its own palette on top of the
@@ -125,7 +128,6 @@ class Commit:
     full_hash: str
     short_hash: str
     date: str
-    author: str
     subject: str
     body: str
     closes: list
@@ -137,8 +139,7 @@ class Commit:
 
 
 def git(repo, *a):
-    r = subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True)
-    return r.stdout if r.returncode == 0 else ""
+    return _git(["-C", str(repo), *a]).stdout
 
 
 def log_args(range_arg):
@@ -151,31 +152,20 @@ def log_args(range_arg):
     return [range_arg]  # rev range, verbatim
 
 
-def default_branch(repo):
-    ref = git(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD").strip()
-    if ref:
-        return ref  # e.g. origin/main
-    for cand in ("main", "master"):
-        if git(repo, "show-ref", "--verify", f"refs/heads/{cand}"):
-            return cand
-    return "HEAD"
-
-
 def github_base(repo):
-    url = git(repo, "remote", "get-url", "origin").strip()
-    m = re.search(r"github\.com[:/]([^/]+/[^/.]+)", url)
-    return f"https://github.com/{m.group(1)}" if m else None
+    slug = origin_slug(str(repo))
+    return f"https://github.com/{slug}" if slug else None
 
 
 def collect(repo, range_arg):
-    branch = default_branch(repo)
+    branch = default_branch(str(repo))
     raw = git(repo, "log", *log_args(range_arg), "--date=format:%Y-%m-%d %H:%M",
-              "--pretty=format:%x1e%H%x1f%h%x1f%ad%x1f%an%x1f%s%x1f%b", branch)
+              "--pretty=format:%x1e%H%x1f%h%x1f%ad%x1f%s%x1f%b", branch)
     commits = []
     for rec in raw.split("\x1e"):
         if not rec.strip():
             continue
-        H, h, ad, an, s, b = (rec.split("\x1f") + [""] * 6)[:6]
+        H, h, ad, s, b = (rec.split("\x1f") + [""] * 5)[:5]
         files, add, rem = [], 0, 0
         for line in git(repo, "show", "--numstat", "--format=", H).splitlines():
             m = line.split("\t")
@@ -184,7 +174,7 @@ def collect(repo, range_arg):
                 r = 0 if m[1] == "-" else int(m[1])
                 add += a; rem += r; files.append((m[2], a, r))
         commits.append(Commit(
-            full_hash=H, short_hash=h, date=ad, author=an, subject=s,
+            full_hash=H, short_hash=h, date=ad, subject=s,
             body=re.sub(r"(Closes #\d+|Co-Authored-By:.*)", "", b).strip(),
             closes=sorted(set(re.findall(r"Closes #(\d+)", b))),
             agent="Co-Authored-By: Claude" in b,
@@ -283,10 +273,16 @@ def main(argv=None):
 
     tabs, panes = [], []
     for repo in roots:
-        commits = collect(repo, range_arg)
+        name = repo.name
+        try:
+            commits = collect(repo, range_arg)
+        except CmdError as e:  # shown, never read as an empty repo or another branch's commits
+            tabs.append(f'<button class="tab zero" data-pane="{name}">{name} <span class="tn">!</span></button>')
+            panes.append(f'<section class="pane" id="pane-{name}" hidden>'
+                         f'<p class="sub"><b>{esc(name)}: cannot list what landed.</b> {esc(str(e))}</p></section>')
+            continue
         if not commits:
             continue
-        name = repo.name
         nagent = sum(1 for c in commits if c.agent)
         tabs.append(f'<button class="tab" data-pane="{name}">{name} '
                     f'<span class="tn">{len(commits)}</span></button>')
