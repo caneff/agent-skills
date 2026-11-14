@@ -18,8 +18,9 @@
 # widens to the full suite. A suite with a line `# all.sh: repo-wide (<why>)`
 # in its first twenty lines reads the whole tree and is always kept. A
 # narrowed run's last line says so:
-# `N of M suites passed (narrowed: ...)`. Suites run concurrently, `TESTS_JOBS` at a time (default `nproc`),
-# and are reported in discovery order. A suite with a comment line
+# `N of M suites passed (narrowed: ...)`. Suites run concurrently, `TESTS_JOBS`
+# at a time (default `nproc`, capped in a linked worktree, #1808), and are
+# reported in discovery order. A suite with a comment line
 # `# all.sh: serial (<why>)` in its first twenty lines cannot share the box (a
 # fixed port, a shared global path): it runs alone after the concurrent ones.
 # Each suite is also held to a CPU budget (see `cpu_budget`): its own user+sys
@@ -337,7 +338,26 @@ identity_before=$(identity_snapshot)
 # identity check runs after each suite against the baseline above: suites
 # overlap, so one that finishes after a leak is flagged along with the leaker,
 # and the failure says so rather than naming a suite that may be innocent.
-jobs=${TESTS_JOBS:-$(nproc 2>/dev/null || echo 4)}
+# A linked worktree is where a worker's run, or the controller's merge-time
+# rerun, happens (#1808): an nproc-wide run there is a parallel job nobody
+# declared, charged at zero while every core runs a suite. With `TESTS_JOBS`
+# unset the default caps at `linked_cap` and says what the run then owes; the
+# primary checkout and the nightly backstop (which sets `TESTS_JOBS`) keep nproc.
+linked_cap=4
+in_linked_worktree() { # fails closed: a probe that cannot answer counts as linked
+  local gitdir common
+  gitdir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) || return 0
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+  [ -n "$gitdir" ] && [ -n "$common" ] && [ "$gitdir" != "$common" ]
+}
+jobs=${TESTS_JOBS:-}
+if [ -z "$jobs" ]; then
+  jobs=$(nproc 2>/dev/null || echo 4)
+  if [ "$jobs" -gt "$linked_cap" ] && in_linked_worktree; then
+    jobs=$linked_cap
+    echo "tests/all.sh: TESTS_JOBS unset in a linked worktree: capped at $linked_cap. Set TESTS_JOBS=<k> yourself and declare the job (implement/SKILL.md § Control) before launching a run." >&2
+  fi
+fi
 case $jobs in ''|*[!0-9]*|0) echo "tests/all.sh: TESTS_JOBS must be a positive integer, got '$jobs'" >&2; exit 2 ;; esac
 
 is_serial() { # <label>: a suite file with a `# all.sh: serial` comment line in its head
