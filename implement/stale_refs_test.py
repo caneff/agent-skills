@@ -281,6 +281,17 @@ def test_no_origin_head_is_not_clean(repo):
     assert_result(run(root, base=None), 2)
 
 
+def test_a_leaked_git_dir_does_not_redirect_the_check(repo, tmp_path):
+    """The shared helper scrubs `GIT_DIR` (#625): the check reads `--repo`, not the caller's repo."""
+    root = repo({"tools/old-gate.sh": "echo\n", "README.md": "Run tools/old-gate.sh.\n"})
+    git(root, "mv", "tools/old-gate.sh", "tools/new-gate.sh")
+    commit(root)
+    other = tmp_path / "other"
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    env = {**os.environ, "GIT_DIR": str(other / ".git")}
+    assert_result(run(root, env=env), 1, present=["README.md:1: tools/old-gate.sh"])
+
+
 def test_a_failing_grep_is_not_clean(repo, failing_git):
     root = repo({"tools/old-gate.sh": "echo\n", "README.md": "Run tools/old-gate.sh.\n"})
     git(root, "mv", "tools/old-gate.sh", "tools/new-gate.sh")

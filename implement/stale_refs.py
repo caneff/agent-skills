@@ -25,26 +25,27 @@ read has not found the tree clean.
 import argparse
 import os
 import re
-import subprocess
 import sys
 
-
-def git(repo, *args):
-    # quotePath off: a non-ASCII path would otherwise come back octal-quoted
-    # and be searched for in a spelling no file uses.
-    return subprocess.run(["git", "-C", repo, "-c", "core.quotePath=false", *args],
-                          capture_output=True, text=True)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+import shellcmd  # noqa: E402  (#1782)
 
 
 class GitError(Exception):
     pass
 
 
+def git(repo, *args, ok=(0,)):
+    # quotePath off: a non-ASCII path would otherwise come back octal-quoted
+    # and be searched for in a spelling no file uses.
+    try:
+        return shellcmd.git(["-C", repo, "-c", "core.quotePath=false", *args], ok=ok)
+    except shellcmd.CmdError as e:
+        raise GitError(str(e)) from None
+
+
 def checked(repo, *args):
-    result = git(repo, *args)
-    if result.returncode != 0:
-        raise GitError(f"git {' '.join(args)}: {result.stderr.strip()}")
-    return result.stdout
+    return git(repo, *args).stdout
 
 
 # Top-level definitions, column 0 only: an indented def is a method or a
@@ -78,6 +79,14 @@ def defined(path, text):
         if match:
             names.add(match.group(1))
     return names
+
+
+def default_base(root):
+    """`origin/<default>` as the repo records it; a repo with none recorded is a GitError."""
+    try:
+        return shellcmd.default_branch(root)
+    except shellcmd.CmdError as e:
+        raise GitError(str(e)) from None
 
 
 def read_diff(repo, base):
@@ -130,11 +139,9 @@ PATH_BEFORE, BASENAME_BEFORE, NAME_BEFORE = "A-Za-z0-9_./-", "A-Za-z0-9_.-", "A-
 
 def hits(repo, pattern):
     """(file, line, text) for each tracked line `pattern` matches."""
-    result = git(repo, "grep", "-n", "-I", "-E", "-e", pattern)
+    result = git(repo, "grep", "-n", "-I", "-E", "-e", pattern, ok=(0, 1))
     if result.returncode == 1:
         return []
-    if result.returncode != 0:
-        raise GitError(f"git grep {pattern}: {result.stderr.strip()}")
     return [tuple(row.split(":", 2)) for row in result.stdout.splitlines()]
 
 
@@ -147,8 +154,7 @@ def main(argv=None):
         # From the top: `git grep` searches only below its cwd, while the
         # diff names paths from the root.
         root = checked(args.repo, "rev-parse", "--show-toplevel").strip()
-        base = args.base or checked(
-            root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
+        base = args.base or default_base(root)
         dirty = checked(root, "status", "--porcelain", "--untracked-files=no")
         if dirty:
             raise GitError("tracked files have uncommitted changes; the diff reads HEAD, "

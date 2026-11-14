@@ -63,7 +63,8 @@ LEDGER_CLI = HERE.parent / "multi-axis-code-review" / "review_ledger.py"
 
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "multi-axis-code-review"))
-from gitcmd import GitError, git  # noqa: E402
+sys.path.insert(0, str(HERE.parent / "common"))
+from shellcmd import CmdError, default_branch, git as _git, origin_slug, scratch_worktree  # noqa: E402  (#1782)
 from review_ledger import DEFAULT_LEDGER, parse_codex_out  # noqa: E402
 from review_cache import REVIEWS_ROOT, CacheDirError, repo_for_checkout  # noqa: E402
 
@@ -103,12 +104,17 @@ class Stop(Exception):
         self.status, self.reason, self.hint = status, reason, hint
 
 
+def git(*args: str, ok: tuple[int, ...] = (0,)):
+    """`git <args>` through the shared helper; its `CmdError` is this script's one git failure."""
+    return _git(list(args), ok=ok)
+
+
 def repo_name() -> str:
-    """This checkout's folded repo name, by `review_cache`'s one rule; a failure is a GitError here."""
+    """This checkout's folded repo name, by `review_cache`'s one rule; a failure is a CmdError here."""
     try:
         return repo_for_checkout(Path.cwd())
     except CacheDirError as e:
-        raise GitError(str(e)) from e
+        raise CmdError(str(e)) from e
 
 
 def append_row(ledger: Path, repo: str, *args: str) -> None:
@@ -201,11 +207,10 @@ def brief(slug: str, span: Span, prs: list[Merge]) -> str:
 
 
 def github_slug() -> str:
-    url = git("remote", "get-url", "origin").stdout.strip()
-    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
-    if not m:
-        raise Stop(ERROR, f"origin {url} is not a GitHub repo")
-    return m[1]
+    slug = origin_slug(".")
+    if not slug:
+        raise Stop(ERROR, "origin is not a GitHub repo")
+    return slug
 
 
 def usage_percent() -> str:
@@ -225,8 +230,7 @@ def launch(args, span: Span, body: Path, out: Path) -> int:
     """Run Codex over `span` from a detached worktree at its newest merge; its exit status."""
     script = None if args.dry_run else companion()
     tree = out.with_name(out.stem + "-tree")
-    git("worktree", "add", "--detach", str(tree), span.newest)
-    try:
+    with scratch_worktree(".", span.newest, str(tree)):
         if script is None:
             out.write_text(args.simulate_out.read_text() if args.simulate_out else
                            "No material findings (dry run: Codex was not launched).\n")
@@ -234,11 +238,6 @@ def launch(args, span: Span, body: Path, out: Path) -> int:
         with out.open("w") as f:
             return subprocess.run(["node", str(script), "adversarial-review", "--wait", "--base", span.base, "--",
                                    body.read_text()], cwd=tree, stdout=f, stderr=subprocess.STDOUT).returncode
-    finally:
-        try:
-            git("worktree", "remove", "--force", str(tree))
-        except GitError as left:  # the run's own outcome stands; a stale worktree is named, not blamed on it
-            print(f"codex-audit: {left}; remove {tree} by hand", file=sys.stderr)
 
 
 def report(findings: list[dict], prs: list[Merge]) -> None:
@@ -263,13 +262,14 @@ def cmd_run(args) -> int:
         return ERROR
     try:
         repo = repo_name()
-    except GitError as e:
+    except CmdError as e:
         print(f"codex-audit: not in a git checkout, so no repo to record under: {e}", file=sys.stderr)
         return ERROR
     ledger = args.ledger or DEFAULT_LEDGER
     try:
         gate()
-        span, prs, left_out = audit_range(ledger, repo, read_mark(args.trial or TRIAL, repo), args.base)
+        base = args.base or default_branch(".")
+        span, prs, left_out = audit_range(ledger, repo, read_mark(args.trial or TRIAL, repo), base)
         print(f"audit range {span}: {', '.join(f'PR #{m.pr}' for m in prs)}")
         cache = args.cache or REVIEWS_ROOT / repo
         cache.mkdir(parents=True, exist_ok=True)
@@ -279,7 +279,7 @@ def cmd_run(args) -> int:
         out, record = stem.with_suffix(".out"), stem.with_suffix(".json")
         usage_before, started = usage_percent(), datetime.now(timezone.utc).isoformat()
         status = launch(args, span, body, out)
-    except (OSError, GitError) as e:  # a missing `gh`, `jq` or `node`, or a failed git: nothing launched
+    except (OSError, CmdError) as e:  # a missing `gh`, `jq` or `node`, or a failed git: nothing launched
         return stopped(Stop(ERROR, str(e)), ledger, repo)
     except Stop as stop:
         return stopped(stop, ledger, repo)
@@ -297,14 +297,14 @@ def cmd_run(args) -> int:
             return REFUSED
         findings, why = parse_codex_out(out.read_text())
         for t in left_out:
-            print(f"left out: ticket #{t}, not in this audit: no single merge commit on {args.base} closes it")
+            print(f"left out: ticket #{t}, not in this audit: no single merge commit on {base} closes it")
         if findings is None:
             print(f"Codex output unreadable as findings ({why}): read it yourself: {out}")
         elif not findings:
             print(f"no material findings; output {out}")
         else:
             report(findings, prs)
-    except (Stop, GitError) as failed:
+    except (Stop, CmdError) as failed:
         print(f"codex-audit: {failed}; Codex already ran: its record is {record} and its output {out}",
               file=sys.stderr)
         return ERROR
@@ -353,7 +353,7 @@ def cmd_mark(args) -> int:
     except Stop as stop:
         print(f"codex-audit: {stop.reason}", file=sys.stderr)
         return stop.status
-    except GitError as e:
+    except CmdError as e:
         print(f"codex-audit: {e}", file=sys.stderr)
         return ERROR
     except OSError as e:
@@ -371,7 +371,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     run = sub.add_parser("run")
-    run.add_argument("--base", default="origin/HEAD")
+    run.add_argument("--base", default=None, help="the default branch (default: origin/HEAD, which must be recorded)")
     run.add_argument("--ledger", type=Path)
     run.add_argument("--cache", type=Path)
     run.add_argument("--trial", type=Path)
