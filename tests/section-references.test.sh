@@ -36,6 +36,7 @@ run_fixture code-span-table-mismatch-valid
 # `fixture|message the checker prints for it`.
 for pair in \
   'pointer-suffix-invalid|§ Build typo not found in target.md' \
+  'renamed-heading-invalid|§ Build not found in target.md' \
   'bare-cross-file-collision|bare § Build follows target.md' \
   'step-heading-name-invalid|§ Step 3 not found in target.md' \
   'step-number-invalid|§ Build steps [3] not all numbered items in target.md' \
@@ -87,17 +88,5 @@ for fixture in code-span-list-boundary-invalid code-span-heading-boundary-invali
     exit 1
   fi
 done
-
-target=implement/SKILL.md
-backup=$(mktemp)
-cp "$target" "$backup"
-trap 'cp "$backup" "$target"; rm -f "$backup"' EXIT
-
-sed -i 's/^### Build$/### Compile for test/' "$target"
-
-if bash tests/check-section-references.sh; then
-  echo "FAIL: checker accepted a renamed referenced heading"
-  exit 1
-fi
 
 echo "ok"

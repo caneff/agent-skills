@@ -764,38 +764,39 @@ run "foreign merge blocked when the lexer's awk fails" 2 \
 stubdir=$stubdir_saved
 # A command that names no destroyer, merge, checkout or stash runs no lexer
 # pass: the quote views cost two awk forks and are read only once a raw gate
-# matches (#1566). The stub logs each lexer call and leaves its answer alone.
+# matches (#1566). The stub logs every awk fork the hook makes and leaves its
+# answer alone, so the test pins the cost, not the lexer's argument spelling.
 mkdir -p "$tmp/countawk"
 cat > "$tmp/countawk/awk" <<'STUB'
 #!/usr/bin/env bash
-[ "$1" = "-v" ] && [[ "$2" == view=* ]] && echo lexed >> "$LEXER_LOG"
+echo "awk $*" >> "$AWK_LOG"
 exec /usr/bin/awk "$@"
 STUB
 chmod +x "$tmp/countawk/awk"
-export LEXER_LOG="$tmp/lexer.log"
-# lexer_passes <command> <want-exit> <want-passes: none|some>
-lexer_passes() {
+export AWK_LOG="$tmp/awk.log"
+# awk_forks <command> <want-exit> <want-forks: none|some>
+awk_forks() {
   local cmd=$1 want=$2 passes=$3 out rc
-  : > "$LEXER_LOG"
+  : > "$AWK_LOG"
   out=$(printf '%s' "$cmd" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
     | (cd "$repo" && PATH="$tmp/countawk:$stubdir:$PATH" bash "$hook") 2>&1)
   rc=$?
   if [ "$rc" != "$want" ]; then
-    echo "FAIL: lexer count '$cmd' — want exit $want, got $rc"; echo "  out: $out"; fails=1; return
+    echo "FAIL: awk count '$cmd' — want exit $want, got $rc"; echo "  out: $out"; fails=1; return
   fi
-  if [ "$passes" = none ] && [ -s "$LEXER_LOG" ]; then
-    echo "FAIL: '$cmd' ran the lexer ($(wc -l < "$LEXER_LOG") passes)"; fails=1
-  elif [ "$passes" = some ] && [ ! -s "$LEXER_LOG" ]; then
-    echo "FAIL: '$cmd' never ran the lexer, so the stub counts nothing"; fails=1
+  if [ "$passes" = none ] && [ -s "$AWK_LOG" ]; then
+    echo "FAIL: '$cmd' forked awk ($(wc -l < "$AWK_LOG") times, budget 0)"; fails=1
+  elif [ "$passes" = some ] && [ ! -s "$AWK_LOG" ]; then
+    echo "FAIL: '$cmd' never forked awk, so the stub counts nothing"; fails=1
   else
-    echo "PASS: '$cmd' lexer passes: $passes"
+    echo "PASS: '$cmd' awk forks: $passes"
   fi
 }
 for plain in "git status" "ls -la" "git log --oneline -5"; do
-  lexer_passes "$plain" 0 none
+  awk_forks "$plain" 0 none
 done
 # The positive control: a command that reaches a raw gate does lex.
-lexer_passes "git branch -D x" 2 some
+awk_forks "git branch -D x" 2 some
 # A whole-tree discard handed to a shell is read as code (#1539): the views
 # must be computed for it, not only for a destroyer pattern.
 run "discard handed to sh -c blocked" 2 "bash -c \" git checkout -- . \"" "BLOCKED"

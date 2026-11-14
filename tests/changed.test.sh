@@ -146,12 +146,19 @@ out=$(cd "$shadow/repo" && TESTS_JOBS=1 bash tests/all.sh 2>&1); rc=$?
 check "...and the same pair fails under one job (the fixture can go red)" "$([ "$rc" = 1 ] && has never-met; echo $?)"
 rm -f "$shadow/mine" "$shadow/theirs"
 
-# A serial suite never overlaps the concurrent ones.
+# A serial suite runs after the concurrent ones: the concurrent suite touches
+# `done` as its last act, and the serial one fails unless `done` already exists.
 fresh
-printf '#!/usr/bin/env bash\ntouch "%s/busy"; sleep 1; rm -f "%s/busy"\n' "$shadow" "$shadow" >"$shadow/repo/a/a.test.sh"
-printf '#!/usr/bin/env bash\n# all.sh: serial (test fixture)\n[ ! -e "%s/busy" ] || { echo overlapped; exit 1; }\n' "$shadow" >"$shadow/repo/b/b.test.sh"
+rm -f "$shadow/done"
+printf '#!/usr/bin/env bash\nsleep 1; touch "%s/done"\n' "$shadow" >"$shadow/repo/a/a.test.sh"
+printf '#!/usr/bin/env bash\n# all.sh: serial (test fixture)\n[ -e "%s/done" ] || { echo ran-before-concurrent; exit 1; }\n' "$shadow" >"$shadow/repo/b/b.test.sh"
 out=$(cd "$shadow/repo" && TESTS_JOBS=4 bash tests/all.sh 2>&1); rc=$?
-check "an 'all.sh: serial' suite runs alone after the concurrent ones" "$([ "$rc" = 0 ]; echo $?)"
+check "an 'all.sh: serial' suite runs after the concurrent ones finished" "$([ "$rc" = 0 ]; echo $?)"
+# Control: the same pair without the serial marker overlaps and goes red.
+rm -f "$shadow/done"
+sed -i '/all.sh: serial/d' "$shadow/repo/b/b.test.sh"
+out=$(cd "$shadow/repo" && TESTS_JOBS=4 bash tests/all.sh 2>&1); rc=$?
+check "...and without the marker the same suite starts early and fails (the fixture can go red)" "$([ "$rc" = 1 ] && has ran-before-concurrent; echo $?)"
 
 # A failing suite stops new suites from starting.
 fresh

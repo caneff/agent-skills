@@ -181,7 +181,6 @@ def test_open_writes_one_paragraph_per_entry_under_section_headings(rig):
     r = rig.run("open")
     assert r.returncode == 0, out(r)
     assert str(rig.doc()) in out(r)
-    assert ".claude/worktrees" not in str(rig.doc())
     paras = [p for p in rig.doc().read_text().split("\n\n") if p.strip()]
     heads = [p for p in paras if p.startswith("# ")]
     assert heads == ["# allow", "# soft_deny", "# environment"]

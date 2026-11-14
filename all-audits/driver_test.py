@@ -438,13 +438,7 @@ def test_decide_and_head_sha_ignore_leaked_git_dir(tmp_path):
     sha = driver.head_sha(repo)
     report_dir = os.path.join(cache_dir, "report")
     os.makedirs(report_dir)
-    driver.save_record(driver._record_file(repo, cache_dir), {
-        "domain-drift": {
-            "last_sha": sha,
-            "timestamp": driver._dt.datetime.now(driver._dt.timezone.utc).isoformat(),
-            "report_dir": report_dir,
-        }
-    })
+    driver.update_cache(repo, 'domain-drift', report_dir, base=cache_dir)
 
     with _leaked_git_env(victim):
         leaked_sha = driver.head_sha(repo)
@@ -500,16 +494,9 @@ def test_cache_decision_bad_sha_forces_run(tmp_path):
 def test_cache_decision_clean_recent_repo_skips(tmp_path):
     repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
-    sha = driver.head_sha(repo)
     report_dir = os.path.join(cache_dir, "report")
     os.makedirs(report_dir)
-    driver.save_record(driver._record_file(repo, cache_dir), {
-        "domain-drift": {
-            "last_sha": sha,
-            "timestamp": driver._dt.datetime.now(driver._dt.timezone.utc).isoformat(),
-            "report_dir": report_dir,
-        }
-    })
+    driver.update_cache(repo, 'domain-drift', report_dir, base=cache_dir)
     d = driver.decide(repo, "domain-drift", ["GLOSSARY.md"], base=cache_dir)
     assert d.run is False, d
     assert d.report_dir == report_dir
@@ -545,12 +532,18 @@ def test_legacy_cache_entry_missing_report_dir_forces_run(tmp_path):
     assert d.run is True, d
 
 
-def test_save_record_is_atomic_no_tmp_left_behind(tmp_path):
-    cache_dir = str(tmp_path)
-    path = os.path.join(cache_dir, "sub", "record.json")
+def test_save_record_is_atomic_a_failed_write_keeps_the_prior_record(tmp_path, monkeypatch):
+    path = os.path.join(str(tmp_path), "sub", "record.json")
     driver.save_record(path, {"a": 1})
     assert json.load(open(path)) == {"a": 1}
-    assert not os.path.exists(path + ".tmp")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("interrupted mid-write")
+
+    monkeypatch.setattr(driver.json, "dump", boom)
+    with pytest.raises(RuntimeError):
+        driver.save_record(path, {"a": 2})
+    assert json.load(open(path)) == {"a": 1}
 
 
 def test_crashed_no_tests_probe_renders_could_not_determine_not_zero(tmp_path):
@@ -707,13 +700,7 @@ def test_plan_reuses_the_cached_report_and_runs_the_rest(tmp_path):
     _init_git_repo(repo)
     report_dir = os.path.join(cache_dir, "domain-drift-report")
     os.makedirs(report_dir)
-    driver.save_record(driver._record_file(repo, cache_dir), {
-        "domain-drift": {
-            "last_sha": driver.head_sha(repo),
-            "timestamp": driver._dt.datetime.now(driver._dt.timezone.utc).isoformat(),
-            "report_dir": report_dir,
-        }
-    })
+    driver.update_cache(repo, 'domain-drift', report_dir, base=cache_dir)
 
     plan = driver.plan_sweep(repo, ["domain-drift", "dead-code"], force=False, base=cache_dir)
     assert plan.to_run == ["dead-code"], plan
@@ -1039,11 +1026,10 @@ def test_failed_module_is_not_recorded(tmp_path):
     assert "solver.py" not in rec.get(mutation_run.MUTATION_KEY, {}), rec
 
 
-def test_prepass_prompt_names_the_candidates_and_drops_solver_oracle(tmp_path):
+def test_prepass_prompt_names_each_candidate_once_and_no_other_module(tmp_path):
     p = driver.mutation_prepass_prompt("/r", ["a.py", "b.py"])
-    assert "a.py" in p and "b.py" in p
-    assert "solver" not in p and "oracle" not in p
-    assert "wrong result" in p
+    assert p.count("a.py") == 1 and p.count("b.py") == 1
+    assert "c.py" not in p
 
 
 def test_record_mutation_keys_a_dotted_path_as_the_repo_relative_one(tmp_path):

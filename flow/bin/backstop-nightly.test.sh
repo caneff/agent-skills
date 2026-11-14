@@ -56,13 +56,13 @@ for f in empty comments; do
   else fail "list $f (rc=$rc): $out"; fi
 done
 
-if [ "$(id -u)" != 0 ]; then
-  cp "$tmp/list" "$tmp/locked"; chmod 000 "$tmp/locked"
-  : > "$log"
-  out=$("$tool" "$tmp/locked" 2>&1); rc=$?
-  if [ "$rc" -ne 0 ] && [ ! -s "$log" ]; then pass "an unreadable list file fails"
-  else fail "unreadable list (rc=$rc): $out"; fi
-fi
+# A directory as the list cannot be read as a file, root included.
+mkdir "$tmp/dirlist"
+: > "$log"
+out=$("$tool" "$tmp/dirlist" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && [ ! -s "$log" ] && printf '%s' "$out" | grep -q 'cannot read the repo list'; then
+  pass "an unreadable list file fails, refused as unreadable"
+else fail "unreadable list (rc=$rc): $out"; fi
 
 # One repo failing must not skip the rest, and the job still ends non-zero.
 : > "$log"
@@ -109,10 +109,16 @@ for code in 4 137; do
   else fail "exit $code (rc=$rc): $(cat "$nlog")"; fi
 done
 
-# The shipped list names the four repos.
-for r in .agents/skills sudokumaker-custom-constraints grid-hunts twitch-rules-scroller; do
-  grep -q "$r" "$here/../backstop-repos" && pass "backstop-repos lists $r" || fail "backstop-repos lacks $r"
-done
+# The shipped list is one the tool accepts: it runs at least one repo, each
+# against an absolute path (a relative entry would not be). A typo'd path still
+# passes: the tool expands `~/` and never checks the directory exists.
+: > "$log"
+out=$(HOME="$tmp/home" "$tool" "$here/../backstop-repos" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [ "$(wc -l < "$log")" -ge 1 ] && ! grep -qv -- '^--repo /' "$log"; then
+  pass "the shipped backstop-repos list runs at least one repo, each by absolute path"
+else
+  fail "shipped list (rc=$rc): $out / $(cat "$log")"
+fi
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

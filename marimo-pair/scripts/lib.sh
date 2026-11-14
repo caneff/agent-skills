@@ -17,11 +17,12 @@ require_tools() {
   fi
 }
 
-# Echoes one of: windows, wsl, posix.
+# Echoes one of: windows, wsl, posix. PROC_VERSION names the file read in place
+# of /proc/version; only lib.test.sh sets it, to fake a kernel string.
 detect_platform() {
   if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
     echo windows
-  elif [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+  elif [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft "${PROC_VERSION:-/proc/version}" 2>/dev/null; then
     echo wsl
   else
     echo posix

@@ -1496,6 +1496,7 @@ def test_the_sweep_skips_a_landed_clump():
                       "skills-3": HERDR_GONE}, calls)
     state = loop.sweep(clumps, get)
     assert calls == ["skills-1", "skills-3"], calls
+    assert [w["agent"] for w in state["workers"]] == ["skills-1", "skills-3"], state
 
 
 def test_a_probe_that_fails_is_one_worker_unreachable_not_a_dead_sweep():
@@ -1725,8 +1726,9 @@ def test_the_sweep_skips_a_closed_clump():
     clumps[1]["closed"] = "already fixed on main"
     get = agent_stub({"skills-1": herdr_agent("working"),
                       "skills-3": HERDR_GONE}, calls)
-    loop.sweep(clumps, get)
+    state = loop.sweep(clumps, get)
     assert calls == ["skills-1", "skills-3"], calls
+    assert [w["agent"] for w in state["workers"]] == ["skills-1", "skills-3"], state
 
 
 def test_the_cli_refuses_a_dispatch_while_a_worker_is_unrecorded(tmp):

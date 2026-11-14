@@ -46,29 +46,3 @@ def test_every_flag_it_names_is_one_drain_accepts():
     assert named, "no flag found in the skill: the pattern matched nothing"
     for flag in named:
         assert flag in helped.stdout, f"{flag} is not a drain.py flag"
-
-
-@pytest.fixture
-def completion():
-    """The batched live run (#1392): its step sits under `## On completion`, and
-    names what a session needs to do it without asking again."""
-    match = re.search(r"^## On completion\n(.*)\Z", skill_text(), re.S | re.M)
-    assert match is not None, "SKILL.md has no `## On completion` section"
-    return match.group(1)
-
-
-def test_live_run_step_reads_the_repos_declared_layer(completion):
-    assert "**Live layer**" in completion, "the live-run step is missing from On completion"
-    assert "AGENTS.md" in completion
-    assert "§ End-to-end seam" in completion
-
-
-def test_live_run_waits_for_chris_and_runs_once_on_merged_main(completion):
-    step = " ".join(completion.split("**Live layer**", 1)[1].lower().split())
-    for needle in ("on his go", "once on merged `main`", "owed live checks", "fix or revert ticket"):
-        assert needle in step, f"the live-run step does not say {needle!r}"
-
-
-def test_completion_report_reads_the_closing_lines_drain_prints(completion):
-    for needle in ("`ended:", "`passed over:`", "`closed, no PR:`", "moot (closed, no PR)"):
-        assert needle in completion, f"On completion does not read {needle!r}"

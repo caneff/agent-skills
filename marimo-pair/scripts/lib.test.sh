@@ -30,24 +30,20 @@ run "OSTYPE=cygwin reports windows" "$got" "windows"
 got=$(unset OSTYPE; WSL_DISTRO_NAME=Ubuntu-24.04 bash -c "source '$here/lib.sh'; detect_platform")
 run "WSL_DISTRO_NAME set reports wsl" "$got" "wsl"
 
-got=$(unset OSTYPE WSL_DISTRO_NAME; bash -c "
-  source '$here/lib.sh'
-  grep() { return 0; } # simulate 'microsoft' present in /proc/version
-  detect_platform
-")
+pv=$(mktemp)
+trap 'rm -f "$pv"' EXIT
+echo "Linux version 5.15.0-microsoft-standard-WSL2" >"$pv"
+got=$(unset OSTYPE WSL_DISTRO_NAME; PROC_VERSION="$pv" bash -c "source '$here/lib.sh'; detect_platform")
 run "microsoft in /proc/version reports wsl" "$got" "wsl"
 
-got=$(unset OSTYPE WSL_DISTRO_NAME; bash -c "
-  source '$here/lib.sh'
-  grep() { return 1; } # simulate no WSL signal at all
-  detect_platform
-")
+echo "Linux version 6.1.0-generic (gcc)" >"$pv"
+got=$(unset OSTYPE WSL_DISTRO_NAME; PROC_VERSION="$pv" bash -c "source '$here/lib.sh'; detect_platform")
 run "no signals reports posix" "$got" "posix"
 
 # --- parse_proc_net_route ---
 
 route_file=$(mktemp)
-trap 'rm -f "$route_file"' EXIT
+trap 'rm -f "$pv" "$route_file"' EXIT
 
 # Real /proc/net/route shape: header line, then one row per route. Gateway
 # 0102A8C0 little-endian hex == 192.168.2.1.
