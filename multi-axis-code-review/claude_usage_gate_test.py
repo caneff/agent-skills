@@ -78,7 +78,11 @@ def cases():
     ]
 
 
-@pytest.mark.parametrize("content,status,needle", [c[1:] for c in cases()], ids=[c[0] for c in cases()])
-def test_gate_exit_status_and_stdout(tmp_path, content, status, needle):
+@pytest.mark.parametrize("case_id", [c[0] for c in cases()])
+def test_gate_exit_status_and_stdout(tmp_path, case_id):
+    # Built inside the test body so every `fetched` stamp is relative to the
+    # moment this case runs, not to pytest collection (a long run would age
+    # the 9-minute cache past the 10-minute TTL).
+    _, content, status, needle = next(c for c in cases() if c[0] == case_id)
     got = run(tmp_path, content)
     assert got[0] == status and needle in got[1], f"want {status} {needle!r}, got {got}"

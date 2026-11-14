@@ -178,7 +178,9 @@ class TestHarvest:
                ' = standards S1 "Duplicated helper loader"\n' in section(env.review.read_text(), "Overlap matches")
 
     def test_without_transcripts_cost_is_unknown_never_zero_and_oe_is_inside_standards(self, env):
-        for row in env.rows().values():
+        rows = env.rows()
+        assert len(rows) == 17, sorted(rows)
+        for row in rows.values():
             for field in ("tokens", "wall_clock"):
                 want = "inside-standards" if row["type"] == "over-engineering" else "unknown"
                 assert row["cost"][field]["status"] == want
@@ -646,6 +648,8 @@ class TestReport:
         mut = dict(report_rows()[0], row_id="r8", type="worker-mutation")
         write_jsonl(ledger, [mut])
         result = env.run("report", "--ledger", ledger)
+        assert result.returncode == 0, result.stderr
+        assert "worker-mutation" in result.stdout, result.stdout
         assert "No mutation rows" not in result.stdout
 
     def test_a_prices_file_that_is_not_an_object_fails_loud(self, env):
