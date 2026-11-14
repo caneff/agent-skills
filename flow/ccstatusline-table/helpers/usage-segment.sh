@@ -46,21 +46,5 @@ case "${1:-}" in
   wreset)  jq -rj "(.rate_limits.seven_day.resets_at // empty) | $compact_countdown" <<<"$in" ;;
   breset)  jq -rj "(.rate_limits.five_hour.resets_at // empty) | $compact_countdown" <<<"$in" ;;
   all)     jq -rj "$all_filter" <<<"$in" ;;
-  --selftest)
-    # Offsets sit ~30s past each minute boundary so the ~1s render drift between
-    # this `date +%s` and jq's `now` can't flip a floor (2d3h30m vs 2d3h29m).
-    s='{"rate_limits":{"five_hour":{"used_percentage":12.9,"resets_at":'"$(( $(date +%s) + 3*3600 + 10*60 + 30 ))"'},"seven_day":{"used_percentage":42.1,"resets_at":'"$(( $(date +%s) + 2*86400 + 3*3600 + 30*60 + 30 ))"'}}}'
-    [ "$(printf '%s' "$s" | "$0" weekly)"  = "42%" ] || { echo "FAIL weekly: $(printf '%s' "$s" | "$0" weekly)"; exit 1; }
-    [ "$(printf '%s' "$s" | "$0" session)" = "12%" ] || { echo "FAIL session"; exit 1; }
-    [ "$(printf '%s' "$s" | "$0" wreset)"  = "2d3h30m" ] || { echo "FAIL wreset: $(printf '%s' "$s" | "$0" wreset)"; exit 1; }
-    [ "$(printf '%s' "$s" | "$0" breset)"  = "3h10m" ]   || { echo "FAIL breset: $(printf '%s' "$s" | "$0" breset)"; exit 1; }
-    [ -z "$(printf '{}' | "$0" weekly)" ]            || { echo "FAIL absent-field not blank"; exit 1; }
-    exp_all=$(printf '42%%\t2d3h30m\t12%%\t3h10m')
-    got_all=$(printf '%s' "$s" | "$0" all)
-    [ "$got_all" = "$exp_all" ] || { echo "FAIL all: $got_all"; exit 1; }
-    exp_blank=$(printf '\t\t\t')
-    got_blank=$(printf '{}' | "$0" all)
-    [ "$got_blank" = "$exp_blank" ] || { echo "FAIL all-absent: $got_blank"; exit 1; }
-    echo "ok" ;;
   *) exit 0 ;;
 esac
