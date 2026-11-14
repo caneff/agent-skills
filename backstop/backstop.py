@@ -15,7 +15,11 @@ throwaway worktree. Either way the night is one of three outcomes:
 
     green          the seam exited 0, printed something itself (`npm ci`'s
                    output before it does not count), and no line starts
-                   `FAIL `: the tip is recorded as the last green sha
+                   `FAIL `: the tip is recorded as the last green sha.
+                   A suite whose PASS line says it ran over its CPU budget
+                   (#1606: `tests/all.sh` measures it and no longer fails on
+                   it) is printed and notified as such; the night stays green.
+                   A red night prints them too, without a second notice
     red            the seam exited non-zero and named its failing suites with
                    `FAIL <suite>` lines
     inconclusive   anything else: the repo's origin, its owner or its
@@ -79,7 +83,8 @@ under `$BACKSTOP_DIR` (default `~/.cache/backstop`), beside the night's log,
 login is run: filing a ticket is outward-facing.
 
 Exit 0 green, 1 red, 2 inconclusive, 3 when a red or inconclusive night's
-ticket or notification could not be sent.
+ticket or notification, or a green night's over-budget notification, could not
+be sent.
 """
 import argparse
 import collections
@@ -295,6 +300,22 @@ def seam_printed(log):
         return False
     _, marker, own = text.partition(SEAM_BEGINS + "\n")
     return bool(marker) and bool(own.strip())
+
+
+# `tests/all.sh` marks a suite that passed over its CPU budget on its PASS line
+# (#1606); that line is the whole interface.
+_OVER_BUDGET = re.compile(r"^PASS (\S.*?) \(([0-9.]+)s cpu, over its ([0-9.]+)s budget\)$")
+
+
+def over_budget(log):
+    """`[(suite, cpu, budget)]` the seam's PASS lines in `log` mark as over
+    their CPU budget. An unreadable log names none: a green night is not
+    held back by it."""
+    try:
+        with open(log, errors="replace") as f:
+            return [m.groups() for m in map(_OVER_BUDGET.match, f.read().splitlines()) if m]
+    except OSError:
+        return []
 
 
 def local_night(ctx, tip, jobs):
@@ -547,10 +568,21 @@ def backstop(args):
     os.makedirs(state_dir, exist_ok=True)
     ctx = Ctx(root, repo, default, state_dir)
     result = night(ctx, args.jobs, args.workflow)
+    # A CI night has no local log of its own (the one on disk is an earlier
+    # failed run's), so it names none. A red night's seam stopped at its first
+    # failure, so it names the overruns of the suites that ran before it.
+    over = [] if args.workflow or result.outcome not in (GREEN, RED) else over_budget(seam_log(ctx))
+    for suite, cpu, budget in over:
+        print(f"backstop: over CPU budget: {suite}: {cpu}s cpu over its {budget}s budget")
     if result.outcome == GREEN:
         with open(last_green_path(ctx), "w") as f:
             f.write(result.sha + "\n")
         print(f"backstop: {repo} green at {result.sha}")
+        if over:
+            title = f"backstop: {repo} green, {len(over)} {'suite' if len(over) == 1 else 'suites'} over " \
+                    f"{'its' if len(over) == 1 else 'their'} CPU budget"
+            if not notify(args.notify, title, "; ".join(f"{s}: {c}s against {b}s" for s, c, b in over)):
+                return UNSENT
         return GREEN
     if result.outcome == RED:
         return report_red(ctx, result, args.notify)

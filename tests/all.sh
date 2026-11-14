@@ -18,15 +18,19 @@
 # widens to the full suite. A suite with a line `# all.sh: repo-wide (<why>)`
 # in its first twenty lines reads the whole tree and is always kept. A
 # narrowed run's last line says so:
-# `N of M suites passed (narrowed: ...)`. Suites run concurrently, `TESTS_JOBS` at a time (default `nproc`),
-# and are reported in discovery order. A suite with a comment line
+# `N of M suites passed (narrowed: ...)`. Suites run concurrently, `TESTS_JOBS`
+# at a time (default `nproc`, capped in a linked worktree, #1808), and are
+# reported in discovery order. A suite with a comment line
 # `# all.sh: serial (<why>)` in its first twenty lines cannot share the box (a
 # fixed port, a shared global path): it runs alone after the concurrent ones.
-# Each suite is also held to a CPU budget (see `cpu_budget`): its own user+sys
-# time with every process it started, not wall-clock time, so load on a shared
-# box cannot make it flaky. `TESTS_CPU_BUDGET=<seconds>` can only lower every
-# budget (a test uses it to make a fixture suite go over); raising one is an
-# edit to `cpu_budget`, a visible diff line.
+# Each suite's own user+sys CPU time, with every process it started, is
+# measured and printed on its PASS line, and one that passes over its budget
+# (see `cpu_budget`) says so there: `PASS <label> (<n>s cpu, over its <b>s
+# budget)`. An overrun never fails the run (#1606): load on a shared box
+# inflates CPU time too, so it was no steadier a verdict than wall-clock time.
+# The nightly backstop reports every such line. `TESTS_CPU_BUDGET=<seconds>`
+# can only lower every budget (a test uses it to make a fixture suite go
+# over); raising one is an edit to `cpu_budget`, a visible diff line.
 # This is the merge gate (`git config land.testcmd`), not a push hook — see
 # #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
@@ -337,7 +341,26 @@ identity_before=$(identity_snapshot)
 # identity check runs after each suite against the baseline above: suites
 # overlap, so one that finishes after a leak is flagged along with the leaker,
 # and the failure says so rather than naming a suite that may be innocent.
-jobs=${TESTS_JOBS:-$(nproc 2>/dev/null || echo 4)}
+# A linked worktree is where a worker's run, or the controller's merge-time
+# rerun, happens (#1808): an nproc-wide run there is a parallel job nobody
+# declared, charged at zero while every core runs a suite. With `TESTS_JOBS`
+# unset the default caps at `linked_cap` and says what the run then owes; the
+# primary checkout and the nightly backstop (which sets `TESTS_JOBS`) keep nproc.
+linked_cap=4
+in_linked_worktree() { # fails closed: a probe that cannot answer counts as linked
+  local gitdir common
+  gitdir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) || return 0
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+  [ -n "$gitdir" ] && [ -n "$common" ] && [ "$gitdir" != "$common" ]
+}
+jobs=${TESTS_JOBS:-}
+if [ -z "$jobs" ]; then
+  jobs=$(nproc 2>/dev/null || echo 4)
+  if [ "$jobs" -gt "$linked_cap" ] && in_linked_worktree; then
+    jobs=$linked_cap
+    echo "tests/all.sh: TESTS_JOBS unset in a linked worktree: capped at $linked_cap. Set TESTS_JOBS=<k> yourself and declare the job (implement/SKILL.md § Control) before launching a run." >&2
+  fi
+fi
 case $jobs in ''|*[!0-9]*|0) echo "tests/all.sh: TESTS_JOBS must be a positive integer, got '$jobs'" >&2; exit 2 ;; esac
 
 is_serial() { # <label>: a suite file with a `# all.sh: serial` comment line in its head
@@ -352,11 +375,12 @@ while IFS=$'\t' read -r label cmd; do
 done <<<"$selection"
 cat "$tmp/parallel" "$tmp/serial" >"$tmp/ordered"
 
-# The CPU budget of every suite, in seconds (#1415): a suite that costs more
-# fails the run, so a suite that re-runs the whole repo inside itself (the old
-# tests/all.test.sh was 251 of the suite's 494 serial seconds) is a red line and
-# not a quiet tax on every merge. A suite that needs more is named below with
-# its own budget and a one-line reason; adding a line is the visible diff.
+# The CPU budget of every suite, in seconds (#1415): a suite that costs more is
+# named on its PASS line and in the nightly backstop's report, so a suite that
+# re-runs the whole repo inside itself (the old tests/all.test.sh was 251 of the
+# suite's 494 serial seconds) is seen and not a quiet tax on every merge. It is
+# a figure to read, not a gate (#1606). A suite that needs more is named below
+# with its own budget and a one-line reason; adding a line is the visible diff.
 # 25, not 15: pytest suites that cost ~10.5s CPU alone measured 15.1-15.7s in a
 # full parallel run (backstop_test, fix_check_test, retire_landing_test (since removed, #1649) failed
 # the 15s line on a loaded box, 2026-11-04, #1615). Still far under a suite that
@@ -457,15 +481,9 @@ while IFS=$'\t' read -r label cmd; do
         "  $hit" \
         "$(logging_remedy "$hit")"
     fi
-    cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label")
-    if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then
-      stop_and_wait
-      report_failure "$label" "$out" \
-        "tests/all.sh: over its CPU budget: ${cpu}s CPU against ${budget}s (user+sys, children included)." \
-        "  A suite that re-runs the repo inside itself is the usual cause. If this one really needs more," \
-        "  name it in cpu_budget in tests/all.sh with its own budget and a one-line reason."
-    fi
-    echo "PASS $label (${cpu}s cpu)"
+    cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label"); over=""
+    if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then over=", over its ${budget}s budget"; fi
+    echo "PASS $label (${cpu}s cpu${over})"
     count=$((count + 1))
   else
     stop_and_wait

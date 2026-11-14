@@ -66,6 +66,8 @@ else:
 FAKE_SEAM = r'''echo "jobs=${TESTS_JOBS:-unset}" >> "$JOBS_LOG"
 case "$FAKE_SEAM" in
   green) echo "PASS a/a_test.py"; echo "PASS b/b.test.sh"; echo "2 suites passed" ;;
+  overbudget) echo "PASS a/a_test.py (30.1s cpu, over its 25s budget)"; echo "PASS b/b.test.sh (1.0s cpu)"
+    echo "PASS c/c_test.py (120.4s cpu, over its 100s budget)"; echo "3 suites passed" ;;
   red) echo "PASS a/a_test.py"; echo "FAIL b/b.test.sh"; echo "boom"; exit 1 ;;
   red2) echo "FAIL a/a_test.py"; echo "FAIL b/b.test.sh"; exit 1 ;;
   garbled) echo "Segmentation fault"; exit 1 ;;
@@ -186,6 +188,48 @@ def test_green_advances_last_green_to_origin_tip(sb):
     assert out.returncode == 0, out.stderr
     assert sb.last_green() == tip
     assert sb.tickets() == [] and sb.notes() == []
+
+
+def test_green_night_reports_every_suite_over_its_cpu_budget(sb):
+    """#1606: `tests/all.sh` no longer fails an overrun, so the night's report
+    is where one is read. The night stays green."""
+    tip = sb.git(sb.repo, "rev-parse", "HEAD")
+    out = sb.run("overbudget")
+    assert out.returncode == 0, out.stderr
+    assert sb.last_green() == tip
+    for line in ("a/a_test.py: 30.1s cpu over its 25s budget", "c/c_test.py: 120.4s cpu over its 100s budget"):
+        assert line in out.stdout, out.stdout
+    assert "b/b.test.sh" not in out.stdout
+    [note] = sb.notes()
+    assert note.startswith("backstop: me/repo green, 2 suites over their CPU budget|")
+    assert "a/a_test.py" in note and "c/c_test.py" in note
+    assert sb.tickets() == []
+
+
+def test_red_night_prints_the_overruns_of_the_suites_that_ran(sb):
+    write(os.path.join(sb.repo, "seam.sh"), FAKE_SEAM.replace(
+        "  red)", '  red) echo "PASS a/a_test.py (30.1s cpu, over its 25s budget)"; echo "FAIL b/b.test.sh"; exit 1 ;;\n  red_old)'))
+    sb.git(sb.repo, "commit", "-qam", "seam"); sb.git(sb.repo, "push", "-q", "origin", "HEAD:main")
+    out = sb.run("red")
+    assert out.returncode == 1, out.stderr
+    assert "a/a_test.py: 30.1s cpu over its 25s budget" in out.stdout
+
+
+def test_ci_green_night_does_not_report_an_old_local_seam_log(ci):
+    """The local log a failed CI night left is not this night's."""
+    os.makedirs(ci.state_dir, exist_ok=True)
+    write(os.path.join(ci.state_dir, "full-seam-me__repo.log"), "PASS a/a_test.py (30.1s cpu, over its 25s budget)\n")
+    ci_run(ci, ci.ci_sha, "success")
+    out = ci.run("green", flags=GATE)
+    assert out.returncode == 0, out.stderr
+    assert "over CPU budget" not in out.stdout and ci.notes() == []
+
+
+def test_green_night_with_a_notifier_that_fails_exits_unsent(sb):
+    write(sb.notify, "#!/bin/sh\nexit 1\n", 0o755)
+    out = sb.run("overbudget")
+    assert out.returncode == 3 and "notification not sent" in out.stderr
+    assert sb.last_green(), "the night is still green"
 
 
 def test_job_count_is_the_stated_input_and_required(sb):
