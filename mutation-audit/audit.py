@@ -83,6 +83,8 @@ def parse_mutmut_results(text):
         func = m.group("func")
         mutant = f"{module}.x_{func}__mutmut_{m.group('id')}"
         if status == "survived":
+            # A test runs the line but doesn't assert hard enough — a covered
+            # survivor. Pass two decides rewrite (default) vs cut.
             survived_count += 1
             bucket, extra = "rewrite", {"mutant": mutant, "killed": False, "survived": True}
         elif status == "no tests":
@@ -226,6 +228,8 @@ def parse_stryker_report(text):
 
 
 def js_test_file(target):
+    """The sibling test file of a `.mjs`/`.js` target (`_sibling_tests`' rule),
+    or `None` when the target is not a worthy module or none exists."""
     return next((t for t in sorted(_sibling_tests(target) or ()) if os.path.isfile(t)), None)
 
 
@@ -294,6 +298,7 @@ def _sibling_tests(p):
 
 
 def _source_paths(root):
+    """Every `.py`, `.mjs` and `.js` path under `root`, in one walk."""
     return auditlib.walk_source(root, (".py", *auditlib.JS_SUFFIXES))
 
 
@@ -356,6 +361,8 @@ def main(argv):
             for candidate in planned["candidates"]:
                 print(json.dumps({"candidate": candidate}))
         else:
+            # The worthy source modules with no sibling test, plus the worthy-module
+            # total, for the repo-wide "N of M source modules have no tests" stat.
             print(json.dumps({"no_tests": planned["no_tests"], "total": planned["total"]}))
         return
     try:
@@ -370,6 +377,7 @@ def main(argv):
             for row in rows:
                 print(json.dumps(row))
             return
+        # The file/stdin parse path goes through auditlib.run_cli.
         auditlib.run_cli(argv, parse_or_inconclusive)
     except Inconclusive as e:
         print(f"INCONCLUSIVE: {e}", file=sys.stderr)

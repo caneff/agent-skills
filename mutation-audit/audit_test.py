@@ -53,6 +53,8 @@ def test_parsing():
 
     assert rows[1]["extra"]["mutant"] == "sample.x_clamp__mutmut_2"
 
+    # `no tests` is mutmut's own marker that no test reaches the mutant —
+    # a no-coverage survivor, distinct from a covered-but-under-asserted one.
     nc = rows[2]
     assert nc["bucket"] == "no-coverage", nc
     assert nc["extra"]["mutant"] == "sample.x_scale__mutmut_1"
@@ -82,7 +84,7 @@ def test_candidate_selection():
     assert candidates == ["pkg/gadget.py", "pkg/widget.py"], candidates
 
     assert suggest_candidates([]) == []
-    assert suggest_candidates(["only.py"]) == []
+    assert suggest_candidates(["only.py"]) == []  # no sibling test -> no candidates, not an error
 
     # no_test_modules is the strict inverse of suggest_candidates' sibling
     # filter: the same worthy-module set, kept only when NO sibling test
@@ -90,8 +92,9 @@ def test_candidate_selection():
     # rest (init, fixture, vendor, test files) aren't worthy modules at all.
     assert no_test_modules(paths) == ["pkg/helper.py"], no_test_modules(paths)
     assert no_test_modules([]) == []
-    assert no_test_modules(["only.py"]) == ["only.py"]
-    assert no_test_modules(["pkg/test_only.py"]) == []
+    assert no_test_modules(["only.py"]) == ["only.py"]  # worthy, no sibling test
+    assert no_test_modules(["pkg/test_only.py"]) == []  # a test file is not worthy
+    # The two partition the worthy universe: no module is in both.
     assert not (set(suggest_candidates(paths)) & set(no_test_modules(paths)))
 
 
@@ -119,6 +122,7 @@ def test_cli_path():
                 f.write("# module\n")
             with open(os.path.join(pkg_dir, f"test_mod_{i}.py"), "w", encoding="utf-8") as f:
                 f.write("# test\n")
+        # Two worthy modules with no sibling test — the no-test case.
         lonely_count = 2
         for i in range(lonely_count):
             with open(os.path.join(pkg_dir, f"lonely_{i}.py"), "w", encoding="utf-8") as f:
@@ -136,10 +140,13 @@ def test_cli_path():
             main(["audit.py", "--no-tests", tmpdir])
         report = json.loads(buf.getvalue())
         assert report["no_tests"] == ["pkg/lonely_0.py", "pkg/lonely_1.py"], report
+        # total = worthy source modules = tested pairs + the testless ones.
         assert report["total"] == pair_count + lonely_count, report
 
 
 def _run_cli(argv, path_dirs, cwd=None, extra_env=None):
+    """Run audit.py as a subprocess with PATH limited to `path_dirs` plus the
+    interpreter's own dir; returns (returncode, stdout, stderr)."""
     # PATH is exactly `path_dirs`: the interpreter is run by absolute path, and
     # the stub uses only shell builtins, so a real uvx cannot leak in.
     env = dict(os.environ, PATH=os.pathsep.join(path_dirs), **(extra_env or {}))
@@ -181,6 +188,7 @@ def test_inconclusive_when_mutmut_cannot_run():
         assert "INCONCLUSIVE" in err and "mutmut run failed" in err, err
         assert out == "", out
 
+    # A results file with no mutant lines at all is inconclusive, not clean.
     with tempfile.TemporaryDirectory() as cwd:
         empty_results = os.path.join(cwd, "r.txt")
         open(empty_results, "w").close()
@@ -192,14 +200,17 @@ def test_inconclusive_when_mutmut_cannot_run():
 def test_run_inconclusive_on_each_broken_mutmut_output():
     """Each way `mutmut results` can be unusable names its own cause."""
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
+        # mutmut ran and reported nothing: the run path must not read it as clean.
         _stub_uvx(d, 0, "no mutants here")
         code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
         assert code == 3 and out == "", (code, out, err)
         assert "no mutant lines" in err, err
+        # `mutmut results` itself fails.
         _stub_uvx(d, 0, "    sample.x_clamp__mutmut_1: survived", results_exit=1)
         code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
         assert code == 3 and out == "", (code, out, err)
         assert "mutmut results failed" in err, err
+        # A hung mutmut is bounded, and says so.
         _stub_uvx(d, 0, "", hang=True)
         code, out, err = _run_cli(["--run", "sample.py"], [d], cwd,
                                   extra_env={"MUTATION_AUDIT_TIMEOUT": "2"})
@@ -236,6 +247,7 @@ def test_run_reports_findings_when_mutmut_present():
         assert code == 0, (code, out, err)
         rows = [json.loads(line) for line in out.splitlines()]
         assert [r["extra"]["mutant"] for r in rows] == ["sample.x_clamp__mutmut_1"], rows
+        # An all-killed run is a real clean run: exit 0, no rows, no INCONCLUSIVE.
         _stub_uvx(d, 0, "    sample.x_is_adult__mutmut_1: killed")
         code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
         assert (code, out) == (0, ""), (code, out, err)
@@ -284,6 +296,7 @@ def test_stryker_timeout_counts_killed_and_unjudged_statuses_stop():
     assert parse_stryker_report(_stryker_report("Killed", "Timeout")) == []
     rows = parse_stryker_report(_stryker_report("Timeout", "Killed", "Survived"))
     assert len(rows) == 1 and rows[0]["extra"]["killed_count"] == 2, rows
+    # Stryker's own score leaves CompileError and Ignored out of the tally.
     assert parse_stryker_report(_stryker_report("Killed", "CompileError", "Ignored")) == []
     for status in ("RuntimeError", "Pending", "Mystery"):
         try:
@@ -292,6 +305,7 @@ def test_stryker_timeout_counts_killed_and_unjudged_statuses_stop():
             assert status in str(e), e
         else:
             raise AssertionError(f"{status} mutant was accepted")
+    # Nothing judged is not a clean run: no mutant, or only unjudged ones.
     for bad in ("", "not json", "{}", _stryker_report(), _stryker_report("Ignored", "CompileError")):
         try:
             parse_stryker_report(bad)
@@ -315,6 +329,7 @@ def test_js_candidate_selection():
         with contextlib.redirect_stdout(buf):
             main(["audit.py", "--suggest", root])
         assert [json.loads(l)["candidate"] for l in buf.getvalue().splitlines()] == ["x.mjs"], buf.getvalue()
+        # The no-test stat counts JS modules in the same universe.
         for name in ("lone.mjs", "x.test.mjs"):
             open(os.path.join(root, name), "w").close()
         buf = io.StringIO()
@@ -346,6 +361,9 @@ def _stub_npx(dirpath, report_text, exit_code=0, hang=False):
 
 
 def test_run_js_target_through_stryker():
+    """`--run x.mjs` runs the pinned StrykerJS command on x.mjs and only its
+    sibling x.test.mjs, writes nothing into the audited checkout, and reports
+    the survivors; every way it cannot judge exits 3."""
     with open(os.path.join(_JS_FIXTURES, "stryker-report.json"), encoding="utf-8") as f:
         report = f.read()
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
@@ -366,11 +384,13 @@ def test_run_js_target_through_stryker():
                         "--reporters", "clear-text,json"], tail
         assert sorted(os.listdir(cwd)) == ["sample.mjs", "sample.test.mjs"], os.listdir(cwd)
 
+        # No sibling test file: nothing to run against.
         os.remove(os.path.join(cwd, "sample.test.mjs"))
         code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
         assert code == 3 and out == "" and "INCONCLUSIVE" in err and "no sibling test file" in err, (code, out, err)
         open(os.path.join(cwd, "sample.test.mjs"), "w").close()
 
+        # Stryker fails, or writes no report.
         _stub_npx(d, report, exit_code=1)
         code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
         assert code == 3 and out == "" and "stryker run failed" in err, (code, out, err)
@@ -380,9 +400,11 @@ def test_run_js_target_through_stryker():
         _stub_npx(d, "")
         code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
         assert code == 3 and out == "" and "not a Stryker JSON report" in err, (code, out, err)
+        # A parseable report with nothing judged is not a clean run either.
         _stub_npx(d, _stryker_report("Ignored", "CompileError"))
         code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
         assert code == 3 and out == "" and "no judged mutant" in err, (code, out, err)
+        # An all-killed run is a real clean run.
         _stub_npx(d, _stryker_report("Killed", "Timeout"))
         code, out, err = _run_cli(["--run", "sample.mjs"], [d], cwd)
         assert (code, out) == (0, ""), (code, out, err)

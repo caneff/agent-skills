@@ -54,6 +54,7 @@ MOCK_CEILING = 3
 
 
 def _name_of(node):
+    """Attribute -> its `.attr`, Name -> its `.id`, else None."""
     if isinstance(node, ast.Attribute):
         return node.attr
     if isinstance(node, ast.Name):
@@ -152,6 +153,7 @@ def is_tautology(func):
 
 
 def is_mock_the_world(func):
+    """3. mock-the-world — many mocks, little real code exercised."""
     mock_calls = real_calls = 0
     for n in ast.walk(func):
         name = _call_name(n)
@@ -181,6 +183,7 @@ def _interaction_check(node):
 
 
 def is_interaction_only(func):
+    """4. interaction-only assertion — only checks that a mock was called."""
     checks = []
     for n in ast.walk(func):
         if isinstance(n, ast.Assert):
@@ -240,6 +243,7 @@ VACUOUS_SMELL = "vacuous loop assertion"
 
 
 def _is_private_name(name):
+    """`_x` or `__x`, not a dunder such as `__class__`."""
     return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
 
 
@@ -326,6 +330,7 @@ def has_vacuous_loop_assertion(func):
 
 
 def is_empty_or_skipped(func):
+    """5. empty/skipped test — pass-body, or @skip with no reason."""
     body = [
         n
         for n in func.body
@@ -374,12 +379,14 @@ def has_dead_assertion_in_raises(func):
 
 
 def _expected_exception(call):
+    """The exception argument of a `raises(...)` call, positional or by keyword."""
     if call.args:
         return call.args[0]
     return next((kw.value for kw in call.keywords if kw.arg == "expected_exception"), None)
 
 
 def has_broad_raises(func):
+    """9. broad exception expectation — `raises(Exception)` with no `match=`."""
     for node in ast.walk(func):
         if (
             _call_name(node) == "raises"
@@ -578,6 +585,7 @@ def _is_prose_call(call):
 
 
 def _prose_names(tree):
+    """Module-level names bound from an expression that spells a `.md` path."""
     names = set()
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -590,6 +598,9 @@ def _prose_names(tree):
 
 
 def is_prose_assertion(func, prose_names=frozenset()):
+    """6. prose-assertion (Python) — every assertion is a containment check,
+    the test reads a prose file, and it calls nothing but file reads and
+    string handling."""
     mechs = _assertion_mechanisms(func)
     if not mechs or not all(isinstance(m, ast.Assert) and _is_containment_assert(m) for m in mechs):
         return False
@@ -639,6 +650,9 @@ def _shell_command_words(source):
 
 
 def is_shell_prose_test(source):
+    """6. prose-assertion (shell) — a `*.test.sh` that names a Markdown file
+    and runs nothing but text commands (`grep`, `sed`, `case`, `test`, ...)
+    or functions it defines itself."""
     code = "\n".join(l for l in source.splitlines() if not l.strip().startswith("#"))
     if not PROSE_FILE.search(code):
         return False

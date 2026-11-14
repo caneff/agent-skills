@@ -59,7 +59,7 @@ def parse_findings(ruff_json, bandit_json):
     from the two tools on the same (file, line) merge into one row noting
     every code that fired.
     """
-    hits = {}
+    hits = {}  # (file, line) -> list of (code, category, message)
     for item in json.loads(ruff_json):
         cat = _category(item["code"])
         if cat is None:

@@ -23,8 +23,13 @@ _VULTURE_LINE_RE = re.compile(r"^(?P<file>.+):(?P<line>\d+): unused (?P<kind>[\w
 
 
 def parse_vulture(text):
-    """Pure: raw vulture stdout in, findings-schema dict rows out. No
-    subprocess, no filesystem."""
+    """Parse vulture's text output into findings rows.
+
+    Pure: raw vulture stdout in, a list of findings-schema dict rows out. No
+    subprocess, no filesystem. `bucket` defaults to "unsure" and `failure` is
+    empty — the dead/dynamic/unsure verdict is the LLM-triage pass's job, not
+    this parser's.
+    """
     rows = []
     for line in text.splitlines():
         m = _VULTURE_LINE_RE.match(line.strip())

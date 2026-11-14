@@ -34,6 +34,7 @@ function testCallFrom(src) {
   const tree = parseSource(src, "snippet.test.js");
   return testCalls(tree)[0];
 }
+/** The smell names `smellsIn` finds for a snippet, in call order. */
 function smellsOf(src) {
   return smellsIn(parseSource(src, "snippet.test.js"), src).map(([, smell]) => smell);
 }

@@ -81,6 +81,7 @@ function calleeName(node) {
   return identifierName(node.callee);
 }
 
+/** The `object.property` root+method for a member-call (`it.skip`), else null. */
 function memberCallee(node) {
   if (node.type !== "CallExpression") return null;
   const c = node.callee;
@@ -150,6 +151,7 @@ function isReasonArg(node) {
   return !!node && (node.type === "StringLiteral" || node.type === "TemplateLiteral");
 }
 
+/** Does this CallExpression name a single test (`it`/`test`, incl. `.skip`)? */
 function isTestCall(node) {
   const bare = calleeName(node);
   if (bare && TEST_ROOTS.has(bare)) return true;
@@ -165,11 +167,13 @@ function isTestCall(node) {
   return true;
 }
 
+/** The modifier on a member test call (`skip`/`todo`/`only`), else null. */
 function testModifier(node) {
   const mem = memberCallee(node);
   return mem && TEST_ROOTS.has(mem.root) ? mem.method : null;
 }
 
+/** The callback function argument of a test call, else null (bodyless `it`). */
 function testCallback(node) {
   for (const arg of node.arguments) {
     if (arg.type === "ArrowFunctionExpression" || arg.type === "FunctionExpression") return arg;
@@ -256,7 +260,7 @@ function asExpectAssertion(node) {
   if (node.type !== "CallExpression" || node.callee.type !== "MemberExpression") return null;
   const matcher = identifierName(node.callee.property);
   let obj = node.callee.object;
-  while (obj && obj.type === "MemberExpression") obj = obj.object;
+  while (obj && obj.type === "MemberExpression") obj = obj.object; // walk past .not/.resolves
   if (obj && obj.type === "CallExpression" && calleeName(obj) === "expect") {
     return { expectCall: obj, matcher, matcherCall: node };
   }
@@ -401,10 +405,10 @@ function isTautology(call, source, bindings) {
 }
 
 function isEmptyOrSkipped(call) {
-  const mod = testModifier(call);
+  const mod = testModifier(call); // it.skip / it.todo / it.only
   if (mod === "skip" || mod === "todo") return true;
   const cb = testCallback(call);
-  if (!cb) return true;
+  if (!cb) return true; // `it('todo')` with no callback
   return cb.body.type === "BlockStatement" && cb.body.body.length === 0;
 }
 
@@ -713,6 +717,7 @@ function privateAccess(tree) {
 
 const BROAD_THROW_MATCHERS = new Set(["toThrow", "toThrowError"]);
 
+/** Is `matcherCall` negated, as in `expect(f).not.toThrow()`? */
 function isNegated(matcherCall) {
   let obj = matcherCall.callee.object;
   while (obj && obj.type === "MemberExpression") {

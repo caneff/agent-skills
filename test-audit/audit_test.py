@@ -83,6 +83,8 @@ def test_is_tautology(source, expected):
 
 
 def test_unittest_testcase_is_not_collected_as_pytest():
+    """unittest.TestCase methods are a different framework, not pytest:
+    skipped, not silently treated as pytest."""
     unittest_tree = ast.parse(
         "class FooTest(unittest.TestCase):\n"
         "    def test_x(self):\n"
@@ -222,6 +224,8 @@ def test_scan_path_prunes_dot_dirs():
 
 
 @pytest.mark.parametrize("source, expected", [
+    # dead assertion in an expect-exception block: every statement after the
+    # first call in the block never runs.
     ("def test_x():\n    with pytest.raises(ValueError):\n        parse('')\n        assert parse.calls == 1\n", True),
     ("def test_x():\n    with raises(ValueError) as e:\n        parse('')\n        x = 1\n", True),
     ("def test_x():\n    with pytest.raises(ValueError):\n        assert ready\n        parse('')\n", False),
@@ -502,6 +506,7 @@ def test_gate_refuses_an_unreadable_root_and_skips_an_unreadable_file():
 
 
 @pytest.mark.parametrize("source, expected", [
+    # stub asserted called: the stubbed receiver must be the one checked
     ("def test_x():\n    m.get.return_value = 1\n    assert f(m) == 1\n    m.get.assert_called_once()\n", True),
     ("def test_x():\n    m = Mock(side_effect=[1])\n    assert f(m) == 1\n    assert m.called\n", True),
     ("def test_x():\n    m.get.return_value = 1\n    assert f(m) == 1\n    m.put.assert_called_once()\n", False),

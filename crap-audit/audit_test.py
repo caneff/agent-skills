@@ -78,6 +78,7 @@ def test_nested_uncovered_and_branchless_score_per_spec():
     assert by_name["inner"]["complexity"] == 6
     assert by_name["inner"]["line"] == 2
 
+    # missing coverage data entirely (untested.py never imported) -> 0% both axes.
     assert by_name["entirely_uncovered"]["statement_coverage"] == 0.0
     assert by_name["entirely_uncovered"]["branch_coverage"] == 0.0
 
@@ -162,6 +163,8 @@ def test_line1_function_does_not_inherit_module_summary():
                         "start_line": 1,
                         "summary": {"percent_covered": 0.0, "percent_branches_covered": 0.0},
                     },
+                    # module-scope summary: same start_line, listed after
+                    # `first` -- exactly how coverage.py 7.16.0 emits it.
                     "": {
                         "start_line": 1,
                         "summary": {"percent_covered": 100.0, "percent_branches_covered": 100.0},
@@ -218,6 +221,8 @@ def test_normalize_raises_on_partial_basename_collision_between_unmatched_files(
 
 
 def _assert_findings_schema(findings):
+    """The six required findings-schema fields, non-empty, on every row —
+    the one home both the Python-path and TS-path tests assert against."""
     for finding in findings:
         for field in ("bucket", "file", "line", "category", "summary", "failure"):
             assert field in finding and finding[field], finding
@@ -237,9 +242,10 @@ def test_findings_validate_against_findings_schema():
         assert "extra" in finding and isinstance(finding["extra"], dict)
 
     by_line = {f["line"]: f for f in result["findings"]}
-    assert by_line[2]["bucket"] == "critical"
+    # pinned against fixtures/sample_project/answer-key.md, not just schema membership
+    assert by_line[2]["bucket"] == "critical"  # inner
     assert by_line[2]["category"] == "low-coverage"
-    assert by_line[17]["bucket"] == "hotspot"
+    assert by_line[17]["bucket"] == "hotspot"  # uncovered_fn
     assert by_line[17]["category"] == "low-coverage"
 
 
@@ -250,7 +256,9 @@ def test_bucket_gate_is_the_classic_30_boundary():
 
 
 def test_category_dominant_ingredient_boundary():
+    # complexity=4: penalty >= complexity when coverage <= 0 (penalty=64 at cov=0)
     assert audit._category(4, 0.0) == "low-coverage"
+    # complexity=4, coverage=1.0 -> penalty=0 < complexity=4
     assert audit._category(4, 1.0) == "high-complexity"
 
 
@@ -328,6 +336,9 @@ def test_gate_suggestions_present_and_correct():
 
 
 def test_cli_main_prints_whole_score_result():
+    """The thin CLI main reads the two JSON files and prints the whole
+    score() result -- findings, under_floor, gates, and ranking -- as one
+    JSON object."""
     out = subprocess.run(
         [
             sys.executable,
@@ -470,6 +481,10 @@ def test_ts_findings_validate_against_findings_schema():
 
 
 def _assert_axis_nulled(row, measured_axis, measured_value):
+    """The one home for the synthetic-axis-nulling assertion: whichever axis
+    normalize_ts actually measured keeps its value, the other reads None —
+    never the synthetic 100.0 filler `score()`'s min() ignores. Shared by
+    the findings-extra and ranking-row variants of the same check."""
     axes = {"statement_coverage", "branch_coverage"}
     assert row[measured_axis] == measured_value
     unmeasured = (axes - {measured_axis}).pop()
@@ -504,6 +519,9 @@ def test_ts_ranking_never_reports_the_synthetic_unmeasured_axis():
 
 
 def test_cli_main_ts_mode_prints_whole_score_result():
+    """The thin CLI's `--ts <report.json>` mode reads the captured tool
+    report and prints the whole score() result -- findings, under_floor,
+    gates, and ranking -- as one JSON object."""
     out = subprocess.run(
         [
             sys.executable,

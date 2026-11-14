@@ -163,7 +163,7 @@ def normalize_ts(report_json):
         elif kind == "branch":
             stmt_cov, branch_cov = 100.0, float(cov)
             axis = "branch"
-        else:
+        else:  # "N/A" with cov not None -> structural_na
             stmt_cov = branch_cov = 100.0
             axis = "both"
         rows.append(
@@ -190,6 +190,8 @@ def _crap(complexity, coverage):
 
 
 def _category(complexity, coverage):
+    """Dominant ingredient: whether the coverage penalty or the flat
+    complexity term drives more of the score."""
     penalty = complexity**2 * (1 - coverage) ** 3
     return "low-coverage" if penalty >= complexity else "high-complexity"
 
@@ -278,7 +280,8 @@ def score(rows, floor=FLOOR):
 
 def _parse_default(radon_text, coverage_text):
     """The two-file default path's `parse`, as `run_cli` expects: one row
-    out, the whole `score()` result."""
+    out, the whole `score()` result, so `run_cli` prints it as one JSON
+    object."""
     return [score(normalize(json.loads(radon_text), json.loads(coverage_text)))]
 
 
