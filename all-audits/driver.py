@@ -37,6 +37,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
 from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
+import auditlib  # noqa: E402
 import pagelib  # noqa: E402
 import audit_record  # noqa: E402
 import mutation_run  # noqa: E402
@@ -424,6 +425,33 @@ def report_failure(label, reason, log_path):
     print(f"[{label}] FAILED: {reason} — see {log_path}")
 
 
+# The audits that read only Python (#1751): on a repo with none they do not
+# run, so a "clean" cannot be what the audit not running would also produce.
+PYTHON_ONLY = ("dead-code", "type-tightness", "docstring-coverage")
+
+
+def not_applicable_verdict(name, repo):
+    """`"not applicable: <language>"` for a Python-only audit on a repo with no
+    Python, else None."""
+    return auditlib.not_applicable(repo) if name in PYTHON_ONLY else None
+
+
+def write_not_applicable(name, verdict, manifest):
+    """Write the manifest and one-line report of an audit that does not apply
+    here. The manifest carries `not_applicable` (the language) and no
+    findings log, so no reader takes it for an audit that found nothing."""
+    language = verdict.split(": ", 1)[1]
+    report_dir = os.path.join(os.path.dirname(manifest), "report")
+    os.makedirs(report_dir, exist_ok=True)
+    report = os.path.join(report_dir, "report.html")
+    with open(report, "w", encoding="utf-8") as f:
+        f.write(pagelib.page(title=f"{name}: not applicable", kicker=name,
+                             h1=f"NOT APPLICABLE: {html.escape(language)}",
+                             lede=f"{name} reads Python source and this repo has none; it did not run.", body=""))
+    with open(manifest, "w", encoding="utf-8") as f:
+        json.dump({"report_path": report, "count": 0, "headline": verdict, "not_applicable": language}, f)
+
+
 def run_one(name, repo, outlogs, manifests_dir):
     """Run one audit. Returns None on success, else the failure reason —
     a nonzero `claude` exit, no manifest or a manifest naming a missing
@@ -433,6 +461,13 @@ def run_one(name, repo, outlogs, manifests_dir):
     manifest = manifest_path_for(manifests_dir, name)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
     clear_manifest(manifest)
+    verdict = not_applicable_verdict(name, repo)
+    if verdict:
+        write_not_applicable(name, verdict, manifest)
+        with open(log_path, "w", encoding="utf-8") as log:
+            log.write(verdict + "\n")
+        print(f"[{name}] {verdict}")
+        return None
     with open(log_path, "w", encoding="utf-8") as log:
         r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=claude_env())
     reason = audit_failure(r.returncode, lambda: manifest_failure(manifests_dir, name))
@@ -674,7 +709,8 @@ def execute(repo, plan, run, jobs):
     """
     if not plan.to_run:
         return []
-    smoke = plan.to_run[0]
+    # The smoke audit must spawn `claude`, or it proves nothing about the guard (#1751).
+    smoke = next((n for n in plan.to_run if not not_applicable_verdict(n, repo)), plan.to_run[0])
     print(f"== smoke test: {smoke} ==")
     failed = [smoke] if run_one(smoke, repo, run.logs, run.manifests) else []
     log_text = open(os.path.join(run.logs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
@@ -682,7 +718,7 @@ def execute(repo, plan, run, jobs):
         print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
         sys.exit(1)
     print("smoke test passed; fanning out the rest\n" if not failed else f"smoke audit {smoke} failed (not the guard); fanning out the rest anyway\n")
-    rest = plan.to_run[1:]
+    rest = [n for n in plan.to_run if n != smoke]
     if rest:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(rest))) as ex:
             results = list(ex.map(lambda n: run_one(n, repo, run.logs, run.manifests), rest))
@@ -770,6 +806,10 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
             continue
         if reason:
             manifest_note[name] = reason
+            continue
+        language = (read_manifest(run.manifests, name) or {}).get("not_applicable")
+        if language:  # shown apart from a clean pass, never cached as a clean result
+            manifest_note[name] = f"NOT APPLICABLE: {language}"
             continue
         if name in GATED:
             os.makedirs(stable, exist_ok=True)

@@ -91,6 +91,14 @@ clean, fewer than `N` files (default 10) changed since the last-run SHA, no
 change touched `domain-drift`'s ground-truth (`GLOSSARY.md`, `docs/adr/`), and the
 last run is within the time backstop (default 30 days).
 
+**Not applicable (#1751).** `dead-code`, `type-tightness` and `docstring-coverage`
+read only Python. On a repo with no Python source but another language's
+(`auditlib.not_applicable`), `run_one` starts no `claude` process: it writes a
+manifest with `"not_applicable": "<language>"`, count 0 and a one-line report,
+and the index's Status column reads `NOT APPLICABLE: <language>` beside "open
+report", apart from a clean pass. A repo with no recognised source at all runs
+the audit as before. The smoke test is the first audit that does start.
+
 **Ignore file.** A repo can carry `.audit-ignore.md` at its root to suppress
 findings it has already reviewed and rejected, so a sweep stops re-raising
 them. Opt-in per repo — see [`harness/IGNORE-FILE.md`](harness/IGNORE-FILE.md).
