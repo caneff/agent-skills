@@ -832,7 +832,7 @@ def fixture_run(cache, in_flight_path):
 
 def test_the_cli_box_check_exits_nonzero_on_a_refusal():
     ok = loop_py("box", "--processes", "4", "--committed-gb", "4",
-                 "--add-gb", "4", "--live", "0")
+                 "--live", "0")
     assert ok.returncode == 0, ok.stderr
     refused = loop_py("box", "--processes", "40", "--committed-gb", "0",
                      "--live", "0")
@@ -1051,8 +1051,7 @@ def test_the_cli_dispatch_takes_only_what_the_box_has_room_for(tmp, empty_live):
                    {"tickets": [457], "closure": ["b.js"]},
                    {"tickets": [458], "closure": ["c.js"]}], fh)
     got = loop_py("dispatch", "--in-flight", empty_live, "--candidates", cand, "--free", "3",
-                  "--processes", "23", "--committed-gb", "23",
-                  "--add-gb", "1")
+                  "--processes", "23", "--committed-gb", "23")
     assert got.returncode == 0, got.stderr
     assert got.stdout.count("dispatch  ") == 1, got.stdout
     assert "room for 1 of 3" in got.stdout, got.stdout
