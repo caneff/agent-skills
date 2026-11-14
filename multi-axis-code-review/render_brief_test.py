@@ -158,12 +158,17 @@ OUTCOME_WORD = r"\b(fixed|moved|disputed)\b"
 
 
 def test_the_renderer_never_emits_an_outcome_of_its_own(wt, diff):
-    """Scoped to the generated sections: with no ruling, choice or claim, none
-    of them assigns an outcome, and no section is an `outcome` field."""
-    _, out, _ = render(wt, diff)
+    """Scoped to the generated sections: given a ruling, a choice and a claim
+    that carry no outcome word, each section is rendered and none of them
+    assigns an outcome; no section is an `outcome` field."""
+    _, out, _ = render(wt, diff, "--ruling", "keep the old name",
+                       "--choice", "split the helper",
+                       "--claim", "S1: the suite ran", axis="correctness")
     assert '"outcome"' not in out, out
     for heading in ("Settled decisions", "Worker's own choices", "Claims to check"):
-        assert not re.search(OUTCOME_WORD, section(out, heading) or ""), (heading, out)
+        body = section(out, heading)
+        assert body, (heading, out)
+        assert not re.search(OUTCOME_WORD, body), (heading, out)
 
 
 def test_a_claims_own_words_are_the_only_place_an_outcome_word_appears(wt, diff):

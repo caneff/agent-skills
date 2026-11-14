@@ -11,12 +11,14 @@ hook="$here/refresh-landed.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# python3 stub: records its argv to a marker file instead of running anything.
+# python3 stub: records its argv to a marker file instead of running anything,
+# and appends the RUN_TAG of the run that started it, one line per call.
 stubdir="$tmp/bin"
 mkdir -p "$stubdir"
 cat > "$stubdir/python3" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$@" > "$tmp/python3.args"
+echo "\${RUN_TAG:-}" >> "$tmp/python3.calls"
 STUB
 chmod +x "$stubdir/python3"
 
@@ -26,7 +28,7 @@ run() {
   local name=$1 want=$2 cmd=$3
   local out rc
   out=$(printf '%s' "$cmd" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
-        | PATH="$stubdir:$PATH" bash "$hook" 2>&1)
+        | RUN_TAG="$name" PATH="$stubdir:$PATH" bash "$hook" 2>&1)
   rc=$?
   if [ "$rc" != "$want" ]; then
     echo "FAIL: $name — want exit $want, got $rc"; echo "  out: $out"; fails=1; return
@@ -34,34 +36,29 @@ run() {
   echo "PASS: $name"
 }
 
-# Non-push command: exits 0, no regeneration triggered.
-rm -f "$tmp/python3.args"
-run "non-push command allowed, no side effects" 0 "git status"
-# A regression would start python3 in the background, as the push case below
-# does, so wait out a bounded window before asserting it never did.
-for _ in $(seq 30); do
-  [ -e "$tmp/python3.args" ] && break
-  sleep 0.1
-done
-if [ -e "$tmp/python3.args" ]; then
-  echo "FAIL: non-push command triggered python3"; fails=1
-else
-  echo "PASS: non-push command triggered no python3 call"
-fi
+# Non-push command: exits 0, no regeneration triggered. A regression would start
+# python3 in the background, so its absence is asserted once the push below has
+# started its own (later) call, each call tagged with the run that started it.
+rm -f "$tmp/python3.args" "$tmp/python3.calls"
+run "non-push command allowed" 0 "git status"
 
 # Push command: exits 0, and generate.py is invoked in the background.
-rm -f "$tmp/python3.args"
 run "push command allowed" 0 "git push origin main"
 # The hook backgrounds the call; give it up to ten seconds to land, since the
 # suite runs concurrently (#1415) and a loaded box can delay a background start.
 for _ in $(seq 100); do
-  [ -e "$tmp/python3.args" ] && break
+  grep -qx "push command allowed" "$tmp/python3.calls" 2>/dev/null && break
   sleep 0.1
 done
 if [ -e "$tmp/python3.args" ] && grep -q "generate.py" "$tmp/python3.args"; then
   echo "PASS: push command invoked generate.py"
 else
   echo "FAIL: push command did not invoke generate.py"; fails=1
+fi
+if ! grep -qx "non-push command allowed" "$tmp/python3.calls" 2>/dev/null; then
+  echo "PASS: non-push command triggered no python3 call"
+else
+  echo "FAIL: non-push command triggered python3"; fails=1
 fi
 
 # The hook runs the generate.py of the checkout it lives in: a path baked in for

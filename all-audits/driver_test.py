@@ -494,7 +494,6 @@ def test_cache_decision_bad_sha_forces_run(tmp_path):
 def test_cache_decision_clean_recent_repo_skips(tmp_path):
     repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
-    sha = driver.head_sha(repo)
     report_dir = os.path.join(cache_dir, "report")
     os.makedirs(report_dir)
     driver.update_cache(repo, 'domain-drift', report_dir, base=cache_dir)

@@ -116,4 +116,3 @@ def test_drain_runs_off_the_moved_frontier():
                          text=True, capture_output=True, check=False)
     assert got.returncode == 0, got.stdout + got.stderr
     assert (SPEC_DIR / "frontier.py").is_file()
-

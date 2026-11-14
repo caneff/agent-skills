@@ -113,7 +113,7 @@ def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(week):
     w = week
     # 1. The merge gate, one PR at a time.
     status, line, _ = w.pr(101, 11, {"lib/a.py": 120, "lib/a_test.py": 200, "tests/t.sh": 200,
-                                           "docs/a.md": 200})
+                                     "docs/a.md": 200})
     assert (status, line) == (40, "under size threshold (120 < 300)")
     w.skip(11, "size")
 

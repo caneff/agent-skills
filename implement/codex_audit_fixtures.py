@@ -27,7 +27,8 @@ def skip_row(ticket, reason, repo="skills", phase="gate"):
 
 
 class GitRepoCase:
-    """Mixin for a plain test-environment class holding `self.env` (the git identity), `self.repo` (a checkout) and `self.ledger` (its ledger file)."""
+    """Mixin for a plain test-environment class holding `self.env` (the git
+    identity), `self.repo` (a checkout) and `self.ledger` (its ledger file)."""
 
     def git(self, *args, date=None):
         env = {**self.env, **({"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else {})}

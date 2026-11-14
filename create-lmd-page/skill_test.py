@@ -1,5 +1,6 @@
 """Structure test for the create-lmd-page flow (#1662): the checks SKILL.md runs around the
-driver, the template's `<p>` measure, and the scripts it calls (extractor `solution`, board_png with Pillow and the renderer faked).
+driver, the template's `<p>` measure, and the scripts it calls (extractor `solution`,
+board_png with Pillow and the renderer faked).
 
 Runs nothing from ~/src/sudokupad-art or ~/src/twitch-rules-scroller. Blind to: whether a
 model follows the prose, the `lmd_archive` command itself (sudokupad-art #261, #262, #287),

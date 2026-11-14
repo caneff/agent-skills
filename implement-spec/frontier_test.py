@@ -1160,10 +1160,10 @@ def test_landed_is_not_asked_about_a_closed_blocker():
     asked = []
     issues = [issue(2, body=SECTION_ON_1)]
     got = F.frontier("owner/repo", "ready-for-agent",
-               fetch=lambda repo, label: issues,
-               state_of=lambda repo, number: "closed",
-               parent_of=lambda repo, ticket, run: spec_parent(483),
-               landed_of=lambda repo, branch: asked.append(branch))
+                     fetch=lambda repo, label: issues,
+                     state_of=lambda repo, number: "closed",
+                     parent_of=lambda repo, ticket, run: spec_parent(483),
+                     landed_of=lambda repo, branch: asked.append(branch))
     assert asked == [], asked
     assert numbers(got["slice"]) == [2], got
 

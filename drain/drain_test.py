@@ -1585,18 +1585,30 @@ def test_a_worker_that_never_goes_idle_fails_at_the_wall_clock(d, monkeypatch):
     assert "passed the 0.3s wall clock" in str(caught.value)
 
 
+class SteppedClock:
+    """A stand-in for drain's `time`: `sleep` advances one tick, whatever it is asked."""
+
+    def __init__(self):
+        self.tick = 0
+
+    def monotonic(self):
+        return self.tick
+
+    def sleep(self, _seconds):
+        self.tick += 1
+
+
 def test_a_spec_run_idle_while_its_slice_workers_work_is_not_a_failed_build(d, ctx, monkeypatch):
     # A stepped clock: one tick per poll, so no real time decides the outcome. Slices work for
     # ticks 0-5, the grace (3) starts at tick 6 and would end at 9, the PR appears at tick 8.
     # With no slice-work reset the grace would have ended at tick 3.
-    tick = [0]
-    monkeypatch.setattr(d, "time", type("Clock", (), {"monotonic": staticmethod(lambda: tick[0]),
-                                                      "sleep": staticmethod(lambda s: tick.__setitem__(0, tick[0] + 1))}))
+    clock = SteppedClock()
+    monkeypatch.setattr(d, "time", clock)
     monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 3)
     monkeypatch.setattr(d, "agent_status", lambda name: "idle")
     monkeypatch.setattr(d, "gh_json", lambda *args: {"state": "open"})
-    monkeypatch.setattr(d, "slices_working", lambda ctx, spec: tick[0] < 6)
-    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: {"number": 1} if tick[0] >= 8 else None)
+    monkeypatch.setattr(d, "slices_working", lambda ctx, spec: clock.tick < 6)
+    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: {"number": 1} if clock.tick >= 8 else None)
     assert d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1) == "pr"
 
 

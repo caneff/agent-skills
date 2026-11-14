@@ -60,7 +60,8 @@ done
 mkdir "$tmp/dirlist"
 : > "$log"
 out=$("$tool" "$tmp/dirlist" 2>&1); rc=$?
-if [ "$rc" -ne 0 ] && [ ! -s "$log" ]; then pass "an unreadable list file fails"
+if [ "$rc" -ne 0 ] && [ ! -s "$log" ] && printf '%s' "$out" | grep -q 'cannot read the repo list'; then
+  pass "an unreadable list file fails, refused as unreadable"
 else fail "unreadable list (rc=$rc): $out"; fi
 
 # One repo failing must not skip the rest, and the job still ends non-zero.
@@ -109,7 +110,8 @@ for code in 4 137; do
 done
 
 # The shipped list is one the tool accepts: it runs at least one repo, each
-# against an absolute path (a typo'd or unexpanded entry would not be).
+# against an absolute path (a relative entry would not be). A typo'd path still
+# passes: the tool expands `~/` and never checks the directory exists.
 : > "$log"
 out=$(HOME="$tmp/home" "$tool" "$here/../backstop-repos" 2>&1); rc=$?
 if [ "$rc" = 0 ] && [ "$(wc -l < "$log")" -ge 1 ] && ! grep -qv -- '^--repo /' "$log"; then

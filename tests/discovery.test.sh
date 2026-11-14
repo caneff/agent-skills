@@ -38,7 +38,7 @@ done
 # (testedplug, the same shape plus a test.ts) shows the rule is exercised.
 ! grep -qxF "skillplug" <<<"$listed" || { echo "FAIL: skillplug (no test.ts) was discovered"; fail=1; }
 
-bash tests/all.sh --bogus >/dev/null 2>&1; [ $? = 2 ] || { echo "FAIL: unknown flag did not exit 2"; fail=1; }
+(cd "$repo" && bash tests/all.sh --bogus) >/dev/null 2>&1; [ $? = 2 ] || { echo "FAIL: unknown flag did not exit 2"; fail=1; }
 
 [ "$fail" = 0 ] || { echo "--- discovered ---"; printf '%s\n' "$listed"; exit 1; }
 echo "ok"
