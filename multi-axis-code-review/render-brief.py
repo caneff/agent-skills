@@ -50,7 +50,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import review_ledger  # noqa: E402  (fold_repo and REVIEWS_ROOT: the one cache key)
+import review_cache  # noqa: E402  (fold_repo and REVIEWS_ROOT: the one cache key)
 
 AXES = ("standards", "spec", "correctness")
 STANDARDS_FILES = ("CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", "GLOSSARY.md")
@@ -161,7 +161,7 @@ def render(a):
     out_dir = f"~/.cache/agent-reviews/{a.repo}"  # a.repo is folded in main
     n, axis, rnd = a.ticket, a.axis, a.round
     suffix = f"-r{rnd}" if rnd > 1 else ""
-    ids = next_ids(review_ledger.REVIEWS_ROOT / a.repo, axis, n, rnd, first_id) if rnd > 1 else None
+    ids = next_ids(review_cache.REVIEWS_ROOT / a.repo, axis, n, rnd, first_id) if rnd > 1 else None
     inputs = [
         f"- Worktree: {a.worktree}",
         f"- Fixed point: {a.base}",
@@ -232,7 +232,7 @@ def write_brief(text, repo, ticket, axis, rnd=1):
     """Write `text` to a ticket-numbered file of `repo`'s (folded) review cache directory that no
     earlier wave holds, and return its path (`-2`, `-3` when the name is taken)."""
     # SKILL.md allows a branch name for `--ticket`; `write_cache_file` keeps a `/` in it from naming a directory.
-    return review_ledger.write_cache_file(repo, f"brief-{ticket}-{axis}" + (f"-r{rnd}" if rnd > 1 else ""), text)
+    return review_cache.write_cache_file(repo, f"brief-{ticket}-{axis}" + (f"-r{rnd}" if rnd > 1 else ""), text)
 
 
 def main(argv):
@@ -257,7 +257,7 @@ def main(argv):
     p.add_argument("--test-command")
     p.add_argument("--capture-stat")
     a = p.parse_args(argv)
-    a.repo = review_ledger.fold_repo(a.repo)  # once: every path and the ledger line below read it folded
+    a.repo = review_cache.fold_repo(a.repo)  # once: every path and the ledger line below read it folded
     try:
         path = write_brief(render(a), a.repo, a.ticket, a.axis, a.round)
     except BadInput as exc:

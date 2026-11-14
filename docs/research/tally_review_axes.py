@@ -29,13 +29,11 @@ import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-REVIEWS_ROOT = Path.home() / ".cache" / "agent-reviews"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "multi-axis-code-review"))
+from review_cache import REVIEWS_ROOT, fold_repo  # noqa: E402,F401  (the one cache key)
+
 ALL_AXES = ("standards", "spec", "correctness")
 AXIS_ALTS = "|".join(ALL_AXES)
-
-REPO_ALIASES = {
-    "agent-skills": "skills",
-}
 
 # The `gh` repo each folded repo name lives in, for the merged-PR lookup.
 GH_REPO_FOR = {
@@ -312,12 +310,6 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
         f"{repo}/{axis}": counts
         for (repo, axis), counts in sorted(table.items())
     }
-
-
-def fold_repo(repo_dir: str) -> str:
-    """Fold known aliases (agent-skills is the same repo as skills, checked
-    out under two directory names historically) onto one canonical name."""
-    return REPO_ALIASES.get(repo_dir, repo_dir)
 
 
 def _walk_cache_layout(root: Path, patterns: tuple[str, ...]) -> list[tuple[str, str]]:

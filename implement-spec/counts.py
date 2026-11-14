@@ -16,13 +16,12 @@ no sidecar, so the counts are read from the spec's one
 number, and no per-slice sidecar is read or required.
 """
 import os
-import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "research"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "multi-axis-code-review"))
 import runfile  # noqa: E402
-from tally_review_axes import fold_repo  # noqa: E402
+from review_cache import CacheDirError, cache_dir_for  # noqa: E402
 
 
 def default_reviews_dir(checkout):
@@ -32,12 +31,7 @@ def default_reviews_dir(checkout):
     submodule or a `--separate-git-dir` checkout where the primary
     checkout's own name is not the key. `checkout` is `runfile.checkout_top`'s
     answer, so it is already a checkout of the repo the run targets."""
-    top = subprocess.run(
-        ["git", "-C", checkout, "rev-parse", "--path-format=absolute",
-         "--git-common-dir"], capture_output=True, text=True, check=True,
-        env=runfile.clean_git_env()).stdout.strip()
-    repo = fold_repo(os.path.basename(os.path.dirname(top)))
-    return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
+    return str(cache_dir_for(checkout, runfile.clean_git_env()))
 
 
 def counts(run, reviews_dir, spec=None):
@@ -151,7 +145,7 @@ def main(argv):
             return 1
         try:
             reviews_dir = default_reviews_dir(top)
-        except (subprocess.CalledProcessError, OSError) as exc:
+        except (CacheDirError, OSError) as exc:
             print(f"counts.py: --repo {args.repo} is not a git checkout: {exc}",
                   file=sys.stderr)
             return 1

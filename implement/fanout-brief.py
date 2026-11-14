@@ -45,7 +45,7 @@ from typing import NamedTuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "multi-axis-code-review"))
-import review_ledger  # noqa: E402  (fold_repo and REVIEWS_ROOT: the one cache key)
+import review_cache  # noqa: E402  (fold_repo and REVIEWS_ROOT: the one cache key)
 
 
 class BadInput(Exception):
@@ -164,7 +164,7 @@ def render(a, owners, findings):
 
 def write_brief(text, repo, ticket, worker):
     """Write `text` to the review cache's `fanout-<ticket>-<worker>[-<n>].md`, never over an earlier render."""
-    return review_ledger.write_cache_file(repo, f"fanout-{ticket}-{worker}", text)
+    return review_cache.write_cache_file(repo, f"fanout-{ticket}-{worker}", text)
 
 
 def main(argv):
@@ -180,7 +180,7 @@ def main(argv):
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--ceiling", type=int, default=600)
     a = p.parse_args(argv)
-    a.repo = review_ledger.fold_repo(a.repo)
+    a.repo = review_cache.fold_repo(a.repo)
     a.worktree = os.path.abspath(a.worktree)
     if not re.fullmatch(r"[A-Za-z0-9._-]+", a.repo):
         print(f"fanout-brief: repo {a.repo!r} is not a plain name", file=sys.stderr)

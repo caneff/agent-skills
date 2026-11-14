@@ -62,11 +62,10 @@ PLUGINS = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
 LEDGER_CLI = HERE.parent / "multi-axis-code-review" / "review_ledger.py"
 
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "docs" / "research"))
 sys.path.insert(0, str(HERE.parent / "multi-axis-code-review"))
 from gitcmd import GitError, git  # noqa: E402
 from review_ledger import DEFAULT_LEDGER, parse_codex_out  # noqa: E402
-from tally_review_axes import REVIEWS_ROOT, fold_repo  # noqa: E402
+from review_cache import REVIEWS_ROOT, fold_repo, repo_for_checkout  # noqa: E402
 
 OK, ERROR, EMPTY, REFUSED, UNREADABLE, UNMATCHED = 0, 2, 3, 4, 5, 6
 CAPPED, UNKNOWN = 20, 30
