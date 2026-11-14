@@ -23,11 +23,14 @@
 # reported in discovery order. A suite with a comment line
 # `# all.sh: serial (<why>)` in its first twenty lines cannot share the box (a
 # fixed port, a shared global path): it runs alone after the concurrent ones.
-# Each suite is also held to a CPU budget (see `cpu_budget`): its own user+sys
-# time with every process it started, not wall-clock time, so load on a shared
-# box cannot make it flaky. `TESTS_CPU_BUDGET=<seconds>` can only lower every
-# budget (a test uses it to make a fixture suite go over); raising one is an
-# edit to `cpu_budget`, a visible diff line.
+# Each suite's own user+sys CPU time, with every process it started, is
+# measured and printed on its PASS line, and one that passes over its budget
+# (see `cpu_budget`) says so there: `PASS <label> (<n>s cpu, over its <b>s
+# budget)`. An overrun never fails the run (#1606): load on a shared box
+# inflates CPU time too, so it was no steadier a verdict than wall-clock time.
+# The nightly backstop reports every such line. `TESTS_CPU_BUDGET=<seconds>`
+# can only lower every budget (a test uses it to make a fixture suite go
+# over); raising one is an edit to `cpu_budget`, a visible diff line.
 # This is the merge gate (`git config land.testcmd`), not a push hook — see
 # #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
@@ -372,11 +375,12 @@ while IFS=$'\t' read -r label cmd; do
 done <<<"$selection"
 cat "$tmp/parallel" "$tmp/serial" >"$tmp/ordered"
 
-# The CPU budget of every suite, in seconds (#1415): a suite that costs more
-# fails the run, so a suite that re-runs the whole repo inside itself (the old
-# tests/all.test.sh was 251 of the suite's 494 serial seconds) is a red line and
-# not a quiet tax on every merge. A suite that needs more is named below with
-# its own budget and a one-line reason; adding a line is the visible diff.
+# The CPU budget of every suite, in seconds (#1415): a suite that costs more is
+# named on its PASS line and in the nightly backstop's report, so a suite that
+# re-runs the whole repo inside itself (the old tests/all.test.sh was 251 of the
+# suite's 494 serial seconds) is seen and not a quiet tax on every merge. It is
+# a figure to read, not a gate (#1606). A suite that needs more is named below
+# with its own budget and a one-line reason; adding a line is the visible diff.
 # 25, not 15: pytest suites that cost ~10.5s CPU alone measured 15.1-15.7s in a
 # full parallel run (backstop_test, fix_check_test, retire_landing_test (since removed, #1649) failed
 # the 15s line on a loaded box, 2026-11-04, #1615). Still far under a suite that
@@ -477,15 +481,9 @@ while IFS=$'\t' read -r label cmd; do
         "  $hit" \
         "$(logging_remedy "$hit")"
     fi
-    cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label")
-    if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then
-      stop_and_wait
-      report_failure "$label" "$out" \
-        "tests/all.sh: over its CPU budget: ${cpu}s CPU against ${budget}s (user+sys, children included)." \
-        "  A suite that re-runs the repo inside itself is the usual cause. If this one really needs more," \
-        "  name it in cpu_budget in tests/all.sh with its own budget and a one-line reason."
-    fi
-    echo "PASS $label (${cpu}s cpu)"
+    cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label"); over=""
+    if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then over=", over its ${budget}s budget"; fi
+    echo "PASS $label (${cpu}s cpu${over})"
     count=$((count + 1))
   else
     stop_and_wait

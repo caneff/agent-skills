@@ -51,7 +51,8 @@ success have been produced by the thing not running at all?**
   inside itself to test one `unset` line. Cheap at 18 suites, 251 of 494 s
   at 111, and no diff ever made it slow: nothing printed a suite's cost, so
   silence about cost read as no cost. Fixed by a per-suite CPU budget in
-  `tests/all.sh`, since review only sees the diff in front of it.
+  `tests/all.sh`, since review only sees the diff in front of it; since #1606 a
+  figure printed on the PASS line and reported nightly, not a failing gate.
 
 ## 2. A stated fallback with no mechanism behind it
 
