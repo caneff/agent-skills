@@ -9,7 +9,7 @@ drain picks, the ticket or spec `--anchor <n>` names (refused unless `<n>` is
 open, ready, unblocked and without a kept workspace; a resumed bundle goes
 first and the anchor waits for the next pick). Tickets numbered
 below the anchor never join its bundle, because the worker's branch and herdr
-agent are named for the lowest ticket of a clump.
+agent are named for the lowest ticket of a bundle.
 
 `drain` leaves a `drain anchor:` comment on it, has one headless one-turn
 `claude -p` session choose the **bundle** (the other unblocked ready tickets
@@ -80,10 +80,10 @@ PR is recorded as what closed it, from its `closed` event: `(landed on main,
 no PR)` with that commit's sha, or with the sha of the main commit whose
 message says `Closes #<n>` when a hand closed it after the trailer did not
 fire; `moot (closed, no PR)` with no sha when neither exists; or an unverified
-close with the reason, never as main's tip. The run's last lines are one
+close with the reason, never as main's tip. This drain's last lines are one
 `passed over: #<n> <why>` per ready ticket it did not build (human-held,
 claimed, blocked, a kept workspace, not started), read fresh when a limit ends
-the run, and one
+the drain, and one
 `ended: <cause>`: `queue empty`, `no startable ticket` (every queued ticket has
 a kept workspace), `--once reached`, `--max <n> reached`, or `stopped` beside
 its `stopped:` line. `ended:` is no `stopped:` line and leaves the exit code
@@ -159,7 +159,7 @@ CHOOSER_SECONDS = float(os.environ.get("DRAIN_CHOOSER_SECONDS", 15 * 60))
 # the chooser may still open a ticket in full.
 EXCERPT_CHARS = 400
 # How long an empty queue read waits before it is read once more: GitHub's label
-# listing lags a relabel by about 30 s, so a ticket readied just before the run
+# listing lags a relabel by about 30 s, so a ticket readied just before the drain
 # starts is not listed yet.
 FRONTIER_RETRY_SECONDS = float(os.environ.get("DRAIN_FRONTIER_RETRY_SECONDS", 45))
 # How long one `herdr agent get` may take: a herdr that hangs would otherwise stall
@@ -169,7 +169,7 @@ IDLE = ("idle", "done")
 # `blocked` is a permission or question dialog nobody here can answer.
 STALLED = ("blocked",)
 # Consecutive failed looks at a worker (a `gh` or `herdr` call) before the wait
-# gives up, so one transient error is not a failed build or a stopped run.
+# gives up, so one transient error is not a failed build or a stopped drain.
 LOOK_ERRORS = 5
 # The controller named in every brief. No session bears it: the worker's "PR up"
 # send to it finds nobody and the worker stops idle, which is what drain waits
@@ -416,7 +416,7 @@ def resumable(ctx, ended):
     `implement-dispatch` started has none, and a ticket drain handed to Chris
     ends in `HANDED_NOTE`, so neither is taken.
     The open list can still carry a ticket just closed, so each candidate's
-    state and labels are read again, and an anchor this run already took up
+    state and labels are read again, and an anchor this drain already took up
     (`ended`) is never taken twice."""
     try:
         claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
@@ -446,7 +446,7 @@ def noted(ctx, anchor):
             for x in re.findall(r"\d+", CANDIDATES.sub("", c["body"]))} - {anchor}
 
 
-_PARENTS = {}  # (repo, number) -> parent number or None; a ticket's parent does not change mid-run
+_PARENTS = {}  # (repo, number) -> parent number or None; a ticket's parent does not change mid-drain
 
 
 def parent_number(ctx, issue):
@@ -567,7 +567,7 @@ def excerpt(ctx, n):
 def chooser_prompt(anchor, others, bundle_max):
     """`others` is `(number, title, excerpt)` per candidate."""
     listing = "\n".join(f"- #{n} {title}: {text}" for n, title, text in others) or "- (none)"
-    return (f"Bundle choice for an unattended run. #{anchor} is the anchor ticket to build next. Other unblocked "
+    return (f"Bundle choice for an unattended drain. #{anchor} is the anchor ticket to build next. Other unblocked "
             f"ready tickets, each with the start of its body and comments:\n{listing}\n"
             f"Open any that look related to #{anchor} in full (`gh issue view <n>`, body and comments) and pick those "
             f"you would naturally fix in the same PR, at most {bundle_max - 1} of them. Change nothing. "
@@ -609,7 +609,7 @@ def dispatch(ctx, bundle, kind):
     """Start the bundle's worker through `implement-dispatch`, the one dispatch
     path: claim, worktree, herdr pane, brief. A refusal claims and creates
     nothing, so it is the environment's (herdr down, onboarding) and stops the
-    run rather than looping over one ticket. A failure after the claim (herdr
+    drain rather than looping over one ticket. A failure after the claim (herdr
     failing once the workspace exists) leaves the claim and the workspace in
     place: that is this bundle's failed build, not the environment's."""
     which = ["--spec", str(bundle[0])] if kind == SPEC else [str(n) for n in bundle]
@@ -732,7 +732,7 @@ def seam(ctx, head, log, pr):
     run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
     log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
     with contextlib.suppress(FileNotFoundError):
-        os.remove(log)  # a conflict writes no log, and an earlier run's must not answer for it
+        os.remove(log)  # a conflict writes no log, and an earlier drain's must not answer for it
     state = shlex.quote(os.path.splitext(log)[0] + "-selector.json")
     tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
     base = f"--root . --rev {shlex.quote(ctx.default)}"
@@ -909,7 +909,7 @@ def finish(ctx, anchor, branch, view, kind):
 
 
 def nudge_text(reason, pr_up, kind):
-    head = "Unattended run, no controller: "
+    head = "Unattended drain, no controller: "
     if pr_up:
         return (head + f"the PR is up but drain's check of it failed: {reason} Fix that, push to the PR branch, "
                 "and send no messages.")
@@ -955,12 +955,12 @@ def announce(ctx, anchor, tickets, kind):
 def work(ctx, anchor, others, resumed, started, kind):
     """`([result, ...], None)` or `(None, the second failure's one-line reason)`;
     appends the bundle's tickets to `started` once its worker exists.
-    Attempt 1 starts the worker (a resumed run finds it or its PR already
+    Attempt 1 starts the worker (a resumed bundle finds it or its PR already
     there); attempt 2 prompts the same worker with the first failure's reason,
     since its workspace exists and a second dispatch would refuse it."""
     branch, agent, reason, bundle = branch_of(anchor, kind), agent_name(ctx, anchor, kind), "", [anchor]
     # The worker's branch and agent are named for the lowest ticket in the
-    # clump, so every ticket bundled with the anchor is a higher number.
+    # bundle, so every ticket bundled with the anchor is a higher number.
     others = [t for t in others if t[0] > anchor]
     for attempt in (1, 2):
         try:
@@ -1035,15 +1035,15 @@ def say_waiting(waiting):
 
 def drain(ctx, limit, limit_name):
     """`Run`: what merged, what closed with no PR, what was handed over, the stop
-    reason or `None`, the cause the run ended on, and the ready tickets it
+    reason or `None`, the cause the drain ended on, and the ready tickets it
     passed over as `[(number, why)]`. `passed` is `None` when no queue could be
     read for it, and `unread` then says why. `limit` counts tickets;
     `limit_name` is how a reached limit is worded, e.g. `--max 3`."""
     merged, closed, handed, stop, failures, done, want = [], [], [], None, 0, 0, ctx.want
     started = []  # the tickets of a bundle whose start line is out and whose end line is not
-    told = set()  # stranded slices already named this run (#1485)
-    ended = set()  # the anchors this run has taken up: added before `work()`, so none is taken twice
-    cause, seen = None, None  # the cause the run ended on, and the last queue read `(queue, waiting, passed)`
+    told = set()  # stranded slices already named this drain (#1485)
+    ended = set()  # the anchors this drain has taken up: added before `work()`, so none is taken twice
+    cause, seen = None, None  # the cause the drain ended on, and the last queue read `(queue, waiting, passed)`
     try:
         if want:  # refuse before any work, and not only when the loop gets there
             queue, waiting, _, candidates, passed = survey(ctx)
@@ -1110,11 +1110,11 @@ def drain(ctx, limit, limit_name):
 
 
 def passed_at_exit(ctx, cause, seen, ended, merged, closed, handed):
-    """`(passed, unread)`: the ready tickets this run passed over, read fresh at
+    """`(passed, unread)`: the ready tickets this drain passed over, read fresh at
     an exit that left work behind (a limit, or no queue read yet) so a list
     from the start of an hours-long run is not reported as current; a stopped
-    run, whose environment may be failing, keeps its last read. Ready tickets
-    this run never started carry the cause as their reason."""
+    drain, whose environment may be failing, keeps its last read. Ready tickets
+    this drain never started carry the cause as their reason."""
     worked = set(ended) | {n for r in merged + closed for n in r["tickets"]} | {n for b, _ in handed for n in b}
     fresh = cause != "stopped" and (seen is None or cause.endswith("reached"))
     unread = None
