@@ -8,14 +8,14 @@ run-audits.sh's original header comment for why: several audit skills carry
 gets past the guard — a subagent fan-out would silently lose them), collects
 the report folders under one `collection/` dir, and builds `index.html`.
 
-A run is three steps: plan (ask the staleness cache what still needs a run),
+A sweep is three steps: plan (ask the staleness cache what still needs a run),
 execute (the only step that spawns audits), collect (assemble the collection
 and render the index). The `index` mode calls collect alone.
 
 Environment: `SWEEP_JOBS` (#1666) caps how many audits a sweep runs at once
 after the smoke test (a positive integer, default 4; anything else exits 2
 before any audit starts). `MUTATION_JOBS` (#1588) does the same for the
-modules of a `mutation` run (default 4).
+modules of a `mutation` sweep (default 4).
 """
 import argparse
 import collections
@@ -386,8 +386,8 @@ def record_inconclusive(manifests_dir, name, collection_dir):
 
 
 def clear_manifest(manifest):
-    """`--out` accumulates: an earlier run's manifest would otherwise prove
-    this run succeeded (#1278)."""
+    """`--out` accumulates: an earlier sweep's manifest would otherwise prove
+    this sweep succeeded (#1278)."""
     if os.path.exists(manifest):
         os.remove(manifest)
 
@@ -1368,8 +1368,9 @@ def recent_pr_repos():
     try:
         rows = json.loads(r.stdout)
         names = {pr["repository"]["nameWithOwner"] for pr in rows}
-    except (ValueError, KeyError, TypeError):
-        raise RuntimeError("gh search prs reply unreadable")
+    except (ValueError, KeyError, TypeError) as e:
+        raise RuntimeError(
+            f"gh search prs reply unreadable ({type(e).__name__}: {e}); stdout began: {r.stdout[:200]!r}") from e
     if len(rows) >= SEARCH_LIMIT:
         raise RuntimeError(f"gh search prs returned {len(rows)} PRs, its limit: the list may be cut off")
     return sorted(n for n in names if n.startswith(OWNER + "/"))
