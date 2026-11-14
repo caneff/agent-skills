@@ -97,8 +97,7 @@ def git(cwd: str) -> tuple[str, str, str]:
                 ["git", "-C", cwd, *args],
                 capture_output=True,
                 timeout=1.0,
-                text=True,
-            ).stdout.strip()
+            ).stdout.decode("utf-8", "replace").strip()
         except (OSError, subprocess.SubprocessError):
             return ""
 
@@ -119,14 +118,15 @@ def context_tokens(transcript: str) -> int | None:
     """Latest context size (tokens) from the transcript's most recent usage.
 
     0 means no data yet (no path, no file, no usage line); None means the
-    transcript exists but could not be read, which must not look like a new
-    session.
+    transcript could not be read, which must not look like a new session.
     """
-    p = Path(transcript) if transcript else None
-    if not p or not p.exists():
+    if not transcript:
         return 0
     total = 0
     try:
+        p = Path(transcript)
+        if not p.exists():  # raises on an unsearchable parent directory
+            return 0
         for line in p.read_text("utf-8", "replace").splitlines():
             try:
                 u = json.loads(line).get("message", {}).get("usage")
@@ -136,8 +136,8 @@ def context_tokens(transcript: str) -> int | None:
                         + u.get("cache_read_input_tokens", 0)
                         + u.get("cache_creation_input_tokens", 0)
                     )
-            except (ValueError, AttributeError):
-                continue  # a torn or non-object line is skipped
+            except (ValueError, AttributeError, TypeError):
+                continue  # a torn, non-object or non-numeric line is skipped
     except OSError:
         return None
     return total
@@ -247,6 +247,11 @@ def main() -> None:
         weekly, wreset, session, breset = parse_usage_fields(line)
         return " · ".join(x for x in (win(weekly, wreset), win(session, breset)) if x)
 
+    def ctx_cell() -> str:
+        if tokens is None:
+            return "Ctx ?"  # unreadable transcript
+        return f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"
+
     def codex_cell() -> str:
         # Codex's own quota, labelled because the unlabelled percentages next
         # to it are Claude's. Blank — and so dropped — until Codex has run.
@@ -259,13 +264,12 @@ def main() -> None:
         # convention; fed the main root so a linked worktree collapses to the
         # project name too, not the worktree's.
         (CYAN, lambda: Path(root or cwd).name),
-        (ORANGE, lambda: "Ctx ?" if tokens is None else f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"),
+        (ORANGE, ctx_cell),
         (PINK, usage_cell),
         (YELLOW, codex_cell),
         (GREEN, lambda: f"{branch} {changes}".strip()),
     ]
     row = [(text, color) for color, build in cells if (text := build())]
-    row = row or [(model, PURPLE)]
 
     print(table([row], frame))
 

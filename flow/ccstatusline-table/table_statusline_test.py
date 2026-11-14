@@ -27,7 +27,27 @@ def plain(s):
     return ts.ANSI.sub("", s)
 
 
-# --- pure helpers (the old --selftest cases) ---------------------------------
+def cells(out):
+    """The rendered table's data row, split into its stripped cell texts."""
+    return [c.strip() for c in out.splitlines()[1].strip("│").split("│")]
+
+
+def frame_top(color):
+    """The escape a frame of `color` opens its top border with."""
+    return ts.paint("╭", color).removesuffix("\x1b[0m")
+
+
+@pytest.fixture(autouse=True)
+def isolated_git(tmp_path, monkeypatch):
+    """No live gitconfig or exported GIT_* reaches a test's git
+    (CODING_STANDARDS.md rule 2)."""
+    for k in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(k)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+# --- pure helpers (the old --selftest cases) --------------------------------
 
 def test_dwidth_counts_emoji_as_two():
     assert ts.dwidth("🏰 idle") == 7
@@ -74,7 +94,7 @@ def test_parse_usage_fields():
     assert ts.parse_usage_fields("") == ("", "", "", "")
 
 
-# --- context_tokens ------------------------------------------------------------
+# --- context_tokens ---------------------------------------------------------
 
 def _usage_line(i, c, w):
     return json.dumps({"message": {"usage": {
@@ -104,7 +124,8 @@ def test_context_tokens_no_usage_lines(tmp_path):
 
 
 def test_context_tokens_unreadable_transcript_is_none(tmp_path):
-    # a directory exists but cannot be read: None, which is not the 0 of a new session
+    # a directory exists but cannot be read as a transcript: None, which is
+    # not the 0 of a new session
     assert ts.context_tokens(str(tmp_path)) is None
 
 
@@ -114,11 +135,30 @@ def test_context_tokens_skips_torn_and_odd_lines(tmp_path):
     assert ts.context_tokens(str(t)) == 5
 
 
+def test_context_tokens_skips_a_non_numeric_count(tmp_path):
+    t = tmp_path / "t.jsonl"
+    t.write_text("\n".join([_usage_line(7, 0, 0), _usage_line(None, 5, 0)]))
+    assert ts.context_tokens(str(t)) == 7
+
+
+def test_context_tokens_unsearchable_parent_is_none(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root searches any directory")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "t.jsonl").write_text(_usage_line(5, 0, 0))
+    locked.chmod(0)
+    try:
+        assert ts.context_tokens(str(locked / "t.jsonl")) is None
+    finally:
+        locked.chmod(0o755)
+
+
 def test_frame_color_unreadable_is_not_the_new_session_color():
     assert ts.frame_color(None) not in (ts.PURPLE, ts.GREEN, ts.YELLOW, ts.RED)
 
 
-# --- git -----------------------------------------------------------------------
+# --- git --------------------------------------------------------------------
 
 def _git(cwd, *args):
     subprocess.run(
@@ -174,11 +214,26 @@ def test_git_missing_binary_is_blank(monkeypatch, tmp_path):
     assert ts.git(str(tmp_path)) == ("", "", "")
 
 
-# --- main, as a process --------------------------------------------------------
+def test_git_non_utf8_output_is_decoded_leniently(repo):
+    _git(repo, "config", "core.quotePath", "false")
+    (repo / "caf\xe9.txt".encode("latin-1").decode("utf-8", "surrogateescape")).write_text("x\n")
+    _git(repo, "add", ".")
+    _, changes, _ = ts.git(str(repo))
+    assert changes == "+1,-0"
+
+
+def test_git_does_not_swallow_programming_errors(monkeypatch, tmp_path):
+    monkeypatch.setattr(ts.subprocess, "run", raise_type_error)
+    with pytest.raises(TypeError):
+        ts.git(str(tmp_path))
+
+
+# --- main, as a process -----------------------------------------------------
 
 @pytest.fixture
 def env(tmp_path):
-    """Temp HOME/CODEX_HOME and a `codex` that fails, so no helper reaches the network."""
+    """Temp HOME/CODEX_HOME and a `codex` that fails, so no helper reaches
+    the network."""
     stub = tmp_path / "bin"
     stub.mkdir()
     codex = stub / "codex"
@@ -190,14 +245,21 @@ def env(tmp_path):
         "HOME": str(home),
         "CODEX_HOME": str(home / ".codex"),
         "PATH": f"{stub}:{os.environ['PATH']}",
+        "GIT_CONFIG_GLOBAL": os.environ["GIT_CONFIG_GLOBAL"],
+        "GIT_CONFIG_NOSYSTEM": "1",
     }
 
 
-def render(env, session, cwd):
-    p = subprocess.run([sys.executable, str(LINE)], input=json.dumps(session), env=env,
+def render_raw(env, stdin_text, cwd):
+    """The script as a process: its painted stdout, once it exited 0."""
+    p = subprocess.run([sys.executable, str(LINE)], input=stdin_text, env=env,
                        capture_output=True, text=True, cwd=cwd)
     assert p.returncode == 0, p.stderr
-    return plain(p.stdout)
+    return p.stdout
+
+
+def render(env, session, cwd):
+    return plain(render_raw(env, json.dumps(session), cwd))
 
 
 def test_main_renders_cells(env, repo, tmp_path):
@@ -216,17 +278,14 @@ def test_main_renders_cells(env, repo, tmp_path):
         },
     }
     out = render(env, session, repo)
-    row = out.splitlines()[1]
-    cells = [c.strip() for c in row.strip("│").split("│")]
-    assert cells == ["O 4.8 (M)", "proj", "Ctx 42.5k", "42% 2d · 12% 3h", "⎇ main +1,-0"]
+    assert cells(out) == ["O 4.8 (M)", "proj", "Ctx 42.5k", "42% 2d · 12% 3h", "⎇ main +1,-0"]
     assert out.splitlines()[0].startswith("╭") and out.splitlines()[-1].startswith("╰")
 
 
 def test_main_usage_cell_absent_without_rate_limits(env, repo):
     out = render(env, {"model": {"display_name": "Opus 4.8"}, "cwd": str(repo)}, repo)
-    cells = [c.strip() for c in out.splitlines()[1].strip("│").split("│")]
-    assert cells[:3] == ["O 4.8", "proj", "Ctx —"]
-    assert not any("%" in c for c in cells)
+    assert cells(out)[:3] == ["O 4.8", "proj", "Ctx —"]
+    assert not any("%" in c for c in cells(out))
 
 
 def test_main_usage_cell_single_window(env, repo):
@@ -239,17 +298,18 @@ def test_main_usage_cell_single_window(env, repo):
 def test_main_frame_color_follows_context(env, repo, tmp_path):
     t = tmp_path / "t.jsonl"
     t.write_text(_usage_line(190_000, 0, 0) + "\n")
-    p = subprocess.run([sys.executable, str(LINE)], env=env, cwd=repo, capture_output=True,
-                       text=True, input=json.dumps({"cwd": str(repo), "transcript_path": str(t)}))
-    assert "\x1b[38;2;255;85;85m╭" in p.stdout  # RED frame
+    out = render_raw(env, json.dumps({"cwd": str(repo), "transcript_path": str(t)}), repo)
+    assert out.startswith(frame_top(ts.RED))
 
 
-def test_main_garbage_stdin_falls_back_to_model_cell(env, tmp_path):
-    p = subprocess.run([sys.executable, str(LINE)], env=env, cwd=tmp_path, capture_output=True,
-                       text=True, input="not json")
-    assert p.returncode == 0, p.stderr
-    out = plain(p.stdout)
-    assert "Ctx —" in out
+def test_main_garbage_stdin_still_renders(env, tmp_path):
+    assert "Ctx —" in plain(render_raw(env, "not json", tmp_path))
+
+
+def test_main_does_not_swallow_a_stdin_programming_error(monkeypatch, capsys, env):
+    monkeypatch.setattr(ts.json, "loads", raise_type_error)
+    with pytest.raises(TypeError):
+        run_main(monkeypatch, capsys, env, {})
 
 
 def test_main_codex_cell_from_fresh_cache(env, repo):
@@ -273,7 +333,7 @@ def test_main_graft_line_when_wired(env, repo):
     assert out.splitlines()[-1] == "graft 12 nodes"
 
 
-# --- main, in-process (so coverage sees `main` and its nested cells) -------------
+# --- main, in-process (so coverage sees `main` and its nested cells) --------
 
 def run_main(monkeypatch, capsys, env, session, raw=None):
     import io
@@ -297,8 +357,7 @@ def test_main_in_process_full_row(monkeypatch, capsys, env, repo, tmp_path):
         "rate_limits": {"seven_day": {"used_percentage": 50, "resets_at": now + 86400 + 1830}},
     }
     out = run_main(monkeypatch, capsys, env, session)
-    cells = [c.strip() for c in out.splitlines()[1].strip("│").split("│")]
-    assert cells == ["S 5.5", "proj", "Ctx 20.5k", "50% 1d", "⎇ main +0,-0"]
+    assert cells(out) == ["S 5.5", "proj", "Ctx 20.5k", "50% 1d", "⎇ main +0,-0"]
 
 
 def test_main_in_process_empty_stdin(monkeypatch, capsys, env, tmp_path):
@@ -309,20 +368,29 @@ def test_main_in_process_empty_stdin(monkeypatch, capsys, env, tmp_path):
 
 def test_main_unreadable_transcript_has_its_own_marker(env, repo, tmp_path):
     session = {"cwd": str(repo), "transcript_path": str(tmp_path)}  # a directory
-    p = subprocess.run([sys.executable, str(LINE)], env=env, cwd=repo, capture_output=True,
-                       text=True, input=json.dumps(session))
-    assert p.returncode == 0, p.stderr
-    assert "Ctx ?" in plain(p.stdout)
-    assert "Ctx —" not in plain(p.stdout)
-    purple = "\x1b[38;2;189;147;249m╭"
-    assert purple not in p.stdout  # not the "no data yet" frame
+    out = render_raw(env, json.dumps(session), repo)
+    assert "Ctx ?" in plain(out)
+    assert "Ctx —" not in plain(out)
+    assert out.startswith(frame_top(ts.ORANGE))  # not the purple "no data yet" frame
 
 
 def test_main_new_session_keeps_no_data_marker(env, repo):
-    p = subprocess.run([sys.executable, str(LINE)], env=env, cwd=repo, capture_output=True,
-                       text=True, input=json.dumps({"cwd": str(repo)}))
-    assert "Ctx —" in plain(p.stdout)
-    assert "\x1b[38;2;189;147;249m╭" in p.stdout
+    out = render_raw(env, json.dumps({"cwd": str(repo)}), repo)
+    assert "Ctx —" in plain(out)
+    assert out.startswith(frame_top(ts.PURPLE))
+
+
+def test_usage_cell_does_not_swallow_programming_errors(monkeypatch, capsys, env, repo):
+    real = ts.subprocess.run
+
+    def run(cmd, *a, **k):
+        if str(cmd[0]).endswith("usage-segment.sh"):
+            raise TypeError("bug")
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(ts.subprocess, "run", run)
+    with pytest.raises(TypeError):
+        run_main(monkeypatch, capsys, env, {"cwd": str(repo)})
 
 
 def test_failed_helper_load_is_logged(monkeypatch, tmp_path, capsys):
@@ -337,9 +405,11 @@ def test_helper_load_ok_is_silent(monkeypatch, tmp_path, capsys):
     assert capsys.readouterr().err == ""
 
 
+def raise_type_error(*a, **k):
+    raise TypeError("bug")
+
+
 def test_run_does_not_swallow_programming_errors(monkeypatch):
-    def boom(*a, **k):
-        raise TypeError("bug")
-    monkeypatch.setattr(ts.subprocess, "run", boom)
+    monkeypatch.setattr(ts.subprocess, "run", raise_type_error)
     with pytest.raises(TypeError):
         ts.run(["x"], b"")
