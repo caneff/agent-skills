@@ -1,4 +1,4 @@
-//! Port of `flow/bin/implement-dispatch`. What the dispatcher runs for the
+//! What the dispatcher runs for the
 //! `/implement` lane: turn a ticket number into a worker running in its own
 //! workspace inside herdr, report, and stop. It never waits on the worker.
 //! The contract is `--help` below.
@@ -139,9 +139,9 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
     ExitCode::FAILURE
 }
 
-/// What a clump's worker is told beyond `/implement`'s own text (#901). One
+/// What a clump's worker is told beyond `/implement`'s own text. One
 /// line, because the brief is one herdr prompt. The per-ticket `Closes #n`
-/// wording lives in `implement/SKILL.md` (#889) and is not repeated here.
+/// wording lives in `implement/SKILL.md` and is not repeated here.
 const CLUMP_NOTE: &str = " -- Clump: a blocker that is another ticket of this clump is ignored, so build them in dependency order and do not park; \
 per-ticket shas do not survive the squash merge, so pin nothing to a sha of yours; \
 the PR-up report is one report for the clump, not one per ticket.";
@@ -151,7 +151,7 @@ struct Args {
     model: Option<String>,
     controller: Option<String>,
     /// The run this dispatch belongs to, put in the brief as `--run
-    /// <id>` so the worker knows a run file is under it (#1146).
+    /// <id>` so the worker knows a run file is under it.
     run: Option<String>,
     /// The clump: every ticket named on the command line, in the order
     /// typed. Spec mode's one ticket arrives here too.
@@ -280,7 +280,6 @@ fn seed_trust(claude_json: &str, wt: &str) -> ExitCode {
         std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
     );
-    // `mode` keeps the file's existing permissions on the replacement.
     if lane::atomic::replace(Path::new(claude_json), Path::new(&tmp), rendered.as_bytes(), mode, |_| {}).is_err() {
         return fail();
     }
@@ -295,7 +294,7 @@ fn claim_lock_wait() -> std::time::Duration {
     std::time::Duration::from_millis(ms)
 }
 
-/// OS-level bound for the `git fetch` inside the claim lock (#976): unlike
+/// OS-level bound for the `git fetch` inside the claim lock: unlike
 /// the plain git calls around it — rev-parse, worktree list, branch checks,
 /// all local and fast — fetch hits the network, and a stalled remote pinned
 /// the claim lock for this run's whole life, refusing every other dispatch
@@ -325,7 +324,7 @@ fn git_query_timeout() -> std::time::Duration {
 
 /// Whether git ignores `path` in the checkout at `primary`. `check-ignore`
 /// exits 0 (ignored) or 1 with no output (not ignored); anything else is git
-/// failing, reported in git's own words (#1254).
+/// failing, reported in git's own words.
 fn path_is_ignored(primary: &str, path: &str) -> Result<bool, String> {
     let out = run_timeout("git", &["-C", primary, "check-ignore", "--", path], git_query_timeout())
         .map_err(|e| format!("git check-ignore {path} in {primary} could not run: {e}"))?;
@@ -338,8 +337,8 @@ fn path_is_ignored(primary: &str, path: &str) -> Result<bool, String> {
     }
 }
 
-/// Keeps `.claude/worktrees/` out of `git status` in the primary checkout
-/// (#1630). When git does not already ignore the workspace path, appends
+/// Keeps `.claude/worktrees/` out of `git status` in the primary checkout.
+/// When git does not already ignore the workspace path, appends
 /// `/.claude/worktrees/` to the repo's `info/exclude`: no commit in the target
 /// repo, and it holds while another session edits `main`. A path already
 /// ignored, by the repo's `.gitignore` or a global one, leaves the file alone.
@@ -374,7 +373,6 @@ fn ensure_workspaces_ignored(primary: &str, branch: &str) -> Result<(), String> 
         let sep = if old.is_empty() || old.ends_with('\n') { "" } else { "\n" };
         std::fs::write(&exclude, format!("{old}{sep}{line}\n")).map_err(|e| format!("could not write {}: {e}", exclude.display()))?;
     }
-    // Prove it took rather than trust the write.
     if path_is_ignored(primary, &path)? {
         Ok(())
     } else {
@@ -451,59 +449,56 @@ const IDENTITY_GUARD: &str = include_str!("../../hooks/commit-identity-guard.sh"
 const GUARD_NAME: &str = "commit-identity-guard";
 /// The stable name a displaced foreign `pre-commit` is moved to — the one
 /// source for this name; the wrapper text below is built from it rather than
-/// hard-coding a second copy, so the two can never drift apart (#1009 S1).
+/// hard-coding a second copy, so the two can never drift apart.
 const PRE_COMMIT_FOREIGN: &str = "pre-commit.foreign";
 
-/// The pre-push half of the guard (#1006): the pre-commit guard above only
+/// The pre-push half of the guard: the pre-commit guard above only
 /// fires on `git commit`, so a rebase or cherry-pick that replays a commit
 /// under a different identity — exactly what the lane's mandated
 /// rebase-onto-default before every push can do — never goes through
 /// `git commit` at all, and slips past it. This re-checks every commit about
 /// to be pushed, on the same checkout-configured-email rule and the same
 /// `COMMIT_IDENTITY_OVERRIDE` escape.
-// Note (#1618): the installed wrapper text in `hook_wrapper` still says the
+// Note: the installed wrapper text in `hook_wrapper` still says the
 // guard's "zero-ref refusal" backs up the buffering copy. That refusal is gone
 // (an empty ref list passes); the wrapper's own failed-copy exit is the net. The
 // text is left as is because `is_ours` matches it byte for byte.
 const PUSH_GUARD: &str = include_str!("../../hooks/commit-identity-guard-pre-push.sh");
 const PUSH_GUARD_NAME: &str = "commit-identity-guard-pre-push";
-/// The stable name a displaced foreign `pre-push` is moved to, same role as
-/// `PRE_COMMIT_FOREIGN` above but for the push hook slot.
 const PRE_PUSH_FOREIGN: &str = "pre-push.foreign";
 
 /// What the lane installs as a hook slot (`pre-commit`, `pre-push`). Never a
-/// substring or a text match on the *foreign* hook it replaces (#1009: a
+/// substring or a text match on the *foreign* hook it replaces (a
 /// hook that only echoed the guard's name, called it on an unreachable
 /// branch, or suppressed its exit with `|| true` all read as "invokes the
-/// guard" under the old substring check). The wrapper runs whatever it
+/// guard" under a substring check). The wrapper runs whatever it
 /// displaced first — preserving that hook's own behavior — then always runs
 /// the guard itself, outside the displaced hook's own text, so nothing in
 /// that text can suppress the guard's exit code. Ownership of the slot is
 /// byte-identity with this exact text — never a marker or any other text
-/// match on the *current* file either (#934's original ruling, reaffirmed on
-/// the Codex gate for PR #1053): a marker-based check reopens the very hole
-/// #1009 closes, since a foreign hook that merely carries the marker phrase
+/// match on the *current* file either: a marker-based check reopens that very hole,
+/// since a foreign hook that merely carries the marker phrase
 /// in a comment would then read as "ours" and skip the takeover — the guard
 /// installs nowhere and never runs. A stale prior version of this text (from
 /// an earlier build of the lane) is therefore foreign too and gets displaced
 /// like any other hook; running it via the wrapper is harmless, since the
-/// pre-#1009 pre-commit wrapper's only body was `exec ".../commit-identity-guard"`.
-/// Both hook slots share this one wrapper shape (#1006) — the guard name and
+/// earlier pre-commit wrapper's only body was `exec ".../commit-identity-guard"`.
+/// Both hook slots share this one wrapper shape — the guard name and
 /// the foreign-displacement name are its only per-slot parameters, plus
 /// `buffer_stdin` for pre-push. A `pre-push` hook's ref list arrives on
 /// stdin, not in `"$@"` (git pre-push protocol) — sharing that one stream
 /// naively between a displaced foreign hook and the guard means a foreign
 /// hook that reads stdin (a real check, not only a spoof) drains it before
 /// the guard ever sees a line, and the guard's empty `while read` then exits
-/// 0 having refused nothing (#1006 Codex/review finding S1: verified with a
-/// stdin-reading foreign hook — the guard saw 0 refs). `buffer_stdin` copies
+/// 0 having refused nothing (verified with a
+/// stdin-reading foreign hook: the guard saw 0 refs). `buffer_stdin` copies
 /// stdin to a temp file first and feeds that file to both, so draining one
 /// read cannot starve the other. `pre-commit` never gets this treatment: git
 /// does not feed it anything on stdin, and reading stdin there risks hanging
 /// an interactive `git commit` on the open terminal — so its wrapper, and
-/// its exec of the guard, stay exactly the pre-#1006 two-argument-free shape
-/// (byte-identical to the pre-#1006 build, which matters for `is_ours` below
-/// on an already-dispatched repo: #1006 Codex/review finding P1).
+/// its exec of the guard, stay exactly the original two-argument-free shape
+/// (byte-identical to the earlier build, which matters for `is_ours` below
+/// on an already-dispatched repo).
 fn hook_wrapper(guard_name: &str, foreign_name: &str, buffer_stdin: bool) -> String {
     if buffer_stdin {
         format!(
@@ -518,7 +513,7 @@ fn hook_wrapper(guard_name: &str, foreign_name: &str, buffer_stdin: bool) -> Str
 
 /// Writes `text` to `path` as an executable, via temp file + rename so a
 /// commit racing the write never runs a truncated script, and never a window
-/// where `path` is briefly absent (#1009 C4): `rename` replaces it in one
+/// where `path` is briefly absent: `rename` replaces it in one
 /// step, whatever was there before. Verifies the bit stuck rather than
 /// assuming `set_permissions` and the filesystem agree.
 fn write_executable(path: &Path, text: &str) -> Result<(), String> {
@@ -531,8 +526,8 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Installs one half of the commit-identity guard (#934 pre-commit, #1006
-/// pre-push) into the hooks dir `dir`, which the caller has already created.
+/// Installs one half of the commit-identity guard (pre-commit, pre-push)
+/// into the hooks dir `dir`, which the caller has already created.
 /// The guard script always goes to `<dir>/<guard_name>` (refreshed in place,
 /// and verified executable). `<dir>/<slot>` becomes the lane's own wrapper
 /// unconditionally: whatever is there when it is not already byte-identical
@@ -541,19 +536,19 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
 /// to `<dir>/<foreign_name>` (the original left in place until
 /// `write_executable`'s atomic rename replaces it, so there is never a
 /// moment with no hook at that slot at all), forced executable (git silently
-/// ignores a hook without the bit, and the pre-#1009 accepted-hook path
+/// ignores a hook without the bit, and the earlier accepted-hook path
 /// never checked it), and left for the wrapper to run before it always runs
 /// the guard itself. A `<foreign_name>` slot already holding a *different*
 /// foreign hook refuses rather than silently overwriting whatever it held
-/// (#1009 C3) — that can only mean something installed a new hook over the
+/// — that can only mean something installed a new hook over the
 /// lane's wrapper since the last dispatch, and only a human can say which
 /// one should survive. Worktrees share the primary's hooks dir, so one
 /// install covers them all, and the call site holds the claim lock so two
-/// dispatches of the same repo can't race each other's takeover (#1009 C2).
+/// dispatches of the same repo can't race each other's takeover.
 /// Ownership is taken once: a slot that is already byte-identical to the
 /// current wrapper is not displaced again, so a repeat dispatch does not
 /// re-displace an already-displaced hook — but it is still rewritten through
-/// `write_executable`, so a lost executable bit is repaired (#1054).
+/// `write_executable`, so a lost executable bit is repaired.
 fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, guard_content: &str, buffer_stdin: bool) -> Result<(), String> {
     let path = Path::new(dir).join(slot);
     let foreign_path = Path::new(dir).join(foreign_name);
@@ -597,7 +592,7 @@ fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str
 }
 
 /// When `core.hooksPath` is set for `primary`, the sentence naming it, where
-/// it came from and the command that unsets it (#1327): git resolves the
+/// it came from and the command that unsets it: git resolves the
 /// hooks dir to that path, so a value left over from another environment
 /// (`/home/agent/.git-no-hooks`) fails as a bare permission error. `None`
 /// when it is not set or the lookup fails — the refusal then stands as it
@@ -622,7 +617,6 @@ fn hooks_path_hint(primary: &str) -> Option<String> {
     Some(format!("core.hooksPath is set to {value} ({scope}, {origin}); if that path belongs to another environment, unset it: {unset}"))
 }
 
-/// `msg`, with [`hooks_path_hint`] after a dash when there is one.
 fn with_hooks_path_hint(msg: String, primary: &str) -> String {
     match hooks_path_hint(primary) {
         Some(hint) => format!("{msg} — {hint}"),
@@ -639,15 +633,14 @@ fn hooks_dir_is_writable(dir: &str) -> std::io::Result<()> {
     std::fs::remove_file(&probe)
 }
 
-/// Installs both halves of the commit-identity guard: pre-commit (#934) and
-/// pre-push (#1006). The pre-commit guard alone never fires on a rebase or
+/// Installs both halves of the commit-identity guard: pre-commit and
+/// pre-push. The pre-commit guard alone never fires on a rebase or
 /// cherry-pick that replays a commit under a different identity, and the
 /// lane rebases onto the default branch before every push — so the pre-push
 /// half is what actually stops a replayed foreign-email commit from ever
-/// reaching `git push`, where #909's failure mode began.
+/// reaching `git push`, where that failure begins.
 fn install_identity_guard(primary: &str) -> Result<(), String> {
-    // Bounded so a timeout reports itself as one (#849 standards/correctness
-    // gate, S4/C6) rather than folding into the same "cannot resolve"
+    // Bounded so a timeout reports itself as one rather than folding into the same "cannot resolve"
     // message a real git failure already gets from `quiet_stdout_timeout`.
     let dir = quiet_stdout_bounded("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"], git_query_timeout())?
         .map(|s| s.trim().to_string())
@@ -707,7 +700,7 @@ struct Ticket {
     chris_merges: bool,
     documentation: bool,
     /// The code path the body names on a ticket that carries `documentation`:
-    /// the label is stripped at claim and the tier goes heavy (#1045).
+    /// the label is stripped at claim and the tier goes heavy.
     stripped_for: Option<String>,
     /// The body could not be read on a `documentation` ticket: heavy, but the
     /// label stays, since a failed `gh` call is no evidence it was wrong.
@@ -779,10 +772,9 @@ impl Claim<'_> {
     }
 }
 
-/// Where a dispatch's workspace branches from (#1458).
+/// Where a dispatch's workspace branches from.
 enum Base {
-    /// `origin/<default>`, as every dispatch did before #1458. A spec run
-    /// lands here only with one slice, which is what it prints.
+    /// `origin/<default>`, the base of an ordinary dispatch. A spec run lands here only with one slice, which is what it prints.
     Default,
     /// A spec run with more than one slice: its workspace branch `spec-<n>`
     /// is the integration branch, `created` here off `origin/<default>` and
@@ -925,7 +917,7 @@ fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
 /// The worker's own Claude session name. herdr's own record of which
 /// sessionId is attached to the agent this run just started
 /// (`agent_session.value`) is the one authoritative link — matching on cwd
-/// or pid alone, as an earlier version of this did, can be fooled by
+/// or pid alone can be fooled by
 /// another live session sharing the worktree, or by a stale registry file
 /// left behind on a reused pid; sessionId can't collide that way. A short
 /// retry covers herdr's own read-after-write lag before it reports the
@@ -975,7 +967,7 @@ fn poll_worker_session_name(
 }
 
 /// The pid of the controller's own session record, to write its
-/// `<pid>.workers.jsonl` sidecar (#964). Three ways, cheapest first: the
+/// `<pid>.workers.jsonl` sidecar. Three ways, cheapest first: the
 /// sessionId captured while deriving the controller from this process's own
 /// ancestry (set only when `--controller` was not passed); a live session
 /// already named `controller` (an explicit `--controller <session name>`, or
@@ -1115,7 +1107,7 @@ fn run() -> Result<(), ExitCode> {
     )
     .map_err(die)?;
 
-    // Inside the claim lock (#1009 C2): two dispatches of the same repo can
+    // Inside the claim lock: two dispatches of the same repo can
     // both find a foreign pre-commit and both try to take ownership of it —
     // serialized here, the second sees the first's wrapper already in place
     // and does nothing, instead of renaming the first dispatch's own install
@@ -1183,8 +1175,8 @@ fn run() -> Result<(), ExitCode> {
     }
     let chris_merges = tickets.iter().any(|t| t.chris_merges);
     let home = env::var("HOME").unwrap_or_default();
-    // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a
-    // literal empty name, so it still falls through to the session lookup.
+    // An empty --controller counts as absent, not as a literal empty name,
+    // so it still falls through to the session lookup.
     let controller_flag = args.controller.as_deref().filter(|c| !c.is_empty());
     let mut controller_session = String::new();
     let controller = match controller_flag {
@@ -1220,7 +1212,7 @@ fn run() -> Result<(), ExitCode> {
 
     // A derived controller is briefed by its herdr agent name when it has one:
     // a restart renames the session, not the agent, and the worker resolves the
-    // name to a session at send time (`resolve-controller`, #923). A controller
+    // name to a session at send time (`resolve-controller`). A controller
     // that is no named herdr agent keeps its session name, which the same
     // resolver still accepts while a live session bears it.
     // A derived controller record with no sessionId cannot be looked up, and a
@@ -1281,7 +1273,7 @@ fn run() -> Result<(), ExitCode> {
     if !remote_branch_exists(&primary, &default).map_err(die)? {
         return Err(die(format!("no origin/{default} to branch from")));
     }
-    // Where the workspace branches from (#1458), settled before the claim so
+    // Where the workspace branches from, settled before the claim so
     // a refusal here still leaves nothing claimed.
     let base = match mode {
         Mode::Spec { .. } => {
@@ -1312,13 +1304,13 @@ fn run() -> Result<(), ExitCode> {
     // closingIssuesReferences is the only authoritative record of which
     // tickets a landing closed — so a light clump lands with nothing for
     // merge-cleanup to read, and every ticket but the branch's own keeps its
-    // claim. That is the state #889 exists to end, so the tier that cannot
+    // claim. That is the state this rule exists to end, so the tier that cannot
     // carry a clump does not get one. The cost is real and small: a
     // docs-only clump gets a PR it would not have had alone. One ticket is
     // unchanged — its documentation label still decides its tier.
-    // A slice of a spec is never light either, whatever its label says
-    // (#1542): light tier lands with no PR, the wrong shape for a slice,
-    // which merges into its spec's integration branch by PR.
+    // A slice of a spec is never light either, whatever its label says:
+    // light tier lands with no PR, the wrong shape for a slice, which
+    // merges into its spec's integration branch by PR.
     let tier = if tickets.len() == 1 && tickets[0].documentation && !matches!(base, Base::Slice { .. }) { "light" } else { "heavy" };
 
     // Past here the clump is claimed; a failure says how to release it. A
@@ -1366,8 +1358,7 @@ fn run() -> Result<(), ExitCode> {
             Ok(c) if c.success => claimed.push(t),
             other => {
                 release_claimed(&claimed, &slug);
-                // Names the underlying gh output (#849 correctness gate,
-                // C4/P3a) so a timeout here — where GitHub may still have
+                // Names the underlying gh output so a timeout here — where GitHub may still have
                 // applied the edit after this process's own child was
                 // killed — reads as a timeout an operator should check
                 // GitHub over, not a bare "could not claim" that looks
@@ -1403,7 +1394,7 @@ fn run() -> Result<(), ExitCode> {
         git_mutation_timeout(),
     );
     claim.step("git worktree add", wa, None)?;
-    // Where the branch started (#1464): merge-cleanup counts a branch as
+    // Where the branch started: merge-cleanup counts a branch as
     // landed by the ancestor test only when its tip has moved off this sha.
     let fork = claim.step("reading the fork point", run_timeout("git", &["-C", &primary, "rev-parse", "--verify", &format!("refs/heads/{branch}^{{commit}}")], git_query_timeout()), None)?;
     let fork = fork.trim().to_string();
@@ -1414,7 +1405,7 @@ fn run() -> Result<(), ExitCode> {
     claim.step("recording the fork point", set, None)?;
     match &base {
         // The one recorded fact the gate, the slice merge and the spec
-        // review are to read a slice's base from (#1459, #1460, #1461),
+        // review are to read a slice's base from,
         // never a missing file or a gh call.
         Base::Slice { spec } => {
             let set = run_timeout("git", &["-C", &primary, "config", &format!("branch.{branch}.base"), &format!("spec-{spec}")], git_query_timeout());
@@ -1465,7 +1456,7 @@ fn run() -> Result<(), ExitCode> {
         }
     }
 
-    // #1368: the flow's mods load in the worker. `herdr agent start` runs
+    // The flow's mods load in the worker. `herdr agent start` runs
     // claude in an existing pane and takes no environment, so the folder
     // rides on the agent's own command line; a folder of plugins loads each
     // child (`claude --help`, `--plugin-dir`).
@@ -1486,7 +1477,7 @@ fn run() -> Result<(), ExitCode> {
             // The whole clump, lowest first: the worker builds every ticket
             // in it and its one PR closes them all.
             // Only a clump carries the note: a lone ticket has no internal
-            // blockers, no sibling shas and one report already (#901).
+            // blockers, no sibling shas and one report already.
             let note = if ns.len() > 1 { CLUMP_NOTE } else { "" };
             let stripped: Vec<String> =
                 tickets.iter().filter_map(|t| t.stripped_for.as_ref().map(|p| format!("#{} names {p}", t.n))).collect();
@@ -1518,7 +1509,7 @@ fn run() -> Result<(), ExitCode> {
 
     let session = worker_session_name(&home, wt.to_str().unwrap_or(""), &agent);
 
-    // #964: the controller's own session survives a `/clear` (the process
+    // The controller's own session survives a `/clear` (the process
     // does, only the context is wiped), so this record is what a
     // SessionStart hook reads back to restore what it controls. Best-effort:
     // a controller this run cannot resolve to a live session still gets its
@@ -1526,7 +1517,7 @@ fn run() -> Result<(), ExitCode> {
     let cleanup = format!("cd {primary} && merge-cleanup {branch} --repo {primary}");
     match resolve_controller_pid(Path::new(&home), &controller_session, &controller) {
         Some(pid) => {
-            // #964 fix round 1 (Codex high): the controller session's own
+            // The controller session's own
             // starttime, read fresh here rather than trusted from whichever
             // registry lookup found `pid` — this is what lets
             // `controller-restore` tell "this session" from "a session that
@@ -1540,7 +1531,7 @@ fn run() -> Result<(), ExitCode> {
                 agent: agent.clone(),
                 tickets: ns.clone(),
                 branch: branch.clone(),
-                // #1040: canonicalized so a symlinked `primary` (or repo
+                // Canonicalized so a symlinked `primary` (or repo
                 // root) still spells the same string `merge-cleanup` reads
                 // back off `git worktree list` and canonicalizes in turn.
                 workspace: lane::workers::canonical_workspace_path(&wt.display().to_string()),

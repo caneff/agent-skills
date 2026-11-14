@@ -4,8 +4,8 @@
 //! as `<role> <args...>`, then checked against a typed allowlist of real
 //! subcommands (from `gh --help` and herdr 0.9.0's `--help`) before any
 //! scenario logic runs: a subcommand missing from that list is refused,
-//! the #745 lesson (a stub that accepted `herdr agent stop`, which does not
-//! exist, hid a command that fails on the real machine). Scenario behavior
+//! the lesson of a stub that accepted `herdr agent stop`, which does not
+//! exist, hid a command that fails on the real machine. Scenario behavior
 //! is driven by env vars, matching the bash stubs it replaces: GH_STATE,
 //! GH_LABELS, HERDR_RUNNING, HERDR_NO_ROOT_PANE, HERDR_AGENT_TAKEN,
 //! HERDR_STALL for implement-dispatch; GH_PR_HEADS, HERDR_AGENTS,
@@ -13,10 +13,10 @@
 //! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup;
 //! GH_PR_STATUS for controller-restore's `--json number,state` PR lookup;
 //! GH_SUBISSUES_<n>, GH_PARENT_<n> and the `git` role's GIT_BEFORE_PUSH for a
-//! spec's integration branch (#1458).
+//! spec's integration branch.
 //! A third role, `git`, is a passthrough proxy to the real binary (`REAL_GIT`,
 //! an absolute path) rather than a scenario stub, since replicating real git
-//! is not this fake's job; `GIT_HANG`/`GH_HANG` (#849) make it or `gh` hang
+//! is not this fake's job; `GIT_HANG`/`GH_HANG` make it or `gh` hang
 //! forever on a call whose args contain the given substring, standing in for
 //! a hung subprocess so a test can prove an OS-level bound actually fires.
 //! Never installed — see install.sh.
@@ -112,7 +112,7 @@ fn env_flag(name: &str) -> bool {
 /// (the actual critical section: the read the lock-vs-no-lock race is about).
 /// Waiting at the first read leaves both dispatches free to run unsynchronized
 /// all the way to that reread, so a witness built on it is timing-dependent,
-/// not deterministic (#982). This barrier instead holds each dispatch (keyed
+/// not deterministic. This barrier instead holds each dispatch (keyed
 /// by its parent pid) at its *second* view of a given ticket — the reread —
 /// until two dispatches have reached theirs, or 3s; the first view of any
 /// ticket passes straight through. Independent of any lock the dispatches
@@ -128,13 +128,13 @@ fn view_barrier(n: &str) {
     // Counted and marked per (pid, ticket): a clump reads several tickets in
     // one process, and a marker keyed on pid alone would have one ticket's
     // reread satisfy another's wait, silently disabling the barrier for
-    // every ticket after the first (#982 review, C1).
+    // every ticket after the first.
     let count_file = std::path::Path::new(&dir).join(format!("{ppid}.{n}.views"));
     // A dropped write or an unreadable/garbage count here must not read as
     // "first view" — that fails the barrier open into no synchronization at
     // all, the exact silent-pass shape `docs/agents/defect-classes.md` class
     // 1 names, and this fake exists only to make that race deterministic
-    // (#982 review, S1/P3/C2). Test-only code: panic rather than swallow.
+    // Test-only code: panic rather than swallow.
     let seen = match std::fs::read_to_string(&count_file) {
         Ok(s) if s.is_empty() => 1,
         Ok(s) => s.trim().parse::<u32>().unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: {count_file:?} held {s:?}, not a count: {e}")) + 1,
@@ -147,24 +147,21 @@ fn view_barrier(n: &str) {
     }
     // Reached at most once per (ppid, n): `seen` comes from a monotonically
     // increasing file-backed counter, so this branch runs on the one call
-    // where it reads exactly 2 — no existence check needed to guard it
-    // (#982 review, over-engineering).
+    // where it reads exactly 2 — no existence check needed to guard it.
     let mine = std::path::Path::new(&dir).join(format!("{ppid}.{n}.reread"));
     std::fs::write(&mine, "").unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not write {mine:?}: {e}"));
     // The two dispatches must be released within microseconds of each other,
     // or the first one released can read, decide and complete its edit
     // before the second even rereads — the same false "only one claimed"
-    // outcome a coarse poll produces (#982). A busy spin for the first ~50ms
+    // outcome a coarse poll produces. A busy spin for the first ~50ms
     // gets that; past it, the lock-held path (where the second run never
     // arrives) falls back to a short sleep so the ordinary passing run does
-    // not peg a core issuing read_dir syscalls for the whole 3s deadline
-    // (#982 review, S3/P2/C3).
+    // not peg a core issuing read_dir syscalls for the whole 3s deadline.
     let suffix = format!(".{n}.reread");
     let is_reread_marker = |e: &std::fs::DirEntry| e.file_name().to_string_lossy().ends_with(&suffix);
     // A failed `read_dir`, or a failed read of one of its entries, must not
     // read as "count 0, keep waiting" — that is the same fail-open shape as
-    // the count file above, just timing out instead of racing (#982 gate,
-    // finding 2). Only the deadline is a legitimate reason to stop waiting.
+    // the count file above, just timing out instead of racing. Only the deadline is a legitimate reason to stop waiting.
     let count = || {
         std::fs::read_dir(&dir)
             .unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not read_dir {dir:?}: {e}"))
@@ -184,7 +181,7 @@ fn view_barrier(n: &str) {
 
 /// `GIT_HANG`/`GH_HANG`: when set to a non-empty substring found in this
 /// call's joined args, sleeps forever instead of answering — standing in
-/// for a hung `git`/`gh` subprocess (#849). The caller's own OS-level
+/// for a hung `git`/`gh` subprocess. The caller's own OS-level
 /// timeout is what ends the wait by killing this process's group; nothing
 /// here ever returns on its own once triggered, so a test that fails to
 /// wire an actual bound would simply hang instead of getting a false pass.
@@ -212,7 +209,7 @@ fn run_git(args: &[String]) -> ExitCode {
     if hangs_on("GIT_HANG", args) {
         hang_forever();
     }
-    // No silent "git" fallback (#849 standards/correctness gate, S1/C5):
+    // No silent "git" fallback:
     // this proxy sits ahead of the real git on PATH, so resolving "git" by
     // name here would just re-invoke this same binary, forever, rather
     // than reaching the real thing. A caller that shadows "git" with this
@@ -222,7 +219,7 @@ fn run_git(args: &[String]) -> ExitCode {
         eprintln!("lane-fake: invoked as git with no REAL_GIT set; refusing rather than re-entering this proxy");
         return ExitCode::FAILURE;
     };
-    // `GIT_BEFORE_PUSH` (#1458): a shell command run just before a `push`
+    // `GIT_BEFORE_PUSH`: a shell command run just before a `push`
     // reaches the real git, standing in for another session pushing between
     // this run's fetch and its push.
     if args.iter().any(|a| a == "push") {
@@ -266,7 +263,7 @@ fn run_gh(args: &[String]) -> ExitCode {
             println!("{body}");
             return ExitCode::SUCCESS;
         }
-        // `--json subIssuesSummary` is a spec's slice count (#1458):
+        // `--json subIssuesSummary` is a spec's slice count:
         // GH_SUBISSUES_<n>, else GH_SUBISSUES, else 0, as gh answers an
         // issue with none; GH_SUBISSUES_FAIL_<n> fails the read.
         if args.iter().any(|a| a == "subIssuesSummary") {
@@ -317,13 +314,13 @@ fn run_gh(args: &[String]) -> ExitCode {
         // either could possibly have edited — deciding after release left
         // a real (if narrow) gap where one process could read, decide,
         // spawn its edit and finish before the other's own post-release
-        // read even ran (Codex gate on PR #1060, finding 1).
+        // read even ran.
         view_barrier(n);
         // Tab-delimited, matching lane::issue_state::read's `-q` query: a
         // label or login can hold a space but never a tab.
         println!("{row}");
     }
-    // `api repos/<o>/<r>/issues/<n>/parent` (#1458): GH_PARENT_<n> is the
+    // `api repos/<o>/<r>/issues/<n>/parent`: GH_PARENT_<n> is the
     // parent's number; unset is gh's own 404 for a ticket with no parent,
     // and GH_PARENT_FAIL_<n> any other failure.
     let parent_of = if a0 == "api" { a1.strip_suffix("/parent").and_then(|p| p.rsplit('/').next()) } else { None };
@@ -389,7 +386,7 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
     // `controller-restore` asks `--json number,state`, a different shape from
     // merge-cleanup's `--json number,headRefOid` below — routed on the field
     // list rather than a new flag, so the two fakes can never be confused for
-    // each other by a caller that forgets to set the right env var (#1042).
+    // each other by a caller that forgets to set the right env var.
     if is_status_json_shape(json_fields) {
         return gh_pr_list_status(head, jq);
     }
@@ -429,7 +426,7 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
 
 /// Whether `--json`'s field list is exactly `controller-restore`'s
 /// `number,state` shape — not merely a list that happens to mention
-/// `state` (Codex gate on #1042, fixed round 1): a future
+/// `state`: a future
 /// `--json number,headRefOid,state` would otherwise route here by accident
 /// and get the wrong fake's answer instead of failing loud. Test-only code:
 /// panic rather than silently fall through to `gh_pr_list`'s own
@@ -451,7 +448,7 @@ fn is_status_json_shape(json_fields: &str) -> bool {
 /// line of `$GH_PR_STATUS/<branch-with-/-as-__>`; a missing file, an empty
 /// file, or `GH_PR_STATUS` unset all mean no PR for that branch — the same
 /// "nothing recorded, nothing to report" shape `gh_pr_list`'s own
-/// `GH_PR_HEADS` uses above (#1042).
+/// `GH_PR_HEADS` uses above.
 fn gh_pr_list_status(head: &str, jq: bool) -> ExitCode {
     let dir = env::var("GH_PR_STATUS").unwrap_or_default();
     let line = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__")))
@@ -473,10 +470,10 @@ fn gh_pr_list_status(head: &str, jq: bool) -> ExitCode {
 }
 
 /// Parses one `$GH_PR_STATUS` fixture line as exactly `<number> <STATE>`.
-/// Test-only code: panics rather than swallowing a malformed line (#1042
-/// review, S3/C2) — a one-field line silently read as "no PR"
+/// Test-only code: panics rather than swallowing a malformed line
+/// — a one-field line silently read as "no PR"
 /// (defect-classes class 1) instead of failing the fixture that wrote it —
-/// and panics on a third field too (Codex gate on #1042, fixed round 1): a
+/// and panics on a third field too: a
 /// row like `152 OPEN extra` must fail the fixture that wrote it, not
 /// silently drop the extra field.
 fn parse_status_row(line: &str, head: &str) -> (String, String) {
@@ -608,7 +605,7 @@ fn main() -> ExitCode {
     let allowed = match role.as_str() {
         "gh" => gh_allowed(&args),
         "herdr" => herdr_allowed(&args),
-        // A passthrough proxy to the real git (#849's hang tests): its
+        // A passthrough proxy to the real git (the hang tests use it): its
         // subcommand surface is git's own, not ours to allowlist.
         "git" => true,
         _ => {

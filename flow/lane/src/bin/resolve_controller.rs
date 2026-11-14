@@ -1,5 +1,5 @@
 //! `resolve-controller <name>`: prints the address `SendMessage` takes for a
-//! controller named in a brief (#923). The brief carries the controller's herdr
+//! controller named in a brief. The brief carries the controller's herdr
 //! agent name, which survives a restart; the Claude session name, which does
 //! not, is resolved here, at send time: herdr agent name -> `agent_session`
 //! id -> the live `~/.claude/sessions/*.json` record's current `name`. A name
@@ -7,7 +7,7 @@
 //! Nothing resolves -> exit 1 with the reason, never a guess. A name that
 //! resolves is then connected to on the live record's `messagingSocketPath`
 //! (nothing sent): a missing path, a refused connection or one not accepted
-//! within 3 s is exit 1, naming the path and the error (#1540).
+//! within 3 s is exit 1, naming the path and the error.
 
 use lane::herdr::HERDR_QUERY_TIMEOUT;
 use lane::sessions::LiveSession;
@@ -28,7 +28,7 @@ fn fail(msg: &str) -> ExitCode {
 }
 
 /// Opens a connection to `session`'s `messagingSocketPath` and closes it,
-/// sending nothing (#1540): the test runs from the sender's side, where a
+/// sending nothing: the test runs from the sender's side, where a
 /// moved socket directory or a stale socket file shows up as an error. `Err`
 /// is the sentence naming the path and why it cannot be reached; a record
 /// with no socket key names its own file, the only path there is.

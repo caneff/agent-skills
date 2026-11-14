@@ -1,5 +1,5 @@
 //! `controller-restore`: the `SessionStart` hook that restores what a
-//! `/clear` wipes from a controller's context (#964). `/clear` kills the
+//! `/clear` wipes from a controller's context. `/clear` kills the
 //! context, not the process — the session's pid, and the sibling
 //! `<pid>.workers.jsonl` file `implement-dispatch` appended a record to for
 //! every worker it started under this session, both survive it. This hook
@@ -25,11 +25,11 @@ use std::io::Read;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// The single deadline every query this run makes shares (#964 fix round 1,
-/// Codex medium), kept under the hook's own 15s timeout in
-/// `flow/claude/settings.json` — the old fixed 10s-per-call budget (one herdr
-/// call plus one gh call per worker) could outlive that timeout with two or
-/// more workers, and the hook's `|| true` swallowed the kill silently.
+/// The single deadline every query this run makes shares, kept under the
+/// hook's own 15s timeout in `flow/claude/settings.json`: a fixed 10s per call
+/// (one herdr call plus one gh call per worker) could outlive that timeout
+/// with two or more workers, and the hook's `|| true` swallowed the kill
+/// silently.
 const HOOK_BUDGET: Duration = Duration::from_secs(12);
 
 /// The rest of `deadline`, or `None` once it has passed.
@@ -38,8 +38,8 @@ fn time_left(deadline: Instant) -> Option<Duration> {
     (deadline > now).then(|| deadline - now)
 }
 
-/// What running `program` came to, budgeted against a shared `deadline`
-/// (#964 fix round 1, Codex medium): `NoBudget` means the deadline was
+/// What running `program` came to, budgeted against a shared `deadline`:
+/// `NoBudget` means the deadline was
 /// already gone and the process was never started at all — kept distinct
 /// from `Ran(None)`, which means it started, and either failed or ran out
 /// the OS-level timeout given the time that was left. Conflating the two
@@ -87,12 +87,10 @@ fn parse_pr_status(out: &str) -> Option<PrStatus> {
 
 /// What herdr or gh answered about one thing: a real value, a real "there is
 /// none", "could not be asked at all" (off PATH, timed out, unparseable
-/// output), or "never asked at all" (the shared deadline was already gone —
-/// #964 fix round 1, Codex medium). No two of these may ever print the same:
-/// conflating `Unknown` and `Answered(None)` was #964's own correctness-axis
-/// C2/standards-axis S1 finding — a wedged herdr made every worker read "no
-/// live herdr agent" as if that were a fact about the agent rather than about
-/// herdr — and conflating `Unchecked` with either would make a worker whose
+/// output), or "never asked at all" (the shared deadline was already gone). No two of
+/// these may ever print the same: conflating `Unknown` and `Answered(None)`
+/// would let a wedged herdr make every worker read "no live herdr agent" as
+/// if that were a fact about the agent rather than about herdr, and conflating `Unchecked` with either would make a worker whose
 /// query never ran under a blown budget look like one that ran and answered.
 enum Asked<T> {
     Answered(T),
@@ -111,7 +109,6 @@ fn agent_status<'a>(agents: &'a Asked<Vec<Agent>>, name: &str) -> Asked<Option<&
     }
 }
 
-/// What to say about a worker's herdr agent.
 fn describe_agent(agent: &str, status: &Asked<Option<&str>>) -> String {
     match status {
         Asked::Unknown => format!("{agent}, herdr status unknown — could not ask herdr"),
@@ -147,7 +144,7 @@ fn restore_line(record: &WorkerRecord, agent: &Asked<Option<&str>>, pr: &Asked<O
     format!("You control {} ({}{merges}): {}; cleanup: {}", record.branch, describe_agent(&record.agent, agent), describe_pr(pr), record.cleanup)
 }
 
-/// One line for a worker whose controller at `pid` is gone (#1098), naming
+/// One line for a worker whose controller at `pid` is gone, naming
 /// the command that makes this session its controller.
 fn orphan_line(pid: &str, record: &WorkerRecord) -> String {
     format!(
@@ -175,7 +172,7 @@ fn is_subagent(stdin: &str) -> bool {
 
 /// Splits `records` into (fresh, stale count) by `WorkerRecord::proc_start`
 /// against `own_start`, the resuming session's own `/proc/<pid>/stat`
-/// starttime (#964 fix round 1, Codex high). Pids are small and get reused,
+/// starttime. Pids are small and get reused,
 /// especially across a WSL restart, so a `<pid>.workers.jsonl` left behind by
 /// a dead controller would otherwise restore its workers into whatever
 /// unrelated session now holds that pid. A record with no `proc_start`
@@ -226,10 +223,10 @@ fn main() {
     let Some(ancestor) = proc_info::parent_pid(self_pid) else { return };
     let Some(own_pid) = sessions::find_own_pid(home, ancestor) else { return };
 
-    // #1098: a dead controller's workers, offered to this session when their
+    // A dead controller's workers, offered to this session when their
     // workspaces sit under its cwd. Printed only; `controller-adopt` does the
     // move. Strictly under: a worker's own session runs in its workspace, and
-    // an orphan is never told to adopt itself (#1098 review C1).
+    // an orphan is never told to adopt itself.
     let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default();
     if !cwd.is_empty() {
         let cwd = workers::canonical_workspace_path(&cwd);
@@ -242,7 +239,7 @@ fn main() {
     if records.is_empty() {
         return;
     }
-    // #964 fix round 1 (Codex high): `find_own_pid` already proved `own_pid`
+    // `find_own_pid` already proved `own_pid`
     // alive with a matching starttime, so re-reading it here gets the exact
     // string every fresh record must carry — a pid whose `/proc` entry is
     // gone between that check and this one reads as `own_start` empty, which
@@ -256,11 +253,8 @@ fn main() {
         return;
     }
 
-    // One deadline shared across every query below (#964 fix round 1, Codex
-    // medium), not a fixed timeout per call: the hook's own 15s timeout in
-    // flow/claude/settings.json is shorter than one herdr call plus one gh
-    // call per worker at the old fixed 10s each, so two or more workers
-    // could get killed mid-output with the failure hidden behind `|| true`.
+    // One deadline shared across every query below, not a fixed timeout per
+    // call; `HOOK_BUDGET` says why.
     let deadline = Instant::now() + HOOK_BUDGET;
     let agents = ask_agents(deadline);
 
@@ -291,10 +285,10 @@ mod tests {
 
     #[test]
     fn call_budgeted_returns_no_budget_without_running_the_command_when_the_deadline_has_passed() {
-        // #964 fix round 1 (Codex medium): the hook's own 15s timeout is
-        // shorter than the sum of one herdr call plus one gh call per
-        // worker at the old fixed 10s each, so two workers on a slow gh
-        // could be killed mid-output. A single shared deadline instead: a
+        // The hook's own 15s timeout is shorter than the sum of one herdr
+        // call plus one gh call per worker at a fixed 10s each, so two
+        // workers on a slow gh could be killed mid-output. A single shared
+        // deadline instead: a
         // query whose budget is already gone must never even start — proven
         // here by pointing it at a command that would sleep for 5s and
         // checking it returns almost instantly, not after (most of) that 5s.
@@ -377,7 +371,7 @@ mod tests {
     fn a_null_first_element_is_no_pr_not_a_pr_number_null() {
         // What `.[0] | ...` (without `// empty`) actually prints for an
         // empty gh result — the bug the jq filter and this second check
-        // both guard against (#964 correctness C1).
+        // both guard against.
         assert!(parse_pr_status("null null").is_none());
     }
 
