@@ -158,9 +158,9 @@ Prefer a smaller number of high-conviction comments over a long list of cosmetic
 
 ## Present the review as an HTML report
 
-Deliver the review as a **single self-contained HTML file**, the same way `/improve-codebase-architecture` does — not as a wall of terminal prose.
+Deliver the review as a **HTML report** (a page plus the `assets/` folder `copy_assets` writes beside it), the same way `/improve-codebase-architecture` does — not as a wall of terminal prose.
 
-Write the file to the OS temp directory so nothing lands in the repo. Resolve the temp dir from `$TMPDIR`, falling back to `/tmp` (or `%TEMP%` on Windows), and write to `<tmpdir>/code-quality-review-<timestamp>/report.html` so each run gets a fresh folder. Copy the assets the report uses next to it (see HTML-REPORT.md), then open it for the user — `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on Windows — and tell them the absolute path.
+Write the file to `<tmpdir>/thermo-nuclear-code-quality-review-<timestamp>/report.html` so nothing lands in the repo and each run gets a fresh folder for the page and its copied assets. Tmpdir resolution, copying the assets, opening the report and handing off its path follow the harness HTML-REPORT.md.
 
 The report is styled with the **visual-teach** design system — vendored `vt-*` components and `--vt-*` theme tokens, the same system the teaching lessons use. It loads **no external host**: the CSS, JS, Prism grammars, and Mermaid all come from local files copied beside the report, so it opens offline and carries a working light/dark mode (it follows the OS theme by default and offers a visible toggle). Use **Mermaid** for the diagrams where a graph communicates the structure better than prose (a "3 writers → 1 canonical helper" fan-in, a duplicated-parser dependency, a coupling that should be split), and mix it with hand-built before/after **code blocks** — a restructuring is usually shown best as `before` vs `after` source, side by side, not as a graph.
 
