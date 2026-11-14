@@ -5,7 +5,7 @@ record (which module was mutated at which sha, when), the order modules run
 in, and `run`, the one call the
 driver makes to learn which modules to mutate. The driver keeps the process
 work (worktrees, `claude`, the pages); this module never spawns anything but
-the `git diff` calls its `runner` makes.
+the `git diff` calls `changed` makes.
 
 The module list and the sibling-test rule come from `mutation-audit/audit.py`'s
 public `plan(repo)`, loaded by path because its directory name is not an
@@ -15,6 +15,8 @@ import collections
 import datetime as _dt
 import importlib.util
 import os
+
+from procs import run as _run
 
 MUTATION_KEY = "mutation_modules"
 _EPOCH = _dt.datetime.min.replace(tzinfo=_dt.timezone.utc)
@@ -44,12 +46,11 @@ def stamp(record, module, sha, date):
     record[MUTATION_KEY] = runs
 
 
-def changed(repo, runs, siblings, runner):
+def changed(repo, runs, siblings):
     """The modules in `runs` ({module: {sha, date}}) whose file or sibling
     tests (`siblings`: {module: [test path]}) differ between their recorded
     sha and HEAD. A sha git cannot resolve, or no recorded sha, proves
-    nothing, so it reads as changed, never as unchanged. `runner(cmd)` runs
-    one command and returns its completed process."""
+    nothing, so it reads as changed, never as unchanged."""
     out = set()
     for module, entry in runs.items():
         sha = entry.get("sha") if isinstance(entry, dict) else None
@@ -57,7 +58,7 @@ def changed(repo, runs, siblings, runner):
             out.add(module)
             continue
         paths = [module, *siblings.get(module, ())]
-        if runner(["git", "-C", repo, "diff", "--quiet", f"{sha}..HEAD", "--", *paths]).returncode != 0:
+        if _run(["git", "-C", repo, "diff", "--quiet", f"{sha}..HEAD", "--", *paths]).returncode != 0:
             out.add(module)
     return out
 
@@ -111,12 +112,12 @@ def _audit_plan(repo):
     return mod.plan(repo)
 
 
-def run(repo, record, *, runner, rank_fn=None, modules=None):
+def run(repo, record, *, rank_fn=None, modules=None):
     """The modules to mutate in `repo`, in run order, with the repo's no-test
     modules and worthy-module total, as a `MutationRun`.
 
     `record` is the repo's cache record (its recorded runs order the
-    candidates); `runner(cmd)` runs a command, as `changed` takes it.
+    candidates).
     `rank_fn(candidates)` may return the model prepass's order, which only
     breaks ties. `modules` names the targets explicitly: they run as given,
     and only the no-tests answer is planned. A planning failure raises: no
@@ -128,5 +129,5 @@ def run(repo, record, *, runner, rank_fn=None, modules=None):
     candidates = planned["candidates"]
     rank = rank_fn(candidates) if rank_fn and candidates else []
     runs = recorded_runs(record)
-    targets = order_targets(candidates, rank, runs, changed(repo, runs, planned["siblings"], runner))
+    targets = order_targets(candidates, rank, runs, changed(repo, runs, planned["siblings"]))
     return MutationRun(targets, planned["no_tests"], planned["total"])

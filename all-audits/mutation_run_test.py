@@ -1,17 +1,18 @@
 """Tests for `mutation_run`: the mutation record, target ordering, and `run`."""
 import json
 import os
-import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
 import mutation_run  # noqa: E402
+import procs  # noqa: E402
 
 
 def _git(repo, *args):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, check=False, env=env)
+    result = procs.run(["git", "-C", repo, *args])
+    assert result.returncode == 0, f"git {args} failed: {result.stderr}"
+    return result
 
 
 def _init_repo(path, files):
@@ -26,7 +27,7 @@ def _init_repo(path, files):
 
 def _commit(repo, msg):
     _git(repo, "add", ".")
-    _git(repo, "commit", "-q", "-m", msg)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", msg)
     return _git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
@@ -82,7 +83,7 @@ def test_changed_since_recorded_sha_and_unresolvable_sha_reads_as_changed(tmp_pa
     _commit(repo, "b changes")
     runs = {"a.py": _rec(sha, "d"), "b.py": _rec(sha, "d"), "c.py": _rec("deadbeef", "d"), "d.py": {"date": "d"},
             "e.py": _rec("", "d")}
-    assert mutation_run.changed(repo, runs, {}, _git_runner) == {"b.py", "c.py", "d.py", "e.py"}
+    assert mutation_run.changed(repo, runs, {}) == {"b.py", "c.py", "d.py", "e.py"}
 
 
 def test_a_changed_sibling_test_counts_as_the_module_changed(tmp_path):
@@ -92,12 +93,7 @@ def test_a_changed_sibling_test_counts_as_the_module_changed(tmp_path):
     _commit(repo, "weaken m's test")
     runs = {"m.py": _rec(sha, "d"), "n.py": _rec(sha, "d")}
     siblings = {"m.py": ["test_m.py"], "n.py": ["test_n.py"]}
-    assert mutation_run.changed(repo, runs, siblings, _git_runner) == {"m.py"}
-
-
-def _git_runner(cmd):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+    assert mutation_run.changed(repo, runs, siblings) == {"m.py"}
 
 
 def _tests_repo(path, modules):
@@ -114,7 +110,7 @@ def test_run_orders_the_plans_candidates_by_the_record_and_reports_no_tests(tmp_
     open(os.path.join(repo, "lonely.py"), "w").write("x = 1\n")
     sha = _commit(repo, "lonely")
     record = {mutation_run.MUTATION_KEY: {"m.py": _rec(sha, "2026-10-01T00:00:00+00:00")}}
-    result = mutation_run.run(repo, record, runner=_git_runner)
+    result = mutation_run.run(repo, record)
     assert result.targets == ["n.py", "o.py", "m.py"]  # m.py ran and is unchanged: last
     assert result.no_tests == ["lonely.py"]
     assert result.total == 4
@@ -129,7 +125,7 @@ def test_run_ranks_through_rank_fn_and_never_adds_a_module(tmp_path):
         seen.append(candidates)
         return ["n.py", "ghost.py"]
 
-    result = mutation_run.run(repo, {}, runner=_git_runner, rank_fn=rank)
+    result = mutation_run.run(repo, {}, rank_fn=rank)
     assert seen == [["m.py", "n.py"]]
     assert result.targets == ["n.py", "m.py"]
 
@@ -137,5 +133,16 @@ def test_run_ranks_through_rank_fn_and_never_adds_a_module(tmp_path):
 def test_run_with_explicit_modules_keeps_them_as_given(tmp_path):
     repo = str(tmp_path / "repo")
     _tests_repo(repo, ["m.py", "n.py"])
-    result = mutation_run.run(repo, {}, runner=_git_runner, modules=["n.py", "z.py"])
+    result = mutation_run.run(repo, {}, modules=["n.py", "z.py"])
     assert result.targets == ["n.py", "z.py"]
+
+
+def test_run_passes_the_plans_sibling_tests_on_so_a_changed_test_reorders_its_module(tmp_path):
+    repo = str(tmp_path / "repo")
+    _tests_repo(repo, ["m.py", "n.py"])
+    sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    open(os.path.join(repo, "test_n.py"), "w").write("def test_x(): assert True\n")
+    _commit(repo, "n's test changes")
+    record = {mutation_run.MUTATION_KEY: {
+        "m.py": _rec(sha, "2026-10-01T00:00:00+00:00"), "n.py": _rec(sha, "2026-10-01T00:00:00+00:00")}}
+    assert mutation_run.run(repo, record).targets == ["n.py", "m.py"]  # only n's sibling test changed
