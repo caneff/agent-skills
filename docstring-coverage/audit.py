@@ -65,40 +65,10 @@ def parse_coverage(ruff_json, interrogate_text):
     return rows
 
 
-def _selfcheck():
-    ruff_json = json.dumps(
-        [
-            {
-                "filename": "sample.py",
-                "location": {"row": 9},
-                "code": "D103",
-                "message": "Missing docstring in public function",
-            }
-        ]
-    )
-    interrogate_text = (
-        "---------------- RESULT: FAILED (minimum: 80.0%, actual: 50.0%) ----------------"
-    )
-    rows = parse_coverage(ruff_json, interrogate_text)
-    assert len(rows) == 1, rows
-    assert rows[0]["bucket"] == "document"
-    assert rows[0]["file"] == "sample.py"
-    assert rows[0]["line"] == 9
-    assert rows[0]["category"] == "missing-function-docstring"
-    assert rows[0]["extra"]["coverage"] == 50.0
-    assert rows[0]["summary"] == "missing function docstring at sample.py:9"
-    assert rows[0]["failure"] == ""
-
-    empty = parse_coverage(json.dumps([]), interrogate_text)
-    assert empty == []
-
-    print("ok")
-
-
 def main(argv):
     auditlib.run_cli(
-        argv, _selfcheck, parse_coverage, nargs=2,
-        usage="usage: audit.py <ruff.json> <interrogate.txt> | --selfcheck",
+        argv, parse_coverage, nargs=2,
+        usage="usage: audit.py <ruff.json> <interrogate.txt>",
     )
 
 

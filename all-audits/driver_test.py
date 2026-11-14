@@ -13,10 +13,14 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("AUDITS_NO_OPEN", "1")
 os.environ.setdefault("AUDITS_NO_SYNTH", "1")
 import driver  # noqa: E402
+import mutation_run  # noqa: E402
+import procs  # noqa: E402
 
 
 def _run_driver(*args):
@@ -40,11 +44,11 @@ def test_index_rerun_replaces_assets_without_nesting(tmp_path):
     with open(os.path.join(tmp, "collection", "dead-code", "assets", "base", "base.css"), "w") as f:
         f.write("body{}")
 
-    r = _run_driver("--index", "--out", tmp)
+    r = _run_driver("index", "--out", tmp)
     assert r.returncode == 0, r.stdout + r.stderr
     assert os.path.isfile(os.path.join(tmp, "collection", "assets", "base", "base.css"))
 
-    r = _run_driver("--index", "--out", tmp)
+    r = _run_driver("index", "--out", tmp)
     assert r.returncode == 0, r.stdout + r.stderr
     assert os.path.isfile(os.path.join(tmp, "collection", "assets", "base", "base.css"))
     assert not os.path.isdir(os.path.join(tmp, "collection", "assets", "assets")), "assets/assets nesting"
@@ -57,7 +61,7 @@ def test_index_over_an_empty_collection_still_links_to_real_assets(tmp_path):
     tmp = str(tmp_path)
     os.makedirs(os.path.join(tmp, "collection"))
 
-    r = _run_driver("--index", "--out", tmp)
+    r = _run_driver("index", "--out", tmp)
     assert r.returncode == 0, r.stdout + r.stderr
 
     index = os.path.join(tmp, "collection", "index.html")
@@ -70,7 +74,7 @@ def test_index_over_an_empty_collection_still_links_to_real_assets(tmp_path):
 
 
 def test_index_over_an_old_run_dir_does_not_prune_it(tmp_path):
-    """#606 round 2: `--index --out <run older than the TTL>` must index that
+    """#606 round 2: `index --out <run older than the TTL>` must index that
     run, not delete it — pruning happens after `--out` is resolved and skips
     the resolved dir."""
     cache_dir = str(tmp_path)
@@ -82,7 +86,7 @@ def test_index_over_an_old_run_dir_does_not_prune_it(tmp_path):
     os.utime(old_run, (0, 0))
 
     r = subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), "--index", "--out", old_run],
+        [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), "index", "--out", old_run],
         capture_output=True, text=True,
         env={**os.environ, "XDG_CACHE_HOME": cache_dir, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
     )
@@ -157,7 +161,7 @@ def test_mutation_subindex_and_single_main_row(tmp_path):
         }
         open(os.path.join(d, "findings.jsonl"), "w").write(json.dumps(row) + "\n")
 
-    r = _run_driver("--index", "--out", tmp)
+    r = _run_driver("index", "--out", tmp)
     assert r.returncode == 0, r.stdout + r.stderr
 
     index_text = open(os.path.join(tmp, "collection", "index.html")).read()
@@ -173,6 +177,20 @@ def test_mutation_subindex_and_single_main_row(tmp_path):
     assert "5/8" in sub  # oracle: killed 5, total 5+1+2
 
 
+def test_a_corrupt_mutation_log_line_shows_in_the_module_row_not_as_a_tally(tmp_path):
+    tmp = str(tmp_path)
+    d = os.path.join(tmp, "collection", "solver.py")
+    os.makedirs(d)
+    open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
+    row = {"extra": {"killed_count": 8, "survived_count": 2, "no_coverage_count": 0}}
+    open(os.path.join(d, "findings.jsonl"), "w").write("{not json\n" + json.dumps(row) + "\n")
+
+    r = _run_driver("index", "--out", tmp)
+    assert r.returncode == 0, r.stdout + r.stderr
+    sub = open(os.path.join(tmp, "collection", "mutation", "index.html")).read()
+    assert "CORRUPT: findings.jsonl line 1" in sub and "8/10" not in sub
+
+
 def test_no_mutation_reports_no_row(tmp_path):
     tmp = str(tmp_path)
     for name in ("dead-code", "test-audit"):
@@ -180,7 +198,7 @@ def test_no_mutation_reports_no_row(tmp_path):
         os.makedirs(d)
         open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
 
-    r = _run_driver("--index", "--out", tmp)
+    r = _run_driver("index", "--out", tmp)
     assert r.returncode == 0, r.stdout + r.stderr
     index_text = open(os.path.join(tmp, "collection", "index.html")).read()
     assert "<td>mutation</td>" not in index_text
@@ -203,7 +221,7 @@ def test_no_test_modules_section(tmp_path):
         json.dumps({"no_tests": ["widget.py", "gadget.py"], "total": 6})
     )
 
-    r = _run_driver("--index", "--out", tmp)
+    r = _run_driver("index", "--out", tmp)
     assert r.returncode == 0, r.stdout + r.stderr
 
     index_text = open(os.path.join(tmp, "collection", "index.html")).read()
@@ -257,7 +275,7 @@ def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, extra_args=(), **extr
         "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env,
     }
     return subprocess.run(
-        [sys.executable, os.path.join(here, "driver.py"), tmp, "--only", only, *extra_args, "--out", os.path.join(tmp, "out")],
+        [sys.executable, os.path.join(here, "driver.py"), "sweep", tmp, "--only", only, *extra_args, "--out", os.path.join(tmp, "out")],
         capture_output=True, text=True, env=env,
     )
 
@@ -338,6 +356,7 @@ def test_stale_manifest_from_an_earlier_run_does_not_count_as_success(tmp_path):
     own recovery command) finds the last run's manifest. An audit that writes
     nothing this time must still fail, not inherit the old manifest."""
     tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
+    _git_init_tracking(tmp)  # out/ later holds untracked .js assets, which must not make the repo read as JavaScript
     first = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
     assert first.returncode == 0, first.stdout + first.stderr
     assert os.path.isfile(os.path.join(tmp, "out", "manifests", "dead-code", "manifest.json")), "fixture setup: run 1 leaves a manifest"
@@ -350,7 +369,7 @@ def test_stale_manifest_from_an_earlier_run_does_not_count_as_success(tmp_path):
 def _leaked_git_env(victim):
     """Run the body with GIT_DIR/GIT_WORK_TREE pointing at `victim`, the way a
     caller's shell (or a git hook) leaks them into the driver (#625)."""
-    saved = {k: os.environ.get(k) for k in driver.GIT_REDIRECT_VARS}
+    saved = {k: os.environ.get(k) for k in procs.GIT_REDIRECT_VARS}
     os.environ["GIT_DIR"] = os.path.join(victim, ".git")
     os.environ["GIT_WORK_TREE"] = victim
     try:
@@ -555,7 +574,7 @@ def test_crashed_no_tests_probe_renders_could_not_determine_not_zero(tmp_path):
         json.dumps({"error": "no-tests probe crashed or returned unparseable output"})
     )
 
-    r = _run_driver("--index", "--out", tmp)
+    r = _run_driver("index", "--out", tmp)
     assert r.returncode == 0, r.stdout + r.stderr
 
     index_text = open(os.path.join(tmp, "collection", "index.html")).read()
@@ -579,7 +598,7 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees(tmp_path):
     os.utime(stale, (0, 0))
 
     r = subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), repo, "--mutation", "solver.py"],
+        [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), "mutation", repo, "--modules", "solver.py"],
         capture_output=True, text=True,
         env={**os.environ, "XDG_CACHE_HOME": cache_dir, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
     )
@@ -622,7 +641,7 @@ def _mutation_with_fake_claude(repo, tmp, out, **extra_env):
     the fake binaries."""
     here = os.path.dirname(os.path.abspath(__file__))
     return subprocess.run(
-        [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation", "solver.py", "--out", out],
+        [sys.executable, os.path.join(here, "driver.py"), "mutation", repo, "--modules", "solver.py", "--out", out],
         capture_output=True, text=True, env=_fake_tools_env(tmp, **extra_env),
     )
 
@@ -741,7 +760,7 @@ def test_collect_copies_both_report_kinds_and_returns_the_index(tmp_path):
 
 
 def test_index_only_rebuild_spawns_nothing_and_needs_no_run_branch(tmp_path):
-    """#606: `--index --out DIR` calls the collect step over an existing
+    """#606: `index --out DIR` calls the collect step over an existing
     collection. Nothing is spawned — the PATH here holds no `claude` and no
     `git` — and no logs/ or manifests/ content is read."""
     tmp, empty_bin = _mkdirs(tmp_path, "tmp", "empty_bin")
@@ -750,7 +769,7 @@ def test_index_only_rebuild_spawns_nothing_and_needs_no_run_branch(tmp_path):
     open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
 
     r = subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), "--index", "--out", tmp],
+        [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), "index", "--out", tmp],
         capture_output=True, text=True,
         env={**os.environ, "PATH": empty_bin, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
     )
@@ -760,20 +779,143 @@ def test_index_only_rebuild_spawns_nothing_and_needs_no_run_branch(tmp_path):
     assert os.listdir(os.path.join(tmp, "logs")) == []
 
 
-def test_help_prints_the_docstring_and_an_unknown_flag_exits_2():
-    """#606: argparse parses the flags and the module docstring is the help
-    text, so the flag reference has one home (all-audits/SKILL.md points at
-    it rather than restating it)."""
-    driver_py = os.path.join(os.path.dirname(__file__), "driver.py")
-    r = subprocess.run([sys.executable, driver_py, "--help"], capture_output=True, text=True)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert r.stdout.startswith("usage:"), r.stdout
-    assert driver.__doc__.splitlines()[0] in r.stdout
-    for flag in ("--out", "--only", "--short", "--index", "--force", "--mutation", "SWEEP_JOBS"):
-        assert flag in r.stdout, flag
+def _main_exit(argv, capsys):
+    """`driver.main` on `argv`, which must exit through argparse: (code, stdout, stderr)."""
+    with pytest.raises(SystemExit) as e:
+        driver.main(["driver.py", *argv])
+    out = capsys.readouterr()
+    return e.value.code, out.out, out.err
 
-    bad = subprocess.run([sys.executable, driver_py, "--nope"], capture_output=True, text=True)
-    assert bad.returncode == 2, bad.stdout + bad.stderr
+
+MODE_FLAGS = {
+    "sweep": ("--out", "--only", "--short", "--force"),
+    "index": ("--out",),
+    "multi": ("--out", "--only", "--short", "--force"),
+    "multi-index": (),
+    "load": (),
+    "suggest": ("--roots",),
+    "mutation": ("--out", "--modules", "--all"),
+}
+EVERY_FLAG = sorted({f for flags in MODE_FLAGS.values() for f in flags})
+
+
+def test_top_level_help_prints_the_docstring_and_names_every_mode(capsys):
+    """#606, #1747: the module docstring is the help text, so the reference has
+    one home, and the modes are subcommands it lists."""
+    code, out, _ = _main_exit(["--help"], capsys)
+    assert code == 0 and out.startswith("usage:"), out
+    assert driver.__doc__.splitlines()[0] in out and "SWEEP_JOBS" in out
+    for mode in MODE_FLAGS:
+        assert mode in out, mode
+
+
+@pytest.mark.parametrize("mode", sorted(MODE_FLAGS))
+def test_each_mode_help_lists_its_own_flags_and_no_other(mode, capsys):
+    """#1747: a mode's `--help` names exactly the flags it takes."""
+    code, out, _ = _main_exit([mode, "--help"], capsys)
+    assert code == 0, out
+    for flag in EVERY_FLAG:
+        assert (re.search(rf"(?<![\w-]){flag}(?![\w-])", out) is not None) == (flag in MODE_FLAGS[mode]), (mode, flag, out)
+
+
+@pytest.mark.parametrize("argv, refusal", [
+    ([], "required"),
+    (["--nope"], "required: MODE"),
+    (["nope"], "invalid choice"),
+    (["load", "42", "--force"], "unrecognized arguments: --force"),
+    (["load", "42", "--only", "dead-code"], "unrecognized arguments: --only"),
+    (["suggest", "--short"], "unrecognized arguments: --short"),
+    (["multi-index", "20990101-000000", "--force"], "unrecognized arguments: --force"),
+    (["multi-index", "20990101-000000", "--roots", "/x"], "unrecognized arguments: --roots"),
+    (["index", "--out", "/x", "--only", "dead-code"], "unrecognized arguments: --only"),
+    (["index"], "--out"),
+    (["sweep", "--roots", "/x"], "unrecognized arguments: --roots"),
+    (["sweep", "--modules", "a.py"], "unrecognized arguments: --modules"),
+    (["multi", "a", "--all"], "unrecognized arguments: --all"),
+    (["multi"], "REPO"),
+    (["mutation", "--all", "--modules", "a.py"], "not allowed with"),
+    (["mutation", "--only", "dead-code"], "unrecognized arguments: --only"),
+    (["mutation", "--modules", ""], "names no module"),
+    (["mutation", "--modules", " , "], "names no module"),
+    (["load", "x"], "invalid int value"),
+])
+def test_each_mode_refuses_a_flag_it_does_not_take_through_argparse(argv, refusal, capsys, monkeypatch):
+    """#1747: argparse, not a hand-written exclusion chain, refuses the flag,
+    exit 2, before any mode starts. Every mode entry is replaced with one that
+    fails the test, so a refusal that came late cannot pass."""
+    for entry in ("sweep", "rebuild_index", "multi_mode", "multi_index_mode", "load_mode", "suggest_mode",
+                  "mutation_mode"):
+        monkeypatch.setattr(driver, entry, lambda *a, _e=entry, **k: pytest.fail(f"{_e} ran on {argv}"))
+    code, _, err = _main_exit(argv, capsys)
+    assert code == 2 and refusal in err, err
+
+
+@pytest.mark.parametrize("argv, entry, call", [
+    (["sweep", "/r", "--only", "a,b", "--short", "--force", "--out", "/o"], "sweep",
+     (("/r", "/o", ["a", "b"], True, True), {})),
+    (["sweep"], "sweep", ((os.getcwd(), None, None, False, False), {})),
+    (["index", "/r", "--out", "/o"], "rebuild_index", (("/r", "/o"), {})),
+    (["multi", "/a", "/b", "--only", "x", "--force"], "multi_mode",
+     ((["/a", "/b"], None, ["x"], False, True), {})),
+    (["multi-index", "20990101-000000"], "multi_index_mode", (("20990101-000000",), {})),
+    (["load", "42", "skills"], "load_mode", ((42, "skills"), {})),
+    (["load", "42"], "load_mode", ((42, None), {})),
+    (["suggest", "--roots", "/a,/b"], "suggest_mode", ((["/a", "/b"],), {})),
+    (["suggest"], "suggest_mode", (([driver.DEFAULT_ROOTS.split(",")[0], driver.DEFAULT_ROOTS.split(",")[1]],), {})),
+    (["mutation", "/r", "--modules", "a.py,b.py", "--out", "/o"], "mutation_mode",
+     (("/r", ["a.py", "b.py"], "/o"), {"whole_repo": False})),
+    (["mutation", "/r"], "mutation_mode", (("/r", None, None), {"whole_repo": False})),
+    (["mutation", "/r", "--all"], "mutation_mode", (("/r", None, None), {"whole_repo": True})),
+])
+def test_each_mode_calls_its_entry_with_its_own_arguments(argv, entry, call, monkeypatch):
+    """#1747: `main(argv)` routes each subcommand to its mode with the values
+    its flags were given, and nothing else."""
+    calls = []
+    monkeypatch.setattr(driver, entry, lambda *a, **k: calls.append((a, k)))
+    driver.main(["driver.py", *argv])
+    assert calls == [call]
+
+
+@pytest.mark.parametrize("audit, record, state, run, reason", [
+    ({}, None, {"dirty": False, "changed_files": []}, True, "no cached run"),
+    ({}, {"age_days": 0}, {"dirty": True, "changed_files": []}, True, "dirty working tree"),
+    ({"ground_truth": ["skills/"]}, {"age_days": 0}, {"dirty": False, "changed_files": ["skills/a.md"]},
+     True, "ground-truth change: skills/a.md"),
+    ({"ground_truth": ["GLOSSARY.md"]}, {"age_days": 0}, {"dirty": False, "changed_files": ["GLOSSARY.md"]},
+     True, "ground-truth change: GLOSSARY.md"),
+    ({"ground_truth": ["skills"]}, {"age_days": 0}, {"dirty": False, "changed_files": ["skillset/a.md"]},
+     False, "unchanged: 1 files < threshold 10, clean, within backstop"),
+    ({"backstop_days": 7}, {"age_days": 7.5}, {"dirty": False, "changed_files": []},
+     True, "last run older than backstop (7.5d > 7d)"),
+    ({"backstop_days": 7}, {"age_days": 7}, {"dirty": False, "changed_files": []},
+     False, "unchanged: 0 files < threshold 10, clean, within backstop"),
+    ({}, {"age_days": driver.DEFAULT_BACKSTOP_DAYS + 1}, {"dirty": False, "changed_files": []},
+     True, f"last run older than backstop ({driver.DEFAULT_BACKSTOP_DAYS + 1}d > {driver.DEFAULT_BACKSTOP_DAYS}d)"),
+    ({"threshold": 2}, {"age_days": 0}, {"dirty": False, "changed_files": ["a", "b"]},
+     True, "2 files changed >= threshold 2"),
+    ({"threshold": 3}, {"age_days": 0}, {"dirty": False, "changed_files": ["a", "b"]},
+     False, "unchanged: 2 files < threshold 3, clean, within backstop"),
+    ({}, {"age_days": 0}, {"dirty": False, "changed_files": [str(i) for i in range(driver.DEFAULT_THRESHOLD)]},
+     True, f"{driver.DEFAULT_THRESHOLD} files changed >= threshold {driver.DEFAULT_THRESHOLD}"),
+])
+def test_should_run(audit, record, state, run, reason):
+    """#1729: the staleness rule, in its order: no record, a dirty tree, a
+    ground-truth path (a prefix only at a `/`), the backstop, the threshold."""
+    assert driver.should_run(audit, record, state) == (run, reason)
+
+
+def test_report_headings_reads_the_first_html_of_the_audit_folder(tmp_path):
+    """#1729: the headings come from the audit's first HTML by name; a folder
+    with none, or no folder, gives []."""
+    collection = str(tmp_path)
+    assert driver._report_headings(collection, "dead-code") == []
+    os.makedirs(os.path.join(collection, "dead-code"))
+    open(os.path.join(collection, "dead-code", "notes.txt"), "w").write("<h1>not html</h1>")
+    assert driver._report_headings(collection, "dead-code") == []
+    open(os.path.join(collection, "dead-code", "b.html"), "w").write("<h1>Second</h1>")
+    open(os.path.join(collection, "dead-code", "a.html"), "w").write(
+        "<h1> Dead  code </h1><p>body</p><h2></h2><h3>Kept <em>here</em></h3><h4>Too deep</h4>")
+    assert driver._report_headings(collection, "dead-code") == ["Dead code", "Kept here"]
 
 
 def test_mutation_worktree_is_removed_even_when_the_failure_report_raises(tmp_path):
@@ -807,41 +949,6 @@ def _rec(sha, date):
     return {"sha": sha, "date": date}
 
 
-def test_order_never_run_then_changed_then_oldest_run():
-    cands = ["a.py", "b.py", "c.py", "d.py"]
-    record = {"a.py": _rec("s", "2026-10-01"), "b.py": _rec("s", "2026-09-01"), "c.py": _rec("s", "2026-10-02")}
-    # d never ran; c changed since its sha (though the newest run); of the
-    # unchanged, b (Sep) is older than a (Oct).
-    assert driver.order_mutation_targets(cands, [], record, {"c.py"}) == ["d.py", "c.py", "b.py", "a.py"]
-
-
-def test_order_recency_outranks_prepass_risk_and_nothing_is_dropped():
-    cands = ["risky.py", "boring.py"]
-    record = {"risky.py": _rec("s", "2026-10-11")}
-    # boring.py is ranked last by the prepass but never ran, so it goes first.
-    assert driver.order_mutation_targets(cands, ["risky.py", "boring.py"], record, set()) == ["boring.py", "risky.py"]
-
-
-def test_order_prepass_rank_breaks_ties_inside_each_group():
-    cands = ["a.py", "b.py", "c.py", "d.py", "e.py"]
-    record = {"c.py": _rec("s", "2026-09-01"), "d.py": _rec("s", "2026-09-01"), "e.py": _rec("s", "2026-08-01")}
-    rank = ["b.py", "a.py", "d.py", "c.py"]
-    # never-run: b before a by rank; same run date: d before c by rank;
-    # e is older, so first.
-    assert driver.order_mutation_targets(cands, rank, record, set()) == ["b.py", "a.py", "e.py", "d.py", "c.py"]
-
-
-def test_order_unranked_follow_ranked_and_a_malformed_entry_counts_as_never_run():
-    cands = ["a.py", "b.py", "c.py"]
-    record = {"b.py": {"sha": "s"}, "c.py": _rec("s", "2026-09-01")}  # b.py has no date
-    assert driver.order_mutation_targets(cands, ["b.py"], record, set()) == ["b.py", "a.py", "c.py"]
-
-
-def test_parse_rank_keeps_only_candidates_once_in_printed_order():
-    out = "b.py\n  a.py \nfake.py\nb.py\n\n"
-    assert driver.parse_mutation_rank(out, ["a.py", "b.py", "c.py"]) == ["b.py", "a.py"]
-
-
 def test_record_mutation_sits_beside_audit_records(tmp_path):
     repo, cache = _mkdirs(tmp_path, "repo", "cache")
     _init_git_repo(repo)
@@ -849,29 +956,14 @@ def test_record_mutation_sits_beside_audit_records(tmp_path):
     driver.record_mutation(repo, "a.py", base=cache)
     rec = driver.load_record(driver._record_file(repo, cache))
     assert rec["dead-code"]["report_dir"] == "/r"
-    assert rec[driver.MUTATION_KEY]["a.py"]["sha"] == driver.head_sha(repo)
-    assert rec[driver.MUTATION_KEY]["a.py"]["date"]
+    assert rec[mutation_run.MUTATION_KEY]["a.py"]["sha"] == driver.head_sha(repo)
+    assert rec[mutation_run.MUTATION_KEY]["a.py"]["date"]
 
 
 def _commit_all(repo, msg):
     env = driver.scrubbed_env()
     subprocess.run(["git", "-C", repo, "add", "."], check=True, env=env)
     subprocess.run(["git", "-C", repo, "commit", "-q", "-m", msg], check=True, env=env)
-
-
-def test_changed_modules_since_recorded_sha(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    _init_git_repo(repo)
-    for n in ("a", "b"):
-        open(os.path.join(repo, f"{n}.py"), "w").write("x = 1\n")
-    _commit_all(repo, "two")
-    sha = driver.head_sha(repo)
-    open(os.path.join(repo, "b.py"), "w").write("x = 2\n")
-    _commit_all(repo, "b changes")
-    record = {"a.py": _rec(sha, "2026-10-01"), "b.py": _rec(sha, "2026-10-01"), "c.py": _rec("deadbeef", "2026-10-01")}
-    # an unresolvable sha proves nothing, so it reads as changed, never as clean
-    assert driver.mutation_changed(repo, record) == {"b.py", "c.py"}
 
 
 def _mutation_repo(path, modules):
@@ -884,10 +976,10 @@ def _mutation_repo(path, modules):
 
 
 def _mutation_no_modules(repo, tmp, **extra_env):
-    """`--mutation` with no value over a repo, fake claude and uv on PATH."""
+    """`mutation` with neither `--modules` nor `--all` over a repo, fake claude and uv on PATH."""
     here = os.path.dirname(os.path.abspath(__file__))
     return subprocess.run(
-        [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation", "--out", os.path.join(tmp, "out")],
+        [sys.executable, os.path.join(here, "driver.py"), "mutation", repo, "--out", os.path.join(tmp, "out")],
         capture_output=True, text=True, env=_fake_tools_env(tmp, **extra_env))
 
 
@@ -904,13 +996,13 @@ def test_mutation_without_a_value_runs_the_mechanical_list_unranked_and_records(
     assert r.returncode == 0, r.stdout + r.stderr
     assert "mutation-target: m.py" in r.stdout and "mutation-target: n.py" in r.stdout, r.stdout
     rec = _cache_record(repo, tmp)
-    assert sorted(rec[driver.MUTATION_KEY]) == ["m.py", "n.py"], rec
+    assert sorted(rec[mutation_run.MUTATION_KEY]) == ["m.py", "n.py"], rec
 
 
 def test_mutation_prepass_ranks_but_never_adds_and_never_run_goes_first(tmp_path):
     repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _mutation_repo(repo, ["m.py", "n.py", "o.py"])
-    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {driver.MUTATION_KEY: {
+    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {mutation_run.MUTATION_KEY: {
         "o.py": _rec(driver.head_sha(repo), "2026-10-01T00:00:00+00:00")}})
     r = _mutation_no_modules(repo, tmp, AUDITS_NO_SYNTH="0", MUTATION_MAX="2",
                              FAKE_CLAUDE_PREPASS="o.py\nghost.py\nn.py\nm.py")
@@ -928,14 +1020,14 @@ def test_explicit_mutation_run_records_too(tmp_path):
     r = _mutation_with_fake_claude(repo, tmp, os.path.join(tmp, "out"))
     assert r.returncode == 0, r.stdout + r.stderr
     rec = _cache_record(repo, tmp)
-    assert rec[driver.MUTATION_KEY]["solver.py"]["sha"] == driver.head_sha(repo)
+    assert rec[mutation_run.MUTATION_KEY]["solver.py"]["sha"] == driver.head_sha(repo)
     # a dotted spelling of the same module is the same key, never a second one
     again = subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), repo,
-         "--mutation", "./solver.py", "--out", os.path.join(tmp, "out2")],
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "mutation", repo,
+         "--modules", "./solver.py", "--out", os.path.join(tmp, "out2")],
         capture_output=True, text=True, env=_fake_tools_env(tmp))
     assert again.returncode == 0, again.stdout + again.stderr
-    assert list(_cache_record(repo, tmp)[driver.MUTATION_KEY]) == ["solver.py"]
+    assert list(_cache_record(repo, tmp)[mutation_run.MUTATION_KEY]) == ["solver.py"]
 
 
 def test_failed_module_is_not_recorded(tmp_path):
@@ -944,7 +1036,7 @@ def test_failed_module_is_not_recorded(tmp_path):
     r = _mutation_with_fake_claude(repo, tmp, os.path.join(tmp, "out"), FAKE_CLAUDE_EXIT_MUTATION="3")
     assert r.returncode != 0
     rec = _cache_record(repo, tmp)
-    assert "solver.py" not in rec.get(driver.MUTATION_KEY, {}), rec
+    assert "solver.py" not in rec.get(mutation_run.MUTATION_KEY, {}), rec
 
 
 def test_prepass_prompt_names_the_candidates_and_drops_solver_oracle(tmp_path):
@@ -954,33 +1046,11 @@ def test_prepass_prompt_names_the_candidates_and_drops_solver_oracle(tmp_path):
     assert "wrong result" in p
 
 
-def test_missing_or_empty_recorded_sha_reads_as_changed(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    _init_git_repo(repo)
-    runs = {"a.py": {"date": "2026-10-01"}, "b.py": _rec("", "2026-10-01")}
-    assert driver.mutation_changed(repo, runs) == {"a.py", "b.py"}
-
-
-def test_a_changed_sibling_test_counts_as_the_module_changed(tmp_path):
-    repo = str(tmp_path / "repo")
-    os.mkdir(repo)
-    _init_git_repo(repo)
-    for f in ("m.py", "test_m.py", "n.py", "test_n.py"):
-        open(os.path.join(repo, f), "w").write("x = 1\n")
-    _commit_all(repo, "pairs")
-    sha = driver.head_sha(repo)
-    open(os.path.join(repo, "test_m.py"), "w").write("x = 2\n")
-    _commit_all(repo, "weaken m's test")
-    runs = {"m.py": _rec(sha, "2026-10-01"), "n.py": _rec(sha, "2026-10-01")}
-    assert driver.mutation_changed(repo, runs) == {"m.py"}
-
-
 def test_record_mutation_keys_a_dotted_path_as_the_repo_relative_one(tmp_path):
     repo, cache = _mkdirs(tmp_path, "repo", "cache")
     _init_git_repo(repo)
     driver.record_mutation(repo, "./a.py", base=cache)
-    assert list(driver.load_record(driver._record_file(repo, cache))[driver.MUTATION_KEY]) == ["a.py"]
+    assert list(driver.load_record(driver._record_file(repo, cache))[mutation_run.MUTATION_KEY]) == ["a.py"]
 
 
 def test_changed_module_runs_first_and_max_cuts_after_ordering(tmp_path):
@@ -992,7 +1062,7 @@ def test_changed_module_runs_first_and_max_cuts_after_ordering(tmp_path):
     open(os.path.join(repo, "o.py"), "w").write("x = 2\n")
     _commit_all(repo, "o changes")
     now = driver.head_sha(repo)
-    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {driver.MUTATION_KEY: {
+    driver.save_record(driver._record_file(repo, os.path.join(tmp, "all-audits")), {mutation_run.MUTATION_KEY: {
         "m.py": _rec(now, "2026-10-01T00:00:00+00:00"),
         "n.py": _rec(now, "2026-09-01T00:00:00+00:00"),
         "o.py": _rec(before, "2026-10-05T00:00:00+00:00")}})
@@ -1002,31 +1072,21 @@ def test_changed_module_runs_first_and_max_cuts_after_ordering(tmp_path):
     assert targets == ["mutation-target: o.py"], r.stdout
 
 
-def _fake_python3(tmp, body):
-    """A `python3` first on PATH, so the driver's own `python3` probes get it."""
-    path = os.path.join(tmp, "python3")
-    with open(path, "w") as f:
-        f.write(f"#!/bin/sh\n{body}\n")
-    os.chmod(path, 0o755)
-
-
-def test_a_crashed_suggest_probe_fails_the_run_not_an_empty_target_list(tmp_path):
+def test_a_failed_plan_fails_the_run_not_an_empty_target_list(tmp_path, monkeypatch, capsys):
     repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _mutation_repo(repo, ["m.py"])
-    _fake_python3(tmp, "echo boom >&2; exit 2")
-    r = _mutation_no_modules(repo, tmp)
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "mutation-target probe failed" in r.stderr and "boom" in r.stderr, r.stderr
-    assert "mutation-target:" not in r.stdout
+    monkeypatch.setenv("XDG_CACHE_HOME", tmp)
 
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
 
-def test_an_unparseable_suggest_probe_fails_the_run(tmp_path):
-    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
-    _mutation_repo(repo, ["m.py"])
-    _fake_python3(tmp, "echo not-json")
-    r = _mutation_no_modules(repo, tmp)
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "mutation-target probe failed" in r.stderr, r.stderr
+    monkeypatch.setattr(driver.mutation_run, "run", boom)
+    with pytest.raises(SystemExit) as e:
+        driver.mutation_mode(repo, None, os.path.join(tmp, "out"))
+    assert e.value.code == 1
+    err = capsys.readouterr()
+    assert "mutation-target probe failed" in err.err and "boom" in err.err, err.err
+    assert "mutation-target:" not in err.out
 
 
 def test_a_failed_prepass_is_named_and_the_run_orders_by_recency_alone(tmp_path):
@@ -1067,7 +1127,7 @@ def _repo_with_two_tested_modules(path):
 def _mutation_all(repo, tmp, out, *flags, **extra_env):
     here = os.path.dirname(os.path.abspath(__file__))
     return subprocess.run(
-        [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation-all", "--out", out, *flags],
+        [sys.executable, os.path.join(here, "driver.py"), "mutation", repo, "--all", "--out", out, *flags],
         capture_output=True, text=True, env=_fake_tools_env(tmp, **extra_env),
     )
 
@@ -1075,7 +1135,7 @@ def _mutation_all(repo, tmp, out, *flags, **extra_env):
 def _recorded_mutation_modules(repo, tmp):
     os.environ["XDG_CACHE_HOME"], old = tmp, os.environ.get("XDG_CACHE_HOME")
     try:
-        return set(driver.mutation_runs(driver.load_record(driver._record_file(repo))))
+        return set(mutation_run.recorded_runs(driver.load_record(driver._record_file(repo))))
     finally:
         if old is None:
             del os.environ["XDG_CACHE_HOME"]
@@ -1115,7 +1175,7 @@ def test_mutation_all_lists_an_inconclusive_module_in_the_report_never_as_clean(
     assert r.returncode == 0, r.stdout + r.stderr
     assert f"INCONCLUSIVE: {why}" in r.stdout, r.stdout
     assert _recorded_mutation_modules(repo, tmp) == set(), "an INCONCLUSIVE module measured nothing and is not recorded"
-    idx = _run_driver("--index", "--out", out)
+    idx = _run_driver("index", "--out", out)
     assert idx.returncode == 0, idx.stdout + idx.stderr
     sub = open(os.path.join(out, "collection", "mutation", "index.html")).read()
     for module in ("alpha.py", "beta.py"):
@@ -1221,7 +1281,7 @@ def test_mutation_all_stale_inconclusive_from_an_earlier_run_does_not_label_a_fa
     assert _mutation_all(repo, tmp, out, FAKE_CLAUDE_INCONCLUSIVE="OLD REASON").returncode == 0
     again = _mutation_all(repo, tmp, out, FAKE_CLAUDE_NOOP="1")
     assert again.returncode != 0, again.stdout + again.stderr
-    _run_driver("--index", "--out", out)
+    _run_driver("index", "--out", out)
     sub = open(os.path.join(out, "collection", "mutation", "index.html")).read()
     assert "OLD REASON" not in sub, sub
 
@@ -1263,16 +1323,6 @@ def test_mutation_jobs_must_be_a_positive_integer(tmp_path):
         assert "creating worktree" not in r.stdout
 
 
-def test_mutation_all_refuses_a_module_list(tmp_path):
-    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
-    r = subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), repo, "--mutation-all", "--mutation", "a.py"],
-        capture_output=True, text=True, env=_fake_tools_env(tmp),
-    )
-    assert r.returncode != 0 and "not allowed with" in r.stderr, r.stdout + r.stderr
-    assert os.listdir(os.path.join(tmp, "all-audits")) == [] if os.path.isdir(os.path.join(tmp, "all-audits")) else True
-
-
 # --- --multi (#1679) -----------------------------------------------------------
 
 def _multi_fixture(tmp, names):
@@ -1304,7 +1354,7 @@ def _multi_fixture(tmp, names):
 def _multi(repos, env, *args, **extra_env):
     return subprocess.run(
         [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
-         "--multi", *repos, "--only", "dead-code", *args],
+         "multi", *repos, "--only", "dead-code", *args],
         capture_output=True, text=True, env={**env, **extra_env},
     )
 
@@ -1388,7 +1438,7 @@ def test_multi_short_runs_only_the_short_set_in_each_repo(tmp_path):
     tmp = str(tmp_path)
     (a, b), env = _multi_fixture(tmp, ["alpha", "beta"])
     r = subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "--multi", a, b, "--short"],
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "multi", a, b, "--short"],
         capture_output=True, text=True, env=env)
     starts = [l.split()[0] for l in open(env["FAKE_CLAUDE_STARTS"]).read().splitlines()]
     assert sorted(set(starts)) == sorted("/" + n for n in SHORT_SET), (starts, r.stdout)
@@ -1661,7 +1711,7 @@ def test_record_carries_the_synthesis_as_is_and_a_malformed_finding_line_is_kept
     assert r.returncode == 0, r.stdout + r.stderr
     body = _bodies(env)
     assert "## Synthesis" in body and "ceiling=" in body.split("## Synthesis", 1)[1]
-    assert "{not json" in body
+    assert "line 2: {not json" in body  # the corrupt line is named by its number, not skipped
 
 
 # --- prune stored sweeps whose record is closed (#1682) --------------------------
@@ -1677,7 +1727,7 @@ def _stored(tmp, repo_name, sweep, issue):
 
 def _single(repo, env, **extra):
     return subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), repo, "--only", "dead-code"],
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "sweep", repo, "--only", "dead-code"],
         capture_output=True, text=True, env={**env, **extra},
     )
 
@@ -1749,7 +1799,7 @@ def _prs(*names):
 def _suggest(roots, env, **extra_env):
     return subprocess.run(
         [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
-         "--suggest", "--roots", roots],
+         "suggest", "--roots", roots],
         capture_output=True, text=True, env={**env, **extra_env},
     )
 
@@ -1802,6 +1852,15 @@ def test_suggest_with_an_unreadable_gh_reply_exits_nonzero(tmp_path):
     r = _suggest(roots, env, FAKE_GH_PRS="not json")
     assert r.returncode != 0
     assert "suggest:" not in r.stdout
+    assert "JSONDecodeError" in r.stderr and "not json" in r.stderr, r.stderr
+
+
+def test_suggest_names_the_missing_field_of_a_reply_with_the_wrong_shape(tmp_path):
+    tmp = str(tmp_path)
+    roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    r = _suggest(roots, env, FAKE_GH_PRS='[{"repo": 1}]')
+    assert r.returncode != 0
+    assert "KeyError" in r.stderr and "repository" in r.stderr, r.stderr
 
 
 def test_suggest_with_no_recent_prs_says_so_and_exits_zero(tmp_path):
@@ -1823,7 +1882,7 @@ def _swept_with_record(tmp, url="https://github.com/caneff/alpha/issues/42"):
 
 def _load(env, *args):
     return subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "--load", *args],
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "load", *args],
         capture_output=True, text=True, env=env,
     )
 
@@ -2002,7 +2061,7 @@ def test_suggest_looks_under_dot_agents_by_default(tmp_path):
     subprocess.run(["git", "-C", skills, "remote", "add", "origin", "https://github.com/caneff/agent-skills.git"],
                    check=True, env=driver.scrubbed_env())
     r = subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "--suggest"],
+        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), "suggest"],
         capture_output=True, text=True,
         env={**env, "HOME": tmp, "FAKE_GH_PRS": _prs("caneff/agent-skills", "caneff/x")})
     assert r.returncode == 0, r.stdout + r.stderr
@@ -2014,14 +2073,6 @@ def test_suggest_refuses_a_search_cut_off_at_its_limit(tmp_path):
     roots, env = _suggest_fixture(tmp, {})
     r = _suggest(roots, env, FAKE_GH_PRS=_prs(*["caneff/x"] * driver.SEARCH_LIMIT))
     assert r.returncode != 0 and "cut off" in r.stderr, r.stdout + r.stderr
-
-
-def test_load_and_suggest_refuse_the_sweep_flags_they_would_ignore(tmp_path):
-    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py")
-    for argv in (["--load", "42", "--force"], ["--load", "42", "--only", "dead-code"], ["--suggest", "--short"]):
-        r = subprocess.run([sys.executable, here, *argv], capture_output=True, text=True)
-        refused = "combines with nothing else" in r.stderr or "stands alone" in r.stderr
-        assert r.returncode == 2 and refused, (argv, r.stderr)
 
 
 def test_end_to_end_multi_sweep_record_load_and_prune(tmp_path):
@@ -2149,7 +2200,7 @@ def test_a_single_repo_sweep_still_opens_its_own_index(tmp_path):
     (a,), env = _multi_fixture(tmp, ["alpha"])
     opened = _fake_openers(os.path.join(tmp, "bin"))
     r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
-                        a, "--only", "dead-code", "--out", os.path.join(tmp, "out")],
+                        "sweep", a, "--only", "dead-code", "--out", os.path.join(tmp, "out")],
                        capture_output=True, text=True, env={**env, "AUDITS_NO_OPEN": "0"})
     assert r.returncode == 0, r.stdout + r.stderr
     assert _pages_opened(opened) == [os.path.join(tmp, "out", "collection", "index.html")]
@@ -2157,7 +2208,7 @@ def test_a_single_repo_sweep_still_opens_its_own_index(tmp_path):
 
 def _multi_index(env, *args):
     return subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"),
-                           "--multi-index", *args], capture_output=True, text=True, env=env)
+                           "multi-index", *args], capture_output=True, text=True, env=env)
 
 
 def test_multi_index_rebuilds_the_page_byte_identically_and_runs_no_claude(tmp_path):
@@ -2200,8 +2251,6 @@ def test_multi_index_with_nothing_stored_or_a_bad_id_exits_nonzero(tmp_path):
     assert r.returncode == 1 and "20990101-000000" in r.stderr and "state.json" in r.stderr, r.stderr
     r = _multi_index(env, "../alpha")
     assert r.returncode == 1 and "not a sweep id" in r.stderr, r.stderr
-    r = _multi_index(env, "20990101-000000", "--force")
-    assert r.returncode == 2, r.stderr
 
 
 def _old_multi_page(tmp, sweep_id):
@@ -2334,8 +2383,110 @@ def test_a_multi_pass_prints_exactly_one_index_line_and_it_is_the_page(tmp_path)
     assert lines == [f"index: {os.path.join(page_dir, 'index.html')}"], r.stdout
 
 
-def test_multi_index_refuses_roots(tmp_path):
+def _git_init_tracking(path, *files):
+    """`git init` `path` and track `files` (created empty), uncommitted."""
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", path, "init", "-q"], check=True, env=env)
+    for f in files:
+        open(os.path.join(path, f), "w").close()
+    if files:
+        subprocess.run(["git", "-C", path, "add", *files], check=True, env=env)
+
+
+def _js_repo_sweep(tmp_path, only, **extra_env):
+    """A sweep of a repo whose only tracked source is `app.js`. A stray
+    untracked `stray.py` sits beside it: untracked files are no evidence of
+    the repo's language (#1751), so it must not make the audits applicable."""
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
+    _git_init_tracking(tmp, "app.js")
+    (tmp_path / "tmp" / "stray.py").write_text("")
+    starts = str(tmp_path / "starts")
+    open(starts, "w").close()
+    r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, FAKE_CLAUDE_STARTS=starts, **extra_env)
+    return tmp, r, open(starts).read()
+
+
+def test_python_only_audits_are_not_applicable_on_a_js_repo(tmp_path):
+    """#1751: dead-code, type-tightness and docstring-coverage read only Python.
+    On a repo of `.js` files the sweep never starts them: each gets a manifest
+    saying "not applicable: JavaScript", and the index shows that apart from a
+    clean pass. The fake `claude` writes nothing for these audits, so a run
+    that did start one would fail with "no manifest"."""
+    tmp, r, started = _js_repo_sweep(tmp_path, "dead-code,type-tightness,docstring-coverage,duplication")
+    assert "[type-tightness] FAILED" not in r.stdout and "[dead-code] FAILED" not in r.stdout, r.stdout
+    assert "/duplication" in started
+    assert not any(n in started for n in ("/dead-code", "/type-tightness", "/docstring-coverage")), started
+    for name in ("dead-code", "type-tightness", "docstring-coverage"):
+        manifest = json.load(open(os.path.join(tmp, "out", "manifests", name, "manifest.json")))
+        assert manifest["not_applicable"] == "JavaScript" and manifest["count"] == 0, manifest
+        assert manifest["headline"] == "not applicable: JavaScript"
+    index = open(os.path.join(tmp, "out", "collection", "index.html")).read()
+    assert index.count("NOT APPLICABLE: JavaScript") == 3, index
+
+
+def test_the_smoke_audit_is_the_first_that_starts_claude(tmp_path):
+    """The smoke test proves the `-p` guard lets an audit through, so it must
+    be an audit that starts `claude`: dead-code comes first but is not
+    applicable here, so duplication is the smoke audit."""
+    _, r, _ = _js_repo_sweep(tmp_path, "dead-code,duplication")  # the fake duplication fails: no manifest
+    assert "== smoke test: duplication ==" in r.stdout, r.stdout
+
+
+def test_a_sweep_where_no_audit_starts_claude_claims_no_smoke_test(tmp_path):
+    """Nothing started, so nothing proved the guard: no "smoke test passed"."""
+    _, r, started = _js_repo_sweep(tmp_path, "dead-code")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert started == "", started
+    assert "smoke test passed" not in r.stdout and "== smoke test:" not in r.stdout, r.stdout
+    assert "no smoke test: no planned audit starts claude" in r.stdout, r.stdout
+
+
+def test_not_applicable_survives_an_index_rebuild_and_its_report_finds_its_assets(tmp_path):
+    """The status lives in the collection, so `index --out` (and `load`, which
+    collects the same way) still shows it rather than an empty Status that
+    reads as a clean pass; the collected report links the collection's assets."""
+    tmp, r, _ = _js_repo_sweep(tmp_path, "dead-code")
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = os.path.join(tmp, "out")
+    rebuilt = _run_driver("index", tmp, "--out", out)
+    assert rebuilt.returncode == 0, rebuilt.stdout + rebuilt.stderr
+    index = open(os.path.join(out, "collection", "index.html")).read()
+    assert "<td>dead-code</td>" in index and "NOT APPLICABLE: JavaScript" in index, index
+    report_dir = os.path.join(out, "collection", "dead-code")
+    hrefs = re.findall(r'(?:href|src)="([^"]+)"', open(os.path.join(report_dir, "report.html")).read())
+    assert hrefs and all(os.path.isfile(os.path.join(report_dir, h)) for h in hrefs), hrefs
+
+
+def test_a_failed_no_tests_probe_with_given_modules_keeps_its_cause(tmp_path, monkeypatch, capsys):
+    """With `--modules` the run goes on when planning fails, but the cause is
+    printed and recorded, never reduced to a bare "probe failed"."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _mutation_repo(repo, ["m.py"])
+    monkeypatch.setenv("XDG_CACHE_HOME", tmp)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom-cause")
+
+    monkeypatch.setattr(driver.mutation_run, "run", boom)
+    monkeypatch.setattr(driver, "_guarded_mutation_module", lambda repo, module, run: None)
+    out = os.path.join(tmp, "out")
+    driver.mutation_mode(repo, ["m.py"], out)
+    assert "boom-cause" in capsys.readouterr().err
+    data = json.load(open(os.path.join(out, "collection", "mutation-no-tests.json")))
+    assert "boom-cause" in data["error"], data
+
+
+def test_a_corrupt_mutation_log_is_not_counted_as_measured_on_the_main_index(tmp_path):
+    """The sub-index shows the module CORRUPT; the main index must agree: not
+    measured, and its tally's survivors not added."""
     tmp = str(tmp_path)
-    _, env = _multi_fixture(tmp, [])
-    r = _multi_index(env, "20990101-000000", "--roots", "/x")
-    assert r.returncode == 2 and "combines with nothing else" in r.stderr, r.stderr
+    for module, text in (("solver.py", "{not json\n"), ("oracle.py", "")):
+        d = os.path.join(tmp, "collection", module)
+        os.makedirs(d)
+        open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
+        row = {"extra": {"killed_count": 8, "survived_count": 2, "no_coverage_count": 1}}
+        open(os.path.join(d, "findings.jsonl"), "w").write(text + json.dumps(row) + "\n")
+    r = _run_driver("index", "--out", tmp)
+    assert r.returncode == 0, r.stdout + r.stderr
+    index = open(os.path.join(tmp, "collection", "index.html")).read()
+    assert "1 modules measured, 3 total survivors, 1 CORRUPT" in index, index

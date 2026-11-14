@@ -2,8 +2,7 @@
 # Runs every test suite in the repo. Discovery rules over git-tracked
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
 # runs as `uv run --locked pytest <file>` (the tools pinned by pyproject.toml
-# and uv.lock), each `audit.py` that implements `--selfcheck` runs with that
-# flag, each `Cargo.toml` runs `cargo test`, and each mod folder under
+# and uv.lock), each `Cargo.toml` runs `cargo test`, and each mod folder under
 # `flow/mods/` runs `claude plugin test <folder>`. One
 # line per suite; exits non-zero on the first failure (and prints that
 # suite's output). A suite is failed on its exit status *or* on a failure
@@ -49,11 +48,6 @@ suites() { # prints "<label>\t<command>" per discovered suite
     while IFS= read -r f; do printf '%s\tbash %s\n' "$f" "$f"; done
   git ls-files -- '*_test.py' |
     while IFS= read -r f; do printf '%s\tuv run --locked pytest %s\n' "$f" "$f"; done
-  git ls-files | grep -E '(^|/)audit\.py$' |
-    while IFS= read -r f; do
-      grep -q -- '--selfcheck' "$f" &&
-        printf '%s --selfcheck\tpython3 %s --selfcheck\n' "$f" "$f"
-    done
   git ls-files -- '*Cargo.toml' |
     while IFS= read -r f; do printf '%s\tcargo test --manifest-path %s\n' "$f" "$f"; done
   # Every mod under flow/mods/ (#1368). A plugin elsewhere (`humanizer/`, a

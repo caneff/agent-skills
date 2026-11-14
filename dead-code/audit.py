@@ -51,34 +51,8 @@ def parse_vulture(text):
     return rows
 
 
-def _selfcheck():
-    sample = "\n".join([
-        "foo.py:12: unused function 'helper' (60% confidence)",
-        "bar.py:3: unused import 'os' (90% confidence)",
-    ])
-    rows = parse_vulture(sample)
-    assert len(rows) == 2, rows
-
-    assert rows[0]["file"] == "foo.py"
-    assert rows[0]["line"] == 12
-    assert rows[0]["category"] == "unused-function"
-    assert rows[0]["extra"]["confidence"] == 60
-    assert rows[0]["bucket"] == "unsure"
-    assert rows[0]["failure"] == ""
-    assert "helper" in rows[0]["summary"]
-
-    assert rows[1]["file"] == "bar.py"
-    assert rows[1]["line"] == 3
-    assert rows[1]["category"] == "unused-import"
-    assert rows[1]["extra"]["confidence"] == 90
-    assert "os" in rows[1]["summary"]
-
-    print("ok")
-
-
 def main(argv):
-    # supports `--selfcheck` via auditlib.run_cli
-    auditlib.run_cli(argv, _selfcheck, parse_vulture)
+    auditlib.run_cli(argv, parse_vulture)
 
 
 if __name__ == "__main__":

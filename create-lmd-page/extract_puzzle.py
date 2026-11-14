@@ -87,18 +87,5 @@ def main():
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
 
-def _selfcheck():
-    assert field("t:'it\\'s here',x:'y'", "t") == "it's here", "escaped quote mid-value"
-    assert field("t:'plain',x:'y'", "t") == "plain", "plain value stops at closing quote"
-    short = "Normal sudoku rules apply.\n\nHit Counts: short clue.\n\nHit Lines: short clue."
-    long = "\n\n".join(f"Rule {i}: " + "word " * 60 for i in range(5))
-    assert layout_hint(short) == "two", "short rules should stay two-column"
-    assert layout_hint(long) == "one", "long rules should drop to one column"
-    print("ok")
-
-
 if __name__ == "__main__":
-    if len(sys.argv) == 2 and sys.argv[1] == "--selfcheck":
-        _selfcheck()
-    else:
-        main()
+    main()

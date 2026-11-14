@@ -49,16 +49,18 @@ instead, with no separate log file:
 `skill-audit` is **not** in the set — it scans the global skills directory, not
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and
 targeted at one module; invoke it by name, or run
-`driver.py --mutation a.py,b.py` for the scripted per-module form. The whole
-repo is a separate explicit ask, never part of this sweep:
-`driver.py --mutation-all` (`mutation-audit/SKILL.md` § Whole-repo mode).
+`driver.py mutation <repo> --modules a.py,b.py` for the scripted per-module
+form. The whole repo is a separate explicit ask, never part of this sweep:
+`driver.py mutation <repo> --all` (`mutation-audit/SKILL.md` § Whole-repo mode).
 Mutation mode runs up to `MUTATION_JOBS` modules at once (default 4). No
 module's run opens its report; the driver opens the mutation index
 (`collection/mutation/index.html`, printed as `index:`) once, when the run
-finishes, and nothing when no page exists. A standalone `/mutation-audit <module>` still opens its own.
-With no value, `--mutation` takes its candidates from `mutation-audit/audit.py
---suggest` (the model's prepass only ranks that list) and orders them never-run
-first, then changed since their recorded sha, then oldest run first, before
+finishes, and nothing when no page exists. A standalone
+`/mutation-audit <module>` still opens its own. With neither `--modules` nor
+`--all`, `mutation` takes its candidates from `mutation-audit/audit.py`'s
+`plan` (the same list `suggest` prints; the model's prepass only ranks that
+list) and orders them never-run first, then changed since their recorded sha,
+then oldest run first, before
 `MUTATION_MAX` cuts. Each finished module is recorded under `mutation_modules`
 in the per-repo cache file.
 
@@ -71,12 +73,16 @@ direct commit to main. Carry this contract into any new audit skill you add here
 ## The runnable sweep — `driver.py`
 
 `driver.py` is the Python orchestrator that runs each guarded audit as its own
-`claude -p "/name"` process and collects the reports. `driver.py --help` is
-the flag reference — argparse prints it from the module docstring, and this
-doc doesn't restate it, so the two can't drift apart. A run is three steps:
-`plan_sweep` asks the staleness cache what still needs running, `execute`
+`claude -p "/name"` process and collects the reports. Each mode is a
+subcommand with only its own flags — `sweep`, `index`, `multi`,
+`multi-index`, `load`, `suggest`, `mutation` — and argparse refuses a flag
+its mode does not take. `driver.py --help` lists the modes, from the module
+docstring, and `driver.py <mode> --help` is that mode's flag reference; this
+doc doesn't restate them, so the two can't drift apart. The stored sweeps and
+their audit records on GitHub belong to `stored_sweeps.py`. A sweep is three
+steps: `plan_sweep` asks the staleness cache what still needs running, `execute`
 spawns the audits (the only step that does), and `collect` assembles the
-collection and renders the index — `--index` calls `collect` alone.
+collection and renders the index — the `index` mode calls `collect` alone.
 `audits_data.py` holds the audit set — adding an audit is one entry there.
 
 **Staleness cache.** The two expensive LLM passes — `domain-drift` and
@@ -94,6 +100,35 @@ last run is within the time backstop (default 30 days).
 **Ignore file.** A repo can carry `.audit-ignore.md` at its root to suppress
 findings it has already reviewed and rejected, so a sweep stops re-raising
 them. Opt-in per repo — see [`harness/IGNORE-FILE.md`](harness/IGNORE-FILE.md).
+
+## Not applicable
+
+`dead-code`, `type-tightness` and `docstring-coverage` read only Python (the
+`python_only` entries of `audits_data.py`). On a repo with no Python source,
+"nothing found" is also what the audit not running produces, so a clean
+report there would be a false pass (#1751). The rule, stated once here:
+
+- **The check.**
+  `python3 ~/.agents/skills/all-audits/harness/auditlib.py --applicable <scope>`
+  prints `applicable` and exits 0, or prints `not applicable: <language>` and
+  exits 3. It counts the files git tracks under `<scope>` (minus vendored and
+  excluded trees), so an untracked stray `.py` or a report folder's `.js`
+  assets never change the answer; a folder outside any git repo is walked
+  instead. A repo with no recognised source at all is `applicable`: with no
+  language to name, the audit runs as before.
+- **Run on its own** (step 0 of each of the three skills): on exit 3 the audit
+  stops there. Write no findings log, and report `not applicable: <language>`
+  as the headline with a manifest `"not_applicable": "<language>"` (count 0).
+  On exit 0, go on.
+- **In a sweep.** `plan_sweep` asks once per sweep and `run_one` starts no
+  `claude` process for the audits it rules out: it writes that manifest, a
+  one-line report and a `not-applicable.txt` beside the report naming the
+  language. Every index built over the collection (a sweep, `index --out`,
+  `load`) reads that file, so the Status column says `NOT APPLICABLE:
+  <language>` beside "open report", never an empty Status that reads as a
+  clean pass, and the report is never cached as a clean result. The smoke
+  test is the first audit that starts `claude`; when none does, there is no
+  smoke test and the sweep says so.
 
 ## Run
 
@@ -117,7 +152,7 @@ When you are invoked in-session as `/all-audits [path]`:
    the three structural audits.
 
 2. **Run the script in the background.** Run
-   `driver.py [--short] <repo>`. It does the fan-out, the collection, the
+   `driver.py sweep [--short] <repo>`. It does the fan-out, the collection, the
    `index.html`, and the lede. It reports only — it applies nothing and opens no
    PR. Do not fan out subagents yourself and do not invoke any audit through the
    `Skill` tool; that is the broken path this replaces.
@@ -133,7 +168,7 @@ When you are invoked in-session as `/all-audits [path]`:
 
 Sweeps several owned repos in one background run. Each repo is swept from a
 fresh worktree of its `origin/main`, one after another, and stored under
-`~/.local/share/all-audits/<repo>/<sweep-id>/` (`driver.py --multi`). One page,
+`~/.local/share/all-audits/<repo>/<sweep-id>/` (`driver.py multi`). One page,
 `~/.local/share/all-audits/multi/<sweep-id>/index.html`, links every repo's
 sweep: the pass rewrites it after each repo finishes, so it is also the pass's
 progress page, and opens it once at the end. No repo's own index opens during
@@ -141,7 +176,7 @@ the pass. The pass prints its path first, as `multi-repo index (rewritten as
 each repo finishes): <path>`, and last, as `index: <path>`.
 
 1. **Pick the repos.** With paths, use them and skip the ask. With none, run
-   `driver.py --suggest`. It prints one `suggest: <path>` line per owned repo
+   `driver.py suggest`. It prints one `suggest: <path>` line per owned repo
    with a PR you authored in the last 14 days and a local checkout directly
    under `~/src` or `~/.agents` (`--roots DIR,DIR` changes where it looks), and one `skipped:
    <owner/name> (no local checkout)` line per repo with recent PRs and no
@@ -151,7 +186,7 @@ each repo finishes): <path>`, and last, as `index: <path>`.
    `skipped:` repos, and take the user's final list. This is the only
    question of the run.
 3. **Launch it under `job-run`, then end the turn.**
-   `job-run --name all-audits-multi -- driver.py --multi <path> <path>…`.
+   `job-run --name all-audits-multi -- driver.py multi <path> <path>…`.
    Do not poll or sleep; the job's completion wakes the session.
 4. **On wake, report from the page.** Read the pass's `index:` line, the last
    line of the job's progress (`job-run --status all-audits-multi`), and give
@@ -165,7 +200,7 @@ each repo finishes): <path>`, and last, as `index: <path>`.
    asks, re-run that repo with `--force`: it bypasses the staleness cache for
    the repo's audits too (fresh results) and the new record links the open one.
    A pass with no page (one started before the page existed, or a page
-   deleted) gets one from `driver.py --multi-index <sweep-id>`, which runs no
+   deleted) gets one from `driver.py multi-index <sweep-id>`, which runs no
    `claude` and prints `index: <path>`.
 
 ## Triage — `/all-audits triage <issue>`
@@ -173,7 +208,7 @@ each repo finishes): <path>`, and last, as `index: <path>`.
 Opens a saved audit by its audit record's issue number, walks the user through
 deciding on each problem, files what they accept, and closes the record.
 
-1. **Load.** Run `driver.py --load <issue> [repo-name]`. It finds the stored
+1. **Load.** Run `driver.py load <issue> [repo-name]`. It finds the stored
    sweep whose `audit-record.json` names that issue, rebuilds its collection
    and `index.html` as it was swept (failed and unchanged audits keep their
    notes, and no `claude` runs), and prints `stored: <dir>`, `repo:
@@ -192,7 +227,7 @@ deciding on each problem, files what they accept, and closes the record.
    grill filed (links), or saying none were filed, then close it:
    `gh issue comment <issue> --repo <owner/name> --body-file …` and
    `gh issue close <issue> --repo <owner/name>`.
-   Closing is what lets `--multi` sweep that repo again, and what frees the
+   Closing is what lets `multi` sweep that repo again, and what frees the
    stored sweep for deletion. If the grill stopped before the confirmation, close
    nothing: the record stays open and `triage pending`.
 

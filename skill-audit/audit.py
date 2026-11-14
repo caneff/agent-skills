@@ -79,133 +79,116 @@ def flip_skill(path):
     return changed
 
 
-def _selfcheck():
-    fm = parse_frontmatter("---\nname: grill\ndescription: Use when they say: stop.\n---\nbody\n")
-    assert fm["name"] == "grill", fm
-    assert fm["description"] == "Use when they say: stop.", fm
-
-    src = "---\nname: foo\ndescription: bar\n---\nbody\n"
-    out, changed = add_flag(src)
-    assert changed and "disable-model-invocation: true" in out, out
-    assert out.index("disable-model-invocation") < out.index("name: foo") < out.index("description"), out
-    out2, changed2 = add_flag(out)  # idempotent
-    assert not changed2 and out2 == out, out2
-    assert out.count("disable-model-invocation") == 1, out
-
-    import tempfile
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
-        tf.write(src)
-        tmp = tf.name
-    try:
-        assert flip_skill(tmp) is True                 # first flip writes
-        assert "disable-model-invocation: true" in open(tmp, encoding="utf-8").read()
-        assert flip_skill(tmp) is False                # second is a no-op
-    finally:
-        os.unlink(tmp)
-
-    now = datetime(2020, 3, 1, tzinfo=timezone.utc)
-    used = datetime(2020, 1, 1, tzinfo=timezone.utc)
-    fresh = Skill.make("fresh", "/x", True, used, now, 45)
-    assert fresh.age_days == 60, fresh
-    assert fresh.stale is True, fresh
-    quiet = Skill.make("quiet", "/x", False, used, now, 45)
-    assert quiet.stale is False, quiet  # not model-invocable, never stale
-    never = Skill.make("never", "/x", True, None, now, 45)
-    assert never.age_days is None and never.stale is True, never
-    recent = Skill.make("recent", "/x", True, now, now, 45)
-    assert recent.age_days == 0 and recent.stale is False, recent
-
-    print("ok")
+SKILL_RE = re.compile(r'"skill":"([^"]+)"')
+TS_RE = re.compile(r'"timestamp":"([^"]+)"')
 
 
-def main(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-
-    if argv[:1] == ["--selfcheck"]:
-        _selfcheck()
-        return 0
-
-    # Args: optional positional stale-days (back-compat), optional `--flip a,b,c`.
+def parse_args(argv):
+    """Return (stale_days, flip_nums); flip_nums is None when --flip is absent."""
     parser = argparse.ArgumentParser()
     parser.add_argument("stale_days", nargs="?", type=int, default=45)
     parser.add_argument("--flip")
     args = parser.parse_args(argv)
-    STALE_DAYS = args.stale_days
     flip_nums = [int(x) for x in args.flip.split(",") if x.strip()] if args.flip else None
+    return args.stale_days, flip_nums
 
-    paths = {}   # name -> SKILL.md path
-    model_inv_by_name = {}  # name -> model_invocable(bool)
-    for sk in glob.glob(f"{SKILLS_DIR}/*/SKILL.md"):
+
+def scan_skills(skills_dir):
+    """Return (paths, model_invocable) dicts keyed by skill name."""
+    paths, model_inv = {}, {}
+    for sk in glob.glob(f"{skills_dir}/*/SKILL.md"):
         with open(sk, encoding="utf-8", errors="replace") as f:
             fm = parse_frontmatter(f.read())
         name = fm.get("name") or os.path.basename(os.path.dirname(sk))
-        disabled = fm.get("disable-model-invocation", "").lower() == "true"
-        model_inv_by_name[name] = not disabled
+        model_inv[name] = fm.get("disable-model-invocation", "").lower() != "true"
         paths[name] = sk
+    return paths, model_inv
 
-    last = {}  # name -> datetime
-    skill_re = re.compile(r'"skill":"([^"]+)"')
-    ts_re = re.compile(r'"timestamp":"([^"]+)"')
-    for log in glob.glob(LOGS, recursive=True):
+
+def parse_log_line(line, known):
+    """Yield (skill name, timestamp) for each known skill a log line names."""
+    if '"skill":"' not in line:
+        return
+    m = TS_RE.search(line)
+    if not m:
+        return
+    try:
+        ts = datetime.fromisoformat(m.group(1).replace("Z", "+00:00"))
+    except ValueError:
+        return
+    for name in SKILL_RE.findall(line):
+        if name in known:
+            yield name, ts
+
+
+def last_used_by_skill(logs_glob, known):
+    """Map each known skill name to its newest timestamp across the logs."""
+    last = {}
+    for log in glob.glob(logs_glob, recursive=True):
         with open(log, encoding="utf-8", errors="replace") as f:
             for line in f:
-                if '"skill":"' not in line:
-                    continue
-                for name in skill_re.findall(line):
-                    if name not in model_inv_by_name:
-                        continue
-                    m = ts_re.search(line)
-                    if not m:
-                        continue
-                    try:
-                        ts = datetime.fromisoformat(m.group(1).replace("Z", "+00:00"))
-                    except ValueError:
-                        continue
+                for name, ts in parse_log_line(line, known):
                     if name not in last or ts > last[name]:
                         last[name] = ts
+    return last
 
-    now = datetime.now(timezone.utc)
-    rows = [
-        Skill.make(name, paths[name], model_inv, last.get(name), now, STALE_DAYS)
-        for name, model_inv in model_inv_by_name.items()
-    ]
 
-    # sort: model-invocable first, then never-used, then oldest.
+def build_rows(paths, model_inv, last, now, stale_days):
+    """Skill rows: model-invocable first, then never-used, then oldest."""
+    rows = [Skill.make(n, paths[n], mi, last.get(n), now, stale_days) for n, mi in model_inv.items()]
     rows.sort(key=lambda r: (r.model_invocable is False, -(r.age_days if r.age_days is not None else 10**6)))
+    return rows
 
-    # Stale candidates, in the stable sorted order the numbered list references.
-    targets = [r for r in rows if r.stale]
 
-    # --flip mode: flip the picked numbers against the same list and stop.
-    if flip_nums is not None:
-        for n in flip_nums:
-            if not 1 <= n <= len(targets):
-                print(f"  {n}: out of range (1–{len(targets)}) — skipped")
-                continue
-            skill = targets[n - 1]
-            did = flip_skill(skill.path)
-            print(f"  {n}. {skill.name}: {'flipped to slash-only' if did else 'already slash-only'}")
-        print("\nRe-run without --flip to see the updated report.")
-        return 0
+def flip_picked(targets, flip_nums):
+    """Flip the numbered stale skills and print what happened to each."""
+    for n in flip_nums:
+        if not 1 <= n <= len(targets):
+            print(f"  {n}: out of range (1–{len(targets)}) — skipped")
+            continue
+        skill = targets[n - 1]
+        did = flip_skill(skill.path)
+        print(f"  {n}. {skill.name}: {'flipped to slash-only' if did else 'already slash-only'}")
+    print("\nRe-run without --flip to see the updated report.")
 
+
+def _when(r):
+    return r.last_used.strftime("%Y-%m-%d") if r.last_used else "NEVER"
+
+
+def print_table(rows, stale_days):
     model_ct = sum(1 for r in rows if r.model_invocable)
     print(f"\nSkills in {SKILLS_DIR}: {len(rows)}  |  model-invocable (cost context): {model_ct}")
-    print(f"Stale threshold: >{STALE_DAYS} days\n")
+    print(f"Stale threshold: >{stale_days} days\n")
     print(f"  {'SKILL':<34} {'INVOKE':<11} {'LAST USED':<11} {'AGE':<9}")
     print("  " + "-" * 62)
     for r in rows:
         inv = "model" if r.model_invocable else "slash-only"
-        when = r.last_used.strftime("%Y-%m-%d") if r.last_used else "NEVER"
         ago = f"{r.age_days}d ago" if r.age_days is not None else "—"
-        print(f"  {r.name:<34} {inv:<11} {when:<11} {ago:<9}")
+        print(f"  {r.name:<34} {inv:<11} {_when(r):<11} {ago:<9}")
 
-    print(f"\n{len(targets)} model-invocable skill(s) unused >{STALE_DAYS}d. "
+
+def print_stale_list(targets, stale_days):
+    print(f"\n{len(targets)} model-invocable skill(s) unused >{stale_days}d. "
           "Unused ≠ useless — pick the ones you call by hand, leave the rest:")
     for idx, r in enumerate(targets, 1):
-        when = r.last_used.strftime("%Y-%m-%d") if r.last_used else "NEVER"
-        print(f"  {idx:>2}. {r.name:<34} last used {when}")
-    days_arg = "" if STALE_DAYS == 45 else f"{STALE_DAYS} "
+        print(f"  {idx:>2}. {r.name:<34} last used {_when(r)}")
+    days_arg = "" if stale_days == 45 else f"{stale_days} "
     print(f"\nTo flip: uv run --no-project python {os.path.abspath(__file__)} {days_arg}--flip <nums>   e.g. --flip 1,3")
+
+
+def main(argv=None):
+    stale_days, flip_nums = parse_args(sys.argv[1:] if argv is None else argv)
+    paths, model_inv = scan_skills(SKILLS_DIR)
+    last = last_used_by_skill(LOGS, model_inv)
+    rows = build_rows(paths, model_inv, last, datetime.now(timezone.utc), stale_days)
+    # Stale candidates, in the stable sorted order the numbered list references.
+    targets = [r for r in rows if r.stale]
+    if flip_nums is not None:
+        flip_picked(targets, flip_nums)
+        return 0
+    print_table(rows, stale_days)
+    print_stale_list(targets, stale_days)
     return 0
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Guards the discovery rules in tests/all.sh: every suite below is found by
-# one of the three rules, not by a name the runner special-cases. Asserts on
+# one of the discovery rules, not by a name the runner special-cases. Asserts on
 # `all.sh --list` rather than a full run — the list IS the seam (#609).
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
@@ -14,7 +14,9 @@ for label in \
   "flow/ccstatusline-table/statusline.test.sh" \
   "all-audits/driver_test.py" \
   "crap-audit/audit_test.py" \
-  "mutation-audit/audit.py --selfcheck" \
+  "all-audits/harness/auditlib_test.py" \
+  "create-lmd-page/extract_puzzle_test.py" \
+  "mutation-audit/audit_test.py" \
   "flow/lane/Cargo.toml" \
   "flow/mods/agent-model" \
   "exa-search-hook"

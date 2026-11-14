@@ -128,6 +128,12 @@ value = external_api.fetch()  # type: ignore[no-any-return]  # boundary — SDK 
 
 ## Run
 
+0. **Python only.** First run
+   `python3 ~/.agents/skills/all-audits/harness/auditlib.py --applicable <scope>`
+   and follow ~/.agents/skills/all-audits/SKILL.md § Not applicable: exit 3
+   means this audit stops there and reports `not applicable: <language>`;
+   exit 0, go on.
+
 1. **Scope.** Audit `$ARGUMENTS` if given; with no argument, scope defaults
    per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Skip vendored, generated, and dependency trees
    (`node_modules`, `dist`, `.venv`, build output, lockfiles) and any

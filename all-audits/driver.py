@@ -8,25 +8,22 @@ run-audits.sh's original header comment for why: several audit skills carry
 gets past the guard — a subagent fan-out would silently lose them), collects
 the report folders under one `collection/` dir, and builds `index.html`.
 
-A run is three steps: plan (ask the staleness cache what still needs a run),
+A sweep is three steps: plan (ask the staleness cache what still needs a run),
 execute (the only step that spawns audits), collect (assemble the collection
-and render the index). `--index` calls collect alone.
+and render the index). The `index` mode calls collect alone.
 
 Environment: `SWEEP_JOBS` (#1666) caps how many audits a sweep runs at once
 after the smoke test (a positive integer, default 4; anything else exits 2
 before any audit starts). `MUTATION_JOBS` (#1588) does the same for the
-modules of a `--mutation` run (default 4).
+modules of a `mutation` sweep (default 4).
 """
 import argparse
 import collections
-import concurrent.futures
 import concurrent.futures
 import dataclasses
 import datetime as _dt
 import hashlib
 import html
-import importlib.util
-import glob
 import json
 import os
 import re
@@ -37,9 +34,19 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
-from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
+from audits_data import AUDIT_NAMES, GATED, PYTHON_ONLY, SHORT_SET  # noqa: E402
+import auditlib  # noqa: E402
 import pagelib  # noqa: E402
 import audit_record  # noqa: E402
+import findings_log  # noqa: E402
+import mutation_run  # noqa: E402
+from procs import claude_env, scrubbed_env, run as _run  # noqa: E402
+from stored_sweeps import (  # noqa: E402
+    MULTI_DIR, OWNER, RECORD_FILE, earlier_record, file_audit_record, find_stored_sweep, label_refusal,
+    latest_record_url, prune_closed_sweeps, record_repo, repo_identity, repo_sweep_dirs, resume_unposted,
+    stored_sweeps_base, triage_label, write_json,
+)
+from mutation_run import parse_utc  # noqa: E402
 
 DEFAULT_THRESHOLD = 10
 DEFAULT_BACKSTOP_DAYS = 30
@@ -124,35 +131,6 @@ def _record_file(repo, base=None):
     return os.path.join(base or cache_base(), repo_key(repo) + ".json")
 
 
-# Git reads these ahead of any `-C` or path argument, so a caller's leaked
-# GIT_DIR (a shell export, a git hook's environment) silently redirects every
-# git call at that repo instead of the one the driver was handed (#625).
-GIT_REDIRECT_VARS = (
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-)
-
-
-def scrubbed_env():
-    """The current environment minus the git-redirecting variables (#625).
-    Every child the driver spawns gets at least this — `claude` and `uv` run
-    git of their own inside a worktree, so they must not inherit the leak
-    either."""
-    return {k: v for k, v in os.environ.items() if k not in GIT_REDIRECT_VARS}
-
-
-def claude_env():
-    """`scrubbed_env` plus an unlimited `claude -p` background-task wait
-    (#1278): an audit fans out shards that outlive `claude -p`'s 600 s
-    default wait ceiling, which terminates the process with no report; `0`
-    waits forever."""
-    return {**scrubbed_env(), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
-
-
-def _run(cmd, cwd=None, env=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False, env=env or scrubbed_env())
-
-
 def git_state(repo, last_sha):
     dirty = bool(_run(["git", "-C", repo, "status", "--porcelain"]).stdout.strip())
     changed = []
@@ -169,12 +147,6 @@ def git_state(repo, last_sha):
 
 def head_sha(repo):
     return _run(["git", "-C", repo, "rev-parse", "HEAD"]).stdout.strip()
-
-
-def parse_utc(timestamp):
-    """An ISO timestamp as an aware datetime; a naive one is read as UTC."""
-    then = _dt.datetime.fromisoformat(timestamp)
-    return then if then.tzinfo else then.replace(tzinfo=_dt.timezone.utc)
 
 
 def now_iso():
@@ -230,108 +202,13 @@ def update_cache(repo, name, report_dir, base=None, key=None):
 
 # --- mutation recency: what each module's last mutation run covered (#1567) --
 
-MUTATION_KEY = "mutation_modules"
-_EPOCH = _dt.datetime.min.replace(tzinfo=_dt.timezone.utc)
-
-
-def mutation_runs(record):
-    """The {module: {sha, date}} part of a cache record; a missing or
-    non-dict value is no recorded runs."""
-    runs = record.get(MUTATION_KEY)
-    return runs if isinstance(runs, dict) else {}
-
-
 def record_mutation(repo, module, base=None):
     """Stamp `module` as mutation-run at HEAD now, beside the audit records
-    in the same per-repo cache file. The key is the repo-relative path, so
-    `./a.py` and `a.py` are one module."""
+    in the same per-repo cache file."""
     path = _record_file(repo, base)
     record = load_record(path)
-    runs = mutation_runs(record)
-    runs[os.path.normpath(module)] = {"sha": head_sha(repo), "date": now_iso()}
-    record[MUTATION_KEY] = runs
+    mutation_run.stamp(record, module, head_sha(repo), now_iso())
     save_record(path, record)
-
-
-def _load_audit(here):
-    """`mutation-audit/audit.py` as a module, for its sibling-test rule."""
-    spec = importlib.util.spec_from_file_location(
-        "mutation_audit_probe", os.path.join(here, "..", "mutation-audit", "audit.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def mutation_changed(repo, runs, here=None):
-    """The modules in `runs` ({module: {sha, date}}) whose file or sibling
-    test differs between their recorded sha and HEAD. A sha git cannot
-    resolve, or no recorded sha, proves nothing, so it reads as changed,
-    never as unchanged."""
-    sibling_tests = _load_audit(here or os.path.dirname(os.path.abspath(__file__)))._sibling_tests
-    changed = set()
-    for module, entry in runs.items():
-        sha = entry.get("sha") if isinstance(entry, dict) else None
-        if not sha:
-            changed.add(module)
-            continue
-        paths = [module, *sorted(sibling_tests(module) or ())]
-        r = _run(["git", "-C", repo, "diff", "--quiet", f"{sha}..HEAD", "--", *paths])
-        if r.returncode != 0:
-            changed.add(module)
-    return changed
-
-
-def _run_date(entry):
-    """The run date of a record entry as an aware datetime, or None for an
-    entry with no readable date — which orders as never run."""
-    try:
-        return parse_utc(entry["date"])
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
-def order_mutation_targets(candidates, rank, record, changed):
-    """Pure: the candidates in the order mutation mode should run them.
-
-    candidates: [module]; rank: [module] in the prepass's order (may be
-    empty); record: {module: {sha, date}}; changed: {module} changed since its
-    recorded sha. Never-run first, then changed since their sha, then oldest
-    run first; the prepass rank breaks ties inside a group, unranked last.
-    Recency outranks risk, and nothing is dropped.
-    """
-    position = {m: i for i, m in enumerate(rank)}
-    dates = {m: _run_date(record.get(m)) for m in candidates}
-
-    def key(m):
-        tie = (position.get(m, len(position)), m)
-        if dates[m] is None:
-            return (0, _EPOCH, *tie)
-        if m in changed:
-            return (1, _EPOCH, *tie)
-        return (2, dates[m], *tie)
-
-    return sorted(candidates, key=key)
-
-
-def parse_mutation_rank(stdout, candidates):
-    """The prepass's printed lines kept only when they name a candidate, each
-    once, in printed order. A line outside the list is dropped."""
-    allowed = set(candidates)
-    return list(dict.fromkeys(
-        line for line in map(str.strip, stdout.splitlines()) if line in allowed))
-
-
-def suggest_mutation_candidates(repo, here):
-    """The modules `mutation-audit/audit.py --suggest` names. A probe that
-    crashes or prints unparseable output raises: no answer is not "no
-    candidates"."""
-    r = _run(["python3", os.path.join(here, "..", "mutation-audit", "audit.py"), "--suggest", repo])
-    if r.returncode != 0:
-        raise RuntimeError(f"audit.py --suggest exited {r.returncode}: {r.stderr.strip()}")
-    try:
-        return [json.loads(ln)["candidate"] for ln in r.stdout.splitlines() if ln.strip()]
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        raise RuntimeError(f"audit.py --suggest printed unparseable output: {e}") from e
 
 
 # --- filesystem / prompt helpers (ported from run-audits.sh) ----------------
@@ -411,8 +288,8 @@ def write_setup_failure_report(collection_dir, module, reason):
             body=f'<div class="vt-callout bad">{html.escape(reason)}</div>\n',
             prefix="../",
         ))
-    with open(os.path.join(d, "findings.jsonl"), "w", encoding="utf-8") as f:
-        f.write(json.dumps({"status": "setup_failure", "module": module, "reason": reason}) + "\n")
+    findings_log.write(os.path.join(d, "findings.jsonl"),
+                       [{"status": "setup_failure", "module": module, "reason": reason}])
 
 
 def manifest_path_for(manifests_dir, name):
@@ -508,8 +385,8 @@ def record_inconclusive(manifests_dir, name, collection_dir):
 
 
 def clear_manifest(manifest):
-    """`--out` accumulates: an earlier run's manifest would otherwise prove
-    this run succeeded (#1278)."""
+    """`--out` accumulates: an earlier sweep's manifest would otherwise prove
+    this sweep succeeded (#1278)."""
     if os.path.exists(manifest):
         os.remove(manifest)
 
@@ -524,15 +401,56 @@ def report_failure(label, reason, log_path):
     print(f"[{label}] FAILED: {reason} — see {log_path}")
 
 
-def run_one(name, repo, outlogs, manifests_dir):
+NOT_APPLICABLE_FILE = "not-applicable.txt"
+
+
+def write_not_applicable(name, language, manifest):
+    """Write the manifest and one-line report of an audit that does not apply
+    here (all-audits/SKILL.md, Not applicable). The manifest carries
+    `not_applicable` (the language) and no findings log, so no reader takes it
+    for an audit that found nothing; `NOT_APPLICABLE_FILE` beside the report
+    carries the language into the collection, where every index reads it."""
+    report_dir = os.path.join(os.path.dirname(manifest), "report")
+    os.makedirs(report_dir, exist_ok=True)
+    report = os.path.join(report_dir, "report.html")
+    with open(report, "w", encoding="utf-8") as f:
+        f.write(pagelib.page(title=f"{name}: not applicable", kicker=name,
+                             h1=f"NOT APPLICABLE: {html.escape(language)}",
+                             lede=f"{name} reads Python source and this repo has none; it did not run.", body="",
+                             prefix="../"))  # collected as collection/<name>/report.html, assets one up
+    with open(os.path.join(report_dir, NOT_APPLICABLE_FILE), "w", encoding="utf-8") as f:
+        f.write(language)
+    with open(manifest, "w", encoding="utf-8") as f:
+        json.dump({"report_path": report, "count": 0, "headline": f"not applicable: {language}",
+                   "not_applicable": language}, f)
+
+
+def collected_not_applicable(collection, name):
+    """The language `name`'s collected report was ruled not applicable for,
+    or None when it ran (or has no report)."""
+    path = os.path.join(collection, name, NOT_APPLICABLE_FILE)
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read().strip() or "unknown language"
+
+
+def run_one(name, repo, outlogs, manifests_dir, not_applicable=None):
     """Run one audit. Returns None on success, else the failure reason —
     a nonzero `claude` exit, no manifest or a manifest naming a missing
-    report (#1278, #1292); `done` prints only on success."""
+    report (#1278, #1292); `done` prints only on success. With
+    `not_applicable` (a language, from the plan) no `claude` starts."""
     print(f"[{name}] starting")
     log_path = os.path.join(outlogs, f"{name}.log")
     manifest = manifest_path_for(manifests_dir, name)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
     clear_manifest(manifest)
+    if not_applicable:
+        write_not_applicable(name, not_applicable, manifest)
+        with open(log_path, "w", encoding="utf-8") as log:
+            log.write(f"not applicable: {not_applicable}\n")
+        print(f"[{name}] not applicable: {not_applicable}")
+        return None
     with open(log_path, "w", encoding="utf-8") as log:
         r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=claude_env())
     reason = audit_failure(r.returncode, lambda: manifest_failure(manifests_dir, name))
@@ -565,6 +483,7 @@ class IndexModel:
     mutation_modules: list = dataclasses.field(default_factory=list)
     mutation_survivors_sum: int = 0
     mutation_inconclusive: int = 0
+    mutation_corrupt: int = 0
     notest_count: int = 0
     notest_error: str = None
 
@@ -580,10 +499,12 @@ def build_index(model):
         else:
             out.append(f'<tr><td>{name}</td><td style="color:var(--vt-muted)">no report</td><td>{note}</td></tr>\n')
     if model.mutation_modules or model.notest_count > 0 or model.notest_error:
-        measured = len(model.mutation_modules) - model.mutation_inconclusive
+        measured = len(model.mutation_modules) - model.mutation_inconclusive - model.mutation_corrupt
         verdict = f"{measured} modules measured, {model.mutation_survivors_sum} total survivors"
         if model.mutation_inconclusive:
             verdict += f", {model.mutation_inconclusive} INCONCLUSIVE (not measured)"
+        if model.mutation_corrupt:
+            verdict += f", {model.mutation_corrupt} CORRUPT (findings.jsonl unreadable, not measured)"
         if model.notest_error:
             verdict += " · no-tests count could not be determined"
         elif model.notest_count > 0:
@@ -610,24 +531,6 @@ def inconclusive_reason(collection, base):
         return f.read().strip() or "no reason recorded"
 
 
-def mutation_tally(findings_jsonl):
-    if not os.path.exists(findings_jsonl):
-        return None
-    for line in open(findings_jsonl, encoding="utf-8"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            extra = (json.loads(line) or {}).get("extra") or {}
-        except json.JSONDecodeError:
-            continue
-        keys = {"killed_count", "survived_count", "no_coverage_count"}
-        if keys <= extra.keys():
-            k, s, n = extra["killed_count"], extra["survived_count"], extra["no_coverage_count"]
-            return k, k + s + n, s, n
-    return None
-
-
 def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error=None):
     d = os.path.join(collection, "mutation")
     os.makedirs(d, exist_ok=True)
@@ -644,11 +547,14 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
         out.append('<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">\n')
         out.append("<thead><tr><th>Module</th><th>Killed/total</th><th>Weak-assertion</th><th>No-coverage</th><th>Report</th></tr></thead><tbody>\n")
         for base in mutation_modules:
-            tally_row = mutation_tally(os.path.join(collection, base, "findings.jsonl"))
+            tally_row, corrupt = _mutation_tally(collection, base)
             why = inconclusive_reason(collection, base)
             if why is not None:
                 inconclusive.append(base)
                 tally = f"INCONCLUSIVE: {html.escape(why)}"
+                weak = nocov = "—"
+            elif corrupt:
+                tally = f"CORRUPT: findings.jsonl line {corrupt[0][0]} is not a JSON object"
                 weak = nocov = "—"
             elif tally_row:
                 k, t, s, n = tally_row
@@ -708,7 +614,7 @@ class RunDir:
         os.makedirs(base, exist_ok=True)
         root = os.path.abspath(out) if out else os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
         # Prune only after `--out` is resolved, and never the run being asked
-        # for: `--index --out <old run>` must index it, not delete it.
+        # for: `index --out <old run>` must index it, not delete it.
         cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
         for entry in os.listdir(base):
             p = os.path.join(base, entry)
@@ -741,10 +647,12 @@ class Plan:
     reused: dict = dataclasses.field(default_factory=dict)
     skip_note: dict = dataclasses.field(default_factory=dict)
     skip_sha: dict = dataclasses.field(default_factory=dict)
+    not_applicable: dict = dataclasses.field(default_factory=dict)  # {audit: language} (#1751)
 
 
 def plan_sweep(repo, selected, force, base=None, key=None):
-    """Ask the staleness cache which of `selected` still needs a run."""
+    """Ask the staleness cache which of `selected` still needs a run, and
+    which of those read only Python on a repo that has none."""
     base = base or cache_base()
     plan = Plan()
     for name in selected:
@@ -759,6 +667,10 @@ def plan_sweep(repo, selected, force, base=None, key=None):
                     continue
                 print(f"[{name}] cache says skip but cached report is gone — running fresh")
         plan.to_run.append(name)
+    python_only = [n for n in plan.to_run if n in PYTHON_ONLY]
+    language = auditlib.not_applicable(repo) if python_only else None  # once per sweep
+    if language:
+        plan.not_applicable = {n: language for n in python_only}
     return plan
 
 
@@ -792,24 +704,33 @@ def execute(repo, plan, run, jobs):
     """
     if not plan.to_run:
         return []
-    smoke = plan.to_run[0]
-    print(f"== smoke test: {smoke} ==")
-    failed = [smoke] if run_one(smoke, repo, run.logs, run.manifests) else []
-    log_text = open(os.path.join(run.logs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
-    if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
-        print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
-        sys.exit(1)
-    print("smoke test passed; fanning out the rest\n" if not failed else f"smoke audit {smoke} failed (not the guard); fanning out the rest anyway\n")
-    rest = plan.to_run[1:]
+
+    def one(name):
+        return run_one(name, repo, run.logs, run.manifests, plan.not_applicable.get(name))
+
+    # The smoke audit must spawn `claude`, or it proves nothing about the guard (#1751).
+    smoke = next((n for n in plan.to_run if n not in plan.not_applicable), None)
+    failed = []
+    if smoke is None:
+        print("== no smoke test: no planned audit starts claude ==")
+    else:
+        print(f"== smoke test: {smoke} ==")
+        failed = [smoke] if one(smoke) else []
+        log_text = open(os.path.join(run.logs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
+        if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
+            print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
+            sys.exit(1)
+        print("smoke test passed; fanning out the rest\n" if not failed else f"smoke audit {smoke} failed (not the guard); fanning out the rest anyway\n")
+    rest = [n for n in plan.to_run if n != smoke]
     if rest:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(rest))) as ex:
-            results = list(ex.map(lambda n: run_one(n, repo, run.logs, run.manifests), rest))
+            results = list(ex.map(one, rest))
         failed += [n for n, reason in zip(rest, results) if reason]
     return failed
 
 
 MutationScan = collections.namedtuple(
-    "MutationScan", "modules survivors_sum inconclusive notest_modules notest_total notest_error")
+    "MutationScan", "modules survivors_sum inconclusive corrupt notest_modules notest_total notest_error")
 
 
 def scan_mutation(collection):
@@ -823,11 +744,15 @@ def scan_mutation(collection):
         if os.path.isfile(os.path.join(d, "findings.jsonl")) or os.path.isfile(inconclusive_path(collection, entry)):
             mutation_modules.append(entry)
 
-    survivors_sum = 0
+    survivors_sum, corrupt = 0, 0
     inconclusive = sum(1 for b in mutation_modules if inconclusive_reason(collection, b) is not None)
     for base_name in mutation_modules:
-        tally = mutation_tally(os.path.join(collection, base_name, "findings.jsonl"))
-        if tally:
+        if inconclusive_reason(collection, base_name) is not None:
+            continue
+        tally, bad_lines = _mutation_tally(collection, base_name)
+        if bad_lines:  # the sub-index shows it CORRUPT: not measured, its survivors not counted
+            corrupt += 1
+        elif tally:
             _, _, s, n = tally
             survivors_sum += s + n
 
@@ -843,7 +768,7 @@ def scan_mutation(collection):
                 notest_modules = d.get("no_tests", [])
         except (json.JSONDecodeError, OSError):
             notest_error = "no-tests probe wrote unparseable output"
-    return MutationScan(mutation_modules, survivors_sum, inconclusive, notest_modules, notest_total, notest_error)
+    return MutationScan(mutation_modules, survivors_sum, inconclusive, corrupt, notest_modules, notest_total, notest_error)
 
 
 def render_mutation_subindex(collection, repo, mut):
@@ -870,7 +795,7 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
 
     Reports arrive two ways — through the manifest each audit that ran wrote,
     or copied from the cache for a skipped one — and this is the only step
-    that reads either. Returns the index path. `--index` calls it directly
+    that reads either. Returns the index path. The `index` mode calls it directly
     over an existing collection, which is why it never touches the run
     branch: an empty `Plan` collects a finished folder just as well.
     """
@@ -889,18 +814,23 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
         if reason:
             manifest_note[name] = reason
             continue
+        if collected_not_applicable(collection, name):  # never cached as a clean result
+            continue
         if name in GATED:
             os.makedirs(stable, exist_ok=True)
             replace_dir(os.path.join(collection, name), os.path.join(stable, name))
             update_cache(repo, name, os.path.join(stable, name), base=base, key=key)
 
+    # Read from the collection, not the plan, so `index --out` and `load` show it too.
+    na_note = {n: f"NOT APPLICABLE: {lang}" for n in AUDIT_NAMES
+               if (lang := collected_not_applicable(collection, n))}
     report_link = report_links(collection)
     mut = scan_mutation(collection)
 
     report_files = [os.path.join(collection, report_link[n]) for n in AUDIT_NAMES if report_link[n]]
     synthesis = ""
     synthesis_path = os.path.join(collection, SYNTHESIS_FILE)
-    if reuse_synthesis:  # `--load` (#1678): the stored synthesis as it was, no new `claude` call
+    if reuse_synthesis:  # `load` (#1678): the stored synthesis as it was, no new `claude` call
         if os.path.isfile(synthesis_path):
             synthesis = open(synthesis_path, encoding="utf-8").read()
     elif os.environ.get("AUDITS_NO_SYNTH", "0") != "1" and report_files:
@@ -922,11 +852,12 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
         collection=collection,
         repo=repo,
         report_link=report_link,
-        skip_note={**plan.skip_note, **manifest_note},
+        skip_note={**plan.skip_note, **na_note, **manifest_note},
         synthesis=synthesis,
         mutation_modules=mut.modules,
         mutation_survivors_sum=mut.survivors_sum,
         mutation_inconclusive=mut.inconclusive,
+        mutation_corrupt=mut.corrupt,
         notest_count=len(mut.notest_modules),
         notest_error=mut.notest_error,
     ))
@@ -963,7 +894,7 @@ class SweepResult:
 
 def run_sweep(repo, out, only, short, force, key=None, standalone=True):
     """Plan, execute and collect one sweep. Standalone, it prints its index as
-    `index:` and opens it; one repo of a `--multi` pass prints `repo index:`
+    `index:` and opens it; one repo of a `multi` pass prints `repo index:`
     and opens nothing, since the pass's own page is its `index:` (#1721).
     Returns what happened: the audit record (#1680) is built from it."""
     repo = os.path.abspath(repo)
@@ -980,7 +911,7 @@ def run_sweep(repo, out, only, short, force, key=None, standalone=True):
 
 
 def sweep(repo, out, only, short, force):
-    prune_closed_sweeps()
+    prune_closed_sweeps(RUN_TTL_DAYS)
     failed = run_sweep(repo, out, only, short, force).failed
     if failed:
         print(f"FAILED audits: {', '.join(failed)}", file=sys.stderr)
@@ -988,7 +919,7 @@ def sweep(repo, out, only, short, force):
 
 
 def rebuild_index(repo, out):
-    """`--index --out DIR`: collect over a finished collection, nothing else."""
+    """`index --out DIR`: collect over a finished collection, nothing else."""
     repo = os.path.abspath(repo)
     run = RunDir.create(out)
     _announce(run, repo)
@@ -996,198 +927,6 @@ def rebuild_index(repo, out):
 
 
 # --- multi-repo mode (#1679) --------------------------------------------------
-
-OWNER = "caneff"
-
-
-def stored_sweeps_base():
-    """Where finished sweeps live: outside the pruned cache (`RUN_TTL_DAYS`)."""
-    return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "all-audits")
-
-
-def repo_identity(repo):
-    """(`owner/name` on GitHub, None) when `gh` reports `caneff` owns the repo,
-    else (None, why it is refused). The GitHub name, never the checkout's
-    directory, keys the stored sweeps, so two checkouts of one repo share
-    them. Anything `gh` cannot answer is a refusal, never a pass."""
-    if not os.path.isdir(repo):
-        return None, "no such directory"
-    r = _run(["gh", "repo", "view", "--json", "owner,name"], cwd=repo)
-    if r.returncode != 0:
-        return None, f"owner check failed (gh exit {r.returncode})"
-    try:
-        reply = json.loads(r.stdout)
-        owner, name = reply["owner"]["login"], reply["name"]
-    except (ValueError, KeyError, TypeError):
-        return None, "owner check failed (gh reply unreadable)"
-    if owner != OWNER:
-        return None, f"owner is {owner}, not {OWNER}"
-    return f"{owner}/{name}", None
-
-
-TRIAGE_ROLE = "needs-triage"
-
-
-def triage_label(checkout):
-    """The repo's label string for the `needs-triage` role: its
-    docs/agents/triage-labels.md mapping, else the role's own name."""
-    path = os.path.join(checkout, "docs", "agents", "triage-labels.md")
-    if os.path.isfile(path):
-        for line in open(path, encoding="utf-8", errors="replace"):
-            cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
-            if len(cells) >= 2 and cells[0] == TRIAGE_ROLE and cells[1]:
-                return cells[1]
-    return TRIAGE_ROLE
-
-
-def label_refusal(repo, label):
-    """None when `repo` has `label`, else why it is refused. A `gh` that cannot
-    answer is a refusal, never a pass; no label is ever created."""
-    r = _run(["gh", "label", "list", "--limit", "1000", "--json", "name"], cwd=repo)
-    if r.returncode != 0:
-        return f"label check failed (gh exit {r.returncode})"
-    try:
-        names = {row["name"] for row in json.loads(r.stdout)}
-    except (ValueError, KeyError, TypeError):
-        return "label check failed (gh reply unreadable)"
-    return None if label in names else f"label `{label}` is missing"
-
-
-RECORD_FILE = "audit-record.json"
-
-
-def repo_sweep_dirs(name="*", sweep_id="*"):
-    """Every repo's stored sweep folder, sorted, `name` and `sweep_id` as glob
-    patterns. The multi-repo index folder (`MULTI_DIR`, #1721) holds no repo's
-    sweeps and is never one."""
-    return [d for d in sorted(glob.glob(os.path.join(stored_sweeps_base(), name, sweep_id)))
-            if os.path.isdir(d) and os.path.basename(os.path.dirname(d)) != MULTI_DIR]
-
-
-def stored_records(name=None):
-    """Each stored sweep holding an audit record, oldest first within a repo:
-    (sweep dir, record) with `issue` an int, or (sweep dir, None) when the
-    record cannot be read. `name` keeps one repo's."""
-    for sweep in repo_sweep_dirs(name or "*"):
-        path = os.path.join(sweep, RECORD_FILE)
-        if not os.path.isfile(path):
-            continue
-        try:
-            rec = json.load(open(path, encoding="utf-8"))
-            rec["issue"], rec["url"] = int(rec["issue"]), str(rec["url"])
-        except (OSError, ValueError, KeyError, TypeError):
-            rec = None
-        yield sweep, rec
-
-
-def record_repo(sweep, rec):
-    """The GitHub repo a record was filed in. A record written before it held
-    `owner/name` falls back to its directory's name."""
-    slug = str(rec.get("repo", ""))
-    return slug if "/" in slug else f"{OWNER}/{os.path.basename(os.path.dirname(sweep))}"
-
-
-def issue_state(number, slug):
-    """("OPEN" or "CLOSED", "") from `gh`, or (None, why). An answer that is
-    neither is never read as either."""
-    r = _run(["gh", "issue", "view", str(number), "--repo", slug, "--json", "state"])
-    try:
-        state = json.loads(r.stdout)["state"] if r.returncode == 0 else None
-    except (ValueError, KeyError, TypeError):
-        state = None
-    if state in ("OPEN", "CLOSED"):
-        return state, ""
-    err = r.stderr.strip()
-    return None, f"gh exit {r.returncode}, state {state!r}{': ' + err if err else ''}"
-
-
-def earlier_record(name):
-    """(url, None) when `name`'s newest audit record is still open on GitHub,
-    ("", None) when there is none or it is closed, and (None, why) when that
-    cannot be told: an unreadable record or an unanswered state is a refusal,
-    never "closed" (#1681)."""
-    records = list(stored_records(name))
-    if not records:
-        return "", None
-    sweep, rec = records[-1]
-    if rec is None:
-        return None, f"earlier record check failed ({os.path.join(sweep, RECORD_FILE)} unreadable)"
-    state, why = issue_state(rec["issue"], record_repo(sweep, rec))
-    if state is None:
-        return None, f"earlier record check failed (issue #{rec['issue']}: {why})"
-    return (rec["url"] if state == "OPEN" else ""), None
-
-
-def _record_history(name):
-    """Every audit record filed for `name`, one JSON line each. A dot-directory,
-    so no `<repo>/<sweep-id>` glob ever reads it as a repo or a sweep."""
-    return os.path.join(stored_sweeps_base(), ".records", name + ".jsonl")
-
-
-def resume_unposted(name):
-    """Post, in order, the comments `name`'s newest audit record is still
-    missing, before anything reads that record. Returns None, or why it could
-    not: the record stays incomplete and says so."""
-    records = list(stored_records(name))
-    if not records or records[-1][1] is None or not records[-1][1].get("unposted"):
-        return None
-    sweep, rec = records[-1]
-    while rec["unposted"]:
-        c = _run(["gh", "issue", "comment", str(rec["issue"]), "--repo", record_repo(sweep, rec),
-                  "--body-file", os.path.join(sweep, rec["unposted"][0])])
-        if c.returncode != 0:
-            return (f"audit record {rec['url']} still misses comments {', '.join(rec['unposted'])} "
-                    f"(gh exit {c.returncode}): {c.stderr.strip()}")
-        rec["unposted"].pop(0)
-        _write_json(os.path.join(sweep, RECORD_FILE), rec)
-    print(f"{name}: posted the missing comments of {rec['url']}")
-    return None
-
-
-def latest_record_url(name):
-    """The newest audit record ever filed for `name`, open or closed, or "":
-    where a skipped-as-unchanged audit's findings went. Read from the repo's
-    record history, which outlives the stored sweeps closing deletes."""
-    path = _record_history(name)
-    urls = []
-    for line in open(path, encoding="utf-8").read().splitlines() if os.path.isfile(path) else []:
-        try:
-            urls.append(str(json.loads(line)["url"]))
-        except (ValueError, KeyError, TypeError):
-            continue
-    return urls[-1] if urls else ""
-
-
-def prune_closed_sweeps():
-    """Delete each stored sweep whose audit record is CLOSED on GitHub (#1682).
-    One whose record is open, unreadable, or whose state `gh` does not answer
-    is kept, and a failed lookup is printed, never read as closed. A stored
-    sweep with no record at all (its issue was never filed) is deleted once it
-    is older than `RUN_TTL_DAYS`, so nothing grows without bound. A multi-repo
-    index (#1721) is deleted once it is that old and no stored sweep carrying
-    its sweep id is left for it to link."""
-    for sweep, rec in stored_records():
-        if rec is None:
-            print(f"stored sweep {sweep}: kept ({RECORD_FILE} unreadable)", file=sys.stderr)
-            continue
-        state, why = issue_state(rec["issue"], record_repo(sweep, rec))
-        if state == "CLOSED":
-            shutil.rmtree(sweep, ignore_errors=True)
-        elif state is None:
-            print(f"stored sweep {sweep}: kept (record #{rec['issue']}: {why})", file=sys.stderr)
-    cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
-    for sweep in repo_sweep_dirs():
-        if not os.path.exists(os.path.join(sweep, RECORD_FILE)) and os.path.getmtime(sweep) < cutoff:
-            print(f"stored sweep {sweep}: deleted (no audit record, older than {RUN_TTL_DAYS} days)",
-                  file=sys.stderr)
-            shutil.rmtree(sweep, ignore_errors=True)
-    for page_dir in glob.glob(os.path.join(stored_sweeps_base(), MULTI_DIR, "*")):
-        if (os.path.isdir(page_dir) and os.path.getmtime(page_dir) < cutoff
-                and not repo_sweep_dirs(sweep_id=os.path.basename(page_dir))):
-            print(f"multi-repo index {page_dir}: deleted (no stored sweep left to link, older than "
-                  f"{RUN_TTL_DAYS} days)", file=sys.stderr)
-            shutil.rmtree(page_dir, ignore_errors=True)
-
 
 @dataclasses.dataclass
 class Outcome:
@@ -1205,18 +944,21 @@ def log_tail(path):
     return "\n".join(text.splitlines()[-15:]) or "(empty log)"
 
 
-def _read_jsonl(path):
-    """Every line of a findings log: the parsed object, or the raw line when
-    it is not JSON."""
-    rows = []
-    for line in open(path, encoding="utf-8", errors="replace").read().splitlines():
-        if not line.strip():
-            continue
-        try:
-            rows.append(json.loads(line))
-        except ValueError:
-            rows.append(line)
-    return rows
+def _log_rows(path):
+    """A findings log's rows for the audit record: each object, then each
+    corrupt line as a string naming its line number, so the record shows it."""
+    log = findings_log.read(path)
+    return log.rows + [f"line {n}: {text}" for n, text in log.corrupt]
+
+
+def _mutation_tally(collection, module):
+    """(tally, corrupt) for a mutation module's log: `findings_log.tally` of
+    its rows, or None, and its corrupt lines. No log is no tally and no corrupt."""
+    path = os.path.join(collection, module, "findings.jsonl")
+    if not os.path.isfile(path):
+        return None, []
+    log = findings_log.read(path)
+    return findings_log.tally(log.rows), log.corrupt
 
 
 def _report_headings(collection, name):
@@ -1239,7 +981,7 @@ def record_model(result, sweep_id, sha, clean, stored, has_ignore_file, open_rec
         manifest = read_manifest(run.manifests, name) or {}
         log = os.path.join(run.collection, name, "findings.jsonl")
         if os.path.isfile(log):
-            findings[name] = _read_jsonl(log)
+            findings[name] = _log_rows(log)
         else:
             no_log[name] = {"count": manifest.get("count"), "headline": manifest.get("headline")}
         if name in audit_record.STRUCTURAL:
@@ -1268,44 +1010,6 @@ def aborted_model(sweep_id, sha, clean, stored, reason, logs, open_record=""):
 
 
 SWEEP_STATE_FILE = "sweep-state.json"
-
-
-def _write_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-
-def file_audit_record(repo, stored, title, label, chunks, meta):
-    """Open the issue with `chunks[0]` and add the rest as comments, in order.
-    The chunks stay in the stored sweep, and the record file is written the
-    moment the issue exists, naming every comment not yet posted, so a failure
-    part-way loses nothing. Returns (url, None) or (url_or_"", why it failed)."""
-    paths = []
-    for i, text in enumerate(chunks):
-        paths.append(os.path.join(stored, f"audit-record-{i}.md"))
-        with open(paths[-1], "w", encoding="utf-8") as f:
-            f.write(text)
-    created = _run(["gh", "issue", "create", "--title", title, "--label", label, "--body-file", paths[0]], cwd=repo)
-    match = re.search(r"/issues/(\d+)", created.stdout)
-    if created.returncode != 0 or not match:
-        return "", (f"audit record not filed (gh exit {created.returncode}): "
-                    f"{created.stderr.strip() or created.stdout.strip()}; its text is in {stored}")
-    url, number = created.stdout.strip().splitlines()[-1], match.group(1)
-    meta = {**meta, "issue": int(number), "url": url, "unposted": [os.path.basename(p) for p in paths[1:]]}
-    record_path = os.path.join(stored, RECORD_FILE)
-    _write_json(record_path, meta)
-    history = _record_history(os.path.basename(os.path.dirname(stored)))
-    os.makedirs(os.path.dirname(history), exist_ok=True)
-    with open(history, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"sweep": os.path.basename(stored), "url": url}) + "\n")
-    for path in paths[1:]:
-        c = _run(["gh", "issue", "comment", number, "--body-file", path], cwd=repo)
-        if c.returncode != 0:
-            return url, (f"audit record {url} is missing continuation comments {', '.join(meta['unposted'])} "
-                         f"(gh exit {c.returncode}): {c.stderr.strip()}; their text is in {stored}")
-        meta["unposted"].pop(0)
-        _write_json(record_path, meta)
-    return url, None
 
 
 def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_record=""):
@@ -1349,7 +1053,7 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
         else:
             model = record_model(result, sweep_id, sha, clean, stored,
                                  os.path.isfile(os.path.join(wt, ".audit-ignore.md")), open_record, earlier)
-            _write_json(os.path.join(stored, SWEEP_STATE_FILE),
+            write_json(os.path.join(stored, SWEEP_STATE_FILE),
                         {"skip_note": result.plan.skip_note,
                          "failed": {n: t.splitlines()[0] for n, t in model.failed.items()}})
             outcome = Outcome("failed" if result.failed else "swept", stored=stored)
@@ -1371,7 +1075,7 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
 
 @dataclasses.dataclass
 class RepoRow:
-    """One repo of a `--multi` pass: what its summary line and its row on the
+    """One repo of a `multi` pass: what its summary line and its row on the
     multi-repo index both say (#1721). `status` is one of `REPO_STATUSES`."""
 
     label: str
@@ -1428,7 +1132,7 @@ def multi_mode(repos, out, only, short, force):
     repo that crashes is that repo's failure, and the rest still run. The
     multi-repo index is rewritten after each repo and opened once, at the end."""
     sweep_jobs()  # a bad SWEEP_JOBS stops the run before any repo is touched
-    prune_closed_sweeps()
+    prune_closed_sweeps(RUN_TTL_DAYS)
     sweep_id = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     base = os.path.abspath(out) if out else os.path.join(cache_base(), "multi-" + sweep_id)
     paths = [os.path.abspath(p) for p in repos]
@@ -1467,7 +1171,6 @@ def _write_page_or_say(sweep_id, rows):
 
 # --- the multi-repo index (#1721) --------------------------------------------
 
-MULTI_DIR = "multi"  # under stored_sweeps_base(): one folder per sweep id, never a repo's
 MULTI_STATE_FILE = "state.json"
 SWEEP_ID = re.compile(r"\d{8}-\d{6}")
 
@@ -1492,7 +1195,7 @@ def multi_page_dir(sweep_id):
 
 def write_multi_page(sweep_id, rows):
     """Record the pass's rows in its `state.json`, then render the page from
-    it: the live pass and `--multi-index` render through the same read."""
+    it: the live pass and `multi-index` render through the same read."""
     save_record(os.path.join(multi_page_dir(sweep_id), MULTI_STATE_FILE),
                 {"sweep_id": sweep_id, "repos": [dataclasses.asdict(r) for r in rows]})
     return render_multi_page(sweep_id)
@@ -1632,53 +1335,34 @@ def render_multi_page(sweep_id):
 
 
 def multi_index_mode(sweep_id):
-    """`--multi-index SWEEP_ID`: rebuild the pass's page from its `state.json`
+    """`multi-index SWEEP_ID`: rebuild the pass's page from its `state.json`
     or stored sweeps; no `claude` runs. Prints `index:`; exits 1 naming the
     file or paths at fault when it cannot."""
     if not SWEEP_ID.fullmatch(sweep_id):
-        sys.exit(f"all-audits --multi-index: {sweep_id!r} is not a sweep id (YYYYMMDD-HHMMSS)")
+        sys.exit(f"all-audits multi-index: {sweep_id!r} is not a sweep id (YYYYMMDD-HHMMSS)")
     try:
         page = render_multi_page(sweep_id)
     except MultiIndexError as e:
-        sys.exit(f"all-audits --multi-index: {e}")
+        sys.exit(f"all-audits multi-index: {e}")
     print(f"index: {page}")
     open_index(page)
 
 
 # --- load a stored sweep for triage (#1684) ----------------------------------
 
-def find_stored_sweep(issue, repo_name=None):
-    """(stored sweep dir, record) for the sweep whose audit record is issue
-    `issue`, else (None, why). Never a guess: no match, two matches (the same
-    number in two repos) and an unreadable record are each a refusal."""
-    pattern = os.path.join(stored_sweeps_base(), repo_name or "*", "*", RECORD_FILE)
-    found = []
-    for sweep, rec in stored_records(repo_name):
-        if rec is None:
-            return None, f"stored record {os.path.join(sweep, RECORD_FILE)} is unreadable"
-        if rec["issue"] == issue:
-            found.append((sweep, rec))
-    if not found:
-        return None, f"no stored sweep for audit record #{issue}: expected {pattern} with \"issue\": {issue}"
-    if len(found) > 1:
-        return None, (f"audit record #{issue} matches {len(found)} stored sweeps "
-                      f"({', '.join(s for s, _ in found)}): name the repo after the issue number")
-    return found[0], None
-
-
 def load_mode(issue, repo_name):
-    """`--load ISSUE [REPO]`: rebuild the stored sweep's index so it can be
+    """`load ISSUE [REPO]`: rebuild the stored sweep's index so it can be
     triaged, with the failed and unchanged audits' notes it was swept with and
     its stored synthesis; no `claude` runs. Prints `stored:`, `checkout:` and
     `index:`; exits 1 naming the issue and the path when the sweep or its
     collection is missing."""
     found, why = find_stored_sweep(issue, os.path.basename((repo_name or "").rstrip("/")) or None)
     if why:
-        sys.exit(f"all-audits --load: {why}")
+        sys.exit(f"all-audits load: {why}")
     stored, rec = found
     collection = os.path.join(stored, "collection")
     if not os.path.isdir(collection):
-        sys.exit(f"all-audits --load: audit record #{issue}: stored collection missing at {collection}")
+        sys.exit(f"all-audits load: audit record #{issue}: stored collection missing at {collection}")
     state_path = os.path.join(stored, SWEEP_STATE_FILE)
     state = json.load(open(state_path, encoding="utf-8")) if os.path.isfile(state_path) else {}
     notes = {**state.get("skip_note", {}), **{n: f"FAILED: {why}" for n, why in state.get("failed", {}).items()}}
@@ -1713,8 +1397,9 @@ def recent_pr_repos():
     try:
         rows = json.loads(r.stdout)
         names = {pr["repository"]["nameWithOwner"] for pr in rows}
-    except (ValueError, KeyError, TypeError):
-        raise RuntimeError("gh search prs reply unreadable")
+    except (ValueError, KeyError, TypeError) as e:
+        raise RuntimeError(
+            f"gh search prs reply unreadable ({type(e).__name__}: {e}); stdout began: {r.stdout[:200]!r}") from e
     if len(rows) >= SEARCH_LIMIT:
         raise RuntimeError(f"gh search prs returned {len(rows)} PRs, its limit: the list may be cut off")
     return sorted(n for n in names if n.startswith(OWNER + "/"))
@@ -1746,7 +1431,7 @@ def suggest_mode(roots):
     try:
         recent = recent_pr_repos()
     except RuntimeError as e:
-        sys.exit(f"driver.py --suggest: {e}")
+        sys.exit(f"driver.py suggest: {e}")
     if not recent:
         print(f"no owned repo has a PR in the last {SUGGEST_DAYS} days")
         return
@@ -1778,32 +1463,44 @@ def mutation_cost_estimate(n, jobs=1, timeout_s=None):
             f"up to {hours:g}h worst case (2 x {timeout_s:g}s per module), plus one `claude` run per module")
 
 
-def mutation_mode(repo, modules, out, whole_repo=False):
-    """`whole_repo` (#1588): every `--suggest` candidate, no `MUTATION_MAX` cut
-    and no model prepass, so the order is the recency order alone."""
-    repo = os.path.abspath(repo)
-    here = os.path.dirname(os.path.abspath(__file__))
+def _prepass_ranker(repo):
+    """The `rank_fn` of `mutation_run.run`: the model prepass's order of the
+    candidates, which only breaks ties. A failed prepass is named and gives no
+    ranking, so the order is recency alone."""
+    def rank(candidates):
+        result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo, candidates)], env=claude_env())
+        ranked = mutation_run.parse_rank(result.stdout, candidates)
+        if result.returncode != 0 or not ranked:
+            print(f"mutation prepass gave no ranking (exit {result.returncode}); "
+                  "ordering by recency alone", file=sys.stderr)
+        return ranked
+    return rank
 
-    final_targets = None if modules is None else list(modules)
-    skipped = 0
-    if final_targets is None:
-        try:
-            candidates = suggest_mutation_candidates(repo, here)
-        except RuntimeError as e:
-            print(f"mutation-target probe failed: {e}", file=sys.stderr)
+
+def mutation_mode(repo, modules, out, whole_repo=False):
+    """`whole_repo` (#1588): every candidate, no `MUTATION_MAX` cut and no
+    model prepass, so the order is the recency order alone."""
+    repo = os.path.abspath(repo)
+
+    use_prepass = not whole_repo and os.environ.get("AUDITS_NO_SYNTH", "0") != "1"
+    try:
+        planned = mutation_run.run(
+            repo, load_record(_record_file(repo)), modules=modules,
+            rank_fn=_prepass_ranker(repo) if use_prepass else None)
+    except Exception as e:  # noqa: BLE001 - named below, never an empty target list
+        if modules is None:
+            print(f"mutation-target probe failed: {e!r}", file=sys.stderr)
             sys.exit(1)
-        rank = []
-        if candidates and not whole_repo and os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
-            result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo, candidates)], env=claude_env())
-            rank = parse_mutation_rank(result.stdout, candidates)
-            if result.returncode != 0 or not rank:
-                print(f"mutation prepass gave no ranking (exit {result.returncode}); "
-                      "ordering by recency alone", file=sys.stderr)
-        runs = mutation_runs(load_record(_record_file(repo)))
-        ordered = order_mutation_targets(candidates, rank, runs, mutation_changed(repo, runs, here))
-        max_n = len(ordered) if whole_repo else int(os.environ.get("MUTATION_MAX", "10"))
-        final_targets = ordered[:max_n]
-        skipped = max(0, len(ordered) - max_n)
+        # The targets are given; only the no-tests count is unknown, and why is kept.
+        probe_error = f"no-tests probe failed: {e!r}"
+        print(probe_error, file=sys.stderr)
+        planned = None
+    final_targets = list(modules) if planned is None else planned.targets
+    skipped = 0
+    if modules is None:
+        max_n = len(final_targets) if whole_repo else int(os.environ.get("MUTATION_MAX", "10"))
+        skipped = max(0, len(final_targets) - max_n)
+        final_targets = final_targets[:max_n]
 
     for t in final_targets:
         print(f"mutation-target: {t}")
@@ -1818,18 +1515,11 @@ def mutation_mode(repo, modules, out, whole_repo=False):
     print(f"collecting under: {collection}\n")
 
     notest_json = os.path.join(collection, "mutation-no-tests.json")
-    r = _run(["python3", os.path.join(here, "..", "mutation-audit", "audit.py"), "--no-tests", repo])
-    data = None
-    if r.returncode == 0:
-        try:
-            data = json.loads(r.stdout)
-        except json.JSONDecodeError:
-            data = None
-    if data is None:
-        # A crash or unparseable output is a real "don't know", never a
-        # silent zero (#559) — the index must render this as could-not-
-        # determine, not as a repo with zero testless modules.
-        data = {"error": "no-tests probe crashed or returned unparseable output"}
+    # A planning failure is a real "don't know", never a silent zero (#559) —
+    # the index must render this as could-not-determine, not as a repo with
+    # zero testless modules.
+    data = ({"error": probe_error} if planned is None
+            else {"no_tests": planned.no_tests, "total": planned.total})
     with open(notest_json, "w", encoding="utf-8") as f:
         json.dump(data, f)
     notest_paths = set(data.get("no_tests", []))
@@ -1944,82 +1634,94 @@ def _run_mutation_module(repo, module, run):
 
 def _split(value):
     """A comma-separated flag value as a list — the one place the CLI splits."""
-    return [v.strip() for v in value.split(",") if v.strip()] if value else []
+    return [v.strip() for v in value.split(",") if v.strip()]
 
 
-def main(argv):
+def _modules(value):
+    """`--modules`: a list naming at least one module. An empty one is refused,
+    never read as a run that mutated nothing."""
+    modules = _split(value)
+    if not modules:
+        raise argparse.ArgumentTypeError(f"{value!r} names no module")
+    return modules
+
+
+def _sweep_flags(p):
+    """The flags a sweep takes, shared by `sweep` and `multi`."""
+    p.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
+    p.add_argument("--only", metavar="A,B", type=_split, help="run just these audits")
+    p.add_argument("--short", action="store_true", help="run only the short set (see audits_data.py)")
+
+
+def _parser():
     p = argparse.ArgumentParser(
         prog="driver.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("repo", nargs="?", help="repo to audit (default: the current directory)")
-    p.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
-    p.add_argument("--only", metavar="A,B", help="run just these audits")
-    p.add_argument("--short", action="store_true", help="run only the short set (see audits_data.py)")
-    p.add_argument("--index", action="store_true", help="rebuild the index only, over --out DIR's reports")
-    p.add_argument("--force", action="store_true",
-                   help="bypass the staleness cache, run everything; under --multi it also sweeps a repo whose "
-                        "earlier audit record is still open (the new record links the open one) (#1681)")
-    p.add_argument("--multi", nargs="+", metavar="REPO",
-                   help="sweep each owned repo in turn from a fresh worktree of its origin/main, "
-                        "storing each sweep under ~/.local/share/all-audits/ (#1679), and the multi-repo index "
-                        "linking them under ~/.local/share/all-audits/multi/<sweep-id>/ (#1721; SKILL.md § Multi-repo)")
-    p.add_argument("--multi-index", metavar="SWEEP_ID", dest="multi_index",
-                   help="rebuild a --multi pass's page from its recorded state (or, for a pass that recorded none, "
-                        "from the stored sweeps carrying SWEEP_ID) and print its index; runs no claude (#1721)")
-    p.add_argument("--load", type=int, metavar="ISSUE",
-                   help="rebuild the stored sweep of audit record ISSUE (a number) and print its index, for "
-                        "/all-audits triage; the repo name after it picks between repos sharing the number (#1684)")
-    p.add_argument("--suggest", action="store_true",
-                   help="print the owned repos with a PR in the last 14 days and a local checkout, "
-                        "one path each, for --multi (#1683)")
-    p.add_argument("--roots", metavar="DIR,DIR", default=DEFAULT_ROOTS,
-                   help="with --suggest: the directories holding local checkouts (default ~/src,~/.agents)")
-    p.add_argument("--mutation", nargs="?", const="", metavar="A.PY,B.PY",
-                   help="run mutation-audit on each module, one fresh git worktree at a time "
-                        "(no value: pick the modules with a prepass)")
-    p.add_argument("--mutation-all", action="store_true", dest="mutation_all",
-                   help="mutation-audit every module the --suggest list names, no MUTATION_MAX cap "
-                        "(prints the module count and a cost estimate first)")
-    args = p.parse_args(argv[1:])
+    modes = p.add_subparsers(dest="mode", metavar="MODE", required=True)
 
-    repo = args.repo or os.getcwd()
-    if args.multi_index is not None:
-        if (args.repo or args.load is not None or args.index or args.multi is not None or args.suggest
-                or args.mutation is not None or args.mutation_all or args.only is not None or args.short
-                or args.force or args.out or args.roots != DEFAULT_ROOTS):
-            p.error("--multi-index takes the sweep id and combines with nothing else.")
-        multi_index_mode(args.multi_index)
-        return
-    if args.load is not None:
-        if (args.index or args.multi is not None or args.suggest or args.mutation is not None or args.mutation_all
-                or args.only is not None or args.short or args.force or args.out):
-            p.error("--load takes the issue number and an optional repo name, and combines with nothing else.")
-        load_mode(args.load, args.repo)
-        return
-    if args.suggest:
-        if (args.repo or args.index or args.multi is not None or args.mutation is not None or args.mutation_all
-                or args.only is not None or args.short or args.force or args.out):
-            p.error("--suggest stands alone: it takes only --roots.")
-        suggest_mode(_split(args.roots))
-        return
-    if args.multi is not None:
-        if args.repo or args.index or args.mutation is not None or args.mutation_all:
-            p.error("--multi takes the repos after it, and does not combine with a positional repo, "
-                    "--index, --mutation or --mutation-all.")
-        multi_mode(args.multi, args.out, _split(args.only) if args.only is not None else None, args.short, args.force)
-        return
-    if args.mutation_all and args.mutation is not None:
-        p.error("--mutation-all is not allowed with --mutation: it takes every candidate, not a list.")
-    if args.mutation_all:
-        mutation_mode(repo, None, args.out, whole_repo=True)
-    elif args.mutation is not None:
-        mutation_mode(repo, None if args.mutation == "" else _split(args.mutation), args.out)
-    elif args.index:
-        if not args.out:
-            p.error("--index needs --out DIR — the dir whose reports to index.")
-        rebuild_index(repo, args.out)
-    else:
-        sweep(repo, args.out, _split(args.only) if args.only is not None else None, args.short, args.force)
+    m = modes.add_parser("sweep", help="sweep one repo", description="Sweep one repo: plan, execute, collect.")
+    m.add_argument("repo", nargs="?", default=os.getcwd(), help="repo to audit (default: the current directory)")
+    _sweep_flags(m)
+    m.add_argument("--force", action="store_true", help="bypass the staleness cache, run everything")
+    m.set_defaults(run=lambda a: sweep(a.repo, a.out, a.only, a.short, a.force))
+
+    m = modes.add_parser("index", help="rebuild the index over a finished collection",
+                         description="Rebuild the index only, over --out DIR's reports; runs no claude.")
+    m.add_argument("repo", nargs="?", default=os.getcwd(), help="the repo the reports are of (default: the current directory)")
+    m.add_argument("--out", metavar="DIR", required=True, help="the dir whose reports to index")
+    m.set_defaults(run=lambda a: rebuild_index(a.repo, a.out))
+
+    m = modes.add_parser("multi", help="sweep each owned repo from a fresh worktree of its origin/main",
+                         description="Sweep each owned repo in turn from a fresh worktree of its origin/main, "
+                                     "storing each sweep under ~/.local/share/all-audits/ (#1679), and the "
+                                     "multi-repo index linking them under ~/.local/share/all-audits/multi/<sweep-id>/ "
+                                     "(#1721; SKILL.md § Multi-repo).")
+    m.add_argument("repos", nargs="+", metavar="REPO", help="the repos to sweep")
+    _sweep_flags(m)
+    m.add_argument("--force", action="store_true",
+                   help="bypass the staleness cache, run everything, and sweep a repo whose earlier audit record "
+                        "is still open (the new record links the open one) (#1681)")
+    m.set_defaults(run=lambda a: multi_mode(a.repos, a.out, a.only, a.short, a.force))
+
+    m = modes.add_parser("multi-index", help="rebuild a multi pass's page",
+                         description="Rebuild a multi pass's page from its recorded state (or, for a pass that "
+                                     "recorded none, from the stored sweeps carrying SWEEP_ID) and print its "
+                                     "index; runs no claude (#1721).")
+    m.add_argument("sweep_id", metavar="SWEEP_ID", help="the pass's sweep id, YYYYMMDD-HHMMSS")
+    m.set_defaults(run=lambda a: multi_index_mode(a.sweep_id))
+
+    m = modes.add_parser("load", help="rebuild a stored sweep for triage",
+                         description="Rebuild the stored sweep of audit record ISSUE and print its index, for "
+                                     "/all-audits triage; runs no claude (#1684).")
+    m.add_argument("issue", type=int, metavar="ISSUE", help="the audit record's issue number")
+    m.add_argument("repo_name", nargs="?", metavar="REPO",
+                   help="the repo name, to pick between repos sharing the number")
+    m.set_defaults(run=lambda a: load_mode(a.issue, a.repo_name))
+
+    m = modes.add_parser("suggest", help="print the owned repos worth sweeping",
+                         description="Print the owned repos with a PR in the last 14 days and a local checkout, "
+                                     "one path each, for multi (#1683).")
+    m.add_argument("--roots", metavar="DIR,DIR", type=_split, default=_split(DEFAULT_ROOTS),
+                   help="the directories holding local checkouts (default ~/src,~/.agents)")
+    m.set_defaults(run=lambda a: suggest_mode(a.roots))
+
+    m = modes.add_parser("mutation", help="mutation-audit modules, one fresh git worktree each",
+                         description="Run mutation-audit on each module, one fresh git worktree at a time. With "
+                                     "neither --modules nor --all, a prepass picks the modules.")
+    m.add_argument("repo", nargs="?", default=os.getcwd(), help="repo to audit (default: the current directory)")
+    m.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
+    which = m.add_mutually_exclusive_group()
+    which.add_argument("--modules", metavar="A.PY,B.PY", type=_modules, help="the modules to mutate")
+    which.add_argument("--all", action="store_true",
+                       help="every module the suggest list names, no MUTATION_MAX cap "
+                            "(prints the module count and a cost estimate first)")
+    m.set_defaults(run=lambda a: mutation_mode(a.repo, a.modules, a.out, whole_repo=a.all))
+    return p
+
+
+def main(argv):
+    args = _parser().parse_args(argv[1:])
+    args.run(args)
 
 
 if __name__ == "__main__":

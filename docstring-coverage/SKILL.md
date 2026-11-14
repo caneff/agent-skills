@@ -39,6 +39,12 @@ the same number on every row, not per-symbol.
 
 ## Run
 
+0. **Python only.** First run
+   `python3 ~/.agents/skills/all-audits/harness/auditlib.py --applicable <scope>`
+   and follow ~/.agents/skills/all-audits/SKILL.md § Not applicable: exit 3
+   means this audit stops there and reports `not applicable: <language>`;
+   exit 0, go on.
+
 1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, scope
    defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section.
    Target the package's public modules — skip tests,
