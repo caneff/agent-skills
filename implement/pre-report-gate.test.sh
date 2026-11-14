@@ -186,10 +186,10 @@ else
   echo "FAIL: waiver — want exit 0 + 'waived' + reason, got $rc: $out"; fails=1
 fi
 out=$(wt env PRE_REPORT_NO_FIX_CHECK=""); rc=$?
-if [ "$rc" = 1 ]; then
+if [ "$rc" = 1 ] && [[ "$out" == *"dispositions-7.jsonl is missing"* ]] && [[ "$out" != *"waived"* ]]; then
   echo "PASS: an empty PRE_REPORT_NO_FIX_CHECK is not a waiver"
 else
-  echo "FAIL: empty waiver — want exit 1, got $rc: $out"; fails=1
+  echo "FAIL: empty waiver — want exit 1 + 'dispositions-7.jsonl is missing' and no 'waived', got $rc: $out"; fails=1
 fi
 
 # A check that could not run (no fix_check.py beside the gate) is an

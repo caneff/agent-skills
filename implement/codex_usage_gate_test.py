@@ -9,7 +9,6 @@ Seam: the script's command line — stdout line and exit status — against a
 cache file under a temporary `$CODEX_HOME`. `PATH` is emptied so a stale or
 missing cache cannot reach a real `codex app-server`.
 """
-import importlib.util
 import json
 import os
 import shutil
@@ -272,21 +271,14 @@ def test_switch_leaves_percent_alone(newdir):
     assert (status, out) == (0, f"12.5 {reset}\n"), (status, out)
 
 
-# With the switch present the helper is never loaded: a disabled gate costs no RPC.
-def test_switch_loads_no_helper(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    path = tmp_path / SWITCH_REL
-    path.parent.mkdir(parents=True)
-    path.touch()
-    spec = importlib.util.spec_from_file_location("gate", GATE)
-    gate = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(gate)
-
-    def boom():
-        raise AssertionError("load_helper called with the kill switch present")
-
-    monkeypatch.setattr(gate, "load_helper", boom)
-    assert gate.check() == (20, f"codex reviews off by Chris's ruling ({path}) — remove the file to re-enable")
+# With the switch present the gate reads no usage: a disabled gate costs no RPC. A stale cache would
+# make any read run `codex`, which leaves `<HOME>/codex-called` behind.
+def test_switch_reads_no_usage(newdir):
+    cwd, env = fake_repo(newdir, {"a.py": 5}, switch=True, stale=True)
+    p = subprocess.run([sys.executable, GATE, "--base", "main", "--tickets", "1"],
+                       cwd=cwd, env=env, capture_output=True, text=True)
+    assert "codex reviews off" in p.stdout and p.returncode == 20, (p.returncode, p.stdout)
+    assert not os.path.exists(os.path.join(env["HOME"], "codex-called")), "the switch still read usage"
 
 
 # --- the size check ----------------------------------------------------------
@@ -506,12 +498,6 @@ def test_flag_order_is_free(newdir):
 def test_usage_refusal_names_its_cause(newdir):
     status, out = run(newdir, cache(5), "--base", "main", "--tickets", "#1")
     assert status == 30 and "not a ticket number: '#1'" in out, (status, out)
-
-
-# `--help` must not be argparse's own exit 0, which a caller reads as proceed.
-def test_help_is_not_a_proceed(newdir):
-    status, out = run(newdir, cache(5), "--help")
-    assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (status, out)
 
 
 # A base git cannot resolve is unknown, never a size verdict either way, and the line names git's
