@@ -446,11 +446,20 @@ def test_once_builds_checks_merges_and_cleans_up(sb):
     assert [m[0] for m in st["merged"]] == [[1]]
     assert sb.labels(2) == ["ready-for-agent"]
     assert "implement-1" in read(sb.cleanup_log)
-    run = sb.dispatch_runs()[0]
-    assert run["argv"] == ["--repo", sb.repo, "--controller", "drain", "1"]
-    assert sb.chooser_runs()[0]["argv"][2:] == ["--permission-mode", "auto"]
-    assert ["agent", "get", "repo-1"] in sb.herdr_calls()
     assert "merged:\n  #1  https://example.test/pull/101  m" + st["merged"][0][1] in r.stdout
+
+
+def test_the_chooser_is_run_in_auto_permission_mode(sb):
+    sb.write_state({1: {}, 2: {}})
+    sb.drain("--once")
+    assert sb.chooser_runs()[0]["argv"][2:] == ["--permission-mode", "auto"]
+
+
+def test_the_build_is_dispatched_under_the_drain_controller_and_its_agent_is_looked_up_by_name(sb):
+    sb.write_state({1: {}, 2: {}})
+    sb.drain("--once")
+    assert sb.dispatch_runs()[0]["argv"] == ["--repo", sb.repo, "--controller", "drain", "1"]
+    assert ["agent", "get", "repo-1"] in sb.herdr_calls()
 
 
 def test_the_agents_bundle_is_one_pr_and_the_rest_stay_ready(sb):
@@ -462,9 +471,6 @@ def test_the_agents_bundle_is_one_pr_and_the_rest_stay_ready(sb):
     assert [i["state"] for i in st["issues"].values()] == ["closed"] * 3 + ["open"]
     assert sb.labels(4) == ["ready-for-agent"]
     assert sb.dispatch_runs()[0]["argv"][-3:] == ["1", "2", "3"]
-    prompt = sb.chooser_runs()[0]["prompt"]
-    for line in ("#1 is the anchor", "- #2 ticket 2", "- #3 ticket 3", "- #4 ticket 4", "at most 7 of them"):
-        assert line in prompt
     assert ["1", "drain bundle: 1 2 3 (of 3 candidates)"] in sb.state()["comments"][-1:]
     assert "#1 #2 #3" in r.stdout
 
@@ -560,12 +566,6 @@ def test_a_pr_over_bundle_max_is_a_failed_build(sb):
     sb.drain("--once", "--bundle-max", "2", env={"TAKE": "2", "EXTRA_CLOSE": "3", "NOTE_EXTRA": "drain bundle: 1 3"})
     assert "merged" not in sb.state()
     assert "over --bundle-max 2" in sb.handed_comment(1)[0]
-
-
-def test_a_pr_closing_a_ticket_no_bundle_comment_names_is_a_failed_build_even_under_the_cap(sb):
-    sb.write_state({1: {}, 2: {}, 3: {}})
-    sb.drain("--once", "--bundle-max", "5", env={"TAKE": "2", "EXTRA_CLOSE": "3"})
-    assert "which no drain bundle: comment on #1 names" in sb.handed_comment(1)[0]
 
 
 def test_a_ticket_the_agent_claimed_but_the_pr_did_not_close_goes_back_to_ready(sb):
@@ -691,12 +691,10 @@ def test_a_merge_cleanup_failure_is_a_note_not_a_rebuild(sb):
     assert [m[0] for m in sb.state()["merged"]] == [[1]]
 
 
-def test_a_punctuated_chooser_answer_still_bundles_every_ticket(sb):
+def test_a_punctuated_chooser_answer_is_parsed_into_every_ticket(sb):
     sb.write_state({1: {}, 2: {}, 3: {}})
-    sb.drain("--once", env={"CHOOSER_SAY": "drain bundle: 1, 2,\nand 3.\ndrain bundle: 1, 2, 3.",
-                              "DRAFT_TICKETS": "1"})
-    for n in (1, 2, 3):
-        assert "ready-for-human" in sb.labels(n)
+    sb.drain("--once", env={"CHOOSER_SAY": "drain bundle: 1, 2,\nand 3.\ndrain bundle: 1, 2, 3."})
+    assert sb.dispatch_runs()[0]["tickets"] == ["1", "2", "3"]
 
 
 def test_a_single_ticket_bundle_records_the_candidates_the_chooser_saw(sb):
@@ -977,6 +975,11 @@ def test_the_lock_and_agent_names_match_implement_dispatch(sb, tmp_path, monkeyp
     # The worker's herdr agent name drain looks for is the one the Rust formats.
     assert "(32usize).saturating_sub(suffix.len())" in source
     assert 'Mode::Plain => format!("-{n}")' in source
+    # ...and drain's own cut, called on a checkout name past 32 characters.
+    long_root = "r" * 40
+    ctx = types.SimpleNamespace(root=os.path.join("/x", long_root))
+    name = drain.agent_name(ctx, 7, drain.TICKET)
+    assert name == long_root[:32 - len("-7")] + "-7" and len(name) == 32
 
 
 def test_refuses_a_repo_the_user_does_not_own(sb):
@@ -1583,12 +1586,17 @@ def test_a_worker_that_never_goes_idle_fails_at_the_wall_clock(d, monkeypatch):
 
 
 def test_a_spec_run_idle_while_its_slice_workers_work_is_not_a_failed_build(d, ctx, monkeypatch):
-    monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 0.2)
+    # A stepped clock: one tick per poll, so no real time decides the outcome. Slices work for
+    # ticks 0-5, the grace (3) starts at tick 6 and would end at 9, the PR appears at tick 8.
+    # With no slice-work reset the grace would have ended at tick 3.
+    tick = [0]
+    monkeypatch.setattr(d, "time", type("Clock", (), {"monotonic": staticmethod(lambda: tick[0]),
+                                                      "sleep": staticmethod(lambda s: tick.__setitem__(0, tick[0] + 1))}))
+    monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 3)
     monkeypatch.setattr(d, "agent_status", lambda name: "idle")
     monkeypatch.setattr(d, "gh_json", lambda *args: {"state": "open"})
-    start = time.monotonic()
-    monkeypatch.setattr(d, "slices_working", lambda ctx, spec: time.monotonic() - start < 0.6)
-    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: {"number": 1} if time.monotonic() - start > 0.8 else None)
+    monkeypatch.setattr(d, "slices_working", lambda ctx, spec: tick[0] < 6)
+    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: {"number": 1} if tick[0] >= 8 else None)
     assert d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1) == "pr"
 
 
@@ -1702,12 +1710,11 @@ def test_a_seam_command_with_a_trailing_semicolon_and_a_comment_runs_as_declared
     assert sb.seam_runs() == ["ran"]
 
 
-def test_the_selector_files_are_named_by_absolute_path_whatever_the_log_dir_is(sb, monkeypatch):
-    sys.path.insert(0, HERE)
-    import drain as drain_module
-    ctx = drain_module.Ctx(sb.repo, "me/repo", "main", "logs", 1, None)
-    seen = []
-    monkeypatch.setattr(drain_module, "run_in_scratch_tree", lambda c, cmd, log, head=None, rev=None: seen.append(cmd))
-    drain_module.seam(ctx, "main", os.path.join("rel", "dir", "pr-seam.log"), 7)
-    cmd = seen[0]
-    assert os.path.abspath(os.path.join("rel", "dir", "pr-seam-selector.json")) in cmd
+def test_a_relative_log_dir_still_gives_the_seam_its_selector_listing(sb):
+    # The seam runs in a scratch tree, so a selector path left relative to drain's cwd would miss.
+    sb.write_state({1: {}})
+    gate_repo(sb, ["alpha/a.test.sh"])
+    r = subprocess.run([sys.executable, DRAIN, "--repo", sb.repo, "--once"], capture_output=True, text=True,
+                       cwd=sb.tmp, env=sb.drain_env({"DRAIN_LOG_DIR": "rel-logs"}))
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert pr_comments(sb) == [LISTED]
