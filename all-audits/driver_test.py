@@ -23,6 +23,38 @@ import mutation_run  # noqa: E402
 import procs  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _sandboxed_home(tmp_path_factory, monkeypatch):
+    """#1815: no test reads or writes the machine's stored sweeps or run
+    folders. `HOME` and both XDG roots point at a tmp dir for every test, so a
+    `main(argv)` that routes wrongly into a real sweep prunes and writes there,
+    and a child process inherits the same sandbox through `os.environ`."""
+    home = str(tmp_path_factory.mktemp("home"))
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("XDG_DATA_HOME", os.path.join(home, "data"))
+    monkeypatch.setenv("XDG_CACHE_HOME", os.path.join(home, "cache"))
+    assert driver.stored_sweeps_base().startswith(home), "sandbox failed"
+    return home
+
+
+MODE_ENTRIES = ("sweep", "rebuild_index", "multi_mode", "multi_index_mode", "load_mode", "suggest_mode",
+                "mutation_mode")
+
+
+def _stub_every_entry(monkeypatch, handler):
+    """Replace every mode entry and every `claude` spawn with `handler(name, args, kwargs)`,
+    so a routing mismatch reaches the handler instead of doing real work (#1815)."""
+    for entry in MODE_ENTRIES:
+        monkeypatch.setattr(driver, entry, lambda *a, _e=entry, **k: handler(_e, a, k))
+    real_run = subprocess.run
+
+    def guarded(cmd, *a, **k):
+        if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "claude":
+            return handler("claude", (cmd,), k)
+        return real_run(cmd, *a, **k)
+    monkeypatch.setattr(subprocess, "run", guarded)
+
+
 def _run_driver(*args):
     return subprocess.run(
         [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), *args],
@@ -830,9 +862,7 @@ def test_each_mode_refuses_a_flag_it_does_not_take_through_argparse(argv, refusa
     """#1747: argparse, not a hand-written exclusion chain, refuses the flag,
     exit 2, before any mode starts. Every mode entry is replaced with one that
     fails the test, so a refusal that came late cannot pass."""
-    for entry in ("sweep", "rebuild_index", "multi_mode", "multi_index_mode", "load_mode", "suggest_mode",
-                  "mutation_mode"):
-        monkeypatch.setattr(driver, entry, lambda *a, _e=entry, **k: pytest.fail(f"{_e} ran on {argv}"))
+    _stub_every_entry(monkeypatch, lambda name, a, k: pytest.fail(f"{name} ran on {argv}"))
     code, _, err = _main_exit(argv, capsys)
     assert code == 2 and refusal in err, err
 
@@ -858,7 +888,12 @@ def test_each_mode_calls_its_entry_with_its_own_arguments(argv, entry, call, mon
     """#1747: `main(argv)` routes each subcommand to its mode with the values
     its flags were given, and nothing else."""
     calls = []
-    monkeypatch.setattr(driver, entry, lambda *a, **k: calls.append((a, k)))
+
+    def handler(name, a, k):
+        if name != entry:
+            pytest.fail(f"{name} ran on {argv}, expected {entry}")
+        calls.append((a, k))
+    _stub_every_entry(monkeypatch, handler)
     driver.main(["driver.py", *argv])
     assert calls == [call]
 
@@ -1744,6 +1779,68 @@ def test_unanswerable_state_keeps_the_stored_sweep(tmp_path):
     (a,), env = _multi_fixture(tmp, ["alpha"])
     d = _stored(tmp, "beta", "20200101-000000", 1)
     _single(a, env, FAKE_GH_ISSUE_STATE="BOGUS")
+    assert os.path.isdir(d)
+
+
+# --- a stored sweep outlives its record until its specs close (#1851) -----------
+
+def _prune_with_specs(tmp, monkeypatch, record_state, open_issues=None, **extra):
+    """One closed-or-open record's stored sweep, pruned in-process with the fake
+    `gh` answering `issue list` as `open_issues`: (sweep dir, stderr is read by the caller)."""
+    (a,), env = _multi_fixture(tmp, ["alpha"])
+    d = _stored(tmp, "beta", "20200101-000000", 1)
+    for k, v in {**env, "FAKE_GH_ISSUE_STATES": f"1={record_state}", **extra}.items():
+        monkeypatch.setenv(k, v)
+    if open_issues is not None:
+        monkeypatch.setenv("FAKE_GH_OPEN_ISSUES", json.dumps(open_issues))
+    return d
+
+
+def _spec(number, sweep_dir, extra=""):
+    return {"number": number, "body": f"## Spec\n\nSweep run: {sweep_dir}/collection\n{extra}"}
+
+
+def test_a_closed_record_keeps_its_sweep_while_a_spec_filed_from_it_is_open(tmp_path, monkeypatch, capsys):
+    tmp = str(tmp_path)
+    d = _prune_with_specs(tmp, monkeypatch, "CLOSED", [_spec(77, "/x/all-audits/beta/20200101-000000")])
+    driver.prune_closed_sweeps(3)
+    assert os.path.isdir(d)
+    assert "#77" in capsys.readouterr().err
+
+
+def test_a_closed_record_deletes_its_sweep_once_no_open_spec_names_it(tmp_path, monkeypatch):
+    tmp = str(tmp_path)
+    # an open issue naming another sweep, and one that only mentions the id outside a `Sweep run:` line
+    d = _prune_with_specs(tmp, monkeypatch, "CLOSED", [
+        _spec(78, "/x/all-audits/beta/20200102-000000"),
+        {"number": 79, "body": "see beta/20200101-000000 for context"},
+        _spec(80, "/x/all-audits/gamma/20200101-000000")])
+    driver.prune_closed_sweeps(3)
+    assert not os.path.exists(d)
+
+
+def test_a_failed_spec_lookup_keeps_the_sweep_and_says_so(tmp_path, monkeypatch, capsys):
+    tmp = str(tmp_path)
+    d = _prune_with_specs(tmp, monkeypatch, "CLOSED", FAKE_GH_ISSUE_LIST_EXIT="1")
+    driver.prune_closed_sweeps(3)
+    assert os.path.isdir(d)
+    assert "fake gh: issue list failed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("reply", ["not json", '{"a": 1}', '[{"number": 1}]', json.dumps([{"number": i, "body": ""} for i in range(1000)])])
+def test_an_unreadable_or_full_spec_listing_keeps_the_sweep(tmp_path, monkeypatch, capsys, reply):
+    """A reply that is not a list of bodies, or fills the `--limit` and so may hide an open spec, is not 'none open'."""
+    tmp = str(tmp_path)
+    d = _prune_with_specs(tmp, monkeypatch, "CLOSED", FAKE_GH_OPEN_ISSUES=reply)
+    driver.prune_closed_sweeps(3)
+    assert os.path.isdir(d)
+    assert "kept" in capsys.readouterr().err
+
+
+def test_an_open_record_does_not_look_up_specs(tmp_path, monkeypatch):
+    tmp = str(tmp_path)
+    d = _prune_with_specs(tmp, monkeypatch, "OPEN", FAKE_GH_ISSUE_LIST_EXIT="1")
+    driver.prune_closed_sweeps(3)
     assert os.path.isdir(d)
 
 
