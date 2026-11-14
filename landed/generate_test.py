@@ -82,6 +82,9 @@ def test_page_has_one_h2_per_day(tmp_path, monkeypatch):
         monkeypatch.setenv("GIT_AUTHOR_DATE", when)
         monkeypatch.setenv("GIT_COMMITTER_DATE", when)
         _git(repo, "commit", "-q", "-m", f"commit {i}")
+    # landed reads only origin/HEAD's branch and never guesses one (#1780).
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     out = str(tmp_path / "landed.html")
     generate.main(["--roots", repo, "--out", out, "100"])
     page = open(out, encoding="utf-8").read()
