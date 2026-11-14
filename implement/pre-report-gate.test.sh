@@ -211,11 +211,13 @@ git -C "$repo" worktree remove --force "$tmp/implement-7"
 git -C "$repo" worktree add -q -b implement-8 "$tmp/implement-8" main
 git -C "$repo" config branch.implement-8.base spec-2
 git -C "$repo" branch -q spec-2 main; git -C "$repo" fetch -q origin  # the live integration branch the key names
+# fix-check asks GitHub through the slug of origin, so origin is named as a GitHub repo from here on.
+git -C "$repo" remote set-url origin https://github.com/o/r.git
 echo slice > "$tmp/implement-8/slice.txt"; git -C "$tmp/implement-8" add -A; git -C "$tmp/implement-8" commit -qm slice
 slice_tip=$(git -C "$tmp/implement-8" rev-parse HEAD)
 # fix-check reads the slice PR's base off GitHub; before `gh pr create` there is none.
 mkdir -p "$tmp/fakebin"
-printf '#!/usr/bin/env bash\n[ "$1 $2" = "pr list" ] && exit 0\nexit 1\n' >"$tmp/fakebin/gh"; chmod +x "$tmp/fakebin/gh"
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "pr list" ] && { echo "[]"; exit 0; }\nexit 1\n' >"$tmp/fakebin/gh"; chmod +x "$tmp/fakebin/gh"
 slice() { local sha=$1; shift; (cd "$tmp/implement-8" && HOME="$cache_home" PATH="$tmp/fakebin:$PATH" "$@" bash "$gate" "$sha" 2>&1); }
 out=$(slice "$slice_tip" env); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"slice of spec-2"* ]]; then

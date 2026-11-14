@@ -76,7 +76,6 @@ unreadable file).
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -88,6 +87,7 @@ import review_ledger  # noqa: E402
 import runfile  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "common"))
 import shellcmd  # noqa: E402  (#1782)
+import tracker as issue_tracker  # noqa: E402  (#1786)
 
 AXES = ("standards", "spec", "correctness")
 RATINGS = ("CONFIRMED", "PLAUSIBLE")
@@ -118,17 +118,28 @@ def slice_base(n):
     return base if base and SPEC_BASE.match(base) else None
 
 
+def tracker():
+    """The issue module's adapter for this checkout's GitHub origin; a checkout whose origin is not
+    one cannot be asked, which is the environment's exit 2."""
+    try:
+        slug = shellcmd.origin_slug(".")
+    except shellcmd.CmdError as e:
+        raise Unanswerable(f"origin could not be read: {e}") from None
+    if slug is None:
+        raise Unanswerable("origin is not a github.com remote, so GitHub cannot be asked")
+    return issue_tracker.GhTracker(slug)
+
+
 def slice_prs(n):
     """`(number, base)` of each open PR from `implement-<n>`, as GitHub holds it (#1460's S4): a
     slice runs no review, so a slice PR into anything but its integration branch would land
     unreviewed.
     None open is the worker's gate before `gh pr create`; the controller's merge has one."""
-    done = subprocess.run(["gh", "pr", "list", "--head", f"implement-{n}", "--state", "open",
-                           "--json", "number,baseRefName", "--jq", '.[] | "\\(.number) \\(.baseRefName)"'],
-                          capture_output=True, text=True)
-    if done.returncode != 0:
-        raise Unanswerable(f"`gh pr list --head implement-{n}` failed: {done.stderr.strip() or 'no output'}")
-    return [tuple(line.split(" ", 1)) for line in done.stdout.splitlines() if line.strip()]
+    try:
+        prs = tracker().open_prs(f"implement-{n}")
+    except issue_tracker.TrackerError as e:
+        raise Unanswerable(f"`gh pr list --head implement-{n}` failed: {e}") from None
+    return [(str(pr["number"]), pr["baseRefName"]) for pr in prs]
 
 
 def reviews_dir():
@@ -335,11 +346,11 @@ def codex_findings(reviews, n, branch, skipped, problems, notes):
 
 
 def moved_state(ticket):
-    done = subprocess.run(["gh", "issue", "view", str(ticket), "--json", "state", "--jq", ".state"],
-                          capture_output=True, text=True)
-    if done.returncode != 0:
-        raise Unanswerable(f"`gh issue view {ticket}` failed: {done.stderr.strip() or 'no output'}")
-    return done.stdout.strip()
+    """`OPEN` or `CLOSED`, as GitHub holds ticket `ticket`; a ticket gh cannot read is Unanswerable."""
+    try:
+        return str(tracker().issue(ticket).get("state", "")).upper()
+    except issue_tracker.TrackerError as e:
+        raise Unanswerable(f"`gh issue view {ticket}` failed: {e}") from None
 
 
 def check_disposition(obj, n, branch):

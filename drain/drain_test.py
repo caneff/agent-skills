@@ -88,6 +88,12 @@ elif args[:2] == ["issue", "edit"]:
         if a == "--remove-assignee" and "me" in issue.get("assignees", []):
             issue["assignees"].remove("me")
     save()
+elif args[:2] == ["issue", "comment"] and args[2] in [str(p["number"]) for p in state["prs"].values()]:
+    # a comment on a PR: the tracker posts it through `issue comment`, which GitHub serves for both
+    if os.environ.get("PR_COMMENT_FAIL"):
+        sys.stderr.write("fake gh: pr comment refused\n"); sys.exit(1)
+    state.setdefault("pr_comments", []).append([args[2], opt("--body")])
+    save()
 elif args[:2] == ["issue", "comment"]:
     state.setdefault("comments", []).append([args[2], opt("--body")])
     save()
@@ -98,11 +104,6 @@ elif args[:2] == ["issue", "view"]:
         issue = dict(issue, state="open", labels=issue["labels"] + ["in-progress"])
     out({"state": issue["state"], "labels": names(issue), "title": issue["title"], "body": issue["body"],
          "comments": [dict(body=b) for n, b in state.get("comments", []) if n == args[2]]})
-elif args[:2] == ["pr", "comment"]:
-    if os.environ.get("PR_COMMENT_FAIL"):
-        sys.stderr.write("fake gh: pr comment refused\n"); sys.exit(1)
-    state.setdefault("pr_comments", []).append([args[2], opt("--body")])
-    save()
 elif args[:2] == ["pr", "list"]:
     pr = state["prs"].get(opt("--head"))
     out([dict(number=pr["number"], url=pr["url"])] if pr and not pr.get("merged") else [])

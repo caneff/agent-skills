@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
@@ -24,6 +25,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.join(HERE, "fix-check.sh")
 IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
          "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "common"))
+import fix_check  # noqa: E402
+import tracker  # noqa: E402
 
 CODEX_OUT = """Findings:
 - [high] First codex finding (a.py:1)
@@ -50,9 +56,13 @@ class World:
         if author_date is not None:  # commits are authored then; a rebase still stamps its committer date now
             self.env["GIT_AUTHOR_DATE"] = f"{int(author_date)} +0000"
         origin = os.path.join(self.tmp, "origin.git")
+        # fix-check asks GitHub through the slug of `origin`, so origin is named as the GitHub repo
+        # `o/r`, and this world's own git calls reach the bare clone by an `insteadOf` fix-check never sees.
+        self.insteadof = f"url.{origin}.insteadOf=https://github.com/o/r.git"
         self.git(self.tmp, "init", "-q", "--bare", "-b", "main", origin)
         self.primary = os.path.join(self.tmp, checkout)
         self.git(self.tmp, "clone", "-q", origin, self.primary)
+        self.git(self.primary, "remote", "set-url", "origin", "https://github.com/o/r.git")
         self.commit(self.primary, "base")
         self.git(self.primary, "push", "-q", "origin", "main")
         self.git(self.primary, "remote", "set-head", "origin", "main")
@@ -71,7 +81,7 @@ class World:
         self.ledger_skip("codex-gate")  # no Codex record unless a case writes one
 
     def git(self, cwd, *args):
-        done = subprocess.run(["git", *args], cwd=cwd, env=self.env, capture_output=True, text=True)
+        done = subprocess.run(["git", "-c", self.insteadof, *args], cwd=cwd, env=self.env, capture_output=True, text=True)
         assert done.returncode == 0, (args, done.stderr)
         return done.stdout.strip()
 
@@ -83,15 +93,16 @@ class World:
         return self.git(cwd, "rev-parse", "HEAD")
 
     def write_gh(self):
-        """A `gh issue view <n> --json state --jq .state` that answers from self.tickets (a ticket
-        not in it fails, as an unreachable gh does), and a `gh pr list` that prints self.prs, one
-        `<number> <base>` line per open PR, or fails when self.prs is None."""
-        table = "\n".join(f"{n}) echo {s};;" for n, s in self.tickets.items())
-        prs = ("echo 'gh: no network' >&2; exit 1" if self.prs is None
-               else "".join(f"echo '{number} {base}'; " for number, base in self.prs) + "exit 0")
+        """A `gh api repos/o/r/issues/<n>` that answers from self.tickets (`OPEN` or `CLOSED`; a
+        ticket not in it fails, as an unreachable gh does), and a `gh pr list` that prints self.prs,
+        a `(number, base)` per open PR, or fails when self.prs is None."""
+        table = "\n".join(f"repos/o/r/issues/{n}) echo '{{\"number\": {n}, \"state\": \"{s.lower()}\"}}';;"
+                          for n, s in self.tickets.items())
+        listed = json.dumps([{"number": n, "url": "u", "baseRefName": b} for n, b in self.prs or []])
+        prs = "echo 'gh: no network' >&2; exit 1" if self.prs is None else f"echo '{listed}'; exit 0"
         with open(os.path.join(self.bin, "gh"), "w") as fh:
             fh.write(f'#!/usr/bin/env bash\nif [ "$1 $2" = "pr list" ]; then {prs}; fi\n'
-                     f'case "$3" in\n{table}\n*) echo "no such issue" >&2; exit 1;;\nesac\n')
+                     f'case "$2" in\n{table}\n*) echo "no such issue" >&2; exit 1;;\nesac\n')
         os.chmod(os.path.join(self.bin, "gh"), 0o755)
 
     def put(self, name, text):
@@ -813,3 +824,23 @@ def test_a_ledger_row_with_a_malformed_round_vouches_for_nothing(world):
     world.ledger_ran("correctness", round=0)
     world.dispositions()
     assert_fix_check(world, 1, "no ledger row for the correctness review of #5")
+
+
+# -- the GitHub reads, over the issue module's in-memory adapter (#1786) -------
+
+def test_the_slice_prs_and_moved_state_read_through_the_tracker(monkeypatch):
+    t = tracker.MemoryTracker([{"number": 77, "state": "closed", "labels": []}],
+                              prs=[{"number": 40, "url": "u", "head": "implement-5", "base": "spec-3"}])
+    monkeypatch.setattr(fix_check, "tracker", lambda: t)
+    assert fix_check.slice_prs(5) == [("40", "spec-3")]
+    assert fix_check.slice_prs(6) == []
+    assert fix_check.moved_state(77) == "CLOSED"
+
+
+def test_a_tracker_that_cannot_answer_is_unanswerable_never_an_empty_answer(monkeypatch):
+    t = tracker.MemoryTracker(broken={"open_prs": "gh down", "issue": "gh down"})
+    monkeypatch.setattr(fix_check, "tracker", lambda: t)
+    with pytest.raises(fix_check.Unanswerable, match="gh down"):
+        fix_check.slice_prs(5)
+    with pytest.raises(fix_check.Unanswerable, match="`gh issue view 77` failed"):
+        fix_check.moved_state(77)

@@ -111,6 +111,7 @@ sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
 # `main`.
 try:
     import shellcmd  # noqa: E402
+    import tracker as issue_tracker  # noqa: E402  (#1786)
     from closing_ticket import declaration  # noqa: E402
     from selector_check import command_of, failing_suites  # noqa: E402
     _IMPORT_ERROR = None
@@ -118,7 +119,7 @@ except Exception as exc:  # noqa: BLE001 - any import failure, reported by main
     _IMPORT_ERROR = exc
 
 WALL_CLOCK_SECONDS = 3 * 60 * 60  # the seam's own bound; the helper's timeout is for its short calls
-Ctx = collections.namedtuple("Ctx", "root repo default log_dir")
+Ctx = collections.namedtuple("Ctx", "root repo default log_dir tracker")
 NOTIFY_SEND = os.path.join(_HERE, os.pardir, "flow", "bin", "notify-send")
 GREEN, RED, INCONCLUSIVE, UNSENT = 0, 1, 2, 3
 MAX_RUN_HOURS = 26
@@ -145,10 +146,18 @@ def repo_slug(ctx):
 
 
 def run(args, cwd=None):
-    """Stdout of `git`/`gh <args>`, stripped; `BackstopError` on any failure."""
+    """Stdout of `git <args>` (`args` is `["git", ...]`), stripped; `BackstopError` on any failure."""
     try:
-        return (shellcmd.gh if args[0] == "gh" else shellcmd.git)(args[1:], cwd=cwd).stdout.strip()
+        return shellcmd.git(args[1:], cwd=cwd).stdout.strip()
     except shellcmd.CmdError as exc:
+        raise BackstopError(str(exc)) from exc
+
+
+def asked(call, *args):
+    """`call(*args)`, a call on the tracker; its `TrackerError` is this script's one failure."""
+    try:
+        return call(*args)
+    except issue_tracker.TrackerError as exc:
         raise BackstopError(str(exc)) from exc
 
 
@@ -243,10 +252,8 @@ def ci_night(ctx, workflow):
     `workflow`; the log ref is the run's URL."""
     branch = ctx.default.split("/", 1)[-1]
     try:
-        runs = json.loads(run(["gh", "run", "list", "--repo", ctx.repo, "--workflow", workflow, "--event", "schedule",
-                               "--branch", branch, "--limit", "1",
-                               "--json", "databaseId,status,conclusion,headSha,createdAt,url"]))
-    except (BackstopError, ValueError) as exc:
+        runs = asked(ctx.tracker.runs, workflow, branch)
+    except BackstopError as exc:
         return Night(INCONCLUSIVE, None, f"the scheduled run could not be read: {one_line(exc, 200)}")
     if not runs:
         return Night(INCONCLUSIVE, None, f"no scheduled run of {workflow} on {branch}")
@@ -276,7 +283,7 @@ def ci_night(ctx, workflow):
         return Night(INCONCLUSIVE, sha, f"the latest scheduled run {url} failed and was already reported on an "
                                         "earlier night; no newer run has completed", url)
     try:
-        text = run(["gh", "run", "view", str(run_id), "--repo", ctx.repo, "--log-failed"])
+        text = asked(ctx.tracker.run_failed_log, run_id)
     except BackstopError as exc:
         return Night(INCONCLUSIVE, sha, f"the scheduled run {url} failed, but its failed log could not be read: "
                                         f"{one_line(exc, 150)}", url)
@@ -366,10 +373,10 @@ def open_backstop_tickets(ctx):
     """`{suite: ticket number}` over the open `bug` tickets carrying the
     marker. A marker that does not parse names nothing, so its suites are
     filed again: a duplicate ticket, never a failure left unfiled."""
-    listed = json.loads(run(["gh", "issue", "list", "--repo", ctx.repo, "--state", "open", "--label", "bug",
-                             "--limit", "500", "--json", "number,body"]))
     named = {}
-    for issue in listed:
+    for issue in asked(ctx.tracker.issues, "bug"):
+        if "pull_request" in issue:  # the REST issue list holds pull requests too
+            continue
         m = _MARKER.search(issue.get("body") or "")
         try:
             suites = json.loads(m.group(1)) if m else []
@@ -402,9 +409,8 @@ def pr_listing(ctx, number):
     """`(suites, None)` from the PR's last `selector:` comment, or `(None,
     why)` when it has no readable listing."""
     try:
-        comments = json.loads(run(["gh", "pr", "view", number, "--repo", ctx.repo, "--json", "comments"]))["comments"]
-        bodies = [c.get("body") or "" for c in comments]
-    except (BackstopError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        bodies = asked(ctx.tracker.pr_comments, int(number))
+    except BackstopError as exc:
         return None, f"#{number}'s comments could not be read ({one_line(exc, 100)})"
     last = next((b for b in reversed(bodies) if b.startswith("selector:")), "")
     fence = re.search(r"\n```\n(.*?)\n?```", last, re.S)
@@ -469,15 +475,8 @@ def ticket_body(ctx, tip, last, failed, judged, ref, since):
 
 def file_ticket(ctx, tip, failed, body):
     """The new ticket's URL."""
-    with tempfile.NamedTemporaryFile("w", dir=ctx.log_dir, prefix="backstop-body-", suffix=".md",
-                                     delete=False) as f:
-        f.write(body)
-    try:
-        title = f"backstop: full seam red on {ctx.default.split('/')[-1]}: {', '.join(failed)}"
-        return run(["gh", "issue", "create", "--repo", ctx.repo, "--title", one_line(title, 200),
-                    "--label", "bug", "--label", "ready-for-agent", "--body-file", f.name])
-    finally:
-        os.remove(f.name)
+    title = f"backstop: full seam red on {ctx.default.split('/')[-1]}: {', '.join(failed)}"
+    return asked(ctx.tracker.create_issue, one_line(title, 200), body, ["bug", "ready-for-agent"])
 
 
 def notify(cmd, title, body):
@@ -553,7 +552,7 @@ def backstop(args):
     if repo is None:
         return report_inconclusive(args.repo, "its origin is not a github.com repo", args.notify)
     try:
-        login = run(["gh", "api", "user", "--jq", ".login"])
+        login = asked(issue_tracker.GhTracker(repo).viewer_login)
     except BackstopError as exc:
         return report_inconclusive(repo, f"the `gh` login could not be read: {one_line(exc, 200)}", args.notify)
     if repo.split("/")[0] != login:
@@ -566,7 +565,7 @@ def backstop(args):
                                          f"{one_line(exc, 300)}", args.notify)
     state_dir = os.environ.get("BACKSTOP_DIR") or os.path.expanduser("~/.cache/backstop")
     os.makedirs(state_dir, exist_ok=True)
-    ctx = Ctx(root, repo, default, state_dir)
+    ctx = Ctx(root, repo, default, state_dir, issue_tracker.GhTracker(repo))
     result = night(ctx, args.jobs, args.workflow)
     # A CI night has no local log of its own (the one on disk is an earlier
     # failed run's), so it names none. A red night's seam stopped at its first

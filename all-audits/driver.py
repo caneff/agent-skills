@@ -42,6 +42,7 @@ import findings_log  # noqa: E402
 import mutation_run  # noqa: E402
 from procs import claude_env, scrubbed_env, run as _run  # noqa: E402
 import shellcmd  # noqa: E402
+import tracker  # noqa: E402  (#1786)
 from stored_sweeps import (  # noqa: E402
     MULTI_DIR, OWNER, RECORD_FILE, earlier_record, file_audit_record, find_stored_sweep, label_refusal,
     latest_record_url, prune_closed_sweeps, record_repo, repo_identity, repo_sweep_dirs, resume_unposted,
@@ -1400,16 +1401,13 @@ def recent_pr_repos():
     more PRs", never "the search broke" or "the search was cut off"."""
     since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=SUGGEST_DAYS)).strftime("%Y-%m-%d")
     try:
-        r = shellcmd.gh(["search", "prs", "--author", "@me", "--created", f">={since}",
-                         "--json", "repository", "--limit", str(SEARCH_LIMIT)])
-    except shellcmd.CmdError as e:
+        rows = tracker.GhTracker().search_prs(since, SEARCH_LIMIT)
+    except tracker.TrackerError as e:
         raise RuntimeError(f"gh search prs failed: {e}") from e
     try:
-        rows = json.loads(r.stdout)
         names = {pr["repository"]["nameWithOwner"] for pr in rows}
-    except (ValueError, KeyError, TypeError) as e:
-        raise RuntimeError(
-            f"gh search prs reply unreadable ({type(e).__name__}: {e}); stdout began: {r.stdout[:200]!r}") from e
+    except (KeyError, TypeError) as e:
+        raise RuntimeError(f"gh search prs reply unreadable ({type(e).__name__}: {e})") from e
     if len(rows) >= SEARCH_LIMIT:
         raise RuntimeError(f"gh search prs returned {len(rows)} PRs, its limit: the list may be cut off")
     return sorted(n for n in names if n.startswith(OWNER + "/"))

@@ -33,15 +33,16 @@ def gh_json(args):
         raise TrackerError(str(exc)) from None
     try:
         return json.loads(out or "null")
-    except ValueError:
-        raise TrackerError(f"gh {' '.join(args)}: unreadable JSON") from None
+    except ValueError as exc:
+        raise TrackerError(f"gh {' '.join(args)}: unreadable JSON ({type(exc).__name__}: {exc}); "
+                           f"stdout began: {out[:200]!r}") from None
 
 
 class GhTracker:
     """The issues of one repo, read and written through `gh`. `run(args)` returns parsed JSON and is
     the seam a test of this adapter replaces."""
 
-    def __init__(self, repo, run=gh_json):
+    def __init__(self, repo=None, run=gh_json):
         self.repo = repo
         self._run = run
 
@@ -118,12 +119,75 @@ class GhTracker:
         return [pr.get("body") or "" for pr in prs if isinstance(pr, dict)]
 
     def open_prs(self, head):
-        """`[{number, url}]` for the open PRs from branch `head`."""
+        """`[{number, url, baseRefName}]` for the open PRs from branch `head`."""
         prs = self._run(["pr", "list", "--repo", self.repo, "--head", head, "--state", "open",
-                         "--json", "number,url"])
+                         "--json", "number,url,baseRefName"])
         if not isinstance(prs, list):
             raise TrackerError("the open-PR list was not a list")
         return prs
+
+    def _view(self, kind, number, fields):
+        answer = self._run([kind, "view", str(number), "--repo", self.repo, "--json", fields])
+        if not isinstance(answer, dict):
+            raise TrackerError(f"gh {kind} view {number}: answered with something other than an object")
+        return answer
+
+    def issue_view(self, number, fields):
+        """`gh issue view`'s object with the comma-separated `fields` (`body,comments` carries each
+        comment's author, time and hidden marker, which the REST object does not)."""
+        return self._view("issue", number, fields)
+
+    def pr_view(self, pr, fields):
+        """`gh pr view`'s object with `fields`. `pr` may be a number, a URL or a branch."""
+        return self._view("pr", pr, fields)
+
+    def pr_comments(self, pr):
+        """The bodies of PR `pr`'s comments, oldest first; a comment with no body reads as ''."""
+        comments = self._view("pr", pr, "comments").get("comments")
+        if not isinstance(comments, list) or not all(isinstance(c, dict) for c in comments):
+            raise TrackerError(f"PR #{pr}: gh answered with no list of comments")
+        return [c.get("body") or "" for c in comments]
+
+    def runs(self, workflow, branch, event="schedule", limit=1):
+        """The newest `limit` runs of `workflow` on `branch` for `event`, as gh's run objects."""
+        runs = self._run(["run", "list", "--repo", self.repo, "--workflow", workflow, "--event", event,
+                          "--branch", branch, "--limit", str(limit),
+                          "--json", "databaseId,status,conclusion,headSha,createdAt,url"])
+        if not isinstance(runs, list):
+            raise TrackerError("the run list was not a list")
+        return runs
+
+    def run_failed_log(self, run_id):
+        """The failed steps' log of run `run_id`. An empty log raises: nothing to read is not a log."""
+        try:
+            text = shellcmd.gh(["run", "view", str(run_id), "--repo", self.repo, "--log-failed"]).stdout
+        except shellcmd.CmdError as exc:
+            raise TrackerError(str(exc)) from None
+        if not text.strip():
+            raise TrackerError(f"run {run_id}: gh printed no log")
+        return text.strip()
+
+    def create_issue(self, title, body, labels):
+        """File an issue and return its URL."""
+        args = ["issue", "create", "--repo", self.repo, "--title", title, "--body", body]
+        for label in labels:
+            args += ["--label", label]
+        try:
+            url = shellcmd.gh(args).stdout.strip()
+        except shellcmd.CmdError as exc:
+            raise TrackerError(str(exc)) from None
+        if not url:
+            raise TrackerError("gh issue create printed no URL")
+        return url
+
+    def search_prs(self, since, limit):
+        """The `repository` of up to `limit` PRs the viewer authored since `since` (`YYYY-MM-DD`),
+        across every repo; the caller owns the cut-off check, since `limit` is gh's own cap."""
+        rows = self._run(["search", "prs", "--author", "@me", "--created", f">={since}",
+                          "--json", "repository", "--limit", str(limit)])
+        if not isinstance(rows, list):
+            raise TrackerError("gh search prs answered with something other than a list")
+        return rows
 
     def viewer_login(self):
         """The login `gh` is authenticated as."""
@@ -155,15 +219,22 @@ class MemoryTracker:
     """`GhTracker`'s answers from a list of REST issue dicts. An issue may carry `parent` (a number)
     and `blockers` (open native blocker numbers); `prs` are `{number, url, head}`; `merged` maps a
     base branch to its merged PR bodies; `broken` maps an operation name (`op` or `op:<key>`, the key a ticket number or base branch) to the message it raises.
-    `comments` and `merges` record what was written."""
+    `pr_views` maps a PR number to its `gh pr view` object, `pr_comments` to its comment bodies,
+    `runs` is the workflow-run list and `logs` maps a run id to its failed log.
+    `comments`, `merges` and the issues `create_issue` adds record what was written."""
 
-    def __init__(self, issues=(), prs=(), viewer="me", merged=None, broken=None, repo="owner/repo"):
+    def __init__(self, issues=(), prs=(), viewer="me", merged=None, broken=None, repo="owner/repo",
+                 pr_views=None, pr_comments=None, runs=(), logs=None):
         self.repo = repo
         self._issues = {i["number"]: i for i in issues}
         self._prs = list(prs)
         self._viewer = viewer
         self._merged = merged or {}
         self._broken = broken or {}
+        self._pr_views = pr_views or {}
+        self._pr_comments = pr_comments or {}
+        self._runs = list(runs)
+        self._logs = logs or {}
         self.comments = []
         self.merges = []
 
@@ -204,7 +275,43 @@ class MemoryTracker:
 
     def open_prs(self, head):
         self._check("open_prs")
-        return [{"number": p["number"], "url": p["url"]} for p in self._prs if p.get("head") == head]
+        return [{"number": p["number"], "url": p["url"], "baseRefName": p.get("base")}
+                for p in self._prs if p.get("head") == head]
+
+    def issue_view(self, number, fields):
+        self._check("issue_view", number)
+        if number not in self._issues:
+            raise TrackerError(f"issue #{number}: Not Found (HTTP 404)")
+        return {f: self._issues[number].get(f) for f in fields.split(",")}
+
+    def pr_view(self, pr, fields):
+        self._check("pr_view", pr)
+        if pr not in self._pr_views:
+            raise TrackerError(f"PR #{pr}: Not Found (HTTP 404)")
+        return self._pr_views[pr]
+
+    def pr_comments(self, pr):
+        self._check("pr_comments", pr)
+        if pr not in self._pr_comments:
+            raise TrackerError(f"PR #{pr}: Not Found (HTTP 404)")
+        return list(self._pr_comments[pr])
+
+    def runs(self, workflow, branch, event="schedule", limit=1):
+        self._check("runs")
+        return self._runs[:limit]
+
+    def run_failed_log(self, run_id):
+        self._check("run_failed_log", run_id)
+        if run_id not in self._logs:
+            raise TrackerError(f"run {run_id}: gh printed no log")
+        return self._logs[run_id]
+
+    def create_issue(self, title, body, labels):
+        self._check("create_issue")
+        number = max(self._issues, default=0) + 1
+        self._issues[number] = {"number": number, "title": title, "body": body, "state": "open",
+                                "labels": [{"name": x} for x in labels]}
+        return f"https://github.com/{self.repo}/issues/{number}"
 
     def viewer_login(self):
         self._check("viewer_login")

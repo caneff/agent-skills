@@ -65,6 +65,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "multi-axis-code-review"))
 sys.path.insert(0, str(HERE.parent / "common"))
 from shellcmd import CmdError, default_branch, git as _git, origin_slug, scratch_worktree  # noqa: E402  (#1782)
+from tracker import GhTracker, TrackerError  # noqa: E402  (#1786)
 from review_ledger import DEFAULT_LEDGER, parse_codex_out  # noqa: E402
 from review_cache import REVIEWS_ROOT, CacheDirError, repo_for_checkout  # noqa: E402
 
@@ -174,13 +175,15 @@ def audit_range(ledger: Path, repo: str, mark: str, base: str) -> tuple[Span, li
     return Span(*lines[0].removeprefix("range ").split("..")), prs, left_out
 
 
-def render_ticket(slug: str, ticket: int, program: str) -> str:
-    """The ticket's body and comments, rendered by `program`, `implement/SKILL.md`'s jq program."""
-    r = subprocess.run(["gh", "issue", "view", str(ticket), "--repo", slug, "--json", "body,comments"],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        raise Stop(ERROR, f"gh could not read ticket #{ticket}: {r.stderr.strip()}")
-    j = subprocess.run(["jq", "-r", program], input=r.stdout, capture_output=True, text=True)
+def render_ticket(slug: str, ticket: int, program: str, tracker=None) -> str:
+    """The ticket's body and comments, rendered by `program`, `implement/SKILL.md`'s jq program.
+    `tracker` is the issue module's adapter for `slug`, the `gh` one unless a test passes the
+    in-memory one."""
+    try:
+        view = (tracker or GhTracker(slug)).issue_view(ticket, "body,comments")
+    except TrackerError as e:
+        raise Stop(ERROR, f"gh could not read ticket #{ticket}: {e}") from None
+    j = subprocess.run(["jq", "-r", program], input=json.dumps(view), capture_output=True, text=True)
     if j.returncode != 0:
         raise Stop(ERROR, f"jq could not render ticket #{ticket}: {j.stderr.strip()}")
     return j.stdout

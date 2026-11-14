@@ -17,6 +17,9 @@ sys.path.insert(0, HERE)
 
 import pr_settle  # noqa: E402
 
+sys.path.insert(0, os.path.join(HERE, "..", "common"))
+import tracker  # noqa: E402
+
 SHA = "a" * 40
 
 
@@ -230,6 +233,42 @@ def test_merge_binds_to_the_head_it_was_given():
     exc, calls, _ = merge_with([(0, "")], views=[view("CLEAN", head="b" * 40)])
     assert isinstance(exc, pr_settle.SettleError) and calls == []
     assert "moved" in str(exc)
+
+
+# -- the gh edges, over the issue module's in-memory adapter (#1786) -----------
+
+def test_the_reader_reads_the_view_through_the_tracker_with_the_extra_fields():
+    t = tracker.MemoryTracker(pr_views={7: view("CLEAN")})
+    assert pr_settle.gh_reader(7, "o/r", "number", tracker=t)() == view("CLEAN")
+
+
+def test_a_reader_whose_tracker_cannot_answer_is_a_settle_error_not_a_view():
+    t = tracker.MemoryTracker(broken={"pr_view": "gh down"})
+    with pytest.raises(pr_settle.SettleError, match="gh pr view failed: gh down"):
+        pr_settle.gh_reader(7, "o/r", tracker=t)()
+
+
+def test_the_merger_squashes_at_the_head_and_reports_zero():
+    t = tracker.MemoryTracker()
+    assert pr_settle.gh_merger(7, "o/r", tracker=t)(SHA) == (0, "")
+    assert t.merges == [(7, SHA)]
+
+
+def test_the_merger_hands_back_the_refusal_text_the_retry_reads():
+    t = tracker.MemoryTracker(broken={"merge": BASE[1]})
+    code, text = pr_settle.gh_merger(7, "o/r", tracker=t)(SHA)
+    assert code == 1 and pr_settle.BASE_MODIFIED in text
+
+
+def test_the_ownership_check_passes_the_owner_and_refuses_anyone_else():
+    pr_settle.require_own_repo("Me/r", tracker=tracker.MemoryTracker(viewer="me"))
+    with pytest.raises(pr_settle.SettleError, match="not the gh login"):
+        pr_settle.require_own_repo("o/r", tracker=tracker.MemoryTracker(viewer="me"))
+
+
+def test_the_ownership_check_refuses_when_the_login_cannot_be_read():
+    with pytest.raises(pr_settle.SettleError, match="could not read the gh login"):
+        pr_settle.require_own_repo("o/r", tracker=tracker.MemoryTracker(broken={"viewer_login": "no auth"}))
 
 
 # -- the command line ------------------------------------------------------
