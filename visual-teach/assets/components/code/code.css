@@ -5,7 +5,8 @@
   overflow: hidden;
   margin: 1.2rem 0;
 }
-.vt-code-head {
+.vt-code-head,
+.vt-io-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -47,12 +48,14 @@
   height: 14px;
   display: block;
 }
-.vt-code pre {
+.vt-code pre,
+.vt-io pre {
   margin: 0;
   overflow-x: auto;
   background: none;
 }
-.vt-code pre code {
+.vt-code pre code,
+.vt-io pre code {
   display: block;
   padding: 0.9rem 1rem;
   font-family: var(--vt-mono-font);
@@ -156,38 +159,8 @@ code.vt-pcode {
   min-width: 0; /* allow grid children to shrink so long lines scroll, not clip */
 }
 
-.vt-io-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-family: var(--vt-ui-font);
-  font-size: 0.78rem;
-  color: var(--vt-muted);
-  padding: 0.4rem 0.8rem;
-  background: var(--vt-soft);
-  border-bottom: 1px solid var(--vt-rule);
-}
-
 .vt-io-output .vt-io-head {
   background: var(--vt-good-soft);
-}
-
-.vt-io pre {
-  margin: 0;
-  overflow-x: auto;
-  background: none;
-}
-
-.vt-io pre code {
-  display: block;
-  padding: 0.9rem 1rem;
-  font-family: var(--vt-mono-font);
-  font-size: 0.85rem;
-  line-height: 1.55;
-  background: none;
-  color: var(--vt-ink);
-  text-shadow: none;
-  white-space: pre;
 }
 
 @media print {
