@@ -169,7 +169,7 @@ peak_suites() { # <file>: the suites a rendezvous run needs at once, one marker 
   cat >"$1" <<FIXTURE
 #!/usr/bin/env bash
 touch "$shadow/up.\$\$"
-for _ in \$(seq 30); do [ "\$(ls "$shadow"/up.* 2>/dev/null | wc -l)" -ge $2 ] && exit 0; sleep 0.1; done
+for _ in \$(seq 150); do [ "\$(ls "$shadow"/up.* 2>/dev/null | wc -l)" -ge $2 ] && exit 0; sleep 0.1; done
 echo never-reached-$2
 exit 1
 FIXTURE
@@ -179,18 +179,21 @@ fresh_many() { # <k>: k suites that each wait until all k are running
   for i in $(seq "$1"); do mkdir -p "$shadow/repo/m$i"; peak_suites "$shadow/repo/m$i/m.test.sh" "$1"; done
   git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm many
 }
+# A stub nproc pins the core count at 32, so the uncapped default runs all five
+# at once on any box and the cap case cannot pass for want of cores (C1).
+mkdir -p "$shadow/bin"; printf '#!/bin/sh\necho 32\n' >"$shadow/bin/nproc"; chmod +x "$shadow/bin/nproc"
 fresh_many 5
 git -C "$shadow/repo" worktree add -q --detach "$shadow/linked" HEAD
-out=$(cd "$shadow/linked" && bash tests/all.sh 2>&1); rc=$?
+out=$(cd "$shadow/linked" && PATH="$shadow/bin:$PATH" bash tests/all.sh 2>&1); rc=$?
 check "an unset TESTS_JOBS in a linked worktree caps below five at once" "$([ "$rc" = 1 ] && has never-reached-5; echo $?)"
 check "...and says the cap and the declaration it owes" "$(grep -qE 'TESTS_JOBS unset in a linked worktree: capped at 4' <<<"$out"; echo $?)"
 rm -f "$shadow"/up.*
-out=$(cd "$shadow/linked" && TESTS_JOBS=5 bash tests/all.sh 2>&1); rc=$?
+out=$(cd "$shadow/linked" && PATH="$shadow/bin:$PATH" TESTS_JOBS=5 bash tests/all.sh 2>&1); rc=$?
 check "an explicit TESTS_JOBS in a linked worktree is not capped" "$([ "$rc" = 0 ]; echo $?)"
 check "...and prints no cap note" "$(! grep -q 'capped at' <<<"$out"; echo $?)"
 rm -f "$shadow"/up.*
-out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
-check "the primary checkout keeps the nproc default" "$([ "$rc" = 0 ] || [ "$(nproc)" -lt 5 ]; echo $?)"
+out=$(cd "$shadow/repo" && PATH="$shadow/bin:$PATH" bash tests/all.sh 2>&1); rc=$?
+check "the primary checkout keeps the nproc default" "$([ "$rc" = 0 ]; echo $?)"
 git -C "$shadow/repo" worktree remove --force "$shadow/linked"
 
 # A failing suite stops new suites from starting.

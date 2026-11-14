@@ -427,8 +427,8 @@ round follows steps 2–3 below keyed on the spec number:
    merged into current `<default>` before it merges (§ The merge step 3).
    The run is a parallel job (§ Control): set `TESTS_JOBS=<k>` on it and
    declare `<k>` cores before you launch. `tests/all.sh` caps an unset
-   `TESTS_JOBS` at 4 in a linked worktree (#1808), which is a cap and not a
-   declaration: the run file still charges zero until you write the record.
+   `TESTS_JOBS` in a linked worktree (#1808); a cap is not a declaration, and
+   the run file charges zero until you write the record.
    `fix-check.sh <n>` (and the pre-report gate that runs it) checks the
    rest mechanically: every finding id in the three findings sidecars and the
    Codex output has exactly one disposition, every `fixed` sha is a commit on
