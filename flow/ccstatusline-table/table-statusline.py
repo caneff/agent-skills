@@ -268,26 +268,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    if "--selftest" in sys.argv:
-        assert dwidth("🏰 idle") == 7, dwidth("🏰 idle")  # emoji=2, space, idle=4
-        assert dwidth("abc") == 3
-        assert dwidth("main") == 4
-        out = table([[("a", FG), ("bb", FG)], [("ccc", FG), ("d", FG)]], GREEN)
-        # strip color to check the frame aligns on visible width
-        widths = {dwidth(ANSI.sub("", l)) for l in out.splitlines()}
-        assert len(widths) == 1, f"rows not equal width: {widths}"
-        assert "╭" in out and "┬" in out.splitlines()[0]
-        assert frame_color(0) == PURPLE
-        assert frame_color(139_000) == GREEN
-        assert frame_color(140_000) == YELLOW
-        assert frame_color(179_000) == YELLOW
-        assert frame_color(180_000) == RED
-        assert frame_color(250_000) == RED  # over 200k: stays red
-        assert parse_usage_fields("42%\t2d3h30m\t12%\t3h10m") == (
-            "42%", "2d3h30m", "12%", "3h10m",
-        )
-        assert parse_usage_fields("\t\t12%\t3h10m") == ("", "", "12%", "3h10m")
-        assert parse_usage_fields("") == ("", "", "", "")
-        print("ok")
-    else:
-        main()
+    main()
