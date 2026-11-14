@@ -764,11 +764,12 @@ run "foreign merge blocked when the lexer's awk fails" 2 \
 stubdir=$stubdir_saved
 # A command that names no destroyer, merge, checkout or stash runs no lexer
 # pass: the quote views cost two awk forks and are read only once a raw gate
-# matches (#1566). The stub logs each lexer call and leaves its answer alone.
+# matches (#1566). The stub logs every awk fork the hook makes and leaves its
+# answer alone, so the test pins the cost, not the lexer's argument spelling.
 mkdir -p "$tmp/countawk"
 cat > "$tmp/countawk/awk" <<'STUB'
 #!/usr/bin/env bash
-[ "$1" = "-v" ] && [[ "$2" == view=* ]] && echo lexed >> "$LEXER_LOG"
+echo "awk $*" >> "$LEXER_LOG"
 exec /usr/bin/awk "$@"
 STUB
 chmod +x "$tmp/countawk/awk"
@@ -784,9 +785,9 @@ lexer_passes() {
     echo "FAIL: lexer count '$cmd' — want exit $want, got $rc"; echo "  out: $out"; fails=1; return
   fi
   if [ "$passes" = none ] && [ -s "$LEXER_LOG" ]; then
-    echo "FAIL: '$cmd' ran the lexer ($(wc -l < "$LEXER_LOG") passes)"; fails=1
+    echo "FAIL: '$cmd' forked awk ($(wc -l < "$LEXER_LOG") times, budget 0)"; fails=1
   elif [ "$passes" = some ] && [ ! -s "$LEXER_LOG" ]; then
-    echo "FAIL: '$cmd' never ran the lexer, so the stub counts nothing"; fails=1
+    echo "FAIL: '$cmd' never forked awk, so the stub counts nothing"; fails=1
   else
     echo "PASS: '$cmd' lexer passes: $passes"
   fi

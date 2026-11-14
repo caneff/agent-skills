@@ -272,7 +272,7 @@ if [ -L "$tmp/fail-home/.local/bin/job-run" ]; then
 else
   echo "FAIL later install steps did not run after the non-refusal failure: $out"; fails=1
 fi
-if printf '%s' "$out" | grep -q 'herdr-toast-install' && printf '%s' "$out" | grep -qi 'fail'; then
+if printf '%s' "$out" | grep -q 'herdr-toast-install failed for a non-refusal reason'; then
   echo "PASS the final summary names the toast step as failed"
 else
   echo "FAIL no summary naming the toast step's failure: $out"; fails=1

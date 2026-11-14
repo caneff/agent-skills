@@ -37,6 +37,12 @@ run() {
 # Non-push command: exits 0, no regeneration triggered.
 rm -f "$tmp/python3.args"
 run "non-push command allowed, no side effects" 0 "git status"
+# A regression would start python3 in the background, as the push case below
+# does, so wait out a bounded window before asserting it never did.
+for _ in $(seq 30); do
+  [ -e "$tmp/python3.args" ] && break
+  sleep 0.1
+done
 if [ -e "$tmp/python3.args" ]; then
   echo "FAIL: non-push command triggered python3"; fails=1
 else

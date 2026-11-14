@@ -103,6 +103,8 @@ has "nothing to commit says so" "$OUT" "no upstream changes."
 # 5. the script no longer overrides the identity: commits carry the checkout's
 d=$(fixture identity); echo edit > "$d/a/SKILL.md"
 run "$d" none
+check "the run with a pending edit exits 0" 0 "$RC"
+check "the snapshot commit happened (base + snapshot)" 2 "$(git -C "$d" rev-list --count HEAD)"
 check "snapshot author is the checkout's identity" t@example.com "$(git -C "$d" log -1 --format=%ae)"
 
 # 6. a buffer whose baseline commit never happened (unborn HEAD) recovers: the

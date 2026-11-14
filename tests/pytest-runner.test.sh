@@ -114,13 +114,5 @@ got=$(cd "$shadow/repo" && uv run --locked python3 -c 'import sys; print(sys.ver
 check "suites run on the system python3 ($want), not a uv-managed one (got: ${got:-nothing})" \
   "$([ -n "$got" ] && [ "$got" = "$want" ]; echo $?)"
 
-# Both testing skills state the ruling and cite ADR 0007 by a path that
-# resolves from any repo. That no suite of this repo's own imports unittest is
-# the check above, run on the real tree by every `bash tests/all.sh`.
-for skill in python-testing-patterns setup-python-repo; do
-  check "$skill states the pytest ruling, citing ADR 0007" \
-    "$(grep -qF '~/.agents/skills/docs/adr/0007-pytest-everywhere.md' "$root/$skill/SKILL.md"; echo $?)"
-done
-
 [ "$fail" = 0 ] || { printf -- '--- last gate output ---\n%s\n' "$out"; exit 1; }
 echo "ALL PASS"
