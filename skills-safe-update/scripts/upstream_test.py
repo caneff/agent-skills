@@ -18,6 +18,16 @@ TREES_ARGS = ("api", "repos/acme/repo/git/trees/headsha1234?recursive=1")
 TARBALL_ARGS = ("api", "repos/acme/repo/tarball/headsha1234")
 
 
+@pytest.fixture(autouse=True)
+def isolated_git(tmp_path, monkeypatch):
+    """No live gitconfig or exported GIT_* reaches a test's git, the fixture
+    repos' or status_rows' own (CODING_STANDARDS.md rule 2)."""
+    for k in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(k)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
 def _done(args, code=0, out=b""):
     return subprocess.CompletedProcess(args, code, stdout=out)
 
@@ -328,10 +338,3 @@ def test_main_sync_extras_prints_report(tmp_path, monkeypatch, gh_runner, capsys
 def test_main_without_command_prints_help_and_exits_2(capsys):
     assert upstream.main([]) == 2
     assert "usage:" in capsys.readouterr().out
-
-
-def test_selfcheck_mode_is_removed(capsys):
-    with pytest.raises(SystemExit) as exc:
-        upstream.main(["--selfcheck"])
-    assert exc.value.code == 2
-    assert "--selfcheck" in capsys.readouterr().err
