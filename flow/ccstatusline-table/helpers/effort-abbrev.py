@@ -20,6 +20,10 @@ def get_level():
     except Exception:
         return None
 
-lvl = (get_level() or "").lower()
-if lvl:
-    sys.stdout.write("(" + ABBR.get(lvl, lvl + "?") + ")")
+def main():
+    lvl = (get_level() or "").lower()
+    if lvl:
+        sys.stdout.write("(" + ABBR.get(lvl, lvl + "?") + ")")
+
+if __name__ == "__main__":
+    main()
