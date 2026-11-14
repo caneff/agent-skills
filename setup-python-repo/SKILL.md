@@ -104,9 +104,9 @@ for faster JS/TS suites.)
 
 ## 6. Gates: merge gate
 
-CI is local, not GitHub Actions (`~/.agents/skills/flow/claude/WORKFLOW.md`
-§ CI): set the merge gate with `git config land.testcmd 'just check'` and copy
-no workflow files.
+CI is local, not GitHub Actions. Per
+`~/.agents/skills/flow/claude/WORKFLOW.md` § CI, set the merge gate with
+`git config land.testcmd 'just check'` and copy no workflow files.
 
 **Done when:** `git config land.testcmd` prints `just check`.
 
