@@ -25,7 +25,7 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 # Dracula palette
 PURPLE, CYAN, GREEN, PINK = "BD93F9", "8BE9FD", "50FA7B", "FF79C6"
-ORANGE, YELLOW, GRAY, FG = "FFB86C", "F1FA8C", "6272A4", "F8F8F2"
+ORANGE, YELLOW, FG = "FFB86C", "F1FA8C", "F8F8F2"
 RED = "FF5555"
 
 
@@ -43,7 +43,7 @@ def run(cmd: list[str], stdin: bytes, cwd: str | None = None) -> str:
             cmd, input=stdin, capture_output=True, timeout=1.5, cwd=cwd
         ).stdout
         return ANSI.sub("", out.decode("utf-8", "replace")).strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return ""
 
 
@@ -99,7 +99,7 @@ def git(cwd: str) -> tuple[str, str, str]:
                 timeout=1.0,
                 text=True,
             ).stdout.strip()
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             return ""
 
     if not g(["rev-parse", "--git-dir"]):
@@ -115,8 +115,13 @@ def git(cwd: str) -> tuple[str, str, str]:
     return (f"⎇ {branch}" if branch else ""), f"+{ins},-{dele}", root
 
 
-def context_tokens(transcript: str) -> int:
-    """Latest context size (tokens) from the transcript's most recent usage."""
+def context_tokens(transcript: str) -> int | None:
+    """Latest context size (tokens) from the transcript's most recent usage.
+
+    0 means no data yet (no path, no file, no usage line); None means the
+    transcript exists but could not be read, which must not look like a new
+    session.
+    """
     p = Path(transcript) if transcript else None
     if not p or not p.exists():
         return 0
@@ -125,21 +130,27 @@ def context_tokens(transcript: str) -> int:
         for line in p.read_text("utf-8", "replace").splitlines():
             try:
                 u = json.loads(line).get("message", {}).get("usage")
-            except Exception:
-                continue
-            if u:
-                total = (
-                    u.get("input_tokens", 0)
-                    + u.get("cache_read_input_tokens", 0)
-                    + u.get("cache_creation_input_tokens", 0)
-                )
-    except Exception:
-        return 0
+                if u:
+                    total = (
+                        u.get("input_tokens", 0)
+                        + u.get("cache_read_input_tokens", 0)
+                        + u.get("cache_creation_input_tokens", 0)
+                    )
+            except (ValueError, AttributeError):
+                continue  # a torn or non-object line is skipped
+    except OSError:
+        return None
     return total
 
 
-def frame_color(tokens: int) -> str:
-    """Green → yellow (≥140k) → red (≥180k) by absolute context size."""
+def frame_color(tokens: int | None) -> str:
+    """Green → yellow (≥140k) → red (≥180k) by absolute context size.
+
+    None (unreadable transcript) is orange, distinct from the purple of a
+    session with no data yet.
+    """
+    if tokens is None:
+        return ORANGE
     if tokens <= 0:
         return PURPLE  # no data yet
     if tokens >= 180_000:
@@ -182,15 +193,16 @@ def write_usage_cache(data: object) -> None:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         mod.write_cache(data, time.time())
-    except Exception:
-        pass
+    except (OSError, ImportError, SyntaxError) as e:
+        # claude-usage-gate reads this cache; a failure here leaves it stale.
+        print(f"table-statusline: claude-usage cache not written: {e!r}", file=sys.stderr)
 
 
 def main() -> None:
     raw = sys.stdin.buffer.read()
     try:
         data = json.loads(raw or b"{}")
-    except Exception:
+    except ValueError:
         data = {}
 
     write_usage_cache(data)
@@ -230,7 +242,7 @@ def main() -> None:
                 timeout=1.5,
             ).stdout
             line = ANSI.sub("", out.decode("utf-8", "replace")).rstrip("\n")
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             line = ""
         weekly, wreset, session, breset = parse_usage_fields(line)
         return " · ".join(x for x in (win(weekly, wreset), win(session, breset)) if x)
@@ -247,7 +259,7 @@ def main() -> None:
         # convention; fed the main root so a linked worktree collapses to the
         # project name too, not the worktree's.
         (CYAN, lambda: Path(root or cwd).name),
-        (ORANGE, lambda: f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"),
+        (ORANGE, lambda: "Ctx ?" if tokens is None else f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"),
         (PINK, usage_cell),
         (YELLOW, codex_cell),
         (GREEN, lambda: f"{branch} {changes}".strip()),

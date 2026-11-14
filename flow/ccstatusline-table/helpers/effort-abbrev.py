@@ -8,7 +8,7 @@ ABBR = {"low": "L", "medium": "M", "high": "H", "xhigh": "XH", "max": "MAX"}
 def get_level():
     try:
         data = json.load(sys.stdin)
-    except Exception:
+    except ValueError:
         data = {}
     lvl = (data.get("effort") or {}).get("level")
     if lvl:
@@ -17,7 +17,7 @@ def get_level():
         p = os.path.expanduser("~/.claude/settings.json")
         with open(p) as f:
             return json.load(f).get("effortLevel")
-    except Exception:
+    except (OSError, ValueError, AttributeError):
         return None
 
 def main():

@@ -103,8 +103,19 @@ def test_context_tokens_no_usage_lines(tmp_path):
     assert ts.context_tokens(str(t)) == 0
 
 
-def test_context_tokens_unreadable_transcript_is_zero(tmp_path):
-    assert ts.context_tokens(str(tmp_path)) == 0  # a directory exists but cannot be read
+def test_context_tokens_unreadable_transcript_is_none(tmp_path):
+    # a directory exists but cannot be read: None, which is not the 0 of a new session
+    assert ts.context_tokens(str(tmp_path)) is None
+
+
+def test_context_tokens_skips_torn_and_odd_lines(tmp_path):
+    t = tmp_path / "t.jsonl"
+    t.write_text("\n".join(['{"message": {"usa', "[1]", '{"message": "x"}', _usage_line(5, 0, 0)]))
+    assert ts.context_tokens(str(t)) == 5
+
+
+def test_frame_color_unreadable_is_not_the_new_session_color():
+    assert ts.frame_color(None) not in (ts.PURPLE, ts.GREEN, ts.YELLOW, ts.RED)
 
 
 # --- git -----------------------------------------------------------------------
@@ -294,3 +305,41 @@ def test_main_in_process_empty_stdin(monkeypatch, capsys, env, tmp_path):
     monkeypatch.chdir(tmp_path)
     out = run_main(monkeypatch, capsys, env, None, raw="")
     assert "Ctx —" in out
+
+
+def test_main_unreadable_transcript_has_its_own_marker(env, repo, tmp_path):
+    session = {"cwd": str(repo), "transcript_path": str(tmp_path)}  # a directory
+    p = subprocess.run([sys.executable, str(LINE)], env=env, cwd=repo, capture_output=True,
+                       text=True, input=json.dumps(session))
+    assert p.returncode == 0, p.stderr
+    assert "Ctx ?" in plain(p.stdout)
+    assert "Ctx —" not in plain(p.stdout)
+    purple = "\x1b[38;2;189;147;249m╭"
+    assert purple not in p.stdout  # not the "no data yet" frame
+
+
+def test_main_new_session_keeps_no_data_marker(env, repo):
+    p = subprocess.run([sys.executable, str(LINE)], env=env, cwd=repo, capture_output=True,
+                       text=True, input=json.dumps({"cwd": str(repo)}))
+    assert "Ctx —" in plain(p.stdout)
+    assert "\x1b[38;2;189;147;249m╭" in p.stdout
+
+
+def test_failed_helper_load_is_logged(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(ts, "CFG", tmp_path)  # no claude-usage.py here
+    ts.write_usage_cache({})
+    assert "claude-usage" in capsys.readouterr().err
+
+
+def test_helper_load_ok_is_silent(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ts.write_usage_cache({})
+    assert capsys.readouterr().err == ""
+
+
+def test_run_does_not_swallow_programming_errors(monkeypatch):
+    def boom(*a, **k):
+        raise TypeError("bug")
+    monkeypatch.setattr(ts.subprocess, "run", boom)
+    with pytest.raises(TypeError):
+        ts.run(["x"], b"")
