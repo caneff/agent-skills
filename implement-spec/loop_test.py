@@ -1,6 +1,7 @@
 """Tests for the dispatch loop (#893). The seams the ticket names: a fixture run
-over a stub tracker and a stub agent list. The loop's prose — its step list, its refusals, its stated
-consequences — has no test: there is no harness that runs a skill's own text.
+over a stub tracker and a stub agent list. The loop's prose — its step list,
+its refusals, its stated consequences — has no test: there is no harness that
+runs a skill's own text.
 """
 import json
 import os
@@ -80,9 +81,9 @@ def test_seat_still_refuses_a_worktree_whose_branch_only_looks_like_a_spec(branc
     assert "worktree" in str(exc.value)
 
 
-def test_seat_refuses_a_integration_branch_in_the_primary_checkout():
-    # The exception is for the linked worktree `--spec` makes; an integration branch
-    # on the primary checkout is still not the default branch.
+def test_seat_refuses_an_integration_branch_in_the_primary_checkout():
+    # The exception is for the linked worktree `--spec` makes; an integration
+    # branch on the primary checkout is still not the default branch.
     with pytest.raises(loop.LoopError) as exc:
         loop.seat(git_stub(branch="spec-1262"))
     assert "spec-1262" in str(exc.value) and "main" in str(exc.value)
@@ -278,7 +279,7 @@ def test_a_wide_clump_held_by_a_live_workspace_stays_off_the_frontier():
         {"tickets": [20], "closure": ["b.js", "c.js", "d.js", HOT]},
         {"tickets": [30], "closure": ["f.js", "g.js"]},
     ]
-    picked = loop.picks(loop.frontier(candidates, parked_455()), 2)[0]
+    picked = picked_for(candidates, parked_455(), 2)
     assert [c["tickets"] for c in picked] == [[30]]
 
 
@@ -373,7 +374,7 @@ def test_a_landing_frees_its_slot_without_waiting_for_the_other_clump():
     # blocked family, so the freed slot stays empty rather than colliding —
     # and the run drains out of ticket order.
     left = [c for c in candidates_781() if c["tickets"] != [501]]
-    assert loop.picks(loop.frontier(left, parked_455()), 1)[0] == []
+    assert picked_for(left, parked_455(), 1) == []
     # #455 lands too, and the same call now fills from the family it held.
     assert [c["tickets"] for c in picked_for(left, [], 1)] == [[452]]
 
@@ -384,7 +385,7 @@ def test_a_clump_clumped_by_subtree_is_checked_on_its_named_files():
     candidates = [{"tickets": [601], "files": ["examples/thermo.js"]}]
     live = [{"tickets": [455], "workspace": "/w/implement-455",
              "agent": "run-455", "files": ["examples/thermo.js"]}]
-    assert loop.picks(loop.frontier(candidates, live), 1)[0] == []
+    assert picked_for(candidates, live, 1) == []
 
 
 def test_the_hot_shared_file_is_the_only_hub():
@@ -473,7 +474,7 @@ def test_the_cli_dispatch_refuses_when_ps_cannot_be_run(tmp, empty_live):
                   env={"PATH": nobin})
     assert got.returncode == 1, got
     assert "dispatch  #" not in got.stdout, got.stdout
-    assert "--processes" in got.stderr, got.stderr
+    assert_refused_without_traceback(got)
 
 
 def test_the_cli_refuses_when_ps_cannot_be_run(tmp):
@@ -482,8 +483,17 @@ def test_the_cli_refuses_when_ps_cannot_be_run(tmp):
                           "0", "--live", "0"], capture_output=True, text=True,
                          timeout=60, env=env)
     assert got.returncode == 1, got
-    assert "--processes" in got.stderr, got.stderr
+    assert_refused_without_traceback(got)
     assert "box ok" not in got.stdout, got.stdout
+
+
+# The count's refusal is an `agents.AgentError`, raised outside `loop.py`: an
+# uncaught one also exits 1 and its traceback also names `--processes`, so
+# only the refusal's own shape tells a handled refusal from a crash.
+def assert_refused_without_traceback(got):
+    assert "Traceback" not in got.stderr, got.stderr
+    assert got.stderr.startswith("loop.py: "), got.stderr
+    assert "--processes" in got.stderr, got.stderr
 
 
 LOOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
@@ -636,7 +646,7 @@ def test_the_exclusion_reads_the_closure_and_not_the_named_files():
     live = [{"tickets": [455], "workspace": "/w/implement-455",
              "agent": "run-455", "files": ["examples/renban.js"],
              "closure": ["examples/renban.js", HOT]}]
-    assert loop.picks(loop.frontier(candidates, live), 1)[0] == []
+    assert picked_for(candidates, live, 1) == []
 
 
 def test_picks_takes_nothing_for_a_free_count_below_zero():
@@ -1935,7 +1945,7 @@ def test_workspace_diff_of_a_slice_that_merged_an_advanced_integration_branch_14
     assert loop.workspace_diff(work) == ["own.txt"]
 
 
-def test_workspace_diff_reads_a_base_that_is_not_a_integration_branch_as_no_slice(tmp):
+def test_workspace_diff_reads_a_base_that_is_not_an_integration_branch_as_no_slice(tmp):
     # As `implement/fix_check.py` reads it: only `spec-<n>` marks a slice.
     work = make_slice_workspace(tmp, own=["own.txt"],
                                 landed=["landed.txt"])

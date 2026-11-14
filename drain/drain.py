@@ -297,8 +297,8 @@ def read_queue(ctx):
     (not ready-for-agent, claimed, blocked), which drain cannot start.
     `stranded` is `[(number, why)]`: slices whose spec is closed or in another
     repo, which no spec run can build (#1485). `passed` is `[(number, why)]`:
-    the other open ready tickets, which a run passes over (human-held, claimed,
-    blocked, unresolved, or carrying a non-dispatchable label)."""
+    the other open ready tickets, which a drain passes over (human-held,
+    claimed, blocked, unresolved, or carrying a non-dispatchable label)."""
     issues = {}
 
     def fetch(r, label):
@@ -364,7 +364,7 @@ def anchors(ctx, queue):
     """The queue's tickets that may anchor a bundle: those with no kept
     workspace. A ticket drain handed to Chris keeps its workspace, and
     `implement-dispatch` refuses to start where one exists, so a re-readied one
-    would stop every later run at it."""
+    would stop every later drain at it."""
     return [t for t in queue if not os.path.isdir(workspace_path(ctx, t[0], t[2]))]
 
 
@@ -1025,7 +1025,7 @@ def hand_to_chris(ctx, anchor, reason, kind):
     return bundle
 
 
-Run = collections.namedtuple("Run", "merged closed handed stop ended passed unread")
+Result = collections.namedtuple("Result", "merged closed handed stop ended passed unread")
 
 
 def survey(ctx, retry=True):
@@ -1092,7 +1092,6 @@ def record_bundle(ctx, prog, anchor, kind, results, reason):
     """Say how the bundle ended and file it: its results as merged or closed, or,
     when it failed, hand it to Chris. Returns the stop reason when the failures
     in a row reach the limit, else `None`."""
-    prog.started.clear()
     if results:
         for result in results:
             if result["outcome"] == MERGED:
@@ -1100,18 +1099,20 @@ def record_bundle(ctx, prog, anchor, kind, results, reason):
             else:
                 say(f"bundle ended: {refs(result['tickets'])}  {result['via']}")
             (prog.merged if result["outcome"] == MERGED else prog.closed).append(result)
+        prog.started.clear()
         prog.done, prog.failures = prog.done + sum(len(r["tickets"]) for r in results), 0
         return None
     bundle = hand_to_chris(ctx, anchor, reason, kind)
     say(f"bundle ended: {refs(bundle)}  handed to Chris: {reason}")
+    prog.started.clear()
     prog.handed.append((bundle, reason))
     prog.done, prog.failures = prog.done + len(bundle), prog.failures + 1
     return consecutive_failure_stop(ctx, prog.failures)
 
 
 def drain(ctx, limit, limit_name):
-    """`Run`: what merged, what closed with no PR, what was handed over, the stop
-    reason or `None`, the cause the drain ended on, and the ready tickets it
+    """`Result`: what merged, what closed with no PR, what was handed over,
+    the stop reason or `None`, the cause the drain ended on, and the ready tickets it
     passed over as `[(number, why)]`. `passed` is `None` when no queue could be
     read for it, and `unread` then says why. `limit` counts tickets;
     `limit_name` is how a reached limit is worded, e.g. `--max 3`. Each pass of
@@ -1142,17 +1143,18 @@ def drain(ctx, limit, limit_name):
         say(f"bundle ended: {refs(prog.started)}  stopped: {stop}")
     if stop:
         prog.cause = "stopped"
-    return Run(prog.merged, prog.closed, prog.handed, stop, prog.cause,
-               *passed_at_exit(ctx, prog.cause, prog.seen, prog.ended, prog.merged, prog.closed, prog.handed))
+    return Result(prog.merged, prog.closed, prog.handed, stop, prog.cause,
+               *passed_at_exit(ctx, prog))
 
 
-def passed_at_exit(ctx, cause, seen, ended, merged, closed, handed):
+def passed_at_exit(ctx, prog):
     """`(passed, unread)`: the ready tickets this drain passed over, read fresh at
     an exit that left work behind (a limit, or no queue read yet) so a list
-    from the start of an hours-long run is not reported as current; a stopped
+    from the start of an hours-long drain is not reported as current; a stopped
     drain, whose environment may be failing, keeps its last read. Ready tickets
     this drain never started carry the cause as their reason."""
-    worked = set(ended) | {n for r in merged + closed for n in r["tickets"]} | {n for b, _ in handed for n in b}
+    cause, seen = prog.cause, prog.seen
+    worked = set(prog.ended) | {n for r in prog.merged + prog.closed for n in r["tickets"]} | {n for b, _ in prog.handed for n in b}
     fresh = cause != "stopped" and (seen is None or cause.endswith("reached"))
     unread = None
     if fresh:
@@ -1165,35 +1167,35 @@ def passed_at_exit(ctx, cause, seen, ended, merged, closed, handed):
     if seen is not None:  # specs the loop's own break did not already name
         say_waiting(seen[1])
     if seen is None:
-        return None, unread or "not read (the run stopped before the queue was listed)"
+        return None, unread or "not read (the drain stopped before the queue was listed)"
     queue, _, passed = seen
     listed = {n for n, _ in passed}
     return passed + [(n, f"ready, not started ({cause})") for n, _, _ in queue
                      if n not in worked and n not in listed], None
 
 
-def summary(run):
+def summary(result):
     """The result lines, `passed over:` for each ready ticket left, and the
     closing `ended:` line. It is not a `stopped:` line and does not change the
     exit code."""
     lines = []
-    if run.merged:
+    if result.merged:
         lines += ["merged:"] + [f"  {refs(m['tickets'])}  {m['via']}  {m['sha']}"
-                                 + (f"  ({m['note']})" if m["note"] else "") for m in run.merged]
-    if run.closed:
+                                 + (f"  ({m['note']})" if m["note"] else "") for m in result.merged]
+    if result.closed:
         lines += ["closed, no PR:"] + [f"  {refs(m['tickets'])}  {m['via']}"
-                                        + (f"  ({m['note']})" if m["note"] else "") for m in run.closed]
-    if run.handed:
-        lines += ["handed to Chris:"] + [f"  {refs(b)}  {r}" for b, r in run.handed]
-    if run.stop:
-        lines.append(f"stopped: {run.stop}")
-    if not (run.merged or run.closed or run.handed or run.stop):
+                                        + (f"  ({m['note']})" if m["note"] else "") for m in result.closed]
+    if result.handed:
+        lines += ["handed to Chris:"] + [f"  {refs(b)}  {r}" for b, r in result.handed]
+    if result.stop:
+        lines.append(f"stopped: {result.stop}")
+    if not (result.merged or result.closed or result.handed or result.stop):
         lines.append("nothing to drain")
-    if run.passed is None:
-        lines.append(f"passed over: {run.unread}")
+    if result.passed is None:
+        lines.append(f"passed over: {result.unread}")
     else:
-        lines += [f"passed over: #{n} {why}" for n, why in run.passed]
-    lines.append(f"ended: {run.ended}")
+        lines += [f"passed over: #{n} {why}" for n, why in result.passed]
+    lines.append(f"ended: {result.ended}")
     return "\n".join(lines)
 
 

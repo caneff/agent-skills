@@ -207,15 +207,18 @@ parked by hand; messaging an agent nobody can find is not reconciliation.
 
 The controller sends these itself: sending is `SendMessage`, which a Python
 module cannot call, and no function stands between the `announce` bucket and
-the send. A send that fails stops the walk, so the worker that was not
-reached is named rather than left addressing a controller that no longer
-exists.
+the send. The procedure, the message and what an unreached worker means are
+stated once, in `SKILL.md`'s step 1; this section keeps only the why. An
+unreached worker is named rather than left silently addressing a controller
+that no longer exists.
 
 The run file keys each worker by its **herdr agent name**. That name is the
 durable key and not an address — the controller runs
 `resolve-controller <herdr agent name>` immediately before each send, the
 same resolution `implement-dispatch` does for the controller (#923), and
 sends to what it prints. Skipping the resolve once sent a resumed
-controller's re-announcement to no worker (#1013). A name that does not
-resolve gets no send, rather than a guess. A resolved address
+controller's re-announcement to no worker (#1013). Nothing is sent to a
+guess. The message names the controller the same way, by the herdr agent
+name the run file holds: a session name put there would re-point every
+worker at a name the next restart invalidates. A resolved address
 written into the run file is what aged and broke the last trial.

@@ -32,8 +32,8 @@ from urllib.parse import quote
 _HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
                       re.IGNORECASE)
 # The one heading rule every ticket reader uses (#1772): CommonMark's ATX
-# heading, up to three spaces before the `#`. `closure` and `closing_ticket`
-# import it rather than carry their own.
+# heading, up to three spaces before the `#`. `closing_ticket` imports it and
+# `closure` reads through `section`, rather than either carrying its own.
 HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
 # The inline forms the tree also writes: `Blocked by: #7, #8` at the top of a
 # /wayfinder child (docs/agents/issue-tracker.md), and `**Blocked by:** ...`
@@ -175,11 +175,10 @@ def key_line(line):
 
 
 def sections(lines, heading_re):
-    """`[(index, text)]` for every heading in `lines` (`visible()` output)
-    that `heading_re` matches: `text` is the lines under it up to the next
-    heading of any level, stripped, and `index` is the heading's position in
-    `lines`. The one section reader for `blocked_by_section`, `section` and
-    the closing-ticket reader, which needs the positions."""
+    """The text under every heading in `lines` (`visible()` output) that
+    `heading_re` matches, in order: the lines up to the next heading of any
+    level, stripped. The section reader `section` and `blocked_by_section`
+    share."""
     found = []
     for pos, (_, line) in enumerate(lines):
         if not heading_re.match(line):
@@ -189,7 +188,7 @@ def sections(lines, heading_re):
             if HEADING.match(rest):
                 break
             body.append(rest)
-        found.append((pos, "\n".join(body).strip()))
+        found.append("\n".join(body).strip())
     return found
 
 
@@ -198,7 +197,7 @@ def section(text, heading_re):
     the next heading, or `None` when the document has no such heading —
     silence, which is not an empty section."""
     found = sections(visible((text or "").splitlines()), heading_re)
-    return found[0][1] if found else None
+    return found[0] if found else None
 
 
 def blocked_by_section(body):
@@ -214,7 +213,7 @@ def blocked_by_section(body):
     `**Blocked by:**` line in the preamble. Every visible occurrence of
     either form is one declaration."""
     lines = visible((body or "").splitlines())
-    answers = [text for _, text in sections(lines, _HEADING)]
+    answers = sections(lines, _HEADING)
     for _, line in lines:
         if HEADING.match(line):
             break  # the preamble ends at the first heading
@@ -318,8 +317,9 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     really a PR, is in no bucket at all — each is off the frontier by its own
     nature, not by a blocking relationship.
 
-    `landed_of(integration_branch) -> {numbers}` and `native_blockers_of(ticket) ->
-    [numbers]` carry the landed-blocker rule, stated in
+    `landed_of(integration_branch) -> {numbers}` and
+    `native_blockers_of(ticket) -> [numbers]` carry the landed-blocker rule,
+    stated in
     `references/frontier.md` (#1466); either raises `FrontierError` when it
     cannot answer, and neither supplied means no blocker has landed.
 
@@ -330,8 +330,8 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     buckets = {name: [] for name in BUCKETS}
 
     def landed_numbers(issue):
-        """`(numbers, why)`: the blockers landed on the integration branch of this
-        ticket's own parent spec. `why` names a lookup that failed, and the
+        """`(numbers, why)`: the blockers landed on the integration branch of
+        this ticket's own parent spec. `why` names a lookup that failed, and the
         ticket then stays blocked with that reason in its entry."""
         if landed_of is None:
             return set(), ""
@@ -503,11 +503,11 @@ _CLOSES = re.compile(r"^[ \t]*Closes[ \t]+#(\d+)[ \t]*$", re.IGNORECASE | re.MUL
 
 
 def fetch_landed(repo, integration_branch, run=gh_json):
-    """The ticket numbers whose PR merged into `integration_branch` (#1466, ruling
-    (a)): each merged PR's bare `Closes #<n>` body lines, which a clump's PR
-    carries once per ticket. GitHub's own closing references stay empty for a
-    PR into a non-default branch, so the body is the record. Raises
-    `FrontierError` when the list cannot be read."""
+    """The ticket numbers whose PR merged into `integration_branch` (#1466,
+    ruling (a)): each merged PR's bare `Closes #<n>` body lines, which a
+    clump's PR carries once per ticket. GitHub's own closing references stay
+    empty for a PR into a non-default branch, so the body is the record.
+    Raises `FrontierError` when the list cannot be read."""
     prs = run(["pr", "list", "--repo", repo, "--base", integration_branch,
                "--state", "merged", "--json", "body", "--limit", "200"])
     if not isinstance(prs, list):

@@ -2533,7 +2533,7 @@ fn a_slice_is_heavy_even_when_it_carries_the_documentation_label() {
 }
 
 #[test]
-fn a_lone_ticket_dispatches_from_origin_default_even_with_a_integration_branch_on_origin() {
+fn a_lone_ticket_dispatches_from_origin_default_even_with_an_integration_branch_on_origin() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -2644,7 +2644,7 @@ fn a_ticket_whose_body_says_its_parent_is_none_dispatches_as_a_lone_ticket() {
 }
 
 #[test]
-fn a_integration_branch_deleted_on_origin_is_not_read_as_present() {
+fn an_integration_branch_deleted_on_origin_is_not_read_as_present() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");

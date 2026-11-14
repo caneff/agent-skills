@@ -392,13 +392,13 @@ impl Cleanup {
     /// name them at PR-up while the branch is unmerged; `blockers: none`
     /// when there are none, so a run that printed nothing is never read as
     /// a clean one.
-    fn report_blockers(&self, listing: Option<&Worktrees>, b: &str) {
+    fn report_blockers(&self, listing: Result<&Worktrees, &String>, b: &str) {
         let mut lines = Vec::new();
         // A listing git could not produce is a blocker, not "no workspace".
         let held = match listing {
-            Some(w) => w.linked_holding(b).map(|wt| (wt, w.primary())),
-            None => {
-                lines.push("unreadable git worktree list failed".to_string());
+            Ok(w) => w.linked_holding(b).map(|wt| (wt, w.primary())),
+            Err(e) => {
+                lines.push(format!("unreadable {e}"));
                 None
             }
         };
@@ -614,14 +614,7 @@ impl Cleanup {
     /// listed for the owner, never removed. A folder there that git no
     /// longer tracks as a worktree is listed too, marked. This run's removal
     /// targets are not "other".
-    fn stale_worktrees(&self, repo: &str, primary: &Result<String, String>) -> Vec<String> {
-        let primary = match primary {
-            Ok(p) => p,
-            Err(e) => {
-                skip("the stale-worktree report", e);
-                return Vec::new();
-            }
-        };
+    fn stale_worktrees(&self, repo: &str, primary: &str) -> Vec<String> {
         let default = default_branch(Path::new(repo));
         let mut base = format!("origin/{default}");
         if !quiet_ok("git", &["-C", primary, "show-ref", "-q", "--verify", &format!("refs/remotes/{base}")]) {
@@ -656,8 +649,8 @@ impl Cleanup {
     }
 
     /// `repos` pairs each repo with its primary checkout, as the caller's
-    /// listing named it or why it could not.
-    fn report_stale(&self, repos: &[(String, Result<String, String>)]) {
+    /// listing named it; a repo git could not list is the caller's to skip.
+    fn report_stale(&self, repos: &[(String, String)]) {
         if quiet() {
             return;
         }
@@ -748,7 +741,10 @@ impl Cleanup {
                 continue;
             }
             let listing = worktree::list(&d);
-            repos.push((d.clone(), listing.as_ref().map(|w| w.primary().to_string()).map_err(String::clone)));
+            match &listing {
+                Ok(w) => repos.push((d.clone(), w.primary().to_string())),
+                Err(e) => skip("the stale-worktree report", e),
+            }
             let default = default_branch(Path::new(&d));
             let heads = quiet_stdout("git", &["-C", &d, "for-each-ref", "--format=%(refname:short)", "refs/heads/"]).unwrap_or_default();
             for b in heads.lines().filter(|b| !b.is_empty() && *b != default) {
@@ -952,8 +948,9 @@ impl Cleanup {
         // listing `git worktree list` could not produce is not "no holder"
         // either (#975): read that way, it reaped a branch this re-check
         // could no longer actually vouch for, so it refuses instead.
-        let Ok(listing) = worktree::list(anchor) else {
-            return Reaped::Refused(format!("could not list worktrees at {anchor}, not removed: git worktree list failed"));
+        let listing = match worktree::list(anchor) {
+            Ok(w) => w,
+            Err(e) => return Reaped::Refused(format!("could not list worktrees, not removed: {e}")),
         };
         if let Some(now) = listing.holding(b)
             && now != wt
@@ -1872,7 +1869,7 @@ fn main() -> ExitCode {
     // every step after them ask it, rather than each listing for itself.
     let listing = worktree::list(&repo);
     if a.dry {
-        c.report_blockers(listing.as_ref().ok(), &branch);
+        c.report_blockers(listing.as_ref(), &branch);
     }
     let ok = match &listing {
         Ok(listing) => c.cleanup_branch(&repo, &branch, listing),
@@ -1888,7 +1885,7 @@ fn main() -> ExitCode {
         // not whether the ticket's claim or its remote branch got cleared —
         // it still runs when git cleanup succeeded, even if
         // claim_clear_failed or remote_delete_failed will fail the exit.
-        c.report_stale(&[(repo, Ok(listing.primary().to_string()))]);
+        c.report_stale(&[(repo, listing.primary().to_string())]);
     }
     c.close_removed_herdr_workspaces();
     if ok && !c.claim_clear_failed && !c.remote_delete_failed { ExitCode::SUCCESS } else { ExitCode::FAILURE }

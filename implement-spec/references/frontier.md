@@ -144,9 +144,9 @@ Evidence: on `sudokumaker-custom-constraints` (#781) the repo had no native
 links, the edges lived in `## Blocked by` sections, and **8 of 21**
 `ready-for-agent` tickets had no such section at all.
 
-**A blocker landed on an integration branch is met** (#1466). A slice merged into its
-spec's `spec-<p>` integration branch stays open until the integration PR
-closes it, so "open" alone would block every slice after it and stall the
+**A blocker landed on an integration branch is met** (#1466). A slice merged
+into its spec's `spec-<p>` integration branch stays open until the integration
+PR closes it, so "open" alone would block every slice after it and stall the
 spec run. The reader therefore asks of each *open* blocker, native or
 stated, whether it landed on the branch of **the dependent ticket's own
 parent spec**: the numbers on the bare `Closes #<n>` lines of the PRs merged

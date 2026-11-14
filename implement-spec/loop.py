@@ -852,8 +852,9 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="loop.py", description=(
             "The run loop's mechanical steps. Sending is SendMessage, which "
-            "the controller calls itself — and so is `landing`'s answer step, which is why `landing` reports "
-            "what is owed and gates cleanup rather than answering anything."))
+            "the controller calls itself — and so is `landing`'s answer "
+            "step, which is why `landing` reports what is owed and gates "
+            "cleanup rather than answering anything."))
     subs = parser.add_subparsers(dest="command", required=True)
     agent_help = ("Override for the agent count this run's cap check reads "
                   "(Claude sessions, subagents included), not OS processes; "

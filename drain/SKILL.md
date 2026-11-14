@@ -1,11 +1,11 @@
 ---
 name: drain
-description: Start a drain run (work the ready-for-agent queue unattended, one PR at a time) from a slash command.
+description: Start a drain (work the ready-for-agent queue unattended, one PR at a time) from a slash command.
 disable-model-invocation: true
 ---
 
 `/drain [--once] [--max <n>] [--anchor <n>] [--bundle-max <k>] [--repo <path>]`
-starts `drain`. What a run does, picks, merges and refuses is
+starts `drain`. What a drain does, picks, merges and refuses is
 the docstring of `drain/drain.py` (#1403); this skill restates none of it.
 
 `/drain status` starts nothing: it is the `## Status` section. So is a `/drain` with

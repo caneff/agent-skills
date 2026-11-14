@@ -794,7 +794,7 @@ fn a_failed_issue_read_is_reported_not_swallowed() {
 }
 
 #[test]
-fn a_integration_branchs_ticket_is_never_cleared() {
+fn an_integration_branchs_ticket_is_never_cleared() {
     let c = Cleanup::new();
     let r = c.mkfixture("r9");
     c.mk_implement_branch(&r, "spec-46");
@@ -1261,11 +1261,12 @@ fn a_dry_run_on_a_branch_not_yet_merged_still_names_its_blockers() {
 fn a_dry_run_that_cannot_list_worktrees_names_that_as_a_blocker() {
     // Review S1/P1/C2: a failed listing is not "no workspace, so none".
     let c = Cleanup::new();
+    // S10: the blocker carries git's own words, not just "failed".
     let (r, _wt) = lane_workspace(&c, "r46", "implement-1032g");
-    let fail_list = "for a in \"$@\"; do [ \"$a\" = list ] && exit 128; done\n";
-    replace_git_with(&c, "noherdr", format!("#!/bin/bash\n{fail_list}exec \"{}\" \"$@\"\n", which("git").display()));
+    fail_worktree_list(&c, "noherdr");
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
-    assert_eq!(blocker_lines(&run), vec!["blocker: unreadable git worktree list failed".to_string()], "{}", run.text());
+    let want = format!("blocker: unreadable git worktree list failed in {}: fatal: listing refused", r.display());
+    assert_eq!(blocker_lines(&run), vec![want], "{}", run.text());
 }
 
 /// A `git` that fails `worktree list` alone, so every other git call the
@@ -1332,6 +1333,22 @@ fn a_reap_that_cannot_list_worktrees_stops_naming_git() {
     assert!(run.stderr.contains("git worktree list failed in"), "{}", run.text());
     assert!(r.join(".claude/worktrees/implement-130").is_dir(), "{}", run.text());
     assert!(c.has_branch(&r, "implement-130"), "{}", run.text());
+}
+
+#[test]
+fn a_sweep_that_cannot_list_worktrees_stops_naming_git() {
+    // C2 on #1734: a sweep row whose listing failed is a FAILED row naming
+    // git's words, never one cleaned with no primary to anchor on.
+    let c = Cleanup::new();
+    let root = sweep_root(&c);
+    let other = root.join("other");
+    fail_worktree_list(&c, "full");
+    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--yes"], &[]);
+    assert!(!run.ok, "{}", run.text());
+    assert!(run.stderr.contains("git worktree list failed in"), "{}", run.text());
+    let rows: Vec<&str> = run.stdout.lines().skip_while(|l| *l != "sweep summary").skip(1).take_while(|l| l.starts_with("  ")).collect();
+    assert!(rows.iter().any(|r| r.starts_with("  other  caneff/ff-merged ") && r.contains(" FAILED ")), "{rows:#?}");
+    assert!(c.has_branch(&other, "caneff/ff-merged"), "the local branch was deleted:\n{}", run.text());
 }
 
 #[test]
@@ -2731,16 +2748,16 @@ fn a_branch_with_no_holder_at_all_since_the_plan_still_reaps() {
 
 #[test]
 fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reaping() {
-    // #975: the reaper's holder lookup once used `unwrap_or_default()`, reading a `git
-    // worktree list --porcelain` that fails the same as one that succeeded
-    // and found no holder, so `reap_one`'s destructive-time re-check waved
-    // the branch through instead of refusing it up front. `git branch -d`'s
-    // own "used by worktree" check still catches this particular case —
-    // that check reads the worktree's HEAD file directly, not the listing —
-    // but only after the run has already skipped the linked-worktree removal
-    // step and moved on to deleting the local branch, so what should be a
-    // clean, single-line refusal comes out as a `FAILED` row and a
-    // non-zero exit instead.
+    // #975: the reaper's holder lookup once used `unwrap_or_default()`,
+    // reading a `git worktree list --porcelain` that fails the same as one
+    // that succeeded and found no holder, so `reap_one`'s destructive-time
+    // re-check waved the branch through instead of refusing it up front. `git
+    // branch -d`'s own "used by worktree" check still catches this particular
+    // case — that check reads the worktree's HEAD file directly, not the
+    // listing — but only after the run has already skipped the
+    // linked-worktree removal step and moved on to deleting the local branch,
+    // so what should be a clean, single-line refusal comes out as a `FAILED`
+    // row and a non-zero exit instead.
     //
     // A `git worktree list` failure has to be made to fail only that one
     // subcommand: corrupting the repo wholesale (e.g. `.git/HEAD`) also
@@ -2758,7 +2775,7 @@ fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reapi
         &c,
         "full",
         format!(
-            "#!/bin/sh\ncase \" $* \" in\n  *' worktree list --porcelain '*)\n    [ -e \"{marker}\" ] && exit 1\n    ;;\nesac\nexec \"{real_git}\" \"$@\"\n",
+            "#!/bin/sh\ncase \" $* \" in\n  *' worktree list --porcelain '*)\n    [ -e \"{marker}\" ] && {{ echo 'fatal: listing refused' >&2; exit 1; }}\n    ;;\nesac\nexec \"{real_git}\" \"$@\"\n",
             marker = marker.display(),
             real_git = real_git.display()
         ),
@@ -2773,7 +2790,12 @@ fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reapi
     assert!(run.ok, "{}", run.text());
     assert!(c.has_branch(&r, "implement-119"), "the branch was deleted despite a listing git could not read:\n{}", run.text());
     assert!(planned.is_dir(), "the worktree was removed despite a listing git could not read:\n{}", run.text());
-    let want = format!("  {}  could not list worktrees at {}, not removed: git worktree list failed (refused at removal)", planned.display(), r.display());
+    // S10: the refusal carries git's own words, not just "failed".
+    let want = format!(
+        "  {}  could not list worktrees, not removed: git worktree list failed in {}: fatal: listing refused (refused at removal)",
+        planned.display(),
+        r.display()
+    );
     assert!(run.has(&want), "{}", run.text());
     assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
 }
@@ -3109,7 +3131,7 @@ fn a_slice_merged_nowhere_is_refused() {
 }
 
 #[test]
-fn a_lone_ticket_merged_only_into_a_integration_branch_is_refused() {
+fn a_lone_ticket_merged_only_into_an_integration_branch_is_refused() {
     // No recorded base: a PR into spec-900 is not this branch's landing,
     // and the refusal says which PR GitHub shows merged, and where.
     let c = Cleanup::new();

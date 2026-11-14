@@ -312,8 +312,8 @@ def test_a_spec_parent_moves_out_of_unresolved_rather_than_vanishing():
     # of spec parents, because each one lands in `spec` instead. A drop that
     # left the queue smaller by one would pass a count check and still hide
     # the work, so the destination is asserted beside the count.
-    # The integration branch reads the label off the issue, so no swap is involved
-    # here and this is the shipped behaviour end to end.
+    # The integration branch reads the label off the issue, so no swap is
+    # involved here and this is the shipped behaviour end to end.
     queue = [
         issue(1, labels=("ready-for-agent", "spec"),
               body="No declaration at all.\n"),
@@ -1169,7 +1169,7 @@ def test_landed_is_not_asked_about_a_closed_blocker():
     assert numbers(got["slice"]) == [2], got
 
 
-def test_a_integration_branch_is_asked_once_however_many_tickets_need_it():
+def test_an_integration_branch_is_asked_once_however_many_tickets_need_it():
     asked = []
     issues = [issue(2, body=SECTION_ON_1), issue(3, body=SECTION_ON_1)]
     F.frontier("owner/repo", "ready-for-agent",
@@ -1319,9 +1319,12 @@ def test_the_rendered_report_names_a_stranded_slice():
 
 # --- one heading rule for all three readers (#1772, spec #1734) -------------
 
-# A `#` line indented four spaces is a code block in CommonMark, not a heading.
-# `visible()` already drops indented lines, but each reader's own heading rule
-# must agree anyway: the same body must give the same sections in all three.
+# A `#` line indented to column four is a code block in CommonMark, not a
+# heading. `visible()` drops a line opening with four spaces or a tab, but not
+# one opening with a space and then a tab — the tab still reaches column four.
+# That line reaches every reader, so only the shared `HEADING` rule keeps it
+# from opening or ending a section: the same body must read the same in all
+# three.
 def test_heading_rule_allows_three_spaces_and_refuses_four():
     assert F.HEADING.match("   ## Blocked by")
     assert not F.HEADING.match("    ## Blocked by")
@@ -1337,9 +1340,14 @@ def test_section_reads_to_next_heading():
 def test_three_readers_agree_on_an_indented_heading():
     import closing_ticket as T
     import closure as C
-    body = ("## Blocked by\n\n- #7\n\n    ## Include closure\n    not a heading\n\n"
-            "## Include closure\n\n- None\n\n    # indented, ends nothing\nmore\n\n"
-            "## End-to-end seam\n\n- **Seam**: `make`\n- **Blind to**: x\n")
-    assert F.blocked_by_section(body) == "- #7"
-    assert C.declaration_section(body) == "- None\n\nmore"
-    assert T.declaration(body) == {"seam": "`make`", "blind to": "x"}
+    code = " \t"  # a space then a tab: column four, and `visible()` keeps it
+    body = (f"{code}## Include closure\n- decoy\n\n"
+            f"{code}## End-to-end seam\n- **Seam**: `decoy`\n\n"
+            f"## Blocked by\n\n- #7\n{code}# ends nothing\nmore\n\n"
+            f"## Include closure\n\n- None\n{code}# ends nothing\nmore\n\n"
+            f"## End-to-end seam\n\n- **Seam**: `make`\n{code}# wrapped\n"
+            "- **Blind to**: x\n")
+    assert F.visible([f"{code}# x"]) == [(0, f"{code}# x")]
+    assert F.blocked_by_section(body) == f"- #7\n{code}# ends nothing\nmore"
+    assert C.declaration_section(body) == f"- None\n{code}# ends nothing\nmore"
+    assert T.declaration(body) == {"seam": "`make` # wrapped", "blind to": "x"}

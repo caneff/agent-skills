@@ -95,18 +95,27 @@ branch too.
    `counts.py --repo` is checked against (§ Run state). Resuming an existing
    run instead:
    `runfile.py resume`, and then **one message per live, unsettled worker**
-   — its `announce` bucket and only that one, which you send yourself. For
-   each entry run `resolve-controller <agent>` (the entry's **herdr agent
+   — its `re-announce` lines and only those, which you send yourself. For
+   each line run `resolve-controller <agent>` (the line's **herdr agent
    name**, the durable key and not an address) and `SendMessage` to the
-   session name it prints: "Your controller is now `<your session name>` —
-   before every send, resolve that name with `resolve-controller` and send
-   your questions and finish notice to what it prints. Run `<run-id>`,
-   clump `<tickets>`, workspace `<workspace>`." Resolve immediately before
-   each send (#923) and never write a resolved address into the run file. A
-   name that does not resolve gets no send: say so and stop for that
-   worker, so a retry covers only the workers not yet reached. A landed or
-   closed clump's worker gets none however its agent looks; a vanished one
-   gets none either, and is reconciled or parked by hand.
+   session name it prints:
+
+   ```
+   Your controller is now <controller> — before every send, resolve that name with `resolve-controller` and send your questions and finish notice to what it prints. Run <run-id>, clump <tickets>, workspace <workspace>.
+   ```
+
+   `<controller>` is the `controller` field `resume` prints, your **herdr
+   agent name** and never your session name, which the next restart
+   invalidates (#923). Write it bare: the worker's alert hook reads the
+   name after `Your controller is now ` as a run of letters, digits, `-`
+   and `_`, so backticks or quotes around it hide the re-pointing.
+   Resolve immediately before each send and never write a resolved
+   address into the run file. A worker whose name does not resolve, or
+   whose send fails, is **not reached**: send it nothing more, name it in
+   your report, go on to the next line, and reconcile or park it by hand
+   as a vanished one. A landed or closed clump's worker gets no message
+   however its agent looks; a vanished one gets none either, and is
+   reconciled or parked by hand.
 2. Read the frontier (§ The frontier) and clump **only the slices of this spec
    it reports clear** (§ Clumping): `closure.py --json` into the candidates
    file, never built by hand. `loop.py dispatch` reads no blocked-by edge, so a
@@ -114,8 +123,12 @@ branch too.
    exploration is the run's **frozen** candidate set: a ticket filed while the
    run is going waits for the next run, with one exception — a ticket filed
    *during* the run **because the run is stuck on what it fixes**. You add
-   that one to the candidates file yourself, by running `closure.py --json`
-   for it, and you name the clump it unblocks when you say so.
+   that one yourself and name the clump it unblocks when you say so.
+   `closure.py` has no append mode — run on one ticket it prints a
+   one-clump list — so write that list to its own file and concatenate the
+   two lists into the candidates file:
+   `closure.py --json <repo-root> <n>=<paths> > <new>`, then
+   `jq -s add <candidates> <new> > <candidates>.tmp && mv <candidates>.tmp <candidates>`.
 3. The **opening report** carries `closure.py`'s announcement line verbatim,
    so the reader can tell all three declaration states apart: a declared
    directive, a **declared None** — the repo has no include graph — and
@@ -128,9 +141,9 @@ branch too.
 4. **Recompute the frontier at each landing** and dispatch into every free
    slot. Refill is **continuous**: no waves, because a wave holds slots
    empty waiting for its slowest clump. A slice of the frozen set that the
-   landing newly unblocks is clumped then (`closure.py --json` over it, as
-   step 2) and added to the candidates file; it was explored, so it is no
-   ticket filed since (#1542).
+   landing newly unblocks is clumped then and appended to the candidates
+   file the way step 2 adds a ticket filed during the run; it was explored,
+   so it is no ticket filed since (#1542).
 5. **At each dispatch, re-resolve the closures** — the clump's own and
    every **in-flight** clump's, through `closure.py` against current
    `origin/spec-<n>`,
