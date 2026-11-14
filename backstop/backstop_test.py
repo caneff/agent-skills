@@ -420,13 +420,20 @@ def test_a_backstop_that_cannot_import_its_neighbours_is_inconclusive(sb):
 
 
 def test_a_backstop_night_never_loads_drain(sb):
-    """A `drain` on the import path that raises: the night still goes green, so nothing it
-    runs imports drain (#1779)."""
-    poison = os.path.join(sb.tmp, "poison")
-    write(os.path.join(poison, "drain.py"), "raise ImportError('drain was loaded')\n")
-    out = sb.run("green", extra={"PYTHONPATH": poison})
+    """Run the backstop under a wrapper that reports whether `drain` ended up in `sys.modules`;
+    the night goes green and drain was never imported (#1779)."""
+    seen = os.path.join(sb.tmp, "modules.txt")
+    wrapper = os.path.join(sb.tmp, "wrap.py")
+    write(wrapper, "import runpy, sys\n"
+                   "try:\n"
+                   f"    runpy.run_path({BACKSTOP!r}, run_name='__main__')\n"
+                   "except SystemExit as e:\n"
+                   "    code = e.code\n"
+                   f"    open({seen!r}, 'w').write('drain' if 'drain' in sys.modules else 'clean')\n"
+                   "    raise\n")
+    out = sb.run("green", script=wrapper)
     assert out.returncode == 0, out.stderr
-    assert sb.last_green() is not None
+    assert read(seen) == "clean"
 
 
 def test_direct_commits_do_not_make_a_suite_unknown_and_are_listed(sb):
