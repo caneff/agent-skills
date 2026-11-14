@@ -47,10 +47,11 @@ import argparse
 import os
 import re
 import sys
+from typing import NamedTuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import review_ledger  # noqa: E402  (fold_repo and REVIEWS_ROOT: the one cache key)
+import review_cache  # noqa: E402  (fold_repo and REVIEWS_ROOT: the one cache key)
 
 AXES = ("standards", "spec", "correctness")
 STANDARDS_FILES = ("CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", "GLOSSARY.md")
@@ -127,11 +128,13 @@ def bullets(items, empty):
     return "\n".join(f"- {i}" for i in items) if items else empty
 
 
-def render(a):
-    if not os.path.isdir(a.worktree):
-        raise BadInput(f"worktree {a.worktree} is not a directory")
-    if a.round < 1:
-        raise BadInput(f"round {a.round}: a round is at least 1")
+class Checked(NamedTuple):
+    """What `check` found out and `render` needs: the diff's line count and a later round's first ids."""
+    lines: int
+    ids: dict | None
+
+
+def parse_first_ids(a):
     first_id = {}
     for spec in a.first_id:
         m = re.fullmatch(r"([A-Z]+)([1-9]\d*)", spec)
@@ -139,29 +142,38 @@ def render(a):
             raise BadInput(f"--first-id {spec!r} is not <series><ordinal> of the {a.axis} axis "
                            f"({', '.join(SERIES[a.axis])}) in a round of 2 or more")
         first_id[m.group(1)] = int(m.group(2))
+    return first_id
+
+
+def check(a):
+    """Validate every input; raise BadInput on the first bad one, write nothing."""
+    if not os.path.isdir(a.worktree):
+        raise BadInput(f"worktree {a.worktree} is not a directory")
+    if a.round < 1:
+        raise BadInput(f"round {a.round}: a round is at least 1")
+    first_id = parse_first_ids(a)
     check_claims(a.claim)
-    claims = a.claim
     if a.spec and a.no_spec:
         raise BadInput("both --spec and --no-spec were given")
     if a.axis != "standards" and not (a.spec or a.no_spec):
         raise BadInput(f"the {a.axis} axis needs --spec <path or pointer> or --no-spec")
     lines = read_diff(a.diff)
-    with open(os.path.join(HERE, "briefs", f"{a.axis}.md")) as fh:
-        brief = fh.read().strip()
-    present = [f for f in STANDARDS_FILES + (DEFECT_CLASSES,) if os.path.exists(os.path.join(a.worktree, f))]
+    ids = next_ids(review_cache.REVIEWS_ROOT / a.repo, a.axis, a.ticket, a.round, first_id) if a.round > 1 else None
+    return Checked(lines, ids)
+
+
+def defect_classes_text(present):
     if DEFECT_CLASSES in present:
-        classes = (f"`{DEFECT_CLASSES}` exists in this worktree: read it by name — the three shapes this "
-                   "repo keeps shipping, with every instance.")
-    else:
-        with open(os.path.join(HERE, "briefs", "defect-shapes.md")) as fh:
-            shapes = fh.read().split("\n")
-        classes = (f"`{DEFECT_CLASSES}` does not exist in this worktree. Check these three shapes:\n"
-                   + "\n".join(f"{n}. {s}" for n, s in enumerate(filter(None, shapes), 1)))
+        return (f"`{DEFECT_CLASSES}` exists in this worktree: read it by name — the three shapes this "
+                "repo keeps shipping, with every instance.")
+    with open(os.path.join(HERE, "briefs", "defect-shapes.md")) as fh:
+        shapes = fh.read().split("\n")
+    return (f"`{DEFECT_CLASSES}` does not exist in this worktree. Check these three shapes:\n"
+            + "\n".join(f"{n}. {s}" for n, s in enumerate(filter(None, shapes), 1)))
+
+
+def inputs_section(a, lines):
     spec = "no spec available" if a.no_spec else a.spec
-    out_dir = f"~/.cache/agent-reviews/{a.repo}"  # a.repo is folded in main
-    n, axis, rnd = a.ticket, a.axis, a.round
-    suffix = f"-r{rnd}" if rnd > 1 else ""
-    ids = next_ids(review_ledger.REVIEWS_ROOT / a.repo, axis, n, rnd, first_id) if rnd > 1 else None
     inputs = [
         f"- Worktree: {a.worktree}",
         f"- Fixed point: {a.base}",
@@ -170,60 +182,83 @@ def render(a):
         *([f"- Capture stat: {a.capture_stat}"] if a.capture_stat else []),
         "- Commits: " + ("; ".join(a.commit) if a.commit else "none given"),
     ]
-    if axis != "standards":
+    if a.axis != "standards":
         inputs.append(f"- Spec: {spec}" if spec else "- Spec: not given")
-    if axis == "correctness" and a.test_command:
+    if a.axis == "correctness" and a.test_command:
         inputs.append(f"- Test command: `{a.test_command}`")
-    parts = [
-        f"# {axis.capitalize()} review of #{n} in {a.repo}" + (f" (round {rnd})" if rnd > 1 else ""),
-        f"You review this one axis only: {axis}. Another reviewer holds each other axis.",
-        "## Inputs",
-        "\n".join(inputs),
-    ]
-    parts += [
-        "## Standards sources (listed from the worktree)",
-        bullets(present, "- none of " + ", ".join(STANDARDS_FILES) + " exists here"),
-        "## Defect classes",
-        classes,
-        "## Settled decisions (ruled by Chris or the controller)",
-        "Never re-raise one; a diff that contradicts one is a finding.",
-        bullets(a.ruling, "Settled decisions: none."),
-    ]
-    if a.choice:
-        parts += ["## Worker's own choices — flag if you disagree (not settled)",
-                  "The worker made these itself; nobody ruled on them. Flag any you disagree with and judge them like any other code.",
-                  bullets(a.choice, "")]
-    if claims:
-        parts += ["## Claims to check (the worker's account, not a result)",
-                  "Verify each against the code and re-run any check yourself; the verdict is yours, "
-                  "and nothing here is settled.",
-                  bullets(claims, "")]
+    return "\n".join(inputs)
+
+
+def output_section(a, ids):
+    out_dir = f"~/.cache/agent-reviews/{a.repo}"  # a.repo is folded in main
+    n, axis, rnd = a.ticket, a.axis, a.round
+    suffix = f"-r{rnd}" if rnd > 1 else ""
     id_lines = []
     if ids:
         first = ", ".join(f"{s}{k}" for s, k in ids.items())
         id_lines = [f"- This is round {rnd}. Finding ids continue the earlier rounds' on this "
                     f"ticket: number yours from {first} (each series from its own number), "
                     "never restart at 1."]
-    parts += [
+    return "\n".join([
+        f"- Full report: `{out_dir}/review-{axis}-{n}{suffix}.md`",
+        f"- Findings sidecar: `{out_dir}/{sidecar_name(axis, n, rnd)}`, one line per finding: `{SIDECAR[axis]}`. "
+        "Empty file when you found nothing.",
+        *id_lines,
+        f"- Then the empty completion marker `{out_dir}/{sidecar_name(axis, n, rnd, 'done')}`, last, once the sidecar is complete.",
+        f"- Then `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo {a.repo} "
+        f"--ticket {n} --type {axis}" + (f" --round {rnd}" if rnd > 1 else "") + "`."])
+
+
+def limits_section(a):
+    return "\n".join([
+        "- You do your own reading and running and spawn no nested subagent: a nested agent reports to the "
+        "top-level session, not to you, and its work is lost. A task too large for one agent is reported as such and stopped.",
+        f"- Any solve, build or test run uses at most {a.workers} worker{'s' if a.workers != 1 else ''} and "
+        f"finishes inside {a.ceiling} seconds of wall clock."]
+        + ([f"- Run the witness check with `--slots {a.workers}`: it picks its own concurrency otherwise."]
+           if a.axis == "correctness" else []))
+
+
+def optional_sections(a):
+    parts = []
+    if a.choice:
+        parts += ["## Worker's own choices — flag if you disagree (not settled)",
+                  "The worker made these itself; nobody ruled on them. Flag any you disagree with and judge them like any other code.",
+                  bullets(a.choice, "")]
+    if a.claim:
+        parts += ["## Claims to check (the worker's account, not a result)",
+                  "Verify each against the code and re-run any check yourself; the verdict is yours, "
+                  "and nothing here is settled.",
+                  bullets(a.claim, "")]
+    return parts
+
+
+def render(a):
+    """The whole brief text for `a`: `check` first, so a bad input writes nothing."""
+    checked = check(a)
+    with open(os.path.join(HERE, "briefs", f"{a.axis}.md")) as fh:
+        brief = fh.read().strip()
+    present = [f for f in STANDARDS_FILES + (DEFECT_CLASSES,) if os.path.exists(os.path.join(a.worktree, f))]
+    rnd = a.round
+    parts = [
+        f"# {a.axis.capitalize()} review of #{a.ticket} in {a.repo}" + (f" (round {rnd})" if rnd > 1 else ""),
+        f"You review this one axis only: {a.axis}. Another reviewer holds each other axis.",
+        "## Inputs",
+        inputs_section(a, checked.lines),
+        "## Standards sources (listed from the worktree)",
+        bullets(present, "- none of " + ", ".join(STANDARDS_FILES) + " exists here"),
+        "## Defect classes",
+        defect_classes_text(present),
+        "## Settled decisions (ruled by Chris or the controller)",
+        "Never re-raise one; a diff that contradicts one is a finding.",
+        bullets(a.ruling, "Settled decisions: none."),
+        *optional_sections(a),
         "## Brief",
         brief,
         "## Output",
-        "\n".join([
-            f"- Full report: `{out_dir}/review-{axis}-{n}{suffix}.md`",
-            f"- Findings sidecar: `{out_dir}/{sidecar_name(axis, n, rnd)}`, one line per finding: `{SIDECAR[axis]}`. "
-            "Empty file when you found nothing.",
-            *id_lines,
-            f"- Then the empty completion marker `{out_dir}/{sidecar_name(axis, n, rnd, 'done')}`, last, once the sidecar is complete.",
-            f"- Then `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo {a.repo} "
-            f"--ticket {n} --type {axis}" + (f" --round {rnd}" if rnd > 1 else "") + "`."]),
+        output_section(a, checked.ids),
         "## Limits",
-        "\n".join([
-            "- You do your own reading and running and spawn no nested subagent: a nested agent reports to the "
-            "top-level session, not to you, and its work is lost. A task too large for one agent is reported as such and stopped.",
-            f"- Any solve, build or test run uses at most {a.workers} worker{'s' if a.workers != 1 else ''} and "
-            f"finishes inside {a.ceiling} seconds of wall clock."]
-            + ([f"- Run the witness check with `--slots {a.workers}`: it picks its own concurrency otherwise."]
-               if axis == "correctness" else [])),
+        limits_section(a),
     ]
     return "\n\n".join(p for p in parts if p) + "\n"
 
@@ -232,7 +267,7 @@ def write_brief(text, repo, ticket, axis, rnd=1):
     """Write `text` to a ticket-numbered file of `repo`'s (folded) review cache directory that no
     earlier wave holds, and return its path (`-2`, `-3` when the name is taken)."""
     # SKILL.md allows a branch name for `--ticket`; `write_cache_file` keeps a `/` in it from naming a directory.
-    return review_ledger.write_cache_file(repo, f"brief-{ticket}-{axis}" + (f"-r{rnd}" if rnd > 1 else ""), text)
+    return review_cache.write_cache_file(repo, f"brief-{ticket}-{axis}" + (f"-r{rnd}" if rnd > 1 else ""), text)
 
 
 def main(argv):
@@ -257,7 +292,7 @@ def main(argv):
     p.add_argument("--test-command")
     p.add_argument("--capture-stat")
     a = p.parse_args(argv)
-    a.repo = review_ledger.fold_repo(a.repo)  # once: every path and the ledger line below read it folded
+    a.repo = review_cache.fold_repo(a.repo)  # once: every path and the ledger line below read it folded
     try:
         path = write_brief(render(a), a.repo, a.ticket, a.axis, a.round)
     except BadInput as exc:

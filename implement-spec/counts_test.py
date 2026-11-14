@@ -71,7 +71,7 @@ def cli(root, *args, cwd=None, home=None, extra_env=None):
 
 
 def write_sidecar(reviews_dir, lowest, lines):
-    path = runfile.dispositions_path(reviews_dir, lowest)
+    path = counts_mod.dispositions_path(reviews_dir, lowest)
     with open(path, "w") as fh:
         for obj in lines:
             fh.write(json.dumps(obj) + "\n")
@@ -201,7 +201,7 @@ def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low(
     # `runfile.read_dispositions` refuses these lines; a reader that skipped them
     # would report a low count with a clean exit (codex-second-M1, #1097).
     landed_run("run-m", REPO)
-    path = runfile.dispositions_path(reviews, 901)
+    path = counts_mod.dispositions_path(reviews, 901)
     with open(path, "w") as fh:
         fh.write('{"id": "S0", "outcome": "fixed", "sha": "aaa"}\n')
         fh.write(bad + "\n")

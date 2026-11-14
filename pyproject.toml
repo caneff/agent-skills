@@ -7,7 +7,11 @@ version = "0"
 requires-python = ">=3.12"
 
 [dependency-groups]
-dev = ["pytest", "pytest-mock"]
+dev = [
+    "pytest",
+    "pytest-mock",
+    "radon>=6.0.1",
+]
 
 [tool.uv]
 package = false
