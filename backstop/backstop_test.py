@@ -437,6 +437,20 @@ def test_repo_owned_by_someone_else_is_refused_before_anything_runs(sb):
     assert "seam could not start" not in note, note
 
 
+def test_an_origin_that_is_not_on_github_is_refused_before_anything_runs(sb):
+    """A remote with no `github.com/<owner>/<name>` in it names no repo to file in or to own."""
+    elsewhere = os.path.join(sb.tmp, "elsewhere", "repo.git")
+    os.makedirs(os.path.dirname(elsewhere))
+    os.symlink(sb.origin, elsewhere)
+    sb.git(sb.repo, "remote", "set-url", "origin", elsewhere)
+    out = sb.run("red")
+    assert out.returncode == 2, out.stderr
+    assert sb.tickets() == [] and sb.last_green() is None
+    assert not os.path.exists(sb.jobs_log), "no seam runs on a repo with no GitHub origin"
+    (note,) = sb.notes()
+    assert "inconclusive" in note and "its origin is not a github.com repo" in note, note
+
+
 def test_missing_origin_head_is_reported_as_itself(sb):
     sb.git(sb.repo, "remote", "set-head", "origin", "-d")
     out = sb.run("green")

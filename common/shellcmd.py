@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 
 TIMEOUT = 120  # seconds; every call is bounded, a hung tool is an error and never a wait
@@ -64,8 +65,12 @@ def herdr_agent(name, timeout=TIMEOUT):
         with contextlib.suppress(ValueError):
             body = json.loads(text)
             break
-    if r.returncode == 0 and isinstance(body, dict) and "result" in body:
-        return body["result"]["agent"]
+    result = body.get("result") if isinstance(body, dict) else None
+    if r.returncode == 0 and isinstance(result, dict):
+        # `{"result": {"agent": {...}}}`; in the flat `{"result": {"agent_status": ...}}` shape
+        # `agent` is absent or the agent kind (`"claude"`), and the result is the record.
+        record = result.get("agent")
+        return record if isinstance(record, dict) else result
     if isinstance(body, dict) and (body.get("error") or {}).get("code") == "agent_not_found":
         return None
     raise CmdError(f"{' '.join(cmd)}: {(r.stderr or r.stdout).strip()[:150] or f'exit {r.returncode}'}")
@@ -77,25 +82,37 @@ _WORKTREE_LOCK = threading.Lock()  # `git worktree add` and `prune` are not safe
 @contextlib.contextmanager
 def scratch_worktree(repo, rev, path):
     """Yield `path`, a detached worktree of `repo` at `rev`; remove and prune it on every exit,
-    an exception included. Raises CmdError when the add fails."""
+    an exception included. Raises CmdError when the add fails, and when `path` is still there
+    after the remove: git exits 128 both for a tree already gone and for one it could not remove
+    (locked, a failed delete), so only the path tells them apart. The body's own exception wins
+    over a leftover, which is then printed on stderr."""
     with _WORKTREE_LOCK:
         git(["-C", repo, "worktree", "add", "--detach", path, rev])
+    body_raised = True
     try:
         yield path
+        body_raised = False
     finally:
         with _WORKTREE_LOCK:
-            git(["-C", repo, "worktree", "remove", "--force", path], ok=(0, 128))
+            r = git(["-C", repo, "worktree", "remove", "--force", path], ok=(0, 128))
             git(["-C", repo, "worktree", "prune"], ok=(0, 128))
+        if os.path.lexists(path):
+            left = (f"git worktree remove --force {path}: {r.stderr.strip() or f'exit {r.returncode}'}; "
+                    f"remove {path} by hand")
+            if not body_raised:
+                raise CmdError(left)
+            # Printed, since a note on the body's exception would not show in its str().
+            print(f"scratch_worktree: {left}", file=sys.stderr)
 
 
 def default_branch(repo):
     """`origin/<default>` as `repo` records it. Refuses, never guesses `main`, when `origin/HEAD`
     is unset, naming the `git remote set-head` that records it."""
-    try:
-        return git(["-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).stdout.strip()
-    except CmdError as e:
-        raise CmdError(f"{e} — {repo} has no recorded default branch and will not be assumed to be "
-                       "`main`: record it with `git remote set-head origin -a`") from None
+    r = git(["-C", repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], ok=(0, 1))
+    if r.returncode == 1:  # `--quiet` makes exit 1 mean exactly "not set"; any other failure raised above
+        raise CmdError(f"{repo} has no `origin/HEAD`, so no recorded default branch, and it will not be "
+                       "assumed to be `main`: record it with `git remote set-head origin -a`")
+    return r.stdout.strip()
 
 
 _SLUG = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
@@ -103,7 +120,8 @@ _SLUG = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 
 def origin_slug(repo):
     """`owner/name` of `repo`'s origin, or None when origin is not a github.com remote. A name
-    with dots in it (`a.b`) keeps them; only a trailing `.git` is dropped."""
-    url = git(["-C", repo, "remote", "get-url", "origin"], ok=(0, 2)).stdout.strip()
+    with dots in it (`a.b`) keeps them; only a trailing `.git` is dropped. A repo with no origin
+    raises CmdError, so it is never reported as one whose origin is elsewhere."""
+    url = git(["-C", repo, "remote", "get-url", "origin"]).stdout.strip()
     m = _SLUG.search(url)
     return m.group(1) if m else None

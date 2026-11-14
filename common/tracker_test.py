@@ -194,3 +194,28 @@ def test_search_prs_hands_back_the_rows_and_refuses_unreadable_output(scripted_g
     monkeypatch.setenv("FAKE_GH_OUT", "not json")
     with pytest.raises(tracker.TrackerError, match="JSONDecodeError.*not json"):
         tracker.GhTracker().search_prs("2026-01-01", 5)
+
+
+def test_every_gh_adapter_call_goes_through_its_run_seam():
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        return "me\n" if args[:2] == ["api", "user"] else "x\n"
+
+    t = tracker.GhTracker("o/r", run=run)
+    t.comment(1, "hi")
+    t.merge(5, "abc")
+    assert t.viewer_login() == "me"
+    assert t.run_failed_log(9) == "x"
+    assert t.create_issue("t", "b", []) == "x"
+    assert [c[:2] for c in calls] == [["issue", "comment"], ["pr", "merge"], ["api", "user"],
+                                      ["run", "view"], ["issue", "create"]]
+
+
+def test_gh_adapter_refuses_empty_output_where_it_asked_for_pages(scripted_gh, monkeypatch):
+    monkeypatch.setenv("FAKE_GH_OUT", "")
+    with pytest.raises(tracker.TrackerError, match="pages"):
+        tracker.GhTracker("o/r").native_blockers({"number": 2})
+    monkeypatch.setenv("FAKE_GH_OUT", "[[]]")
+    assert tracker.GhTracker("o/r").native_blockers({"number": 2}) == []

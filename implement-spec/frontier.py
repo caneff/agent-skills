@@ -112,12 +112,6 @@ _ISSUE_LINK = r"https://github\.com/{repo}/issues/(\d+)\b"
 _ANY_ISSUE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/\d+|[\w.-]+/[\w.-]+#\d+")
 
 
-# The tracker could not be read. One stderr line, never a traceback: this
-# reader's whole point is that an answer it cannot get has a name.
-FrontierError = tracker_mod.TrackerError
-
-
-
 def unfenced(lines):
     """Every line outside a fenced code block, as `(index, line)`."""
     fence = None
@@ -309,7 +303,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     GitHub issue objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
     state; `None` means it could not be read, which is unresolved rather than
     a guess. `parent_of(ticket) -> issue | None` reads the ticket's parent
-    issue, `None` being a ticket with no parent; it raises `FrontierError`
+    issue, `None` being a ticket with no parent; it raises `TrackerError`
     for a parent that could not be read, which is unresolved too. A claimed
     ticket, a ticket carrying a non-dispatchable label, and anything that is
     really a PR, is in no bucket at all — each is off the frontier by its own
@@ -318,7 +312,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     `landed_of(integration_branch) -> {numbers}` and
     `native_blockers_of(ticket) -> [numbers]` carry the landed-blocker rule,
     stated in
-    `references/frontier.md` (#1466); either raises `FrontierError` when it
+    `references/frontier.md` (#1466); either raises `TrackerError` when it
     cannot answer, and neither supplied means no blocker has landed.
 
     `stranded` is a slice whose parent spec cannot run it (#1485): the spec
@@ -338,7 +332,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             if not parent or SPEC_LABEL not in tracker_mod.labels(parent):
                 return set(), ""
             return landed_of(f"spec-{parent['number']}"), ""
-        except FrontierError as exc:
+        except tracker_mod.TrackerError as exc:
             return set(), f" (landing lookup failed: {exc})"
 
     def native_open(issue, landed):
@@ -347,7 +341,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
         blocker: an unknown blocker is not a met one."""
         try:
             listed = native_blockers_of(issue)
-        except FrontierError:
+        except tracker_mod.TrackerError:
             return None
         return [n for n in listed if n not in landed] if listed else None
 
@@ -428,7 +422,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             # slices — and a parent that cannot be read is not "no parent".
             try:
                 parent = parent_of(issue)
-            except FrontierError as exc:
+            except tracker_mod.TrackerError as exc:
                 # A silent ticket keeps its own reason: that one a human fixes.
                 own = f"{entry['why']}; " if name == "unresolved" else ""
                 entry["why"] = f"{own}its parent could not be read ({exc})"
@@ -455,7 +449,7 @@ def fetch_landed(tracker, integration_branch):
     ruling (a)): each merged PR's bare `Closes #<n>` body lines, which a
     clump's PR carries once per ticket. GitHub's own closing references stay
     empty for a PR into a non-default branch, so the body is the record.
-    Raises `FrontierError` when the list cannot be read."""
+    Raises `TrackerError` when the list cannot be read."""
     return {int(n) for body in tracker.merged_bodies(integration_branch)
             for n in _CLOSES.findall(body)}
 
@@ -464,7 +458,7 @@ def fetch_parent(tracker, ticket, issue_of=None):
     """The parent issue of `ticket`, `None` when it has none. The tracker's
     sub-issue link first; none there means the body's parent line
     (`_parent_number`) is the fallback the tree writes where sub-issues are
-    not enabled. Any other failure raises `FrontierError`: a call that did
+    not enabled. Any other failure raises `TrackerError`: a call that did
     not answer is not an answer of "no parent". `issue_of` reads the issue a
     body line names (default `tracker.issue`)."""
     link = tracker.parent_link(ticket)
@@ -480,7 +474,7 @@ def _parent_number(body, repo):
     the first `#<n>` / this repo's issue URL under a `## Parent` heading.
 
     A `## Parent` section that names no such issue — empty, prose, another
-    repo's link — raises `FrontierError`: a declaration this reader cannot
+    repo's link — raises `TrackerError`: a declaration this reader cannot
     resolve is not "no parent" (#1406). `None` under it, as `Blocked by`
     says it, is no parent. A `Part of` line outside the heading that names
     another repo's issue and none in this one raises too; a `Part of` line
@@ -514,10 +508,10 @@ def _parent_number(body, repo):
                 return int(ref.group(1))
             unread += line.strip() + " "
     if unread is not None and not _NONE.match(unread):
-        raise FrontierError(f"`## Parent` names no issue in {repo}"
+        raise tracker_mod.TrackerError(f"`## Parent` names no issue in {repo}"
                             + (f": {unread.strip()[:80]}" if unread.strip() else ""))
     if foreign is not None:
-        raise FrontierError(f"`Part of` names no issue in {repo}: {foreign[:80]}")
+        raise tracker_mod.TrackerError(f"`Part of` names no issue in {repo}: {foreign[:80]}")
     return None
 
 
@@ -557,7 +551,7 @@ def main(argv):
         return 2
     try:
         buckets = frontier(argv[1], argv[2])
-    except FrontierError as exc:
+    except tracker_mod.TrackerError as exc:
         print(f"frontier.py: {exc}", file=sys.stderr)
         return 1
     print(render(buckets))

@@ -12,6 +12,14 @@ def sh(*cmd, cwd=None):
     subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, env=shellcmd.scrubbed_env())
 
 
+@pytest.fixture(autouse=True)
+def own_git_config(tmp_path, monkeypatch):
+    """No global or system gitconfig: an `insteadOf` there would rewrite what `get-url` answers."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
 @pytest.fixture
 def repo(tmp_path):
     origin, work = str(tmp_path / "origin.git"), str(tmp_path / "work")
@@ -63,12 +71,43 @@ def test_scratch_worktree_bad_rev_raises(repo, tmp_path):
             pass
 
 
+def test_scratch_worktree_reports_a_tree_it_could_not_remove(repo, tmp_path):
+    # A worktree locked twice survives `remove --force` with exit 128, as an already-gone one exits.
+    wt = str(tmp_path / "wt")
+    with pytest.raises(shellcmd.CmdError, match="remove .* by hand"):
+        with shellcmd.scratch_worktree(repo, "origin/main", wt):
+            sh("git", "-C", repo, "worktree", "lock", wt)
+    assert os.path.isdir(wt)
+
+
+def test_scratch_worktree_already_gone_is_quiet(repo, tmp_path):
+    wt = str(tmp_path / "wt")
+    with shellcmd.scratch_worktree(repo, "origin/main", wt):
+        sh("git", "-C", repo, "worktree", "remove", "--force", wt)
+    assert not os.path.exists(wt)
+
+
+def test_scratch_worktree_leftover_does_not_hide_the_body_error(repo, tmp_path, capsys):
+    wt = str(tmp_path / "wt")
+    with pytest.raises(RuntimeError, match="boom"):
+        with shellcmd.scratch_worktree(repo, "origin/main", wt):
+            sh("git", "-C", repo, "worktree", "lock", wt)
+            raise RuntimeError("boom")
+    assert "by hand" in capsys.readouterr().err
+
+
 def test_default_branch_refuses_when_unset_then_reads(repo):
     sh("git", "remote", "set-head", "origin", "-d", cwd=repo)
     with pytest.raises(shellcmd.CmdError, match="git remote set-head"):
         shellcmd.default_branch(repo)
     sh("git", "remote", "set-head", "origin", "main", cwd=repo)
     assert shellcmd.default_branch(repo) == "origin/main"
+
+
+def test_default_branch_names_no_remedy_for_another_failure(tmp_path):
+    with pytest.raises(shellcmd.CmdError) as e:
+        shellcmd.default_branch(str(tmp_path))  # not a repo: `set-head` would not help
+    assert "set-head" not in str(e.value) and "not a git repository" in str(e.value)
 
 
 @pytest.mark.parametrize("url,slug", [
@@ -82,6 +121,12 @@ def test_origin_slug(repo, url, slug):
     assert shellcmd.origin_slug(repo) == slug
 
 
+def test_origin_slug_without_origin_raises(repo):
+    sh("git", "remote", "remove", "origin", cwd=repo)
+    with pytest.raises(shellcmd.CmdError, match="origin"):
+        shellcmd.origin_slug(repo)
+
+
 def fake_herdr(tmp_path, monkeypatch, script):
     (tmp_path / "herdr").write_text("#!/bin/sh\n" + script)
     (tmp_path / "herdr").chmod(0o755)
@@ -91,6 +136,8 @@ def fake_herdr(tmp_path, monkeypatch, script):
 def test_herdr_agent(tmp_path, monkeypatch):
     fake_herdr(tmp_path, monkeypatch, """echo '{"result":{"agent":{"agent_status":"idle"}}}'""")
     assert shellcmd.herdr_agent("w") == {"agent_status": "idle"}
+    fake_herdr(tmp_path, monkeypatch, """echo '{"result":{"agent":"claude","agent_status":"working"}}'""")
+    assert shellcmd.herdr_agent("w") == {"agent": "claude", "agent_status": "working"}
     fake_herdr(tmp_path, monkeypatch, """echo '{"error":{"code":"agent_not_found"}}' >&2; exit 1""")
     assert shellcmd.herdr_agent("w") is None
     fake_herdr(tmp_path, monkeypatch, "echo down >&2; exit 1")

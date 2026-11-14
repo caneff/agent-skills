@@ -32,13 +32,12 @@ import json
 import math
 import os
 import re
-import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
-from shellcmd import scrubbed_env  # noqa: E402
+import shellcmd  # noqa: E402
 
 CACHE_DIR = "~/.cache/spec-run"
 # How long a writer waits for the run file's lock before refusing, matching the
@@ -98,16 +97,13 @@ def checkout_top(where):
     if not isinstance(where, str) or not where.strip():
         raise RunFileError("no checkout named: the path is blank")
     try:
-        done = subprocess.run(
-            ["git", "-C", os.path.expanduser(where), "worktree", "list",
-             "--porcelain"], capture_output=True, text=True, timeout=30,
-            env=scrubbed_env())
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RunFileError(f"{where} is not a git checkout: {exc}") from exc
+        done = shellcmd.git(["-C", os.path.expanduser(where), "worktree", "list",
+                             "--porcelain"], timeout=30)
+    except shellcmd.CmdError as exc:
+        raise RunFileError(f"{where} is not a git checkout: {exc}") from None
     first = done.stdout.split("\n", 1)[0]
-    if done.returncode != 0 or not first.startswith("worktree "):
-        raise RunFileError(
-            f"{where} is not a git checkout: {done.stderr.strip()}")
+    if not first.startswith("worktree "):
+        raise RunFileError(f"{where} is not a git checkout: git worktree list named no worktree")
     return os.path.realpath(first[len("worktree "):])
 
 

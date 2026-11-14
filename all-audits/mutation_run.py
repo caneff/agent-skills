@@ -14,8 +14,11 @@ import collections
 import datetime as _dt
 import importlib.util
 import os
+import sys
 
-from procs import run as _run
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+
+import shellcmd  # noqa: E402
 
 MUTATION_KEY = "mutation_modules"
 _EPOCH = _dt.datetime.min.replace(tzinfo=_dt.timezone.utc)
@@ -48,8 +51,9 @@ def stamp(record, module, sha, date):
 def changed(repo, runs, siblings):
     """The modules in `runs` ({module: {sha, date}}) whose file or sibling
     tests (`siblings`: {module: [test path]}) differ between their recorded
-    sha and HEAD. A sha git cannot resolve, or no recorded sha, proves
-    nothing, so it reads as changed, never as unchanged."""
+    sha and HEAD. A sha git cannot resolve (exit 128), or no recorded sha,
+    proves nothing, so it reads as changed, never as unchanged; any other
+    failure, a timeout included, raises CmdError."""
     out = set()
     for module, entry in runs.items():
         sha = entry.get("sha") if isinstance(entry, dict) else None
@@ -57,7 +61,7 @@ def changed(repo, runs, siblings):
             out.add(module)
             continue
         paths = [module, *siblings.get(module, ())]
-        if _run(["git", "-C", repo, "diff", "--quiet", f"{sha}..HEAD", "--", *paths]).returncode != 0:
+        if shellcmd.git(["-C", repo, "diff", "--quiet", f"{sha}..HEAD", "--", *paths], ok=(0, 1, 128)).returncode != 0:
             out.add(module)
     return out
 

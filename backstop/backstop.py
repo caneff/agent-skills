@@ -88,16 +88,12 @@ be sent.
 """
 import argparse
 import collections
-import contextlib
 import datetime
 import json
 import os
 import re
-import shutil
-import signal
 import subprocess
 import sys
-import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # One line per directory, each spelled out, so `tests/suite-edges.py` sees the
@@ -105,12 +101,14 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "common"))
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement"))
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
-# The git and gh calls, the scratch worktree, the origin slug and the default
-# branch come from the shared helper; the seam section's grammar has one copy
+# The git and gh calls, the scratch-tree run, the origin slug and the default
+# branch come from the shared helpers; the seam section's grammar has one copy
 # too. A neighbour that no longer imports is an inconclusive night, said by
 # `main`.
 try:
+    import scratch_run  # noqa: E402
     import shellcmd  # noqa: E402
+    from scratch_run import one_line  # noqa: E402
     import tracker as issue_tracker  # noqa: E402  (#1786)
     from closing_ticket import declaration  # noqa: E402
     from selector_check import command_of, failing_suites  # noqa: E402
@@ -136,19 +134,15 @@ class BackstopError(Exception):
     """A step failed; the message is the reason put in the night's note."""
 
 
-def one_line(text, limit=300):
-    return " ".join(str(text).split())[:limit]
-
-
 def repo_slug(ctx):
     """`owner__name`: the repo as one file-name component."""
     return ctx.repo.replace("/", "__")
 
 
-def run(args, cwd=None):
-    """Stdout of `git <args>` (`args` is `["git", ...]`), stripped; `BackstopError` on any failure."""
+def git(args, cwd=None):
+    """Stdout of `git <args>`, stripped; `BackstopError` on any failure."""
     try:
-        return shellcmd.git(args[1:], cwd=cwd).stdout.strip()
+        return shellcmd.git(args, cwd=cwd).stdout.strip()
     except shellcmd.CmdError as exc:
         raise BackstopError(str(exc)) from exc
 
@@ -162,37 +156,12 @@ def asked(call, *args):
 
 
 def run_in_scratch_tree(ctx, cmd, log, rev):
-    """`cmd` in a throwaway worktree of `rev`, its output in `log`. Each directory holding a
-    tracked `package-lock.json` gets `npm ci` first (a bare worktree has no `node_modules`).
-    Raises `BackstopError` on a failed start or a non-zero exit."""
-    scratch = tempfile.mkdtemp(prefix="backstop-seam-")
+    """`scratch_run.run_in_scratch_tree` on `rev` under the seam's wall clock; any failure there
+    is a `BackstopError`."""
     try:
-        with shellcmd.scratch_worktree(ctx.root, rev, scratch), open(log, "w") as out:
-            listed = run(["git", "ls-files", "-z", "--", "package-lock.json", "*/package-lock.json"], cwd=scratch)
-            for lock in sorted(x for x in listed.split("\0") if x):
-                code = run_group(["npm", "ci"], os.path.join(scratch, os.path.dirname(lock)), out)
-                if code:
-                    raise BackstopError(f"`npm ci` failed (output in {log})")
-            if run_group(["sh", "-c", cmd], scratch, out):
-                raise BackstopError(f"`{cmd}` failed (output in {log})")
-    except (shellcmd.CmdError, OSError) as exc:
+        scratch_run.run_in_scratch_tree(ctx.root, rev, cmd, log, WALL_CLOCK_SECONDS)
+    except scratch_run.ScratchError as exc:
         raise BackstopError(str(exc)) from exc
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-
-
-def run_group(cmd, cwd, out):
-    """Exit code of `cmd` in its own process group, killed whole at the wall clock."""
-    proc = subprocess.Popen(cmd, cwd=cwd, stdout=out, stderr=subprocess.STDOUT, text=True, start_new_session=True)
-    try:
-        return proc.wait(timeout=WALL_CLOCK_SECONDS)
-    except BaseException as exc:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
-        if isinstance(exc, subprocess.TimeoutExpired):
-            raise BackstopError(f"{cmd[0]} passed the {WALL_CLOCK_SECONDS}s wall clock") from None
-        raise
 
 
 def positive(text):
@@ -206,7 +175,7 @@ def seam_command(root, tip):
     """The `**Seam**` command `AGENTS.md` declares at `tip`. Raises
     `BackstopError` naming the gap."""
     try:
-        text = run(["git", "show", f"{tip}:AGENTS.md"], cwd=root)
+        text = git(["show", f"{tip}:AGENTS.md"], cwd=root)
     except BackstopError as exc:
         raise BackstopError(f"no AGENTS.md at {tip[:12]}: {one_line(exc, 150)}") from exc
     found = declaration(text)
@@ -271,7 +240,7 @@ def ci_night(ctx, workflow):
         return Night(INCONCLUSIVE, sha, f"the latest scheduled run {url} is from {latest['createdAt']}, "
                                         f"over {MAX_RUN_HOURS} hours ago", url)
     try:
-        run(["git", "merge-base", "--is-ancestor", str(sha), ctx.default], cwd=ctx.root)
+        git(["merge-base", "--is-ancestor", str(sha), ctx.default], cwd=ctx.root)
     except BackstopError:
         return Night(INCONCLUSIVE, None, f"the scheduled run {url} read {sha}, which is not on {ctx.default}", url)
     conclusion = latest.get("conclusion")
@@ -357,8 +326,8 @@ def night(ctx, jobs, workflow):
     """The night's `Night`: the named workflow's scheduled run, else the seam
     run here."""
     try:
-        run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
-        tip = run(["git", "rev-parse", ctx.default], cwd=ctx.root)
+        git(["fetch", "-q", "origin"], cwd=ctx.root)
+        tip = git(["rev-parse", ctx.default], cwd=ctx.root)
     except BackstopError as exc:
         return Night(INCONCLUSIVE, None, f"the tip of {ctx.default} could not be read: {one_line(exc, 200)}")
     if workflow:
@@ -398,7 +367,7 @@ def commits_since(ctx, last, tip):
     if not last:
         return Since([], [], "no green run on record, so the merges since one cannot be listed")
     try:
-        listed = run(["git", "log", "--first-parent", "--reverse", "--format=%H %s", f"{last}..{tip}"], cwd=ctx.root)
+        listed = git(["log", "--first-parent", "--reverse", "--format=%H %s", f"{last}..{tip}"], cwd=ctx.root)
     except BackstopError as exc:
         return Since([], [], f"the merges since {last} could not be listed: {one_line(exc, 150)}")
     lines = listed.splitlines()

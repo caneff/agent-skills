@@ -582,8 +582,8 @@ def test_a_candidate_with_no_body_and_no_comments_is_listed_as_empty_not_blank(s
     spec = importlib.util.spec_from_file_location("drain_under_test", DRAIN)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.gh_json = lambda *a, **k: {"body": "", "comments": []}
-    ctx = type("Ctx", (), {"repo": "o/r"})()
+    import tracker
+    ctx = type("Ctx", (), {"repo": "o/r", "tracker": tracker.MemoryTracker([mem_issue(2, ["ready-for-agent"])])})()
     assert mod.excerpt(ctx, 2) == "(empty body, no comments)"
 
 
@@ -1662,7 +1662,8 @@ def d(monkeypatch):
 
 @pytest.fixture
 def ctx():
-    return type("Ctx", (), {"repo": "o/r", "root": "/x/repo"})()
+    import tracker
+    return type("Ctx", (), {"repo": "o/r", "root": "/x/repo", "tracker": tracker.MemoryTracker([mem_issue(1, [])])})()
 
 
 def test_a_worker_that_never_goes_idle_fails_at_the_wall_clock(d, monkeypatch):
@@ -1694,7 +1695,6 @@ def test_a_spec_run_idle_while_its_slice_workers_work_is_not_a_failed_build(d, c
     monkeypatch.setattr(d, "time", clock)
     monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 3)
     monkeypatch.setattr(d, "agent_status", lambda name: "idle")
-    monkeypatch.setattr(d, "gh_json", lambda *args: {"state": "open"})
     monkeypatch.setattr(d, "slices_working", lambda ctx, spec: clock.tick < 6)
     monkeypatch.setattr(d, "open_pr", lambda ctx, branch: {"number": 1} if clock.tick >= 8 else None)
     assert d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1) == "pr"
@@ -1714,7 +1714,6 @@ def test_a_slice_worker_counts_as_working_only_while_it_is_working(d, ctx, monke
 def test_the_same_idle_wait_with_no_slice_working_fails_at_the_grace(d, ctx, monkeypatch):
     monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 0.2)
     monkeypatch.setattr(d, "agent_status", lambda name: "idle")
-    monkeypatch.setattr(d, "gh_json", lambda *args: {"state": "open"})
     monkeypatch.setattr(d, "slices_working", lambda ctx, spec: False)
     monkeypatch.setattr(d, "open_pr", lambda ctx, branch: None)
     with pytest.raises(d.DrainError) as caught:
@@ -1823,40 +1822,90 @@ def test_a_relative_log_dir_still_gives_the_seam_its_selector_listing(sb):
 # --- The in-memory tracker -------------------------------------------------
 
 def mem_issue(n, labels, body="", parent=None, **extra):
-    return {"number": n, "title": f"t{n}", "state": "open", "body": body, "assignees": [],
+    return {"number": n, "title": f"t{n}", "state": "open", "body": body, "assignees": [], "comments": [],
             "labels": [{"name": x} for x in labels], **({"parent": parent} if parent else {}), **extra}
 
 
-def test_resumable_and_claimed_slices_share_one_claimed_read(d, ctx, monkeypatch):
+def test_resumable_and_claimed_slices_each_read_the_claimed_queue_once(d, ctx, monkeypatch):
+    """`resumable` and `claimed_slices` share `claimed_issues`, one tracker read per call. They
+    run at different moments of a pass (the pick, then every look at a spec run whose slices are
+    claimed after dispatch), so each must read live: one read shared across them would be stale."""
     import tracker
     mem = tracker.MemoryTracker([mem_issue(1, ["spec", "in-progress"]), mem_issue(2, ["in-progress"], parent=1),
                                  mem_issue(3, ["in-progress", "ready-for-human"], parent=1),
                                  mem_issue(4, ["in-progress"], pull_request={"url": "u"})])
     reads = []
-    real = mem.claimed
-    mem.claimed = lambda: reads.append(1) or real()
-    monkeypatch.setattr(d, "tracker_for", lambda repo: mem)
-    monkeypatch.setattr(d, "gh_json", lambda *a: {"state": "open", "labels": [{"name": "in-progress"}],
-                                                 "comments": [], "body": ""})
+    monkeypatch.setattr(mem, "claimed", lambda real=mem.claimed: reads.append(1) or real())
+    ctx.tracker = mem
     assert d.claimed_slices(ctx, 1) == [2]
+    assert len(reads) == 1
     d.resumable(ctx, set())
-    assert len(reads) == 2  # one tracker call each, none of the old second listing path
+    assert len(reads) == 2
     assert [i["number"] for i in d.claimed_issues(ctx)] == [1, 2]
 
 
-def test_read_queue_runs_on_the_in_memory_tracker(d, ctx, monkeypatch):
+def test_read_queue_runs_on_the_in_memory_tracker_and_lists_it_once(d, ctx):
     import tracker
     mem = tracker.MemoryTracker([mem_issue(5, ["ready-for-agent"], body="## Blocked by\n\nNone\n"),
                                  mem_issue(6, ["ready-for-agent", "ready-for-human"], body="## Blocked by\n\nNone\n"),
                                  mem_issue(7, ["ready-for-agent", "in-progress"])])
-    monkeypatch.setattr(d, "tracker_for", lambda repo: mem)
+    listed = []
+    real = mem.issues
+    ctx.tracker = type("Spy", (), {"__getattr__": lambda self, name: getattr(mem, name),
+                                   "issues": lambda self, label: listed.append(label) or real(label)})()
     queue, waiting, stranded, passed = d.read_queue(ctx)
     assert queue == [(5, "t5", d.TICKET)] and waiting == [] and stranded == []
     assert dict(passed)[6] == "ready-for-human" and dict(passed)[7].startswith("claimed")
+    assert listed == ["ready-for-agent"], "the frontier classifies drain's own listing, not a second read"
+    assert "issues" not in vars(mem), "the tracker itself is never patched"
 
 
-def test_a_tracker_that_cannot_answer_is_a_drain_error(d, ctx, monkeypatch):
+def test_a_tracker_that_cannot_answer_is_a_drain_error(d, ctx):
     import tracker
-    monkeypatch.setattr(d, "tracker_for", lambda repo: tracker.MemoryTracker(broken={"claimed": "gh down"}))
+    ctx.tracker = tracker.MemoryTracker(broken={"claimed": "gh down"})
     with pytest.raises(d.DrainError, match="gh down"):
         d.claimed_issues(ctx)
+
+
+def test_once_drains_a_ticket_through_the_in_memory_tracker_with_no_gh(sb, d, monkeypatch):
+    """#1785's named seam: `drain --once` (the loop `main` runs, given its `Ctx`) on the in-memory
+    tracker. Git, herdr, merge-cleanup and the seam are the sandbox's real repo and stubs; every
+    tracker question goes to `MemoryTracker`, and a `gh` that is run at all fails the test."""
+    import tracker
+    for key, value in sb.drain_env().items():
+        monkeypatch.setenv(key, value)
+    gh_log = os.path.join(sb.tmp, "gh-called.log")
+    write(os.path.join(sb.bin, "gh"), f'#!/bin/sh\necho "$@" >> {gh_log}\nexit 1\n', 0o755)
+    monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 0.3)
+    branch = "implement-1"
+    view = {"number": 101, "url": "https://example.test/pull/101", "isDraft": False, "state": "OPEN",
+            "mergeStateStatus": "CLEAN", "statusCheckRollup": [], "closingIssuesReferences": [{"number": 1}]}
+    mem = tracker.MemoryTracker([mem_issue(1, ["ready-for-agent"], body="## Blocked by\n\nNone\n")],
+                                prs=[{"number": 101, "url": view["url"], "head": branch}],
+                                pr_views={branch: view, 101: view}, repo="me/repo")
+
+    def dispatch(ctx, bundle, kind):  # implement-dispatch and its worker: claim, build, push, PR
+        assert (bundle, kind) == ([1], d.TICKET)
+        mem.issue(1)["labels"] = [{"name": "in-progress"}]
+        wt = d.workspace_path(ctx, 1, kind)
+        sb.git(sb.repo, "worktree", "add", "-q", "-b", branch, wt, "origin/main")
+        write(os.path.join(wt, "work-1.txt"), "built\n")
+        sb.git(wt, "add", ".")
+        sb.git(wt, "commit", "-qm", "build 1")
+        sb.git(wt, "push", "-q", "origin", f"HEAD:{branch}")
+        head = sb.git(wt, "rev-parse", "HEAD")
+        view.update(headRefOid=head, mergeCommit={"oid": "m" + head})
+    monkeypatch.setattr(d, "dispatch", dispatch)
+
+    ctx = d.Ctx(sb.repo, "me/repo", "origin/main", os.path.join(sb.tmp, "logs"), d.BUNDLE_MAX, None, mem)
+    os.makedirs(ctx.log_dir)
+    result = d.drain(ctx, 1, "--once")
+
+    assert result.stop is None and result.ended == "--once reached", result
+    assert [(m["tickets"], m["via"], m["sha"]) for m in result.merged] == [([1], view["url"], "m" + view["headRefOid"])]
+    assert mem.merges == [(101, view["headRefOid"])]
+    assert [body for n, body in mem.comments if n == 1] == ["drain anchor: implement-1", "drain bundle: 1 (of 0 candidates)"]
+    assert result.passed == []  # #1 left the ready listing when it was claimed
+    assert os.path.exists(os.path.join(ctx.log_dir, f"{branch}-seam.log")), "the per-change command ran"
+    assert branch in read(sb.cleanup_log)
+    assert not os.path.exists(gh_log), read(gh_log)

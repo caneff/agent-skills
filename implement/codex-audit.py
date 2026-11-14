@@ -64,7 +64,7 @@ LEDGER_CLI = HERE.parent / "multi-axis-code-review" / "review_ledger.py"
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "multi-axis-code-review"))
 sys.path.insert(0, str(HERE.parent / "common"))
-from shellcmd import CmdError, default_branch, git as _git, origin_slug, scratch_worktree  # noqa: E402  (#1782)
+from shellcmd import CmdError, default_branch, git, origin_slug, scratch_worktree  # noqa: E402  (#1782)
 from tracker import GhTracker, TrackerError  # noqa: E402  (#1786)
 from review_ledger import DEFAULT_LEDGER, parse_codex_out  # noqa: E402
 from review_cache import REVIEWS_ROOT, CacheDirError, repo_for_checkout  # noqa: E402
@@ -103,11 +103,6 @@ class Stop(Exception):
     def __init__(self, status: int, reason: str, hint: str = ""):
         super().__init__(reason)
         self.status, self.reason, self.hint = status, reason, hint
-
-
-def git(*args: str, ok: tuple[int, ...] = (0,)):
-    """`git <args>` through the shared helper; its `CmdError` is this script's one git failure."""
-    return _git(list(args), ok=ok)
 
 
 def repo_name() -> str:
@@ -233,18 +228,28 @@ def launch(args, span: Span, body: Path, out: Path) -> int:
     """Run Codex over `span` from a detached worktree at its newest merge; its exit status."""
     script = None if args.dry_run else companion()
     tree = out.with_name(out.stem + "-tree")
-    with scratch_worktree(".", span.newest, str(tree)):
-        if script is None:
-            out.write_text(args.simulate_out.read_text() if args.simulate_out else
-                           "No material findings (dry run: Codex was not launched).\n")
-            return args.simulate_status or 0
-        with out.open("w") as f:
-            return subprocess.run(["node", str(script), "adversarial-review", "--wait", "--base", span.base, "--",
-                                   body.read_text()], cwd=tree, stdout=f, stderr=subprocess.STDOUT).returncode
+    status = None
+    try:
+        with scratch_worktree(".", span.newest, str(tree)):
+            if script is None:
+                out.write_text(args.simulate_out.read_text() if args.simulate_out else
+                               "No material findings (dry run: Codex was not launched).\n")
+                status = args.simulate_status or 0
+            else:
+                with out.open("w") as f:
+                    status = subprocess.run(["node", str(script), "adversarial-review", "--wait", "--base", span.base,
+                                             "--", body.read_text()], cwd=tree, stdout=f,
+                                            stderr=subprocess.STDOUT).returncode
+    except CmdError as left:
+        if status is None:  # the add failed: nothing launched
+            raise
+        # The run's own outcome stands; a stale worktree is named, not blamed on it.
+        print(f"codex-audit: {left}", file=sys.stderr)
+    return status
 
 
 def report(findings: list[dict], prs: list[Merge]) -> None:
-    files = {m.pr: set(git("show", "--name-only", "--format=", m.sha).stdout.split()) for m in prs}
+    files = {m.pr: set(git(["show", "--name-only", "--format=", m.sha]).stdout.split()) for m in prs}
     for k, f in enumerate(findings, 1):
         if not f["file"]:
             where = "names no file"
@@ -340,7 +345,7 @@ def cmd_mark(args) -> int:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.date):
             raise Stop(ERROR, f"--date {args.date!r} is not YYYY-MM-DD, so the next run could not read the mark")
         repo = repo_name()
-        r = git("rev-parse", "--verify", "--quiet", f"{args.sha}^{{commit}}", ok=(0, 1))
+        r = git(["rev-parse", "--verify", "--quiet", f"{args.sha}^{{commit}}"], ok=(0, 1))
         if r.returncode != 0:
             raise Stop(ERROR, f"--sha {args.sha} is not a commit in this checkout")
         sha = r.stdout.strip()
@@ -351,7 +356,7 @@ def cmd_mark(args) -> int:
         mine = [m for m in marks if m["repo"] == repo]
         if len(mine) > 1:
             raise Stop(ERROR, f"{len(mine)} audit marks for {repo} in {trial}, not one")
-        if mine and git("merge-base", "--is-ancestor", mine[0]["sha"], sha, ok=(0, 1)).returncode != 0:
+        if mine and git(["merge-base", "--is-ancestor", mine[0]["sha"], sha], ok=(0, 1)).returncode != 0:
             raise Stop(ERROR, f"{sha} does not descend from the current mark {mine[0]['sha']}")
     except Stop as stop:
         print(f"codex-audit: {stop.reason}", file=sys.stderr)

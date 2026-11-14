@@ -1032,7 +1032,7 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
             added = True
             return _sweep_checkout(repo, slug, name, wt, run_root, sweep_id, only, short, force, open_record)
     except shellcmd.CmdError as e:
-        if added:
+        if added:  # the body or the cleanup failed, not the add
             raise
         return Outcome("failed", f"git worktree add origin/main failed: {e}")
 
@@ -1040,7 +1040,7 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
 def _sweep_checkout(repo, slug, name, wt, run_root, sweep_id, only, short, force, open_record):
     """The body of `_sweep_origin_main` once its worktree `wt` exists."""
     label = triage_label(wt)
-    refusal = label_refusal(repo, label)  # before any audit starts
+    refusal = label_refusal(slug, label)  # before any audit starts
     if refusal:
         return Outcome("refused", refusal)
     earlier = latest_record_url(name)  # before this sweep stores its own
@@ -1427,8 +1427,12 @@ def local_checkouts(roots):
                 continue
             try:
                 slug = shellcmd.origin_slug(path)
-            except shellcmd.CmdError:
-                continue  # a checkout with no origin has no slug to sweep under
+            except shellcmd.CmdError as e:
+                # origin_slug raises on a checkout with no origin remote, which has no slug to
+                # sweep under, and on a git that could not answer; either way it is skipped, and
+                # named, so a failed read is never silently taken for "no origin".
+                print(f"skipped checkout {path}: {e}", file=sys.stderr)
+                continue
             if slug:
                 key = (not os.path.isdir(os.path.join(path, ".git")), len(path), path)
                 found.setdefault(slug, []).append((key, path))
@@ -1595,13 +1599,17 @@ def _run_mutation_module(repo, module, run):
 
     print(f"[mutation:{module}] creating worktree")
     reason = None
+    added = False
     try:
         # The one cleanup for this worktree: `scratch_worktree` removes it on
         # every exit, an exception included (#606). mutation_mode keeps an outer
         # sweep of `worktrees/` as the backstop for a crash mid-`add`.
         with shellcmd.scratch_worktree(repo, "HEAD", wt):
+            added = True
             if not (os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml"))):
                 reason = "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling"
+                with open(log, "w", encoding="utf-8") as f:  # report_failure points at it
+                    f.write(f"{reason}\n")
             else:
                 print(f"[mutation:{module}] resolving env (uv sync)")
                 with open(log, "w", encoding="utf-8") as f:
@@ -1620,7 +1628,7 @@ def _run_mutation_module(repo, module, run):
                     if not reason:
                         record_inconclusive(run.manifests, slug, collection)
     except shellcmd.CmdError as e:
-        if os.path.isdir(wt):
+        if added:  # the body or the cleanup failed, not the add
             raise
         with open(log, "w", encoding="utf-8") as f:
             f.write(f"{e}\n")

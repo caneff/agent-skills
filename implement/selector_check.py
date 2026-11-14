@@ -57,6 +57,7 @@ sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
 from closing_ticket import declaration  # noqa: E402
 
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "common"))
+import shellcmd  # noqa: E402
 import tracker as issue_tracker  # noqa: E402  (#1786)
 
 LISTING_SECONDS = 600
@@ -101,12 +102,9 @@ def agents_text(root, rev=None):
         except OSError as exc:
             return None, f"no AGENTS.md could be read at {root} ({' '.join(str(exc).split())[:100]})"
     try:
-        shown = subprocess.run(["git", "-C", root, "show", f"{rev}:./AGENTS.md"], capture_output=True, text=True)
-    except OSError as exc:
-        return None, f"no AGENTS.md could be read at {rev} (git could not start: {exc})"
-    if shown.returncode:
-        return None, f"no AGENTS.md could be read at {rev} ({' '.join(shown.stderr.split())[:100]})"
-    return shown.stdout, None
+        return shellcmd.git(["-C", root, "show", f"{rev}:./AGENTS.md"]).stdout, None
+    except shellcmd.CmdError as exc:
+        return None, f"no AGENTS.md could be read at {rev} ({' '.join(str(exc).split())[:150]})"
 
 
 def per_change(root, rev=None):

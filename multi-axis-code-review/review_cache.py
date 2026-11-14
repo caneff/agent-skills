@@ -8,9 +8,11 @@ codex-audit, the brief renderers and the tally import it from here.
 """
 import os
 import re
-import subprocess
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+import shellcmd  # noqa: E402  (#1730 P5)
 
 
 def reviews_root() -> Path:
@@ -37,21 +39,21 @@ def fold_repo(repo_dir: str) -> str:
     return REPO_ALIASES.get(repo_dir, repo_dir)
 
 
-def repo_for_checkout(cwd: Path | str, env: dict | None = None) -> str:
-    """The folded repo name of the checkout at `cwd`: the directory holding the common `.git`."""
+def repo_for_checkout(cwd: Path | str) -> str:
+    """The folded repo name of the checkout at `cwd`: the directory holding the common `.git`. Run
+    through `shellcmd`, so a leaked GIT_DIR cannot name another repo's cache."""
+    if not os.path.isdir(cwd):  # git would never start: say so as the one error every caller handles
+        raise CacheDirError(f"git cannot name the repo of {cwd}: not a directory")
     try:
-        done = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=cwd,
-                              capture_output=True, text=True, env=env)
-    except OSError as e:  # a cwd that is missing or no directory: git never started
+        out = shellcmd.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=str(cwd)).stdout
+    except shellcmd.CmdError as e:
         raise CacheDirError(f"git cannot name the repo of {cwd}: {e}") from e
-    if done.returncode != 0:
-        raise CacheDirError(f"git cannot name the repo of {cwd}: {done.stderr.strip() or 'no output'}")
-    return fold_repo(os.path.basename(os.path.dirname(done.stdout.strip())))
+    return fold_repo(os.path.basename(os.path.dirname(out.strip())))
 
 
-def cache_dir_for(cwd: Path | str, env: dict | None = None) -> Path:
+def cache_dir_for(cwd: Path | str) -> Path:
     """The review cache directory of the repo `cwd` is in."""
-    return REVIEWS_ROOT / repo_for_checkout(cwd, env)
+    return REVIEWS_ROOT / repo_for_checkout(cwd)
 
 
 def dispositions_path(reviews_dir: Path | str, lowest) -> str:

@@ -153,7 +153,12 @@ def log_args(range_arg):
 
 
 def github_base(repo):
-    slug = origin_slug(str(repo))
+    """The repo's GitHub URL for commit links, or None: a repo with no origin (or one git cannot
+    read) is listed without links, since its commits were already read by `collect`."""
+    try:
+        slug = origin_slug(str(repo))
+    except CmdError:
+        return None
     return f"https://github.com/{slug}" if slug else None
 
 

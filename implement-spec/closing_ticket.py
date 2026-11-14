@@ -272,7 +272,7 @@ def default_branch(root):
     run's own reader, or None when git cannot say."""
     try:
         ref = origin_default(root)
-    except (LoopError, OSError):
+    except LoopError:
         return None
     return ref[len("origin/"):] if ref.startswith("origin/") else None
 

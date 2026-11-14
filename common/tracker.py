@@ -1,9 +1,11 @@
-"""The one way a Python script asks the GitHub tracker about issues (#1785, spec #1730).
+"""The one way a Python script asks GitHub about its issues, PRs and workflow runs, and writes
+comments, issues and merges back (#1785, #1786, spec #1730).
 
 `GhTracker` runs `gh`; `MemoryTracker` answers the same calls from a list, so a test of a caller
-drives the real seam without faking a binary. A `gh` that cannot answer (it failed, timed out, or
-printed something that is not the shape asked for) raises `TrackerError`: never an empty answer,
-since an empty queue and an unreadable one are different facts. Issues are GitHub REST objects."""
+drives the real seam without faking a binary. A `gh` that cannot answer (it failed, timed out,
+printed nothing, or printed something that is not the shape asked for) raises `TrackerError`:
+never an empty answer, since an empty queue and an unreadable one are different facts. Issues are
+GitHub REST objects."""
 import json
 from urllib.parse import quote
 
@@ -25,12 +27,17 @@ def labels(issue):
     return {x["name"] for x in listed}
 
 
-def gh_json(args):
-    """`gh <args>` parsed as JSON (empty output is None). Raises TrackerError when gh cannot answer."""
+def gh_text(args):
+    """`gh <args>`'s stdout. Raises TrackerError when gh cannot answer: the one place a `CmdError`
+    becomes a `TrackerError`."""
     try:
-        out = shellcmd.gh(list(args)).stdout
+        return shellcmd.gh(list(args)).stdout
     except shellcmd.CmdError as exc:
         raise TrackerError(str(exc)) from None
+
+
+def _parsed(args, out):
+    """`out` parsed as JSON, empty output being None. Raises TrackerError on unreadable JSON."""
     try:
         return json.loads(out or "null")
     except ValueError as exc:
@@ -38,22 +45,29 @@ def gh_json(args):
                            f"stdout began: {out[:200]!r}") from None
 
 
-class GhTracker:
-    """The issues of one repo, read and written through `gh`. `run(args)` returns parsed JSON and is
-    the seam a test of this adapter replaces."""
+def gh_json(args):
+    """`gh <args>` parsed as JSON (empty output is None). Raises TrackerError when gh cannot answer."""
+    return _parsed(args, gh_text(args))
 
-    def __init__(self, repo=None, run=gh_json):
+
+class GhTracker:
+    """The issues, PRs and runs of one repo, read and written through `gh`. Every call goes through
+    `run(args)`, which returns gh's stdout and is the seam a test of this adapter replaces."""
+
+    def __init__(self, repo=None, run=gh_text):
         self.repo = repo
         self._run = run
+
+    def _json(self, args):
+        return _parsed(args, self._run(args))
 
     def _path(self, tail):
         return f"repos/{quote(self.repo, safe='/')}/{tail}"
 
     def _pages(self, path, what):
-        """Every item of every page of `path`; a non-list page is an error."""
-        pages = self._run(["api", "--paginate", "--slurp", path])
-        if pages is None:
-            return []
+        """Every item of every page of `path`. A non-list page is an error, and so is empty output:
+        `--slurp` prints `[[]]` for an empty list, so nothing printed is no answer."""
+        pages = self._json(["api", "--paginate", "--slurp", path])
         if not isinstance(pages, list) or not all(isinstance(p, list) for p in pages):
             raise TrackerError(f"gh answered with something other than pages of {what}")
         return [item for page in pages for item in page]
@@ -70,7 +84,7 @@ class GhTracker:
 
     def issue(self, number):
         """One issue's REST object."""
-        answer = self._run(["api", self._path(f"issues/{int(number)}")])
+        answer = self._json(["api", self._path(f"issues/{int(number)}")])
         if not isinstance(answer, dict) or "number" not in answer:
             raise TrackerError(f"issue #{number}: gh answered with no issue")
         return answer
@@ -79,15 +93,15 @@ class GhTracker:
         """`"open"`, `"closed"`, or None when it cannot be read: a number that names nothing here is
         not a closed blocker, and neither is a failed lookup."""
         try:
-            return (self._run(["api", self._path(f"issues/{int(number)}")]) or {}).get("state")
-        except (TrackerError, OSError):
+            return (self._json(["api", self._path(f"issues/{int(number)}")]) or {}).get("state")
+        except TrackerError:
             return None
 
     def parent_link(self, ticket):
         """The issue `ticket` is a sub-issue of, or None on the endpoint's 404 (no link). Any other
         failure raises: a call that did not answer is not "no parent"."""
         try:
-            answer = self._run(["api", self._path(f"issues/{int(ticket['number'])}/parent")])
+            answer = self._json(["api", self._path(f"issues/{int(ticket['number'])}/parent")])
         except TrackerError as exc:
             # gh's own status marker, not a bare "404": a failed call's message can carry a URL.
             if "(HTTP 404)" in str(exc):
@@ -112,7 +126,7 @@ class GhTracker:
 
     def merged_bodies(self, base):
         """The bodies of the PRs merged into `base`."""
-        prs = self._run(["pr", "list", "--repo", self.repo, "--base", base, "--state", "merged",
+        prs = self._json(["pr", "list", "--repo", self.repo, "--base", base, "--state", "merged",
                          "--json", "body", "--limit", "200"])
         if not isinstance(prs, list):
             raise TrackerError("the merged-PR list was not a list")
@@ -120,14 +134,14 @@ class GhTracker:
 
     def open_prs(self, head):
         """`[{number, url, baseRefName}]` for the open PRs from branch `head`."""
-        prs = self._run(["pr", "list", "--repo", self.repo, "--head", head, "--state", "open",
+        prs = self._json(["pr", "list", "--repo", self.repo, "--head", head, "--state", "open",
                          "--json", "number,url,baseRefName"])
         if not isinstance(prs, list):
             raise TrackerError("the open-PR list was not a list")
         return prs
 
     def _view(self, kind, number, fields):
-        answer = self._run([kind, "view", str(number), "--repo", self.repo, "--json", fields])
+        answer = self._json([kind, "view", str(number), "--repo", self.repo, "--json", fields])
         if not isinstance(answer, dict):
             raise TrackerError(f"gh {kind} view {number}: answered with something other than an object")
         return answer
@@ -150,7 +164,7 @@ class GhTracker:
 
     def runs(self, workflow, branch, event="schedule", limit=1):
         """The newest `limit` runs of `workflow` on `branch` for `event`, as gh's run objects."""
-        runs = self._run(["run", "list", "--repo", self.repo, "--workflow", workflow, "--event", event,
+        runs = self._json(["run", "list", "--repo", self.repo, "--workflow", workflow, "--event", event,
                           "--branch", branch, "--limit", str(limit),
                           "--json", "databaseId,status,conclusion,headSha,createdAt,url"])
         if not isinstance(runs, list):
@@ -159,10 +173,7 @@ class GhTracker:
 
     def run_failed_log(self, run_id):
         """The failed steps' log of run `run_id`. An empty log raises: nothing to read is not a log."""
-        try:
-            text = shellcmd.gh(["run", "view", str(run_id), "--repo", self.repo, "--log-failed"]).stdout
-        except shellcmd.CmdError as exc:
-            raise TrackerError(str(exc)) from None
+        text = self._run(["run", "view", str(run_id), "--repo", self.repo, "--log-failed"])
         if not text.strip():
             raise TrackerError(f"run {run_id}: gh printed no log")
         return text.strip()
@@ -172,10 +183,7 @@ class GhTracker:
         args = ["issue", "create", "--repo", self.repo, "--title", title, "--body", body]
         for label in labels:
             args += ["--label", label]
-        try:
-            url = shellcmd.gh(args).stdout.strip()
-        except shellcmd.CmdError as exc:
-            raise TrackerError(str(exc)) from None
+        url = self._run(args).strip()
         if not url:
             raise TrackerError("gh issue create printed no URL")
         return url
@@ -183,7 +191,7 @@ class GhTracker:
     def search_prs(self, since, limit):
         """The `repository` of up to `limit` PRs the viewer authored since `since` (`YYYY-MM-DD`),
         across every repo; the caller owns the cut-off check, since `limit` is gh's own cap."""
-        rows = self._run(["search", "prs", "--author", "@me", "--created", f">={since}",
+        rows = self._json(["search", "prs", "--author", "@me", "--created", f">={since}",
                           "--json", "repository", "--limit", str(limit)])
         if not isinstance(rows, list):
             raise TrackerError("gh search prs answered with something other than a list")
@@ -191,34 +199,25 @@ class GhTracker:
 
     def viewer_login(self):
         """The login `gh` is authenticated as."""
-        try:
-            login = shellcmd.gh(["api", "user", "--jq", ".login"]).stdout.strip()
-        except shellcmd.CmdError as exc:
-            raise TrackerError(str(exc)) from None
+        login = self._run(["api", "user", "--jq", ".login"]).strip()
         if not login:
             raise TrackerError("gh api user printed no login")
         return login
 
     def comment(self, number, body):
         """Comment on issue or PR `number`."""
-        self._write(["issue", "comment", str(number), "--repo", self.repo, "--body", body])
+        self._run(["issue", "comment", str(number), "--repo", self.repo, "--body", body])
 
     def merge(self, pr, head):
         """Squash-merge `pr`, only if its head is still `head`."""
-        self._write(["pr", "merge", str(pr), "--repo", self.repo, "--squash", "--match-head-commit", head])
-
-    @staticmethod
-    def _write(args):
-        try:
-            shellcmd.gh(args)
-        except shellcmd.CmdError as exc:
-            raise TrackerError(str(exc)) from None
+        self._run(["pr", "merge", str(pr), "--repo", self.repo, "--squash", "--match-head-commit", head])
 
 
 class MemoryTracker:
     """`GhTracker`'s answers from a list of REST issue dicts. An issue may carry `parent` (a number)
     and `blockers` (open native blocker numbers); `prs` are `{number, url, head}`; `merged` maps a
-    base branch to its merged PR bodies; `broken` maps an operation name (`op` or `op:<key>`, the key a ticket number or base branch) to the message it raises.
+    base branch to its merged PR bodies; `broken` maps an operation name (`op` or `op:<key>`, the
+    key a ticket number or base branch) to the message it raises.
     `pr_views` maps a PR number to its `gh pr view` object, `pr_comments` to its comment bodies,
     `runs` is the workflow-run list and `logs` maps a run id to its failed log.
     `comments`, `merges` and the issues `create_issue` adds record what was written."""

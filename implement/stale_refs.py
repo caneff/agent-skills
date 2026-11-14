@@ -44,10 +44,6 @@ def git(repo, *args, ok=(0,)):
         raise GitError(str(e)) from None
 
 
-def checked(repo, *args):
-    return git(repo, *args).stdout
-
-
 # Top-level definitions, column 0 only: an indented def is a method or a
 # nested helper, whose name is not the file's to export. Keyed by extension
 # because a `def` inside a Markdown code block is prose, not a definition.
@@ -95,8 +91,8 @@ def read_diff(repo, base):
     top-level names its removed lines define outside test files."""
     # Prefixes pinned so a user's diff.noprefix cannot strip the `a/` and
     # `b/` the headers are parsed by.
-    out = checked(repo, "diff", "-U0", "--no-color", "--no-ext-diff", "-M",
-                  "--src-prefix=a/", "--dst-prefix=b/", f"{base}...HEAD")
+    out = git(repo, "diff", "-U0", "--no-color", "--no-ext-diff", "-M",
+              "--src-prefix=a/", "--dst-prefix=b/", f"{base}...HEAD").stdout
     gone, removed = {}, {}
     old = ""
     header = False  # a removed `-- comment` line inside a hunk is not a file header
@@ -153,13 +149,13 @@ def main(argv=None):
     try:
         # From the top: `git grep` searches only below its cwd, while the
         # diff names paths from the root.
-        root = checked(args.repo, "rev-parse", "--show-toplevel").strip()
+        root = git(args.repo, "rev-parse", "--show-toplevel").stdout.strip()
         base = args.base or default_base(root)
-        dirty = checked(root, "status", "--porcelain", "--untracked-files=no")
+        dirty = git(root, "status", "--porcelain", "--untracked-files=no").stdout
         if dirty:
             raise GitError("tracked files have uncommitted changes; the diff reads HEAD, "
                            "so commit first:\n" + dirty.rstrip())
-        tracked = {os.path.basename(p) for p in checked(root, "ls-files").splitlines()}
+        tracked = {os.path.basename(p) for p in git(root, "ls-files").stdout.splitlines()}
         gone, removed = read_diff(root, base)
         found = 0
         for old, why in sorted(gone.items()):
