@@ -20,7 +20,6 @@ modules of a `mutation` sweep (default 4).
 import argparse
 import collections
 import concurrent.futures
-import concurrent.futures
 import dataclasses
 import datetime as _dt
 import hashlib
@@ -35,7 +34,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
-from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
+from audits_data import AUDIT_NAMES, GATED, PYTHON_ONLY, SHORT_SET  # noqa: E402
 import auditlib  # noqa: E402
 import pagelib  # noqa: E402
 import audit_record  # noqa: E402
@@ -402,48 +401,55 @@ def report_failure(label, reason, log_path):
     print(f"[{label}] FAILED: {reason} — see {log_path}")
 
 
-# The audits that read only Python (#1751): on a repo with none they do not
-# run, so a "clean" cannot be what the audit not running would also produce.
-PYTHON_ONLY = ("dead-code", "type-tightness", "docstring-coverage")
+NOT_APPLICABLE_FILE = "not-applicable.txt"
 
 
-def not_applicable_verdict(name, repo):
-    """`"not applicable: <language>"` for a Python-only audit on a repo with no
-    Python, else None."""
-    return auditlib.not_applicable(repo) if name in PYTHON_ONLY else None
-
-
-def write_not_applicable(name, verdict, manifest):
+def write_not_applicable(name, language, manifest):
     """Write the manifest and one-line report of an audit that does not apply
-    here. The manifest carries `not_applicable` (the language) and no
-    findings log, so no reader takes it for an audit that found nothing."""
-    language = verdict.split(": ", 1)[1]
+    here (all-audits/SKILL.md, Not applicable). The manifest carries
+    `not_applicable` (the language) and no findings log, so no reader takes it
+    for an audit that found nothing; `NOT_APPLICABLE_FILE` beside the report
+    carries the language into the collection, where every index reads it."""
     report_dir = os.path.join(os.path.dirname(manifest), "report")
     os.makedirs(report_dir, exist_ok=True)
     report = os.path.join(report_dir, "report.html")
     with open(report, "w", encoding="utf-8") as f:
         f.write(pagelib.page(title=f"{name}: not applicable", kicker=name,
                              h1=f"NOT APPLICABLE: {html.escape(language)}",
-                             lede=f"{name} reads Python source and this repo has none; it did not run.", body=""))
+                             lede=f"{name} reads Python source and this repo has none; it did not run.", body="",
+                             prefix="../"))  # collected as collection/<name>/report.html, assets one up
+    with open(os.path.join(report_dir, NOT_APPLICABLE_FILE), "w", encoding="utf-8") as f:
+        f.write(language)
     with open(manifest, "w", encoding="utf-8") as f:
-        json.dump({"report_path": report, "count": 0, "headline": verdict, "not_applicable": language}, f)
+        json.dump({"report_path": report, "count": 0, "headline": f"not applicable: {language}",
+                   "not_applicable": language}, f)
 
 
-def run_one(name, repo, outlogs, manifests_dir):
+def collected_not_applicable(collection, name):
+    """The language `name`'s collected report was ruled not applicable for,
+    or None when it ran (or has no report)."""
+    path = os.path.join(collection, name, NOT_APPLICABLE_FILE)
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read().strip() or "unknown language"
+
+
+def run_one(name, repo, outlogs, manifests_dir, not_applicable=None):
     """Run one audit. Returns None on success, else the failure reason —
     a nonzero `claude` exit, no manifest or a manifest naming a missing
-    report (#1278, #1292); `done` prints only on success."""
+    report (#1278, #1292); `done` prints only on success. With
+    `not_applicable` (a language, from the plan) no `claude` starts."""
     print(f"[{name}] starting")
     log_path = os.path.join(outlogs, f"{name}.log")
     manifest = manifest_path_for(manifests_dir, name)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
     clear_manifest(manifest)
-    verdict = not_applicable_verdict(name, repo)
-    if verdict:
-        write_not_applicable(name, verdict, manifest)
+    if not_applicable:
+        write_not_applicable(name, not_applicable, manifest)
         with open(log_path, "w", encoding="utf-8") as log:
-            log.write(verdict + "\n")
-        print(f"[{name}] {verdict}")
+            log.write(f"not applicable: {not_applicable}\n")
+        print(f"[{name}] not applicable: {not_applicable}")
         return None
     with open(log_path, "w", encoding="utf-8") as log:
         r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=claude_env())
@@ -477,6 +483,7 @@ class IndexModel:
     mutation_modules: list = dataclasses.field(default_factory=list)
     mutation_survivors_sum: int = 0
     mutation_inconclusive: int = 0
+    mutation_corrupt: int = 0
     notest_count: int = 0
     notest_error: str = None
 
@@ -492,10 +499,12 @@ def build_index(model):
         else:
             out.append(f'<tr><td>{name}</td><td style="color:var(--vt-muted)">no report</td><td>{note}</td></tr>\n')
     if model.mutation_modules or model.notest_count > 0 or model.notest_error:
-        measured = len(model.mutation_modules) - model.mutation_inconclusive
+        measured = len(model.mutation_modules) - model.mutation_inconclusive - model.mutation_corrupt
         verdict = f"{measured} modules measured, {model.mutation_survivors_sum} total survivors"
         if model.mutation_inconclusive:
             verdict += f", {model.mutation_inconclusive} INCONCLUSIVE (not measured)"
+        if model.mutation_corrupt:
+            verdict += f", {model.mutation_corrupt} CORRUPT (findings.jsonl unreadable, not measured)"
         if model.notest_error:
             verdict += " · no-tests count could not be determined"
         elif model.notest_count > 0:
@@ -638,10 +647,12 @@ class Plan:
     reused: dict = dataclasses.field(default_factory=dict)
     skip_note: dict = dataclasses.field(default_factory=dict)
     skip_sha: dict = dataclasses.field(default_factory=dict)
+    not_applicable: dict = dataclasses.field(default_factory=dict)  # {audit: language} (#1751)
 
 
 def plan_sweep(repo, selected, force, base=None, key=None):
-    """Ask the staleness cache which of `selected` still needs a run."""
+    """Ask the staleness cache which of `selected` still needs a run, and
+    which of those read only Python on a repo that has none."""
     base = base or cache_base()
     plan = Plan()
     for name in selected:
@@ -656,6 +667,10 @@ def plan_sweep(repo, selected, force, base=None, key=None):
                     continue
                 print(f"[{name}] cache says skip but cached report is gone — running fresh")
         plan.to_run.append(name)
+    python_only = [n for n in plan.to_run if n in PYTHON_ONLY]
+    language = auditlib.not_applicable(repo) if python_only else None  # once per sweep
+    if language:
+        plan.not_applicable = {n: language for n in python_only}
     return plan
 
 
@@ -689,25 +704,33 @@ def execute(repo, plan, run, jobs):
     """
     if not plan.to_run:
         return []
+
+    def one(name):
+        return run_one(name, repo, run.logs, run.manifests, plan.not_applicable.get(name))
+
     # The smoke audit must spawn `claude`, or it proves nothing about the guard (#1751).
-    smoke = next((n for n in plan.to_run if not not_applicable_verdict(n, repo)), plan.to_run[0])
-    print(f"== smoke test: {smoke} ==")
-    failed = [smoke] if run_one(smoke, repo, run.logs, run.manifests) else []
-    log_text = open(os.path.join(run.logs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
-    if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
-        print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
-        sys.exit(1)
-    print("smoke test passed; fanning out the rest\n" if not failed else f"smoke audit {smoke} failed (not the guard); fanning out the rest anyway\n")
+    smoke = next((n for n in plan.to_run if n not in plan.not_applicable), None)
+    failed = []
+    if smoke is None:
+        print("== no smoke test: no planned audit starts claude ==")
+    else:
+        print(f"== smoke test: {smoke} ==")
+        failed = [smoke] if one(smoke) else []
+        log_text = open(os.path.join(run.logs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
+        if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
+            print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
+            sys.exit(1)
+        print("smoke test passed; fanning out the rest\n" if not failed else f"smoke audit {smoke} failed (not the guard); fanning out the rest anyway\n")
     rest = [n for n in plan.to_run if n != smoke]
     if rest:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(rest))) as ex:
-            results = list(ex.map(lambda n: run_one(n, repo, run.logs, run.manifests), rest))
+            results = list(ex.map(one, rest))
         failed += [n for n, reason in zip(rest, results) if reason]
     return failed
 
 
 MutationScan = collections.namedtuple(
-    "MutationScan", "modules survivors_sum inconclusive notest_modules notest_total notest_error")
+    "MutationScan", "modules survivors_sum inconclusive corrupt notest_modules notest_total notest_error")
 
 
 def scan_mutation(collection):
@@ -721,11 +744,15 @@ def scan_mutation(collection):
         if os.path.isfile(os.path.join(d, "findings.jsonl")) or os.path.isfile(inconclusive_path(collection, entry)):
             mutation_modules.append(entry)
 
-    survivors_sum = 0
+    survivors_sum, corrupt = 0, 0
     inconclusive = sum(1 for b in mutation_modules if inconclusive_reason(collection, b) is not None)
     for base_name in mutation_modules:
-        tally, _ = _mutation_tally(collection, base_name)
-        if tally:
+        if inconclusive_reason(collection, base_name) is not None:
+            continue
+        tally, bad_lines = _mutation_tally(collection, base_name)
+        if bad_lines:  # the sub-index shows it CORRUPT: not measured, its survivors not counted
+            corrupt += 1
+        elif tally:
             _, _, s, n = tally
             survivors_sum += s + n
 
@@ -741,7 +768,7 @@ def scan_mutation(collection):
                 notest_modules = d.get("no_tests", [])
         except (json.JSONDecodeError, OSError):
             notest_error = "no-tests probe wrote unparseable output"
-    return MutationScan(mutation_modules, survivors_sum, inconclusive, notest_modules, notest_total, notest_error)
+    return MutationScan(mutation_modules, survivors_sum, inconclusive, corrupt, notest_modules, notest_total, notest_error)
 
 
 def render_mutation_subindex(collection, repo, mut):
@@ -787,15 +814,16 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
         if reason:
             manifest_note[name] = reason
             continue
-        language = (read_manifest(run.manifests, name) or {}).get("not_applicable")
-        if language:  # shown apart from a clean pass, never cached as a clean result
-            manifest_note[name] = f"NOT APPLICABLE: {language}"
+        if collected_not_applicable(collection, name):  # never cached as a clean result
             continue
         if name in GATED:
             os.makedirs(stable, exist_ok=True)
             replace_dir(os.path.join(collection, name), os.path.join(stable, name))
             update_cache(repo, name, os.path.join(stable, name), base=base, key=key)
 
+    # Read from the collection, not the plan, so `index --out` and `load` show it too.
+    na_note = {n: f"NOT APPLICABLE: {lang}" for n in AUDIT_NAMES
+               if (lang := collected_not_applicable(collection, n))}
     report_link = report_links(collection)
     mut = scan_mutation(collection)
 
@@ -824,11 +852,12 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
         collection=collection,
         repo=repo,
         report_link=report_link,
-        skip_note={**plan.skip_note, **manifest_note},
+        skip_note={**plan.skip_note, **na_note, **manifest_note},
         synthesis=synthesis,
         mutation_modules=mut.modules,
         mutation_survivors_sum=mut.survivors_sum,
         mutation_inconclusive=mut.inconclusive,
+        mutation_corrupt=mut.corrupt,
         notest_count=len(mut.notest_modules),
         notest_error=mut.notest_error,
     ))
@@ -1456,13 +1485,16 @@ def mutation_mode(repo, modules, out, whole_repo=False):
     use_prepass = not whole_repo and os.environ.get("AUDITS_NO_SYNTH", "0") != "1"
     try:
         planned = mutation_run.run(
-            repo, load_record(_record_file(repo)), runner=_run, modules=modules,
+            repo, load_record(_record_file(repo)), modules=modules,
             rank_fn=_prepass_ranker(repo) if use_prepass else None)
     except Exception as e:  # noqa: BLE001 - named below, never an empty target list
         if modules is None:
             print(f"mutation-target probe failed: {e!r}", file=sys.stderr)
             sys.exit(1)
-        planned = None  # the targets are given; only the no-tests count is unknown
+        # The targets are given; only the no-tests count is unknown, and why is kept.
+        probe_error = f"no-tests probe failed: {e!r}"
+        print(probe_error, file=sys.stderr)
+        planned = None
     final_targets = list(modules) if planned is None else planned.targets
     skipped = 0
     if modules is None:
@@ -1486,7 +1518,7 @@ def mutation_mode(repo, modules, out, whole_repo=False):
     # A planning failure is a real "don't know", never a silent zero (#559) —
     # the index must render this as could-not-determine, not as a repo with
     # zero testless modules.
-    data = ({"error": "no-tests probe failed"} if planned is None
+    data = ({"error": probe_error} if planned is None
             else {"no_tests": planned.no_tests, "total": planned.total})
     with open(notest_json, "w", encoding="utf-8") as f:
         json.dump(data, f)

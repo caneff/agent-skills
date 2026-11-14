@@ -95,17 +95,37 @@ clean, fewer than `N` files (default 10) changed since the last-run SHA, no
 change touched `domain-drift`'s ground-truth (`GLOSSARY.md`, `docs/adr/`), and the
 last run is within the time backstop (default 30 days).
 
-**Not applicable (#1751).** `dead-code`, `type-tightness` and `docstring-coverage`
-read only Python. On a repo with no Python source but another language's
-(`auditlib.not_applicable`), `run_one` starts no `claude` process: it writes a
-manifest with `"not_applicable": "<language>"`, count 0 and a one-line report,
-and the index's Status column reads `NOT APPLICABLE: <language>` beside "open
-report", apart from a clean pass. A repo with no recognised source at all runs
-the audit as before. The smoke test is the first audit that does start.
-
 **Ignore file.** A repo can carry `.audit-ignore.md` at its root to suppress
 findings it has already reviewed and rejected, so a sweep stops re-raising
 them. Opt-in per repo — see [`harness/IGNORE-FILE.md`](harness/IGNORE-FILE.md).
+
+## Not applicable
+
+`dead-code`, `type-tightness` and `docstring-coverage` read only Python (the
+`python_only` entries of `audits_data.py`). On a repo with no Python source,
+"nothing found" is also what the audit not running produces, so a clean
+report there would be a false pass (#1751). The rule, stated once here:
+
+- **The check.** `python3 ~/.agents/skills/all-audits/harness/auditlib.py --applicable <scope>`
+  prints `applicable` and exits 0, or prints `not applicable: <language>` and
+  exits 3. It counts the files git tracks under `<scope>` (minus vendored and
+  excluded trees), so an untracked stray `.py` or a report folder's `.js`
+  assets never change the answer; a folder outside any git repo is walked
+  instead. A repo with no recognised source at all is `applicable`: with no
+  language to name, the audit runs as before.
+- **Run on its own** (step 0 of each of the three skills): on exit 3 the audit
+  stops there. Write no findings log, and report `not applicable: <language>`
+  as the headline with a manifest `"not_applicable": "<language>"` (count 0).
+  On exit 0, go on.
+- **In a sweep.** `plan_sweep` asks once per sweep and `run_one` starts no
+  `claude` process for the audits it rules out: it writes that manifest, a
+  one-line report and a `not-applicable.txt` beside the report naming the
+  language. Every index built over the collection (a sweep, `index --out`,
+  `load`) reads that file, so the Status column says `NOT APPLICABLE:
+  <language>` beside "open report", never an empty Status that reads as a
+  clean pass, and the report is never cached as a clean result. The smoke
+  test is the first audit that starts `claude`; when none does, there is no
+  smoke test and the sweep says so.
 
 ## Run
 

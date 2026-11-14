@@ -356,7 +356,7 @@ def test_stale_manifest_from_an_earlier_run_does_not_count_as_success(tmp_path):
     own recovery command) finds the last run's manifest. An audit that writes
     nothing this time must still fail, not inherit the old manifest."""
     tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
-    (tmp_path / "tmp" / "mod.py").write_text("")  # a Python repo: out/ later holds .js assets, which must not matter
+    _git_init_tracking(tmp)  # out/ later holds untracked .js assets, which must not make the repo read as JavaScript
     first = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
     assert first.returncode == 0, first.stdout + first.stderr
     assert os.path.isfile(os.path.join(tmp, "out", "manifests", "dead-code", "manifest.json")), "fixture setup: run 1 leaves a manifest"
@@ -2383,19 +2383,37 @@ def test_a_multi_pass_prints_exactly_one_index_line_and_it_is_the_page(tmp_path)
     assert lines == [f"index: {os.path.join(page_dir, 'index.html')}"], r.stdout
 
 
+def _git_init_tracking(path, *files):
+    """`git init` `path` and track `files` (created empty), uncommitted."""
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", path, "init", "-q"], check=True, env=env)
+    for f in files:
+        open(os.path.join(path, f), "w").close()
+    if files:
+        subprocess.run(["git", "-C", path, "add", *files], check=True, env=env)
+
+
+def _js_repo_sweep(tmp_path, only, **extra_env):
+    """A sweep of a repo whose only tracked source is `app.js`. A stray
+    untracked `stray.py` sits beside it: untracked files are no evidence of
+    the repo's language (#1751), so it must not make the audits applicable."""
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
+    _git_init_tracking(tmp, "app.js")
+    (tmp_path / "tmp" / "stray.py").write_text("")
+    starts = str(tmp_path / "starts")
+    open(starts, "w").close()
+    r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, FAKE_CLAUDE_STARTS=starts, **extra_env)
+    return tmp, r, open(starts).read()
+
+
 def test_python_only_audits_are_not_applicable_on_a_js_repo(tmp_path):
     """#1751: dead-code, type-tightness and docstring-coverage read only Python.
     On a repo of `.js` files the sweep never starts them: each gets a manifest
     saying "not applicable: JavaScript", and the index shows that apart from a
     clean pass. The fake `claude` writes nothing for these audits, so a run
     that did start one would fail with "no manifest"."""
-    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
-    (tmp_path / "tmp" / "app.js").write_text("")
-    starts = str(tmp_path / "starts")
-    r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code,type-tightness,docstring-coverage,duplication",
-                                FAKE_CLAUDE_STARTS=starts)
+    tmp, r, started = _js_repo_sweep(tmp_path, "dead-code,type-tightness,docstring-coverage,duplication")
     assert "[type-tightness] FAILED" not in r.stdout and "[dead-code] FAILED" not in r.stdout, r.stdout
-    started = open(starts).read()
     assert "/duplication" in started
     assert not any(n in started for n in ("/dead-code", "/type-tightness", "/docstring-coverage")), started
     for name in ("dead-code", "type-tightness", "docstring-coverage"):
@@ -2404,3 +2422,71 @@ def test_python_only_audits_are_not_applicable_on_a_js_repo(tmp_path):
         assert manifest["headline"] == "not applicable: JavaScript"
     index = open(os.path.join(tmp, "out", "collection", "index.html")).read()
     assert index.count("NOT APPLICABLE: JavaScript") == 3, index
+
+
+def test_the_smoke_audit_is_the_first_that_starts_claude(tmp_path):
+    """The smoke test proves the `-p` guard lets an audit through, so it must
+    be an audit that starts `claude`: dead-code comes first but is not
+    applicable here, so duplication is the smoke audit."""
+    _, r, _ = _js_repo_sweep(tmp_path, "dead-code,duplication")  # the fake duplication fails: no manifest
+    assert "== smoke test: duplication ==" in r.stdout, r.stdout
+
+
+def test_a_sweep_where_no_audit_starts_claude_claims_no_smoke_test(tmp_path):
+    """Nothing started, so nothing proved the guard: no "smoke test passed"."""
+    _, r, started = _js_repo_sweep(tmp_path, "dead-code")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert started == "", started
+    assert "smoke test passed" not in r.stdout and "== smoke test:" not in r.stdout, r.stdout
+    assert "no smoke test: no planned audit starts claude" in r.stdout, r.stdout
+
+
+def test_not_applicable_survives_an_index_rebuild_and_its_report_finds_its_assets(tmp_path):
+    """The status lives in the collection, so `index --out` (and `load`, which
+    collects the same way) still shows it rather than an empty Status that
+    reads as a clean pass; the collected report links the collection's assets."""
+    tmp, r, _ = _js_repo_sweep(tmp_path, "dead-code")
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = os.path.join(tmp, "out")
+    rebuilt = _run_driver("index", tmp, "--out", out)
+    assert rebuilt.returncode == 0, rebuilt.stdout + rebuilt.stderr
+    index = open(os.path.join(out, "collection", "index.html")).read()
+    assert "<td>dead-code</td>" in index and "NOT APPLICABLE: JavaScript" in index, index
+    report_dir = os.path.join(out, "collection", "dead-code")
+    hrefs = re.findall(r'(?:href|src)="([^"]+)"', open(os.path.join(report_dir, "report.html")).read())
+    assert hrefs and all(os.path.isfile(os.path.join(report_dir, h)) for h in hrefs), hrefs
+
+
+def test_a_failed_no_tests_probe_with_given_modules_keeps_its_cause(tmp_path, monkeypatch, capsys):
+    """With `--modules` the run goes on when planning fails, but the cause is
+    printed and recorded, never reduced to a bare "probe failed"."""
+    repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
+    _mutation_repo(repo, ["m.py"])
+    monkeypatch.setenv("XDG_CACHE_HOME", tmp)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom-cause")
+
+    monkeypatch.setattr(driver.mutation_run, "run", boom)
+    monkeypatch.setattr(driver, "_guarded_mutation_module", lambda repo, module, run: None)
+    out = os.path.join(tmp, "out")
+    driver.mutation_mode(repo, ["m.py"], out)
+    assert "boom-cause" in capsys.readouterr().err
+    data = json.load(open(os.path.join(out, "collection", "mutation-no-tests.json")))
+    assert "boom-cause" in data["error"], data
+
+
+def test_a_corrupt_mutation_log_is_not_counted_as_measured_on_the_main_index(tmp_path):
+    """The sub-index shows the module CORRUPT; the main index must agree: not
+    measured, and its tally's survivors not added."""
+    tmp = str(tmp_path)
+    for module, text in (("solver.py", "{not json\n"), ("oracle.py", "")):
+        d = os.path.join(tmp, "collection", module)
+        os.makedirs(d)
+        open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
+        row = {"extra": {"killed_count": 8, "survived_count": 2, "no_coverage_count": 1}}
+        open(os.path.join(d, "findings.jsonl"), "w").write(text + json.dumps(row) + "\n")
+    r = _run_driver("index", "--out", tmp)
+    assert r.returncode == 0, r.stdout + r.stderr
+    index = open(os.path.join(tmp, "collection", "index.html")).read()
+    assert "1 modules measured, 3 total survivors, 1 CORRUPT" in index, index

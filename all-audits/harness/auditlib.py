@@ -8,7 +8,11 @@ hook (see `dead-code/audit.py` for the pattern).
 """
 import json
 import os
+import subprocess
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from procs import scrubbed_env  # noqa: E402
 
 # The one definition of the excluded-directory set. `write_json_mirror`
 # below regenerates the JSON copy `test-audit/audit.mjs` reads.
@@ -52,27 +56,54 @@ OTHER_LANGUAGES = {
 }
 
 
+def _kept(rel):
+    """True when no directory of `rel` is excluded or a dot-dir: `walk_source`'s
+    pruning, applied to a path list."""
+    return not any(d in EXCLUDED_DIRS or d.startswith(".") for d in rel.split("/")[:-1])
+
+
+def tracked_source(root):
+    """Sorted `root`-relative paths of the files git tracks under `root`,
+    minus excluded and dot-dirs. An untracked file is no evidence of what a
+    repo is written in: a stray `.py`, or the `.js` assets of an `--out`
+    folder inside the repo, must not change the answer (#1751).
+
+    `root` outside any git work tree has no tracked files to go by, so it is
+    walked as a folder (`walk_source`). Any other git failure raises,
+    naming git's own message."""
+    r = subprocess.run(["git", "-C", root, "ls-files", "-z"], capture_output=True, text=True, env=scrubbed_env())
+    if r.returncode != 0:
+        if "not a git repository" in r.stderr:
+            return walk_source(root, ("",))
+        raise RuntimeError(f"git ls-files in {root} failed (exit {r.returncode}): {r.stderr.strip()}")
+    return sorted(rel for rel in r.stdout.split("\0") if rel and _kept(rel))
+
+
 def not_applicable(root):
-    """`"not applicable: <language>"` when `root` holds no Python source but
-    does hold another recognised language's, else None.
+    """The language a Python-only audit names when `root` holds no Python
+    source but does hold another recognised language's, else None. Decided
+    from `tracked_source`.
 
     An audit that only reads Python finds nothing on such a repo, and "nothing
     found" reads as a clean pass (defect class 1). None also covers a repo
     with no recognised source at all: with no language to name, the audit runs
     as before rather than being waved off."""
-    if walk_source(root, ".py"):
+    files = tracked_source(root)
+    if any(f.endswith(".py") for f in files):
         return None
-    counts = {lang: len(walk_source(root, suffixes)) for lang, suffixes in OTHER_LANGUAGES.items()}
+    counts = {lang: sum(f.endswith(suffixes) for f in files) for lang, suffixes in OTHER_LANGUAGES.items()}
     language, count = max(counts.items(), key=lambda kv: kv[1])
-    return f"not applicable: {language}" if count else None
+    return language if count else None
 
 
 def applicable_cli(root):
-    """The `--applicable <repo>` answer: print `applicable` and return 0, or
-    print `not applicable: <language>` and return 3."""
-    verdict = not_applicable(root)
-    print(verdict or "applicable")
-    return 3 if verdict else 0
+    """The `auditlib.py --applicable <repo>` answer, the one step 0 of every
+    Python-only audit (all-audits/SKILL.md § Not applicable): print
+    `applicable` and return 0, or print `not applicable: <language>` and
+    return 3."""
+    language = not_applicable(root)
+    print(f"not applicable: {language}" if language else "applicable")
+    return 3 if language else 0
 
 
 def is_test_or_fixture(path):
@@ -115,8 +146,6 @@ def run_cli(argv, parse, nargs=1, usage=None):
     Reads `nargs` file arguments (or stdin when `nargs == 1` and none is
     given), calls `parse(*contents)`, and prints one JSON line per row.
     """
-    if argv[1:2] == ["--applicable"] and len(argv) == 3:
-        sys.exit(applicable_cli(argv[2]))
     if nargs == 1:
         text = sys.stdin.read() if len(argv) < 2 else open(argv[1], encoding="utf-8").read()
         args = (text,)

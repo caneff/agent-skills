@@ -47,12 +47,10 @@ still `dynamic`, not `unsure`, once the entrypoint evidence is concrete.
 
 ## Run
 
-0. **Python only.** First run `python3 ~/.agents/skills/dead-code/audit.py --applicable <scope>`. Exit 3 prints
-   `not applicable: <language found>`: the repo has no Python source, so this
-   audit stops there. Write no findings log, and report `not applicable:
-   <language>` as the headline with a manifest `"not_applicable": "<language>"`
-   (count 0). A "clean" report here would be what the audit not running also
-   produces. Exit 0: go on.
+0. **Python only.** Run `python3 ~/.agents/skills/all-audits/harness/auditlib.py --applicable <scope>`
+   first and follow ~/.agents/skills/all-audits/SKILL.md § Not applicable: exit 3
+   means this audit stops there and reports `not applicable: <language>`; exit 0,
+   go on.
 
 1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, scope
    defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Skip
