@@ -1084,7 +1084,7 @@ fn run() -> Result<(), ExitCode> {
     }
 
     let repo = args.repo.clone().unwrap_or_else(|| env::current_dir().map(|p| p.display().to_string()).unwrap_or_default());
-    let primary = worktree::primary_timeout(&repo, git_query_timeout()).map_err(die)?;
+    let primary = worktree::list_timeout(&repo, git_query_timeout()).map_err(die)?.primary().to_string();
     let slug = git_origin::origin_slug_timeout(Path::new(&primary), git_query_timeout()).map_err(die)?.unwrap_or_default();
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
@@ -1266,8 +1266,8 @@ fn run() -> Result<(), ExitCode> {
     }
     let registered_worktree = quiet_stdout_bounded("git", &["-C", &primary, "worktree", "list", "--porcelain"], git_query_timeout())
         .map_err(die)?
-        .map(|out| out.lines().any(|l| l == format!("worktree {}", wt.display())))
-        .unwrap_or(false);
+        .and_then(|out| worktree::Worktrees::parse(&out))
+        .is_some_and(|listing| listing.all().iter().any(|w| w.path == wt.display().to_string()));
     if wt.exists() || registered_worktree {
         return Err(die(format!("{} already exists", wt.display())));
     }

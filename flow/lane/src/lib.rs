@@ -14,3 +14,4 @@ pub mod sessions;
 pub mod targets;
 pub mod workers;
 pub mod worktree;
+pub mod worktree_files;

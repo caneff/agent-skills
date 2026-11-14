@@ -1295,6 +1295,33 @@ fn a_cleanup_that_cannot_list_worktrees_stops_naming_git() {
 }
 
 #[test]
+fn a_single_branch_cleanup_lists_worktrees_once() {
+    // #1767: the primary checkout, the holder, the files guard's declared
+    // names, the destructive recheck and the stale report each listed for
+    // themselves, so one cleanup read several snapshots of a changing tree.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r49", "implement-1767");
+    let log = c.root().join("worktree-list.log");
+    replace_git_with(
+        &c,
+        "full",
+        format!(
+            "#!/bin/sh\ncase \" $* \" in\n  *' worktree list '*) echo listed >> \"{}\" ;;\nesac\nexec \"{}\" \"$@\"\n",
+            log.display(),
+            which("git").display()
+        ),
+    );
+    let listings = || std::fs::read_to_string(&log).unwrap_or_default().lines().count();
+    let dry = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert!(dry.ok, "{}", dry.text());
+    assert_eq!(listings(), 1, "the dry run with its blocker report listed more than once:\n{}", dry.text());
+    std::fs::remove_file(&log).unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert_eq!(listings(), 1, "the cleanup listed more than once:\n{}", run.text());
+}
+
+#[test]
 fn a_reap_that_cannot_list_worktrees_stops_naming_git() {
     // #1762: a failed listing read as "nothing to reap" and exited 0.
     let c = Cleanup::new();
@@ -2704,7 +2731,7 @@ fn a_branch_with_no_holder_at_all_since_the_plan_still_reaps() {
 
 #[test]
 fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reaping() {
-    // #975: `worktree_holding`'s old `unwrap_or_default()` read a `git
+    // #975: the reaper's holder lookup once used `unwrap_or_default()`, reading a `git
     // worktree list --porcelain` that fails the same as one that succeeded
     // and found no holder, so `reap_one`'s destructive-time re-check waved
     // the branch through instead of refusing it up front. `git branch -d`'s
