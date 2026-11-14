@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The wizard template's prompt helper, run with piped stdin (no tty): one
 # `ask` serves visible and secret input, a re-run offers the .env value, and
-# Enter keeps it. Sources only the library above the STAGES marker.
+# Enter keeps it. Sources only the library above the STAGES marker. Piped
+# stdin cannot see `read -s`; template_tty_test.py types at a pty for that.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d) || exit 1
