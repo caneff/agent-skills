@@ -1268,6 +1268,45 @@ fn a_dry_run_that_cannot_list_worktrees_names_that_as_a_blocker() {
     assert_eq!(blocker_lines(&run), vec!["blocker: unreadable git worktree list failed".to_string()], "{}", run.text());
 }
 
+/// A `git` that fails `worktree list` alone, so every other git call the
+/// run makes still answers: a failure elsewhere would refuse the run for a
+/// reason that is not the listing.
+fn fail_worktree_list(c: &Cleanup, tools_dir: &str) {
+    let script = format!(
+        "#!/bin/sh\ncase \" $* \" in\n  *' worktree list '*) echo 'fatal: listing refused' >&2; exit 128 ;;\nesac\nexec \"{}\" \"$@\"\n",
+        which("git").display()
+    );
+    replace_git_with(c, tools_dir, script);
+}
+
+#[test]
+fn a_cleanup_that_cannot_list_worktrees_stops_naming_git() {
+    // #1762: the primary checkout read as "" when the listing failed, and
+    // the run went on to delete both branches with no primary to anchor on.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r47");
+    fail_worktree_list(&c, "full");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok, "{}", run.text());
+    assert!(run.stderr.contains("git worktree list failed in"), "{}", run.text());
+    assert!(c.has_branch(&r, "caneff/merged-one"), "the local branch was deleted:\n{}", run.text());
+    let origin = c.root().join("r47.origin.git");
+    assert!(c.has_branch(&origin, "caneff/merged-one"), "the remote branch was deleted:\n{}", run.text());
+}
+
+#[test]
+fn a_reap_that_cannot_list_worktrees_stops_naming_git() {
+    // #1762: a failed listing read as "nothing to reap" and exited 0.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r48", &["130"]);
+    fail_worktree_list(&c, "full");
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(!run.ok, "{}", run.text());
+    assert!(run.stderr.contains("git worktree list failed in"), "{}", run.text());
+    assert!(r.join(".claude/worktrees/implement-130").is_dir(), "{}", run.text());
+    assert!(c.has_branch(&r, "implement-130"), "{}", run.text());
+}
+
 #[test]
 fn a_dry_run_with_nothing_blocking_says_so() {
     let c = Cleanup::new();

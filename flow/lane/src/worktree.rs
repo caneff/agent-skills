@@ -28,8 +28,8 @@ pub fn primary_checked(repo: &str) -> Result<String, String> {
 /// this variant — its first git call, before it has even resolved the
 /// origin slug — so a hang or any git failure here must fail loud, with
 /// git's own words, rather than be read as "not a git repo" (#1254).
-/// `controller-adopt` calls the unbounded `primary_checked`, out of that
-/// ticket's scope.
+/// `controller-adopt` and `merge-cleanup` call the unbounded `primary_checked`,
+/// out of that ticket's scope.
 pub fn primary_timeout(repo: &str, timeout: Duration) -> Result<String, String> {
     let out = stdout_bounded("git", &["-C", repo, "worktree", "list", "--porcelain"], timeout)?;
     out.lines()
