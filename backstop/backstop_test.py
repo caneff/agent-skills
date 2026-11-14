@@ -66,6 +66,8 @@ else:
 FAKE_SEAM = r'''echo "jobs=${TESTS_JOBS:-unset}" >> "$JOBS_LOG"
 case "$FAKE_SEAM" in
   green) echo "PASS a/a_test.py"; echo "PASS b/b.test.sh"; echo "2 suites passed" ;;
+  overbudget) echo "PASS a/a_test.py (30.1s cpu, over its 25s budget)"; echo "PASS b/b.test.sh (1.0s cpu)"
+    echo "PASS c/c_test.py (120.4s cpu, over its 100s budget)"; echo "3 suites passed" ;;
   red) echo "PASS a/a_test.py"; echo "FAIL b/b.test.sh"; echo "boom"; exit 1 ;;
   red2) echo "FAIL a/a_test.py"; echo "FAIL b/b.test.sh"; exit 1 ;;
   garbled) echo "Segmentation fault"; exit 1 ;;
@@ -187,6 +189,29 @@ def test_green_advances_last_green_to_origin_tip(sb):
     assert out.returncode == 0, out.stderr
     assert sb.last_green() == tip
     assert sb.tickets() == [] and sb.notes() == []
+
+
+def test_green_night_reports_every_suite_over_its_cpu_budget(sb):
+    """#1606: `tests/all.sh` no longer fails an overrun, so the night's report
+    is where one is read. The night stays green."""
+    tip = sb.git(sb.repo, "rev-parse", "HEAD")
+    out = sb.run("overbudget")
+    assert out.returncode == 0, out.stderr
+    assert sb.last_green() == tip
+    for line in ("a/a_test.py: 30.1s cpu over its 25s budget", "c/c_test.py: 120.4s cpu over its 100s budget"):
+        assert line in out.stdout, out.stdout
+    assert "b/b.test.sh" not in out.stdout
+    [note] = sb.notes()
+    assert note.startswith("backstop: me/repo green, 2 suites over their CPU budget|")
+    assert "a/a_test.py" in note and "c/c_test.py" in note
+    assert sb.tickets() == []
+
+
+def test_green_night_with_a_notifier_that_fails_exits_unsent(sb):
+    write(sb.notify, "#!/bin/sh\nexit 1\n", 0o755)
+    out = sb.run("overbudget")
+    assert out.returncode == 3 and "notification not sent" in out.stderr
+    assert sb.last_green(), "the night is still green"
 
 
 def test_job_count_is_the_stated_input_and_required(sb):

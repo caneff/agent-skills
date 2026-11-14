@@ -210,8 +210,10 @@ printf '#!/usr/bin/env bash\necho line-one; echo line-two; exit 1\n' >"$shadow/r
 out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
 check "a failing suite fails the run and prints all of its output" "$([ "$rc" = 1 ] && has 'FAIL a/a.test.sh' && has line-one && has line-two; echo $?)"
 
-# The CPU budget: a suite that burns CPU past it fails the run, naming both
-# numbers. The burner counts its own process CPU time (a wall-clock loop would
+# The CPU budget (#1606): a suite that burns CPU past it is measured and named
+# on its PASS line, and does not fail the run (load on a shared box inflates CPU
+# time, so a pass/fail line on it was flaky). The nightly backstop reports the
+# overruns. The burner counts its own process CPU time (a wall-clock loop would
 # measure whatever the box gives it). `TESTS_CPU_BUDGET` only lowers a budget.
 fresh
 cat >"$shadow/repo/a/a.test.sh" <<'FIXTURE'
@@ -224,9 +226,10 @@ while time.process_time() - t < 2:
 PY
 FIXTURE
 out=$(cd "$shadow/repo" && TESTS_CPU_BUDGET=1 bash tests/all.sh 2>&1); rc=$?
-check "a suite over its CPU budget fails the run" "$([ "$rc" = 1 ] && has 'FAIL a/a.test.sh'; echo $?)"
-check "...naming its CPU time and its budget" "$(grep -qE 'over its CPU budget: [0-9.]+s CPU against 1s' <<<"$out"; echo $?)"
+check "a suite over its CPU budget passes the run" "$([ "$rc" = 0 ] && has_pass a/a.test.sh; echo $?)"
+check "...its PASS line names its CPU time and its budget" "$(grep -qE '^PASS a/a.test.sh \([0-9.]+s cpu, over its 1s budget\)$' <<<"$out"; echo $?)"
+check "...and the run does not print a FAIL line" "$(grep -q '^FAIL' <<<"$out"; [ $? = 1 ]; echo $?)"
 out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
-check "the same suite within the default budget passes, its CPU time on the PASS line" "$([ "$rc" = 0 ] && has_pass a/a.test.sh; echo $?)"
+check "the same suite within the default budget passes, its CPU time on the PASS line" "$([ "$rc" = 0 ] && has_pass a/a.test.sh && ! grep -q 'over its' <<<"$out"; echo $?)"
 
 exit $fail
