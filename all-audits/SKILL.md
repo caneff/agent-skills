@@ -231,8 +231,8 @@ deciding on each problem, files what they accept, and closes the record.
    sweep for deletion only once every spec filed from it is closed too: the
    driver lists the repo's open issues and keeps the sweep while any body has a
    `Sweep run:` line naming it (the line every spec carries), and keeps it,
-   printing why, when that listing fails. If the grill stopped before the confirmation, close
-   nothing: the record stays open and `triage pending`.
+   printing why, when that listing fails. If the grill stopped before the
+   confirmation, close nothing: the record stays open and `triage pending`.
 
 ## After the sweep
 

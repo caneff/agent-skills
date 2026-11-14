@@ -199,7 +199,7 @@ def open_specs_of(sweep, rec):
         return None, "open-spec lookup failed (gh reply unreadable)"
     if len(issues) >= SPEC_LIST_LIMIT:
         return None, f"open-spec lookup may be incomplete ({SPEC_LIST_LIMIT} open issues listed)"
-    named = re.compile(r"^\s*Sweep run:.*[/\\]%s[/\\]%s(?![\w-])" % (
+    named = re.compile(r"^[\s>*_-]*Sweep run:.*[/\\]%s[/\\]%s(?![\w-])" % (
         re.escape(os.path.basename(os.path.dirname(sweep))), re.escape(os.path.basename(sweep))), re.M)
     return [n for n, body in issues if named.search(body)], None
 

@@ -42,8 +42,9 @@ MODE_ENTRIES = ("sweep", "rebuild_index", "multi_mode", "multi_index_mode", "loa
 
 
 def _stub_every_entry(monkeypatch, handler):
-    """Replace every mode entry and every `claude` spawn with `handler(name, args, kwargs)`,
-    so a routing mismatch reaches the handler instead of doing real work (#1815)."""
+    """Replace every mode entry and every `claude` spawn with
+    `handler(name, args, kwargs)`, so a routing mismatch reaches the handler
+    instead of doing real work (#1815)."""
     for entry in MODE_ENTRIES:
         monkeypatch.setattr(driver, entry, lambda *a, _e=entry, **k: handler(_e, a, k))
     real_run = subprocess.run
@@ -818,9 +819,10 @@ MODE_FLAGS = {
 EVERY_FLAG = sorted({f for flags in MODE_FLAGS.values() for f in flags})
 
 
-def test_top_level_help_prints_the_docstring_and_names_every_mode(capsys):
+def test_top_level_help_prints_the_docstring_and_names_every_mode(capsys, monkeypatch):
     """#606, #1747: the module docstring is the help text, so the reference has
     one home, and the modes are subcommands it lists."""
+    _stub_every_entry(monkeypatch, lambda name, a, k: pytest.fail(f"{name} ran on --help"))
     code, out, _ = _main_exit(["--help"], capsys)
     assert code == 0 and out.startswith("usage:"), out
     assert driver.__doc__.splitlines()[0] in out and "SWEEP_JOBS" in out
@@ -829,8 +831,9 @@ def test_top_level_help_prints_the_docstring_and_names_every_mode(capsys):
 
 
 @pytest.mark.parametrize("mode", sorted(MODE_FLAGS))
-def test_each_mode_help_lists_its_own_flags_and_no_other(mode, capsys):
+def test_each_mode_help_lists_its_own_flags_and_no_other(mode, capsys, monkeypatch):
     """#1747: a mode's `--help` names exactly the flags it takes."""
+    _stub_every_entry(monkeypatch, lambda name, a, k: pytest.fail(f"{name} ran on {mode} --help"))
     code, out, _ = _main_exit([mode, "--help"], capsys)
     assert code == 0, out
     for flag in EVERY_FLAG:
@@ -1785,8 +1788,9 @@ def test_unanswerable_state_keeps_the_stored_sweep(tmp_path):
 # --- a stored sweep outlives its record until its specs close (#1851) -----------
 
 def _prune_with_specs(tmp, monkeypatch, record_state, open_issues=None, **extra):
-    """One closed-or-open record's stored sweep, pruned in-process with the fake
-    `gh` answering `issue list` as `open_issues`: (sweep dir, stderr is read by the caller)."""
+    """Set up one stored sweep (record #1 of `beta`, in `record_state`) and the
+    fake `gh` environment, `issue list` answering `open_issues`. Returns the
+    sweep dir; the caller runs `prune_closed_sweeps`."""
     (a,), env = _multi_fixture(tmp, ["alpha"])
     d = _stored(tmp, "beta", "20200101-000000", 1)
     for k, v in {**env, "FAKE_GH_ISSUE_STATES": f"1={record_state}", **extra}.items():
@@ -1796,25 +1800,52 @@ def _prune_with_specs(tmp, monkeypatch, record_state, open_issues=None, **extra)
     return d
 
 
-def _spec(number, sweep_dir, extra=""):
-    return {"number": number, "body": f"## Spec\n\nSweep run: {sweep_dir}/collection\n{extra}"}
+def _gh_log_text(tmp):
+    path = os.path.join(tmp, "gh.log")
+    return open(path).read() if os.path.exists(path) else ""
 
 
-def test_a_closed_record_keeps_its_sweep_while_a_spec_filed_from_it_is_open(tmp_path, monkeypatch, capsys):
+def _spec(number, sweep_dir, line="Sweep run: {}/collection"):
+    return {"number": number, "body": "## Spec\n\n" + line.format(sweep_dir) + "\n"}
+
+
+SWEEP = "/x/all-audits/beta/20200101-000000"
+
+
+@pytest.mark.parametrize("spec_open, kept", [(True, True), (False, False)])
+def test_a_closed_record_keeps_its_sweep_exactly_while_a_spec_filed_from_it_is_open(
+        tmp_path, monkeypatch, capsys, spec_open, kept):
+    """The same closed record: its linked spec listed open keeps the sweep,
+    absent from the open listing (closed) deletes it."""
     tmp = str(tmp_path)
-    d = _prune_with_specs(tmp, monkeypatch, "CLOSED", [_spec(77, "/x/all-audits/beta/20200101-000000")])
+    d = _prune_with_specs(tmp, monkeypatch, "CLOSED", [_spec(77, SWEEP)] if spec_open else [])
+    driver.prune_closed_sweeps(3)
+    assert os.path.isdir(d) == kept
+    assert ("#77" in capsys.readouterr().err) == kept
+    # the lookup lists the record's own repo, not the current directory's
+    assert "issue list --repo caneff/beta" in _gh_log_text(tmp)
+
+
+@pytest.mark.parametrize("line", [
+    "Sweep run: {}/collection", "**Sweep run:** {}/collection", "- Sweep run: {}",
+    "> Sweep run: {}/"])
+def test_a_spec_line_in_any_markdown_dress_keeps_the_sweep(tmp_path, monkeypatch, line):
+    tmp = str(tmp_path)
+    d = _prune_with_specs(tmp, monkeypatch, "CLOSED", [_spec(77, SWEEP, line)])
     driver.prune_closed_sweeps(3)
     assert os.path.isdir(d)
-    assert "#77" in capsys.readouterr().err
 
 
-def test_a_closed_record_deletes_its_sweep_once_no_open_spec_names_it(tmp_path, monkeypatch):
+def test_a_closed_record_deletes_its_sweep_when_no_open_spec_names_it(tmp_path, monkeypatch):
     tmp = str(tmp_path)
-    # an open issue naming another sweep, and one that only mentions the id outside a `Sweep run:` line
+    # open issues that do not name this sweep: another sweep id, a longer id,
+    # another repo, a mention outside a `Sweep run:` line, and one mid-line
     d = _prune_with_specs(tmp, monkeypatch, "CLOSED", [
         _spec(78, "/x/all-audits/beta/20200102-000000"),
-        {"number": 79, "body": "see beta/20200101-000000 for context"},
-        _spec(80, "/x/all-audits/gamma/20200101-000000")])
+        _spec(79, "/x/all-audits/beta/20200101-0000009"),
+        _spec(80, "/x/all-audits/gamma/20200101-000000"),
+        {"number": 81, "body": "see beta/20200101-000000 for context"},
+        {"number": 82, "body": f"also note Sweep run: {SWEEP}/collection"}])
     driver.prune_closed_sweeps(3)
     assert not os.path.exists(d)
 
@@ -1827,9 +1858,12 @@ def test_a_failed_spec_lookup_keeps_the_sweep_and_says_so(tmp_path, monkeypatch,
     assert "fake gh: issue list failed" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("reply", ["not json", '{"a": 1}', '[{"number": 1}]', json.dumps([{"number": i, "body": ""} for i in range(1000)])])
+@pytest.mark.parametrize("reply", [
+    "not json", '{"a": 1}', '[{"number": 1}]',
+    json.dumps([{"number": i, "body": ""} for i in range(1000)])])
 def test_an_unreadable_or_full_spec_listing_keeps_the_sweep(tmp_path, monkeypatch, capsys, reply):
-    """A reply that is not a list of bodies, or fills the `--limit` and so may hide an open spec, is not 'none open'."""
+    """A reply that is not a list of bodies, or fills the `--limit` and so may
+    hide an open spec, is not 'none open'."""
     tmp = str(tmp_path)
     d = _prune_with_specs(tmp, monkeypatch, "CLOSED", FAKE_GH_OPEN_ISSUES=reply)
     driver.prune_closed_sweeps(3)
@@ -1842,6 +1876,7 @@ def test_an_open_record_does_not_look_up_specs(tmp_path, monkeypatch):
     d = _prune_with_specs(tmp, monkeypatch, "OPEN", FAKE_GH_ISSUE_LIST_EXIT="1")
     driver.prune_closed_sweeps(3)
     assert os.path.isdir(d)
+    assert "issue view 1" in _gh_log_text(tmp) and "issue list" not in _gh_log_text(tmp)
 
 
 def test_single_repo_run_folders_past_three_days_are_still_pruned(tmp_path):
