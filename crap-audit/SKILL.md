@@ -249,7 +249,7 @@ message saying so on an older Node.
   `istanbul-lib-instrument` as Node loads them and dumps Istanbul counters per
   process. It takes `esModules` from the format Node resolved
   (`result.format === 'module'`), never the extension: an ES module saved as
-  `.js` is a module (#1667). It fails the import loudly, naming the file, on an
+  `.js` is a module. It fails the import loudly, naming the file, on an
   instrument error, a missing variable or a listed file that does not exist.
 - `capped-run.sh <cap> -- <cmd>` runs the suite in a memory-capped systemd
   unit with no swap, so a runaway suite is an OOM kill of its own unit, not a

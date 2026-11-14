@@ -91,7 +91,7 @@ Steps:
   3. Define acceptance criteria for each story
   4. List out-of-scope items explicitly
 End Goal: A PRD that an engineering team can begin sprint planning from immediately.
-Narrowing: No technical implementation details. No wireframes. Under 600 words total.
+Narrowing: No technical implementation details. No wireframes. Short enough for the team to read in one sitting before sprint planning.
 ```
 
 ---

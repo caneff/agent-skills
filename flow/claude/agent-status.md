@@ -37,7 +37,7 @@ gh issue view <n> --repo <owner/name> \
 - **`idle`** / **`done`** — ready for input. `done` is an idle whose finished
   turn nobody has focused yet; reads do not mark it seen. Treat both as idle.
 - **`unknown`** — an agent is present but herdr cannot classify it. It does
-  not prove completion; re-check on the next poll.
+  not prove completion; read its pane again when you next act on it.
 - **dead** — no registry file for the worktree has a live pid. The registry
   decides; `herdr agent get` returning `agent_not_found` (the name clears
   when the agent exits) only corroborates it.
@@ -84,10 +84,10 @@ has three causes:
   say how far it got
 - dead — no live registry pid, which decides it (see **dead** above); resume with `claude --resume` in the worktree
 
-## Poll; silence is not progress
+## Silence is not progress
 
-A parked agent is invisible until someone looks. Notifications get lost. Poll
-`herdr agent get` on a timer or arm `herdr agent wait <name> --until idle
---until blocked --until done --timeout <ms>`, and when an agent is
+A parked agent is invisible until someone looks. Notifications get lost.
+Subscribe to the agent with `SendMessage({to: "<name>", notify_when_idle:
+true})` and end the turn (`OPERATIONS.md` § Wait); when an agent is
 `blocked`, or `idle` with no PR, read its screen and act on what it is
 waiting for.
