@@ -19,6 +19,10 @@ STRUCTURAL = ("ponytail-audit", "thermo-nuclear-code-quality-review", "improve-c
 
 @dataclasses.dataclass
 class RecordModel:
+    """One record: everything one sweep of one repo left on disk, which `build`
+    turns into one issue body and its continuation comments. Plain data; the
+    fields say what each holds.
+    """
     sweep_id: str
     timestamp: str
     sha: str
@@ -77,6 +81,9 @@ class _Headings(html.parser.HTMLParser):
 
 
 def report_headings(html_text):
+    """The text of every `h1`, `h2` and `h3` in `html_text`, in document order,
+    as a list of strings with whitespace collapsed. A heading with no text is
+    left out; an HTML with no heading gives `[]`."""
     parser = _Headings()
     parser.feed(html_text)
     return parser.found

@@ -2,7 +2,7 @@
 
 Owns what the driver used to hold for `--mutation`: the per-module mutation
 record (which module was mutated at which sha, when), the order modules run
-in, the tally a module's `findings.jsonl` carries, and `run`, the one call the
+in, and `run`, the one call the
 driver makes to learn which modules to mutate. The driver keeps the process
 work (worktrees, `claude`, the pages); this module never spawns anything but
 the `git diff` calls its `runner` makes.
@@ -14,7 +14,6 @@ import name.
 import collections
 import datetime as _dt
 import importlib.util
-import json
 import os
 
 MUTATION_KEY = "mutation_modules"
@@ -101,27 +100,6 @@ def parse_rank(stdout, candidates):
     allowed = set(candidates)
     return list(dict.fromkeys(
         line for line in map(str.strip, stdout.splitlines()) if line in allowed))
-
-
-def tally(findings_jsonl):
-    """(killed, total, survived, no_coverage) from the first line of a module's
-    `findings.jsonl` carrying the three counts, or None when the file is
-    missing or no line carries them."""
-    if not os.path.exists(findings_jsonl):
-        return None
-    for line in open(findings_jsonl, encoding="utf-8"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            extra = (json.loads(line) or {}).get("extra") or {}
-        except json.JSONDecodeError:
-            continue
-        keys = {"killed_count", "survived_count", "no_coverage_count"}
-        if keys <= extra.keys():
-            k, s, n = extra["killed_count"], extra["survived_count"], extra["no_coverage_count"]
-            return k, k + s + n, s, n
-    return None
 
 
 def _audit_plan(repo):

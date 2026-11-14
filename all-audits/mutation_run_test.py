@@ -1,4 +1,4 @@
-"""Tests for `mutation_run`: the mutation record, target ordering, the tally, and `run`."""
+"""Tests for `mutation_run`: the mutation record, target ordering, and `run`."""
 import json
 import os
 import subprocess
@@ -139,11 +139,3 @@ def test_run_with_explicit_modules_keeps_them_as_given(tmp_path):
     _tests_repo(repo, ["m.py", "n.py"])
     result = mutation_run.run(repo, {}, runner=_git_runner, modules=["n.py", "z.py"])
     assert result.targets == ["n.py", "z.py"]
-
-
-def test_tally_reads_the_first_counted_line(tmp_path):
-    path = str(tmp_path / "findings.jsonl")
-    row = {"extra": {"killed_count": 8, "survived_count": 2, "no_coverage_count": 3}}
-    open(path, "w").write("\n" + json.dumps({"extra": {}}) + "\n" + json.dumps(row) + "\n")
-    assert mutation_run.tally(path) == (8, 13, 2, 3)
-    assert mutation_run.tally(str(tmp_path / "missing.jsonl")) is None
