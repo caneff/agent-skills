@@ -2731,7 +2731,7 @@ fn a_branch_with_no_holder_at_all_since_the_plan_still_reaps() {
 
 #[test]
 fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reaping() {
-    // #975: `worktree_holding`'s old `unwrap_or_default()` read a `git
+    // #975: the reaper's holder lookup once used `unwrap_or_default()`, reading a `git
     // worktree list --porcelain` that fails the same as one that succeeded
     // and found no holder, so `reap_one`'s destructive-time re-check waved
     // the branch through instead of refusing it up front. `git branch -d`'s
