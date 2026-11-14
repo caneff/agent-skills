@@ -249,7 +249,7 @@ class TestEscape:
         repo.git(repo.repo, "remote", "set-url", "origin", str(repo.tmp / "no-such.git"))
         r = repo.run("escapes", "--repo-dir", repo.repo, "--ledger", repo.ledger)
         assert r.returncode == 2
-        assert "git fetch" in r.stderr
+        assert "fetch -q origin" in r.stderr
 
     def test_no_default_branch_recorded_is_refused_by_name(self, repo):
         r = repo.run("escapes", "--repo-dir", repo.repo, "--ledger", repo.ledger)
