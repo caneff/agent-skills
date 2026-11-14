@@ -2,7 +2,7 @@
 # Guards the discovery rules in tests/all.sh: one fixture per rule in a shadow
 # repo, each found (or, for the plugin rule, withheld) by the rule alone, never
 # by a name the runner special-cases. Asserts on `all.sh --list` rather than a
-# full run — the list IS the seam (#609). Reads no real-tree state: a renamed or
+# full run — the list IS the seam. Reads no real-tree state: a renamed or
 # retired real suite cannot fail it.
 set -uo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES

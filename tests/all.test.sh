@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression test for #620: a caller's leaked GIT_DIR/GIT_WORK_TREE/
+# A caller's leaked GIT_DIR/GIT_WORK_TREE/
 # GIT_INDEX_FILE/GIT_COMMON_DIR/GIT_OBJECT_DIRECTORY/
 # GIT_ALTERNATE_OBJECT_DIRECTORIES must not let this repo's suite touch that
 # caller's repo. Reproduces the incident of 2026-09-07 in a scratch repo that
@@ -9,9 +9,7 @@
 # victim, finds no suites, and reports 0 -- this is the check that catches a
 # missing scrub); and the victim unchanged, including its index and object
 # store (the probe writes through git, config and index and an object, so a
-# leak that reaches the suites all.sh runs lands in the victim). (Until #1415
-# the shadow was a copy of the whole tree that ran every suite again, 251 of
-# the suite's 494 serial seconds, for the same assertions.)
+# leak that reaches the suites all.sh runs lands in the victim).
 #
 # Guarded against re-entrant recursion: a nested copy of this file would be
 # discovered by a nested tests/all.sh, so it no-ops on that pass —
@@ -90,7 +88,7 @@ if [ "$(git -C "$shadow" config --local --get probe.ran)" != yes ]; then
   exit 1
 fi
 
-# A live session's BASH_ENV (#1625) runs in every bash a suite starts.
+# A live session's BASH_ENV runs in every bash a suite starts.
 if [ -n "$(git -C "$shadow" config --local --get probe.bash-env)" ]; then
   echo "FAIL: BASH_ENV reached a suite through tests/all.sh"
   exit 1

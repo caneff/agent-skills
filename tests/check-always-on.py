@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Always-on budget gate (#1413): the global CLAUDE.md plus every file it
+"""Always-on budget gate: the global CLAUDE.md plus every file it
 `@`-imports is the text every session loads, so its word count is a cost paid
 everywhere. Fails when that total passes BUDGET, when an import cannot be read
 (an unread import is not zero words), and when a pointer line names a path

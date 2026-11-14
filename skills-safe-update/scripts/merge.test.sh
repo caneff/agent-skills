@@ -13,19 +13,19 @@ export SKILLS_DIR="$WORK"
 # shellcheck source=safe-update.sh
 source "$SCRIPT_DIR/safe-update.sh"
 set +e   # the sourced script sets -e; these tests assert on exit codes
-# safe-update.sh no longer forces an identity (#1450); fixtures bring one.
+# safe-update.sh forces no identity; the fixtures bring one.
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 
 fails=0
 ok(){ printf 'ok   %s\n' "$1"; }
 bad(){ printf 'FAIL %s\n' "$1"; fails=$((fails + 1)); }
-check(){ # <label> <expected> <actual>
+check(){
   if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 — expected [$2] got [$3]"; fi
 }
-contains(){ # <label> <needle> <file>
+contains(){
   if grep -qF -- "$2" "$3"; then ok "$1"; else bad "$1 — [$2] not in $3"; fi
 }
-lacks(){ # <label> <needle> <file>
+lacks(){
   if grep -qF -- "$2" "$3"; then bad "$1 — [$2] present in $3"; else ok "$1"; fi
 }
 
@@ -34,7 +34,6 @@ git init -q .
 
 seq_lines(){ for i in $(seq 1 10); do echo "line$i"; done; }
 
-# --- base: the upstream version that was installed -------------------------
 mkdir -p myskill/reference
 seq_lines > myskill/SKILL.md
 seq_lines > myskill/reference/overlap.md
@@ -52,7 +51,6 @@ printf 'theirs\n' > "$WORK/tBase"; ln -s "$WORK/tBase" myskill/was-a-link
 git add -A; git commit -qm base
 BASE=$(git rev-parse HEAD:myskill); BASE_C=$(git rev-parse HEAD)
 
-# --- PRE: your local edits on top ------------------------------------------
 sed -i 's/^line1$/line1 LOCAL/' myskill/SKILL.md
 sed -i 's/^line5$/line5 LOCAL/' myskill/reference/overlap.md
 echo "my own note" > myskill/local-only.md
@@ -66,11 +64,10 @@ printf 'yours\n' > myskill/addadd.sh; chmod +x myskill/addadd.sh
 chmod +x myskill/modeonly.sh
 ln -sfn "$WORK/tLOCAL" myskill/link
 rm myskill/was-a-link; printf 'yours\n'  > myskill/was-a-link
-rm myskill/del-clean.md myskill/del-changed.md     # you deleted both
+rm myskill/del-clean.md myskill/del-changed.md
 git add -A; git commit -qm local
 PRE=$(git rev-parse HEAD)
 
-# --- POST: what upstream published instead ---------------------------------
 git checkout -q "$BASE_C" -- myskill   # upstream never saw your edits
 sed -i 's/^line10$/line10 UPSTREAM/' myskill/SKILL.md
 sed -i 's/^line5$/line5 UPSTREAM/' myskill/reference/overlap.md
@@ -97,33 +94,28 @@ check "merge writes nothing to stderr" "" "$(cat "$errlog")"
 
 check "conflicting skill exits non-zero" 1 "$rc"
 
-# AC1: non-overlapping hunks merge, both sides present, no markers
 contains "local hunk kept"    "line1 LOCAL"    myskill/SKILL.md
 contains "upstream hunk taken" "line10 UPSTREAM" myskill/SKILL.md
 lacks    "clean file has no markers" "<<<<<<<" myskill/SKILL.md
 contains "clean merge reported" "MERGED	SKILL.md" "$report"
 
-# AC2: overlapping hunks leave conflict markers and are named in the report
 contains "conflict markers written" "<<<<<<<" myskill/reference/overlap.md
 contains "conflict names local side"    "line5 LOCAL"    myskill/reference/overlap.md
 contains "conflict names upstream side" "line5 UPSTREAM" myskill/reference/overlap.md
 contains "conflict reported" "CONFLICT	reference/overlap.md" "$report"
 
-# the merged file is exactly base plus both edits — nothing else moved
 { echo "line1 LOCAL"; for i in 2 3 4 5 6 7 8 9; do echo "line$i"; done; echo "line10 UPSTREAM"; } > "$WORK/want"
 if diff -q "$WORK/want" myskill/SKILL.md >/dev/null; then ok "merged file is base plus both edits"
 else bad "merged file is base plus both edits"; diff "$WORK/want" myskill/SKILL.md; fi
 
-# untouched-by-you files take upstream; your unique files survive; new ones land
 check "local-only file restored" "my own note" "$(cat myskill/local-only.md 2>/dev/null)"
 contains "local-only reported" "LOCAL	local-only.md" "$report"
 check "new upstream file kept" "brand new" "$(cat myskill/new-upstream.md 2>/dev/null)"
 contains "new upstream file reported" "UPSTREAM	new-upstream.md" "$report"
 if [ -x myskill/tool.sh ]; then ok "upstream mode change kept"; else bad "upstream mode change kept"; fi
-# a restored local-only file keeps its executable bit (put writes the mode)
+# put writes the mode, so a restored file keeps its exec bit
 if [ -x myskill/local-only.sh ]; then ok "restored file keeps exec bit"; else bad "restored file keeps exec bit"; fi
 
-# you deleted a file upstream left alone: the deletion stands
 if [ -e myskill/del-clean.md ]; then bad "local deletion honoured"; else ok "local deletion honoured"; fi
 contains "local deletion reported" "LOCAL	del-clean.md" "$report"
 # you deleted a file upstream then changed: nobody wins silently
@@ -132,7 +124,6 @@ contains "delete-vs-edit conflicts" "CONFLICT	del-changed.md" "$report"
 # delete-vs-edit conflict has no lines to mark up
 contains "delete-vs-edit names the surviving side" "upstream changed it, and ITS version is in the tree" "$report"
 
-# a non-ASCII name must merge like any other (core.quotePath would hide it)
 contains "non-ASCII file kept local hunk"    "line1 LOCAL"     "myskill/réf.md"
 contains "non-ASCII file took upstream hunk" "line10 UPSTREAM" "myskill/réf.md"
 contains "non-ASCII file reported" "MERGED	réf.md" "$report"
@@ -158,11 +149,9 @@ check "symlink target untouched (upstream)" "UP"    "$(cat "$WORK/tUP")"
 contains "symlink conflict reported" "CONFLICT	link" "$report"
 contains "symlink conflict names the reason" "symlink — not line-mergeable" "$report"
 
-# upstream deleted a file you had edited: your version stays, and it conflicts
 contains "upstream-deleted-yours-edited conflicts" "CONFLICT	you-edited-they-deleted.md" "$report"
 contains "your edit to it survives" "line1 LOCAL" myskill/you-edited-they-deleted.md
 
-# an unmergeable (binary) file falls back to keeping yours, and says so
 contains "binary conflict reported" "CONFLICT	blob.bin" "$report"
 contains "binary conflict names its own reason" "not line-mergeable (binary?)" "$report"
 # the binary route keeps your bytes verbatim; the text route writes markers.
@@ -204,7 +193,6 @@ check "clean skill exits zero" 0 $?
 contains "clean skill kept local"    "line2 LOCAL"    clean/SKILL.md
 contains "clean skill took upstream" "line9 UPSTREAM" clean/SKILL.md
 
-# --- base lookup -----------------------------------------------------------
 found=$(resolve_base_tree "$BASE") ; check "base tree resolves" "$BASE" "$found"
 if resolve_base_tree 0000000000000000000000000000000000000000 >/dev/null 2>&1; then
   bad "missing base tree reports failure"

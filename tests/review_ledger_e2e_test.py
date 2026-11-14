@@ -1,4 +1,4 @@
-"""End-to-end test for spec #1262 (the review ledger), closing ticket #1302.
+"""End-to-end test for the review ledger.
 
 One review cache and one transcripts tree, driven through every subcommand the
 spec's slices built, in the order the ledger is used. Each step reads what the
@@ -86,8 +86,6 @@ class LedgerEndToEnd(Env):
             sources += ["--transcripts", self.tr]
         return self.run("append", "--repo", "skills", "--ledger", self.ledger, *sources, *args)
 
-    # -- fixtures ----------------------------------------------------------------
-
     def build_pr_700(self):
         """One PR: S1 and P1 are the same finding, raised by two axes."""
         s = self.skills
@@ -161,16 +159,12 @@ def e2e(tmp_path):
     return LedgerEndToEnd(tmp_path)
 
 
-# -- the run -----------------------------------------------------------------
-
-
 def test_backfill_then_forward_rows_then_report(e2e):
     e2e.build_pr_700()
     review = e2e.tmp / "review.md"
     e2e.ok("harvest", "--cache", e2e.cache, "--transcripts", e2e.tr, "--ledger", e2e.ledger,
             "--review-file", review)
 
-    # 1. The backfill: one row per review, a shared finding marked on both reviewers.
     rows = e2e.rows()
     assert sorted(r["type"] for r in rows.values()) == \
         ["codex-gate", "correctness", "over-engineering", "spec", "standards"]
@@ -183,7 +177,6 @@ def test_backfill_then_forward_rows_then_report(e2e):
     # a record with no readings is unknown, never zero
     assert rows["skills/700/codex-gate/1/codex-adversarial-700-gate"]["cost"]["usage_delta"]["status"] == "unknown"
 
-    # 2. Forward rows.
     e2e.build_forward_files()
     before = e2e.ledger.read_text()
     missing = e2e.append("--ticket", 799, "--type", "spec")
@@ -197,12 +190,11 @@ def test_backfill_then_forward_rows_then_report(e2e):
     assert (second["status"], second["delta"]) == ("known", 2.5)
     assert {r["outcome"] for r in rows.values() if r["type"] == "witness-mutation"} == {"red", "unknown"}
 
-    # 3. Rerunning every step leaves the same rows.
     for r in e2e.append_forward_rows():
         assert r.returncode == 0, r.stderr
     e2e.ok("harvest", "--cache", e2e.cache, "--transcripts", e2e.tr, "--ledger", e2e.ledger,
             "--review-file", review)
-    # (A row append wrote stays `append` through a harvest, #1304: nothing may differ, origin included.)
+    # (A row append wrote stays `append` through a harvest: nothing may differ, origin included.)
     again = e2e.rows()
     assert set(again) == set(rows)
     for row_id, row in rows.items():
@@ -246,7 +238,6 @@ def test_backfill_then_forward_rows_then_report(e2e):
     check("witness-mutation", rows=2, red_rate=1.0, unknown_mutations=1)
     check("call-site-mutation", rows=1, red_rate=0.0, unknown_mutations=0)
 
-    # The markdown form carries the same table.
     md = e2e.ok("report", "--ledger", e2e.ledger, "--prices", e2e.prices).stdout
     assert "| standards | 1 | 1 | 1.50 |" in md
     assert "| over-engineering | 1 | 1 | 1.00 |" in md
