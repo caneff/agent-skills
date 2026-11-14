@@ -1,6 +1,6 @@
 #!/bin/bash
 # Teaching hook (PreToolUse, Bash): the first `zed` call, or the first call of
-# an image opener (`wslview` and its kin, #1531), answers with
+# an image opener (`wslview` and its kin), answers with
 # VISUAL-INSPECTION.md § Showing me a file, the first `shot-scraper` call with
 # § Reading a rendered page yourself, each once per session, so the calls
 # after it follow the section. Shared mechanics: teach-lib.sh.

@@ -41,7 +41,7 @@ strip_heredocs() {
 # A `#` opens a comment only at the start of a word: after an unquoted,
 # unescaped blank or separator. `a\ #x` is one word, and its `#` is text.
 # One awk pass per view, linear in the command: a bash loop that appended to
-# two strings per character took 2.6 s on 44 KB and 5.9 s on 66 KB (#1423), and
+# two strings per character took 2.6 s on 44 KB and 5.9 s on 66 KB, and
 # the teaching hooks, which run it on every Bash call, time out at 5 s. Both
 # are `$(...)` captures, so trailing newlines are dropped. An awk that fails
 # leaves the raw command as the view: every quoted word then counts as run,

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Shared body of the teaching hooks (teach-*.sh): PreToolUse(Bash) hooks that
 # answer a trigger command with a section of a pointer doc as
-# additionalContext, once per session per section, and never block (#1412).
+# additionalContext, once per session per section, and never block.
 # Sourced, never run.
 #
 # The section text is read from the doc when the hook fires, never copied
@@ -111,8 +111,7 @@ teach_add() { TEACH_CONTEXT+="${TEACH_CONTEXT:+$'\n\n'}$1"; }
 # what it printed as shown: a hook killed before this point (a timeout) has
 # shown nothing and spends nothing. A denial of the same call (a permission
 # prompt, a parallel blocking hook) does not drop the context: the model still
-# read it, so printing is the right moment to record (#1423,
-# docs/research/2026-10-04-teaching-hook-live-firing.md). Always exit 0: a
+# read it, so printing is the right moment to record (docs/research/2026-10-04-teaching-hook-live-firing.md). Always exit 0: a
 # teaching hook never blocks a command.
 teach_emit() {
   local key
