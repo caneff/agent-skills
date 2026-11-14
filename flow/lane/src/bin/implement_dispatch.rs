@@ -1587,7 +1587,7 @@ mod tests {
     #[test]
     fn run_id_grammar_matches_runfile_py() {
         let ids = [
-            "burn-2026-09-27", "a", "1", "A.b_c-9", "burn.x", "a.", "-a", ".a", "_a", "a..b", "..", "a/b", "a b", "a\"b", "a\n", "",
+            "a", "1", "A.b_c-9", "run.x", "a.", "-a", ".a", "_a", "a..b", "..", "a/b", "a b", "a\"b", "a\n", "",
             "\u{e9}t\u{e9}", "a\u{e9}",
         ];
         let script = r#"

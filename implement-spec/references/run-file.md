@@ -20,9 +20,9 @@ python3 implement-spec/runfile.py resume   <run-id> --live a,b [--controller <ag
 
 ```json
 {
-  "run_id": "burn-2026-09-20-0905",
+  "run_id": "run-2026-09-20-0905",
   "slots": 3,
-  "controller": "burn-ctl-1a",
+  "controller": "run-ctl-1a",
   "repo": "/home/c/src/x",
   "clumps": [
     {"tickets": [901, 902], "workspace": "/home/c/src/x/.claude/worktrees/implement-901",
@@ -175,7 +175,7 @@ handle, and it is the one recorded here.
 and splits the clumps four ways against the agents that are alive:
 
 ```
-run burn-2026-09-20-0905  slots 3  held 2  free 1  controller burn-ctl-f3
+run run-2026-09-20-0905  slots 3  held 2  free 1  controller run-ctl-f3
 re-announce  implement-901-42  #901,#902  /home/c/src/x/.claude/worktrees/implement-901
 vanished     implement-903-9   #903       /home/c/src/x/.claude/worktrees/implement-903
 landed       0123456789abcdef0123456789abcdef01234567  #905

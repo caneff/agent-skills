@@ -794,7 +794,7 @@ fn a_failed_issue_read_is_reported_not_swallowed() {
 }
 
 #[test]
-fn a_spec_branchs_ticket_is_never_cleared() {
+fn a_integration_branchs_ticket_is_never_cleared() {
     let c = Cleanup::new();
     let r = c.mkfixture("r9");
     c.mk_implement_branch(&r, "spec-46");
@@ -3060,7 +3060,7 @@ fn assert_refused(c: &Cleanup, r: &std::path::Path, wt: &std::path::Path, n: &st
 }
 
 #[test]
-fn a_slice_merged_into_its_spec_branch_is_cleaned_up() {
+fn a_slice_merged_into_its_integration_branch_is_cleaned_up() {
     let c = Cleanup::new();
     let (r, wt) = slice_workspace(&c, "s1", "71");
     let tip = c.rev(&r, "implement-71");
@@ -3082,7 +3082,7 @@ fn a_slice_merged_nowhere_is_refused() {
 }
 
 #[test]
-fn a_lone_ticket_merged_only_into_a_spec_branch_is_refused() {
+fn a_lone_ticket_merged_only_into_a_integration_branch_is_refused() {
     // No recorded base: a PR into spec-900 is not this branch's landing,
     // and the refusal says which PR GitHub shows merged, and where.
     let c = Cleanup::new();
@@ -3110,7 +3110,7 @@ fn a_slice_merged_into_another_specs_branch_is_refused() {
 }
 
 #[test]
-fn a_recorded_base_that_names_no_spec_branch_is_no_slice() {
+fn a_recorded_base_that_names_no_integration_branch_is_no_slice() {
     // `spec-<digits>` is the only base dispatch records; any other value is a
     // key set by hand, and a PR into it is not a landing.
     for (n, base) in [("75", "feature-x"), ("79", "spec-x")] {
@@ -3246,7 +3246,7 @@ fn a_light_tier_landing_one_commit_past_the_fork_point_is_cleaned_up() {
 }
 
 #[test]
-fn a_slice_with_commits_pushed_to_its_spec_branch_is_cleaned_up_with_a_fork_point_recorded() {
+fn a_slice_with_commits_pushed_to_its_integration_branch_is_cleaned_up_with_a_fork_point_recorded() {
     let c = Cleanup::new();
     let (r, wt) = slice_workspace(&c, "f4", "85");
     let fork = c.rev(&r, "spec-900");

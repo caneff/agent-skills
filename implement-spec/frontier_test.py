@@ -311,7 +311,7 @@ def test_a_spec_parent_moves_out_of_unresolved_rather_than_vanishing():
     # of spec parents, because each one lands in `spec` instead. A drop that
     # left the queue smaller by one would pass a count check and still hide
     # the work, so the destination is asserted beside the count.
-    # The spec branch reads the label off the issue, so no swap is involved
+    # The integration branch reads the label off the issue, so no swap is involved
     # here and this is the shipped behaviour end to end.
     queue = [
         issue(1, labels=("ready-for-agent", "spec"),
@@ -1098,7 +1098,7 @@ SECTION_ON_1 = "## Blocked by\n\n- #1\n"
 SPEC_483 = {"spec-483": {1}}
 
 
-def test_a_section_blocker_landed_on_its_spec_branch_is_met():
+def test_a_section_blocker_landed_on_its_integration_branch_is_met():
     got = read([issue(2, body=SECTION_ON_1)], states={1: "open"},
                landed=SPEC_483, parents={2: spec_parent(483)})
     assert numbers(got["slice"]) == [2], got
@@ -1130,7 +1130,7 @@ def test_one_landed_blocker_does_not_free_a_ticket_with_another_open_one():
     assert got["blocked"][0]["blockers"] == [2], got
 
 
-def test_native_open_blocker_landed_on_its_spec_branch_is_met():
+def test_native_open_blocker_landed_on_its_integration_branch_is_met():
     got = read([issue(2, blocked_by=1, total_blocked_by=1)], landed=SPEC_483,
                native={2: [1]}, parents={2: spec_parent(483)})
     assert numbers(got["slice"]) == [2], got
@@ -1168,7 +1168,7 @@ def test_landed_is_not_asked_about_a_closed_blocker():
     assert numbers(got["slice"]) == [2], got
 
 
-def test_a_spec_branch_is_asked_once_however_many_tickets_need_it():
+def test_a_integration_branch_is_asked_once_however_many_tickets_need_it():
     asked = []
     issues = [issue(2, body=SECTION_ON_1), issue(3, body=SECTION_ON_1)]
     F.frontier("owner/repo", "ready-for-agent",
