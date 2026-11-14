@@ -2,22 +2,11 @@
 a leaked git-redirecting variable in its environment (#625)."""
 import os
 import subprocess
+import sys
 
-# Git reads these ahead of any `-C` or path argument, so a caller's leaked
-# GIT_DIR (a shell export, a git hook's environment) silently redirects every
-# git call at that repo instead of the one the driver was handed (#625).
-GIT_REDIRECT_VARS = (
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 
-
-def scrubbed_env():
-    """The current environment minus the git-redirecting variables (#625).
-    Every child the driver spawns gets at least this — `claude` and `uv` run
-    git of their own inside a worktree, so they must not inherit the leak
-    either."""
-    return {k: v for k, v in os.environ.items() if k not in GIT_REDIRECT_VARS}
+from shellcmd import GIT_REDIRECT_VARS, scrubbed_env  # noqa: E402,F401  (one definition: common/shellcmd.py)
 
 
 def claude_env():
