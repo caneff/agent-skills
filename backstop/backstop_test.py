@@ -207,6 +207,25 @@ def test_green_night_reports_every_suite_over_its_cpu_budget(sb):
     assert sb.tickets() == []
 
 
+def test_red_night_prints_the_overruns_of_the_suites_that_ran(sb):
+    write(os.path.join(sb.repo, "seam.sh"), FAKE_SEAM.replace(
+        "  red)", '  red) echo "PASS a/a_test.py (30.1s cpu, over its 25s budget)"; echo "FAIL b/b.test.sh"; exit 1 ;;\n  red_old)'))
+    sb.git(sb.repo, "commit", "-qam", "seam"); sb.git(sb.repo, "push", "-q", "origin", "HEAD:main")
+    out = sb.run("red")
+    assert out.returncode == 1, out.stderr
+    assert "a/a_test.py: 30.1s cpu over its 25s budget" in out.stdout
+
+
+def test_ci_green_night_does_not_report_an_old_local_seam_log(ci):
+    """The local log a failed CI night left is not this night's."""
+    os.makedirs(ci.state_dir, exist_ok=True)
+    write(os.path.join(ci.state_dir, "full-seam-me__repo.log"), "PASS a/a_test.py (30.1s cpu, over its 25s budget)\n")
+    ci_run(ci, ci.ci_sha, "success")
+    out = ci.run("green", flags=GATE)
+    assert out.returncode == 0, out.stderr
+    assert "over CPU budget" not in out.stdout and ci.notes() == []
+
+
 def test_green_night_with_a_notifier_that_fails_exits_unsent(sb):
     write(sb.notify, "#!/bin/sh\nexit 1\n", 0o755)
     out = sb.run("overbudget")

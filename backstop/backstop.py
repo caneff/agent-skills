@@ -15,10 +15,11 @@ throwaway worktree. Either way the night is one of three outcomes:
 
     green          the seam exited 0, printed something itself (`npm ci`'s
                    output before it does not count), and no line starts
-                   `FAIL `: the tip is recorded as the last green sha
+                   `FAIL `: the tip is recorded as the last green sha.
                    A suite whose PASS line says it ran over its CPU budget
                    (#1606: `tests/all.sh` measures it and no longer fails on
-                   it) is printed and notified as such; the night stays green
+                   it) is printed and notified as such; the night stays green.
+                   A red night prints them too, without a second notice
     red            the seam exited non-zero and named its failing suites with
                    `FAIL <suite>` lines
     inconclusive   anything else: the repo's origin, its owner or its
@@ -82,7 +83,8 @@ under `$BACKSTOP_DIR` (default `~/.cache/backstop`), beside the night's log,
 login is run: filing a ticket is outward-facing.
 
 Exit 0 green, 1 red, 2 inconclusive, 3 when a red or inconclusive night's
-ticket or notification could not be sent.
+ticket or notification, or a green night's over-budget notification, could not
+be sent.
 """
 import argparse
 import collections
@@ -504,14 +506,16 @@ def backstop(args):
     os.makedirs(state_dir, exist_ok=True)
     ctx = Ctx(root, repo, default, state_dir, None, None)
     result = night(ctx, args.jobs, args.workflow)
+    # A CI night has no local log of its own (the one on disk is an earlier
+    # failed run's), so it names none. A red night's seam stopped at its first
+    # failure, so it names the overruns of the suites that ran before it.
+    over = [] if args.workflow or result.outcome not in (GREEN, RED) else over_budget(seam_log(ctx))
+    for suite, cpu, budget in over:
+        print(f"backstop: over CPU budget: {suite}: {cpu}s cpu over its {budget}s budget")
     if result.outcome == GREEN:
         with open(last_green_path(ctx), "w") as f:
             f.write(result.sha + "\n")
         print(f"backstop: {repo} green at {result.sha}")
-        # A CI night has no local log, so it names none here.
-        over = [] if args.workflow else over_budget(seam_log(ctx))
-        for suite, cpu, budget in over:
-            print(f"backstop: over CPU budget: {suite}: {cpu}s cpu over its {budget}s budget")
         if over:
             title = f"backstop: {repo} green, {len(over)} {'suite' if len(over) == 1 else 'suites'} over " \
                     f"{'its' if len(over) == 1 else 'their'} CPU budget"
