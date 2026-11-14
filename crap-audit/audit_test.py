@@ -88,6 +88,33 @@ def test_nested_uncovered_and_branchless_score_per_spec():
     assert eff == 1.0
 
 
+def _radon_class_fixture():
+    """radon `cc -j` as it really emits a class: the method appears flat at
+    top level AND under the class's `methods`; a closure appears under its
+    function's `closures` in both places."""
+    method = {"type": "method", "name": "handle", "lineno": 10, "complexity": 3,
+              "classname": "C",
+              "closures": [{"type": "function", "name": "inner", "lineno": 12, "complexity": 1}]}
+    return [
+        {"type": "function", "name": "top", "lineno": 1, "complexity": 2, "closures": []},
+        method,
+        {"type": "class", "name": "C", "lineno": 8, "complexity": 4, "methods": [method]},
+    ]
+
+
+def test_flatten_radon_takes_a_class_method_once():
+    rows = audit._flatten_radon(_radon_class_fixture())
+    assert sorted(rows, key=lambda r: r[1]) == [
+        ("top", 1, 2), ("handle", 10, 3), ("inner", 12, 1)]
+
+
+def test_normalize_and_score_count_each_class_method_once():
+    cov = {"files": {"m.py": {"functions": {}}}}
+    rows = audit.normalize({"m.py": _radon_class_fixture()}, cov)
+    assert [(r["name"], r["line"]) for r in rows].count(("handle", 10)) == 1
+    assert len(rows) == 3
+
+
 def test_line1_function_does_not_inherit_module_summary():
     """P0 regression: coverage.py's `""` module-scope entry is always
     start_line 1 and is emitted last in `functions`. A real function that
