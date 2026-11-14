@@ -10,12 +10,12 @@ the report folders under one `collection/` dir, and builds `index.html`.
 
 A run is three steps: plan (ask the staleness cache what still needs a run),
 execute (the only step that spawns audits), collect (assemble the collection
-and render the index). `--index` calls collect alone.
+and render the index). The `index` mode calls collect alone.
 
 Environment: `SWEEP_JOBS` (#1666) caps how many audits a sweep runs at once
 after the smoke test (a positive integer, default 4; anything else exits 2
 before any audit starts). `MUTATION_JOBS` (#1588) does the same for the
-modules of a `--mutation` run (default 4).
+modules of a `mutation` run (default 4).
 """
 import argparse
 import collections
@@ -629,7 +629,7 @@ class RunDir:
         os.makedirs(base, exist_ok=True)
         root = os.path.abspath(out) if out else os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
         # Prune only after `--out` is resolved, and never the run being asked
-        # for: `--index --out <old run>` must index it, not delete it.
+        # for: `index --out <old run>` must index it, not delete it.
         cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
         for entry in os.listdir(base):
             p = os.path.join(base, entry)
@@ -792,7 +792,7 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
 
     Reports arrive two ways — through the manifest each audit that ran wrote,
     or copied from the cache for a skipped one — and this is the only step
-    that reads either. Returns the index path. `--index` calls it directly
+    that reads either. Returns the index path. The `index` mode calls it directly
     over an existing collection, which is why it never touches the run
     branch: an empty `Plan` collects a finished folder just as well.
     """
@@ -826,7 +826,7 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
     report_files = [os.path.join(collection, report_link[n]) for n in AUDIT_NAMES if report_link[n]]
     synthesis = ""
     synthesis_path = os.path.join(collection, SYNTHESIS_FILE)
-    if reuse_synthesis:  # `--load` (#1678): the stored synthesis as it was, no new `claude` call
+    if reuse_synthesis:  # `load` (#1678): the stored synthesis as it was, no new `claude` call
         if os.path.isfile(synthesis_path):
             synthesis = open(synthesis_path, encoding="utf-8").read()
     elif os.environ.get("AUDITS_NO_SYNTH", "0") != "1" and report_files:
@@ -889,7 +889,7 @@ class SweepResult:
 
 def run_sweep(repo, out, only, short, force, key=None, standalone=True):
     """Plan, execute and collect one sweep. Standalone, it prints its index as
-    `index:` and opens it; one repo of a `--multi` pass prints `repo index:`
+    `index:` and opens it; one repo of a `multi` pass prints `repo index:`
     and opens nothing, since the pass's own page is its `index:` (#1721).
     Returns what happened: the audit record (#1680) is built from it."""
     repo = os.path.abspath(repo)
@@ -914,7 +914,7 @@ def sweep(repo, out, only, short, force):
 
 
 def rebuild_index(repo, out):
-    """`--index --out DIR`: collect over a finished collection, nothing else."""
+    """`index --out DIR`: collect over a finished collection, nothing else."""
     repo = os.path.abspath(repo)
     run = RunDir.create(out)
     _announce(run, repo)
@@ -1300,7 +1300,7 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
 
 @dataclasses.dataclass
 class RepoRow:
-    """One repo of a `--multi` pass: what its summary line and its row on the
+    """One repo of a `multi` pass: what its summary line and its row on the
     multi-repo index both say (#1721). `status` is one of `REPO_STATUSES`."""
 
     label: str
@@ -1421,7 +1421,7 @@ def multi_page_dir(sweep_id):
 
 def write_multi_page(sweep_id, rows):
     """Record the pass's rows in its `state.json`, then render the page from
-    it: the live pass and `--multi-index` render through the same read."""
+    it: the live pass and `multi-index` render through the same read."""
     save_record(os.path.join(multi_page_dir(sweep_id), MULTI_STATE_FILE),
                 {"sweep_id": sweep_id, "repos": [dataclasses.asdict(r) for r in rows]})
     return render_multi_page(sweep_id)
@@ -1561,15 +1561,15 @@ def render_multi_page(sweep_id):
 
 
 def multi_index_mode(sweep_id):
-    """`--multi-index SWEEP_ID`: rebuild the pass's page from its `state.json`
+    """`multi-index SWEEP_ID`: rebuild the pass's page from its `state.json`
     or stored sweeps; no `claude` runs. Prints `index:`; exits 1 naming the
     file or paths at fault when it cannot."""
     if not SWEEP_ID.fullmatch(sweep_id):
-        sys.exit(f"all-audits --multi-index: {sweep_id!r} is not a sweep id (YYYYMMDD-HHMMSS)")
+        sys.exit(f"all-audits multi-index: {sweep_id!r} is not a sweep id (YYYYMMDD-HHMMSS)")
     try:
         page = render_multi_page(sweep_id)
     except MultiIndexError as e:
-        sys.exit(f"all-audits --multi-index: {e}")
+        sys.exit(f"all-audits multi-index: {e}")
     print(f"index: {page}")
     open_index(page)
 
@@ -1596,18 +1596,18 @@ def find_stored_sweep(issue, repo_name=None):
 
 
 def load_mode(issue, repo_name):
-    """`--load ISSUE [REPO]`: rebuild the stored sweep's index so it can be
+    """`load ISSUE [REPO]`: rebuild the stored sweep's index so it can be
     triaged, with the failed and unchanged audits' notes it was swept with and
     its stored synthesis; no `claude` runs. Prints `stored:`, `checkout:` and
     `index:`; exits 1 naming the issue and the path when the sweep or its
     collection is missing."""
     found, why = find_stored_sweep(issue, os.path.basename((repo_name or "").rstrip("/")) or None)
     if why:
-        sys.exit(f"all-audits --load: {why}")
+        sys.exit(f"all-audits load: {why}")
     stored, rec = found
     collection = os.path.join(stored, "collection")
     if not os.path.isdir(collection):
-        sys.exit(f"all-audits --load: audit record #{issue}: stored collection missing at {collection}")
+        sys.exit(f"all-audits load: audit record #{issue}: stored collection missing at {collection}")
     state_path = os.path.join(stored, SWEEP_STATE_FILE)
     state = json.load(open(state_path, encoding="utf-8")) if os.path.isfile(state_path) else {}
     notes = {**state.get("skip_note", {}), **{n: f"FAILED: {why}" for n, why in state.get("failed", {}).items()}}
@@ -1675,7 +1675,7 @@ def suggest_mode(roots):
     try:
         recent = recent_pr_repos()
     except RuntimeError as e:
-        sys.exit(f"driver.py --suggest: {e}")
+        sys.exit(f"driver.py suggest: {e}")
     if not recent:
         print(f"no owned repo has a PR in the last {SUGGEST_DAYS} days")
         return
@@ -1875,82 +1875,85 @@ def _run_mutation_module(repo, module, run):
 
 def _split(value):
     """A comma-separated flag value as a list — the one place the CLI splits."""
-    return [v.strip() for v in value.split(",") if v.strip()] if value else []
+    return [v.strip() for v in value.split(",") if v.strip()]
 
 
-def main(argv):
+def _sweep_flags(p):
+    """The flags a sweep takes, shared by `sweep` and `multi`."""
+    p.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
+    p.add_argument("--only", metavar="A,B", type=_split, help="run just these audits")
+    p.add_argument("--short", action="store_true", help="run only the short set (see audits_data.py)")
+
+
+def _parser():
     p = argparse.ArgumentParser(
         prog="driver.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("repo", nargs="?", help="repo to audit (default: the current directory)")
-    p.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
-    p.add_argument("--only", metavar="A,B", help="run just these audits")
-    p.add_argument("--short", action="store_true", help="run only the short set (see audits_data.py)")
-    p.add_argument("--index", action="store_true", help="rebuild the index only, over --out DIR's reports")
-    p.add_argument("--force", action="store_true",
-                   help="bypass the staleness cache, run everything; under --multi it also sweeps a repo whose "
-                        "earlier audit record is still open (the new record links the open one) (#1681)")
-    p.add_argument("--multi", nargs="+", metavar="REPO",
-                   help="sweep each owned repo in turn from a fresh worktree of its origin/main, "
-                        "storing each sweep under ~/.local/share/all-audits/ (#1679), and the multi-repo index "
-                        "linking them under ~/.local/share/all-audits/multi/<sweep-id>/ (#1721; SKILL.md § Multi-repo)")
-    p.add_argument("--multi-index", metavar="SWEEP_ID", dest="multi_index",
-                   help="rebuild a --multi pass's page from its recorded state (or, for a pass that recorded none, "
-                        "from the stored sweeps carrying SWEEP_ID) and print its index; runs no claude (#1721)")
-    p.add_argument("--load", type=int, metavar="ISSUE",
-                   help="rebuild the stored sweep of audit record ISSUE (a number) and print its index, for "
-                        "/all-audits triage; the repo name after it picks between repos sharing the number (#1684)")
-    p.add_argument("--suggest", action="store_true",
-                   help="print the owned repos with a PR in the last 14 days and a local checkout, "
-                        "one path each, for --multi (#1683)")
-    p.add_argument("--roots", metavar="DIR,DIR", default=DEFAULT_ROOTS,
-                   help="with --suggest: the directories holding local checkouts (default ~/src,~/.agents)")
-    p.add_argument("--mutation", nargs="?", const="", metavar="A.PY,B.PY",
-                   help="run mutation-audit on each module, one fresh git worktree at a time "
-                        "(no value: pick the modules with a prepass)")
-    p.add_argument("--mutation-all", action="store_true", dest="mutation_all",
-                   help="mutation-audit every module the --suggest list names, no MUTATION_MAX cap "
-                        "(prints the module count and a cost estimate first)")
-    args = p.parse_args(argv[1:])
+    modes = p.add_subparsers(dest="mode", metavar="MODE", required=True)
 
-    repo = args.repo or os.getcwd()
-    if args.multi_index is not None:
-        if (args.repo or args.load is not None or args.index or args.multi is not None or args.suggest
-                or args.mutation is not None or args.mutation_all or args.only is not None or args.short
-                or args.force or args.out or args.roots != DEFAULT_ROOTS):
-            p.error("--multi-index takes the sweep id and combines with nothing else.")
-        multi_index_mode(args.multi_index)
-        return
-    if args.load is not None:
-        if (args.index or args.multi is not None or args.suggest or args.mutation is not None or args.mutation_all
-                or args.only is not None or args.short or args.force or args.out):
-            p.error("--load takes the issue number and an optional repo name, and combines with nothing else.")
-        load_mode(args.load, args.repo)
-        return
-    if args.suggest:
-        if (args.repo or args.index or args.multi is not None or args.mutation is not None or args.mutation_all
-                or args.only is not None or args.short or args.force or args.out):
-            p.error("--suggest stands alone: it takes only --roots.")
-        suggest_mode(_split(args.roots))
-        return
-    if args.multi is not None:
-        if args.repo or args.index or args.mutation is not None or args.mutation_all:
-            p.error("--multi takes the repos after it, and does not combine with a positional repo, "
-                    "--index, --mutation or --mutation-all.")
-        multi_mode(args.multi, args.out, _split(args.only) if args.only is not None else None, args.short, args.force)
-        return
-    if args.mutation_all and args.mutation is not None:
-        p.error("--mutation-all is not allowed with --mutation: it takes every candidate, not a list.")
-    if args.mutation_all:
-        mutation_mode(repo, None, args.out, whole_repo=True)
-    elif args.mutation is not None:
-        mutation_mode(repo, None if args.mutation == "" else _split(args.mutation), args.out)
-    elif args.index:
-        if not args.out:
-            p.error("--index needs --out DIR — the dir whose reports to index.")
-        rebuild_index(repo, args.out)
-    else:
-        sweep(repo, args.out, _split(args.only) if args.only is not None else None, args.short, args.force)
+    m = modes.add_parser("sweep", help="sweep one repo", description="Sweep one repo: plan, execute, collect.")
+    m.add_argument("repo", nargs="?", default=os.getcwd(), help="repo to audit (default: the current directory)")
+    _sweep_flags(m)
+    m.add_argument("--force", action="store_true", help="bypass the staleness cache, run everything")
+    m.set_defaults(run=lambda a: sweep(a.repo, a.out, a.only, a.short, a.force))
+
+    m = modes.add_parser("index", help="rebuild the index over a finished collection",
+                         description="Rebuild the index only, over --out DIR's reports; runs no claude.")
+    m.add_argument("repo", nargs="?", default=os.getcwd(), help="the repo the reports are of (default: the current directory)")
+    m.add_argument("--out", metavar="DIR", required=True, help="the dir whose reports to index")
+    m.set_defaults(run=lambda a: rebuild_index(a.repo, a.out))
+
+    m = modes.add_parser("multi", help="sweep each owned repo from a fresh worktree of its origin/main",
+                         description="Sweep each owned repo in turn from a fresh worktree of its origin/main, "
+                                     "storing each sweep under ~/.local/share/all-audits/ (#1679), and the "
+                                     "multi-repo index linking them under ~/.local/share/all-audits/multi/<sweep-id>/ "
+                                     "(#1721; SKILL.md § Multi-repo).")
+    m.add_argument("repos", nargs="+", metavar="REPO", help="the repos to sweep")
+    _sweep_flags(m)
+    m.add_argument("--force", action="store_true",
+                   help="bypass the staleness cache, run everything, and sweep a repo whose earlier audit record "
+                        "is still open (the new record links the open one) (#1681)")
+    m.set_defaults(run=lambda a: multi_mode(a.repos, a.out, a.only, a.short, a.force))
+
+    m = modes.add_parser("multi-index", help="rebuild a multi pass's page",
+                         description="Rebuild a multi pass's page from its recorded state (or, for a pass that "
+                                     "recorded none, from the stored sweeps carrying SWEEP_ID) and print its "
+                                     "index; runs no claude (#1721).")
+    m.add_argument("sweep_id", metavar="SWEEP_ID", help="the pass's sweep id, YYYYMMDD-HHMMSS")
+    m.set_defaults(run=lambda a: multi_index_mode(a.sweep_id))
+
+    m = modes.add_parser("load", help="rebuild a stored sweep for triage",
+                         description="Rebuild the stored sweep of audit record ISSUE and print its index, for "
+                                     "/all-audits triage; runs no claude (#1684).")
+    m.add_argument("issue", type=int, metavar="ISSUE", help="the audit record's issue number")
+    m.add_argument("repo_name", nargs="?", metavar="REPO",
+                   help="the repo name, to pick between repos sharing the number")
+    m.set_defaults(run=lambda a: load_mode(a.issue, a.repo_name))
+
+    m = modes.add_parser("suggest", help="print the owned repos worth sweeping",
+                         description="Print the owned repos with a PR in the last 14 days and a local checkout, "
+                                     "one path each, for multi (#1683).")
+    m.add_argument("--roots", metavar="DIR,DIR", type=_split, default=_split(DEFAULT_ROOTS),
+                   help="the directories holding local checkouts (default ~/src,~/.agents)")
+    m.set_defaults(run=lambda a: suggest_mode(a.roots))
+
+    m = modes.add_parser("mutation", help="mutation-audit modules, one fresh git worktree each",
+                         description="Run mutation-audit on each module, one fresh git worktree at a time. With "
+                                     "neither --modules nor --all, a prepass picks the modules.")
+    m.add_argument("repo", nargs="?", default=os.getcwd(), help="repo to audit (default: the current directory)")
+    m.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
+    which = m.add_mutually_exclusive_group()
+    which.add_argument("--modules", metavar="A.PY,B.PY", type=_split, help="the modules to mutate")
+    which.add_argument("--all", action="store_true",
+                       help="every module the suggest list names, no MUTATION_MAX cap "
+                            "(prints the module count and a cost estimate first)")
+    m.set_defaults(run=lambda a: mutation_mode(a.repo, a.modules, a.out, whole_repo=a.all))
+    return p
+
+
+def main(argv):
+    args = _parser().parse_args(argv[1:])
+    args.run(args)
 
 
 if __name__ == "__main__":

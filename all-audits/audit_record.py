@@ -1,4 +1,4 @@
-"""The audit record's body (#1680): what `driver.py --multi` files as one issue
+"""The audit record's body (#1680): what `driver.py multi` files as one issue
 per repo, built from facts the sweep left on disk. No model writes or merges
 any of it; this module only formats and splits.
 

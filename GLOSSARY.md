@@ -78,7 +78,7 @@ One JSON file per run at `~/.cache/spec-run/<run-id>.json` holding that run's wh
 _Avoid_: progress file, state file, log
 
 **Sweep**:
-One pass of `all-audits/driver.py` over one repo: the audits it plans and runs, collected under one run folder with an `index.html`. A `--multi` pass is one sweep per repo, each from a fresh worktree of that repo's `origin/main`. The glossary reserves **Run** for a spec run, so a sweep is never called a run.
+One pass of `all-audits/driver.py` over one repo: the audits it plans and runs, collected under one run folder with an `index.html`. A `multi` pass is one sweep per repo, each from a fresh worktree of that repo's `origin/main`. The glossary reserves **Run** for a spec run, so a sweep is never called a run.
 _Avoid_: run, scan, batch
 
 **Stored sweep**:
@@ -86,9 +86,9 @@ A finished sweep copied to `~/.local/share/all-audits/<repo>/<sweep-id>/` (its `
 _Avoid_: archive, saved run, cached sweep
 
 **Multi-repo index**:
-The one page a `--multi` pass writes, at `~/.local/share/all-audits/multi/<sweep-id>/index.html`, linking every repo's stored sweep and audit record. When it is written and opened: `all-audits/SKILL.md` § Multi-repo.
+The one page a `multi` pass writes, at `~/.local/share/all-audits/multi/<sweep-id>/index.html`, linking every repo's stored sweep and audit record. When it is written and opened: `all-audits/SKILL.md` § Multi-repo.
 _Avoid_: progress page, run page, summary page
 
 **Audit record**:
-The GitHub issue a `--multi` sweep opens in the swept repo, labelled with its triage label, holding every finding and every fact about the sweep as text (body, then ordered comments past GitHub's length limit). One per repo per sweep, and only when the sweep found something or an audit failed. Its stored sweep keeps the issue number in `audit-record.json`; closing it, which `/all-audits triage` does, frees that stored sweep for deletion.
+The GitHub issue a `multi` sweep opens in the swept repo, labelled with its triage label, holding every finding and every fact about the sweep as text (body, then ordered comments past GitHub's length limit). One per repo per sweep, and only when the sweep found something or an audit failed. Its stored sweep keeps the issue number in `audit-record.json`; closing it, which `/all-audits triage` does, frees that stored sweep for deletion.
 _Avoid_: report (one audit's HTML), manifest (one audit's `claude -p` answer), finding (one row inside a record)
