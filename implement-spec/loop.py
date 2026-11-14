@@ -1113,7 +1113,152 @@ def render_dispatch(picked, held, run_id, repo):
     return "\n".join(lines) or "nothing to dispatch"
 
 
-def run(argv):
+def cmd_seat(args):
+    print(seat(git))
+    return 0
+
+
+def cmd_box(args):
+    count, counter, _working, _unlisted = agent_count(args)
+    verdict = box_check(count, args.committed_gb,
+                        counter=counter, live=args.live)
+    if not verdict["ok"]:
+        for refusal in verdict["refusals"]:
+            print(f"loop.py: {refusal}", file=sys.stderr)
+        return 1
+    print("box ok")
+    return 0
+
+
+def cmd_dispatch(args):
+    """`dispatch`: callable on its own with the parsed arguments, so a test
+    builds a namespace and calls it without the parser (#1769). Returns the
+    exit status; a refusal raises `LoopError` or returns 1."""
+    candidates = read_clumps(args.candidates)
+    in_flight = read_clumps(args.in_flight, live=True)
+    root = runfile.env_root()
+    run = load_run(args.run, root)
+    repo = run_target(run)
+    in_flight = with_run_jobs(in_flight, run)
+    candidates, skipped = without_settled(candidates, run)
+    for lowest in skipped:
+        print(f"landed #{lowest}: skipped")
+    if args.no_workspace_diff:
+        # Said, not silent: this run's exclusion reads only the named
+        # closures, and its output must not read like one that also
+        # read each workspace's diff (#1212 S1).
+        print("workspace diff: SKIPPED (--no-workspace-diff) — "
+              "in-flight closures are the named files only")
+    else:
+        in_flight = with_workspace_diffs(in_flight)
+    free = max(args.free, 0)
+    # Measured before any early return: a broken herdr or `ps` must
+    # refuse here too, not hide behind "nothing to dispatch".
+    count, counter, working, unlisted = agent_count(args)
+    # A landed clump awaiting cleanup, or one closed with no landing
+    # (#1310), is not a live worker: it is
+    # filtered out before the core accounting, the peak live count,
+    # and the frontier all see it, so a run file that sets `landed`
+    # without ever clearing `job` reads as a freed slot instead of
+    # refusing the whole tick on a job record that will never be
+    # recorded (#1003) — and its dead workspace (the change is on
+    # `main`; the next worker branches from there) never blocks a
+    # candidate sharing its closure (Codex gate, PR #1050).
+    unsettled = [c for c in in_flight if not runfile.settled(c)]
+    cores = core_room(free, unsettled)
+    cores_line = render_cores(cores, free)
+    if cores_line:
+        print(cores_line)
+    if cores["room"] == 0 and free:
+        # The declared jobs hold every free slot. Said here rather
+        # than left to the box check, whose refusal would name a
+        # process cap that is not what is holding the slot — and with
+        # the held-clump lines, which a controller reads to see which
+        # live workspace holds which candidate whatever stopped the
+        # dispatch.
+        print("nothing to dispatch: every free slot is held by a "
+              "declared job")
+        print(render_dispatch([], frontier(candidates, unsettled)["held"],
+                              args.run, repo))
+        return 0
+    live = len(unsettled)
+    room, refusals = box_room(count, args.committed_gb,
+                              cores["room"], counter,
+                              live)
+    if refusals:
+        for refusal in refusals:
+            print(f"loop.py: {refusal}", file=sys.stderr)
+        return 1
+    print(render_peak(count, live, room, working, unlisted))
+    state = frontier(candidates, unsettled)
+    picked, same_tick_held = picks(state, room)
+    lines = render_dispatch(picked, state["held"] + same_tick_held,
+                            args.run, repo)
+    if room < cores["room"]:
+        lines = f"box: room for {room} of {cores['room']}\n{lines}"
+    print(lines)
+    return 0
+
+
+def cmd_landing(args):
+    if args.clump < 1:
+        raise LoopError(f"not a ticket number: {args.clump}")
+    if not args.agent.strip():
+        raise LoopError(
+            "no agent named — the refusal's whole job is to name the "
+            "worker that is owed an answer")
+    clump = {"tickets": [args.clump], "agent": args.agent}
+    owed = [step for step in landing_steps(clump, args.outstanding)
+            if step["step"] == "answer"]
+    if owed:
+        # The answers, and a refusal saying they are the whole list.
+        # `merge` and `cleanup` are not printed here: an exit code
+        # refuses, a printed step list does not, and anything reading
+        # this list would be handed `cleanup` on the one path where
+        # running it closes the pane the answer is owed on.
+        print(f"refused: {len(owed)} answer"
+              f"{'' if len(owed) == 1 else 's'} owed before cleanup")
+        for step in owed:
+            print(f"answer    {step['agent']}  {step['question']}")
+    else:
+        for step in landing_steps(clump, args.outstanding):
+            print(step["step"])
+    cleanup_ready(clump, args.outstanding)
+    return 0
+
+
+def cmd_sweep(args):
+    # Checked once, before any probe: without it every slot reads
+    # `unreachable`, which is a dead roster and a missing tool telling
+    # the same story — and § Parking would park the run on it.
+    if shutil.which("herdr") is None:
+        raise LoopError(
+            "herdr is not on PATH, so the sweep has nothing to ask — "
+            "this is a broken controller box, not a roster of dead "
+            "workers")
+    budget = float(os.environ.get("SPEC_RUN_SWEEP_BUDGET")
+                   or SWEEP_BUDGET)
+    if args.run:
+        workers = load_run(args.run, runfile.env_root())["clumps"]
+    else:
+        workers = read_clumps(args.workers, closure=False)
+    print(render_sweep(sweep(workers, herdr_get, budget=budget)))
+    return 0
+
+
+def cmd_hub(args):
+    landed = [p for p in args.landed.replace(",", " ").split() if p]
+    hub_files = hubs(read_clumps(args.candidates))
+    if hub_landing(landed, hub_files):
+        print("re-explore: this landing touched "
+              + ", ".join(sorted(set(landed) & hub_files)))
+    else:
+        print("no hub touched: re-resolve the next clump's own "
+              "closure, one hop, and dispatch")
+    return 0
+
+
+def build_parser():
     parser = argparse.ArgumentParser(
         prog="loop.py", description=(
             "The run loop's mechanical steps. Sending is SendMessage, which "
@@ -1125,7 +1270,9 @@ def run(argv):
                   "never `ps | wc -l`. Default: " + HERDR_COUNTER +
                   ", falling back to " + AGENT_COUNTER +
                   " only when herdr cannot answer.")
-    subs.add_parser("seat", help="refuse unless this is a controller's seat")
+    subs.add_parser(
+        "seat", help="refuse unless this is a controller's seat"
+    ).set_defaults(func=cmd_seat)
     box = subs.add_parser("box", help="room on the box for one more worker")
     box.add_argument("--processes", type=process_count,
                      help=agent_help)
@@ -1133,6 +1280,7 @@ def run(argv):
     box.add_argument("--live", type=live_count, required=True,
                      help="workers already running, each held at its peak; "
                           "0 is a count you took, not a default")
+    box.set_defaults(func=cmd_box)
     dispatch = subs.add_parser(
         "dispatch", help="which clumps go into the free slots")
     dispatch.add_argument("--candidates", required=True)
@@ -1157,6 +1305,7 @@ def run(argv):
     dispatch.add_argument("--processes", type=process_count,
                           help=agent_help)
     dispatch.add_argument("--committed-gb", type=float, required=True)
+    dispatch.set_defaults(func=cmd_dispatch)
     sweep_cmd = subs.add_parser(
         "sweep", help="one herdr probe per live slot, the backstop under the "
                       "wake")
@@ -1166,11 +1315,13 @@ def run(argv):
                              "file")
     roster.add_argument("--workers",
                         help="the run's clumps, as the run file holds them")
+    sweep_cmd.set_defaults(func=cmd_sweep)
     hub = subs.add_parser(
         "hub", help="whether a landing asks for full re-exploration")
     hub.add_argument("--candidates", required=True)
     hub.add_argument("--landed", required=True,
                      help="comma-separated paths the landing's diff touched")
+    hub.set_defaults(func=cmd_hub)
     landing = subs.add_parser(
         "landing", help="a landing's tail, and whether cleanup may run yet")
     landing.add_argument("--clump", type=int, required=True,
@@ -1179,136 +1330,19 @@ def run(argv):
                          help="the worker's herdr agent name")
     landing.add_argument("--outstanding", action="append", default=[],
                          help="a worker question still unanswered; repeatable")
-    args = parser.parse_args(argv[1:])
+    landing.set_defaults(func=cmd_landing)
+    return parser
+
+
+def run(argv):
+    """Parse `argv` and run the subcommand's handler (`set_defaults(func=...)`),
+    turning a `LoopError` into a refusal on stderr."""
+    args = build_parser().parse_args(argv[1:])
     try:
-        if args.command == "seat":
-            print(seat(git))
-        elif args.command == "box":
-            count, counter, _working, _unlisted = agent_count(args)
-            verdict = box_check(count, args.committed_gb,
-                                counter=counter, live=args.live)
-            if not verdict["ok"]:
-                for refusal in verdict["refusals"]:
-                    print(f"loop.py: {refusal}", file=sys.stderr)
-                return 1
-            print("box ok")
-        elif args.command == "dispatch":
-            candidates = read_clumps(args.candidates)
-            in_flight = read_clumps(args.in_flight, live=True)
-            root = runfile.env_root()
-            run = load_run(args.run, root)
-            repo = run_target(run)
-            in_flight = with_run_jobs(in_flight, run)
-            candidates, skipped = without_settled(candidates, run)
-            for lowest in skipped:
-                print(f"landed #{lowest}: skipped")
-            if args.no_workspace_diff:
-                # Said, not silent: this run's exclusion reads only the named
-                # closures, and its output must not read like one that also
-                # read each workspace's diff (#1212 S1).
-                print("workspace diff: SKIPPED (--no-workspace-diff) — "
-                      "in-flight closures are the named files only")
-            else:
-                in_flight = with_workspace_diffs(in_flight)
-            free = max(args.free, 0)
-            # Measured before any early return: a broken herdr or `ps` must
-            # refuse here too, not hide behind "nothing to dispatch".
-            count, counter, working, unlisted = agent_count(args)
-            # A landed clump awaiting cleanup, or one closed with no landing
-            # (#1310), is not a live worker: it is
-            # filtered out before the core accounting, the peak live count,
-            # and the frontier all see it, so a run file that sets `landed`
-            # without ever clearing `job` reads as a freed slot instead of
-            # refusing the whole tick on a job record that will never be
-            # recorded (#1003) — and its dead workspace (the change is on
-            # `main`; the next worker branches from there) never blocks a
-            # candidate sharing its closure (Codex gate, PR #1050).
-            unsettled = [c for c in in_flight if not runfile.settled(c)]
-            cores = core_room(free, unsettled)
-            cores_line = render_cores(cores, free)
-            if cores_line:
-                print(cores_line)
-            if cores["room"] == 0 and free:
-                # The declared jobs hold every free slot. Said here rather
-                # than left to the box check, whose refusal would name a
-                # process cap that is not what is holding the slot — and with
-                # the held-clump lines, which a controller reads to see which
-                # live workspace holds which candidate whatever stopped the
-                # dispatch.
-                print("nothing to dispatch: every free slot is held by a "
-                      "declared job")
-                print(render_dispatch([], frontier(candidates, unsettled)["held"],
-                                      args.run, repo))
-                return 0
-            live = len(unsettled)
-            room, refusals = box_room(count, args.committed_gb,
-                                      cores["room"], counter,
-                                      live)
-            if refusals:
-                for refusal in refusals:
-                    print(f"loop.py: {refusal}", file=sys.stderr)
-                return 1
-            print(render_peak(count, live, room, working, unlisted))
-            state = frontier(candidates, unsettled)
-            picked, same_tick_held = picks(state, room)
-            lines = render_dispatch(picked, state["held"] + same_tick_held,
-                                    args.run, repo)
-            if room < cores["room"]:
-                lines = f"box: room for {room} of {cores['room']}\n{lines}"
-            print(lines)
-        elif args.command == "landing":
-            if args.clump < 1:
-                raise LoopError(f"not a ticket number: {args.clump}")
-            if not args.agent.strip():
-                raise LoopError(
-                    "no agent named — the refusal's whole job is to name the "
-                    "worker that is owed an answer")
-            clump = {"tickets": [args.clump], "agent": args.agent}
-            owed = [step for step in landing_steps(clump, args.outstanding)
-                    if step["step"] == "answer"]
-            if owed:
-                # The answers, and a refusal saying they are the whole list.
-                # `merge` and `cleanup` are not printed here: an exit code
-                # refuses, a printed step list does not, and anything reading
-                # this list would be handed `cleanup` on the one path where
-                # running it closes the pane the answer is owed on.
-                print(f"refused: {len(owed)} answer"
-                      f"{'' if len(owed) == 1 else 's'} owed before cleanup")
-                for step in owed:
-                    print(f"answer    {step['agent']}  {step['question']}")
-            else:
-                for step in landing_steps(clump, args.outstanding):
-                    print(step["step"])
-            cleanup_ready(clump, args.outstanding)
-        elif args.command == "sweep":
-            # Checked once, before any probe: without it every slot reads
-            # `unreachable`, which is a dead roster and a missing tool telling
-            # the same story — and § Parking would park the run on it.
-            if shutil.which("herdr") is None:
-                raise LoopError(
-                    "herdr is not on PATH, so the sweep has nothing to ask — "
-                    "this is a broken controller box, not a roster of dead "
-                    "workers")
-            budget = float(os.environ.get("SPEC_RUN_SWEEP_BUDGET")
-                           or SWEEP_BUDGET)
-            if args.run:
-                workers = load_run(args.run, runfile.env_root())["clumps"]
-            else:
-                workers = read_clumps(args.workers, closure=False)
-            print(render_sweep(sweep(workers, herdr_get, budget=budget)))
-        elif args.command == "hub":
-            landed = [p for p in args.landed.replace(",", " ").split() if p]
-            hub_files = hubs(read_clumps(args.candidates))
-            if hub_landing(landed, hub_files):
-                print("re-explore: this landing touched "
-                      + ", ".join(sorted(set(landed) & hub_files)))
-            else:
-                print("no hub touched: re-resolve the next clump's own "
-                      "closure, one hop, and dispatch")
+        return args.func(args)
     except LoopError as exc:
         print(f"loop.py: {exc}", file=sys.stderr)
         return 1
-    return 0
 
 
 def main(argv):

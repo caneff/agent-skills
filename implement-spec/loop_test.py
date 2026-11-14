@@ -2320,3 +2320,53 @@ def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches(tmp)
     refused = loop_py(*args, real_workspaces=True)
     assert refused.returncode == 1, refused.stdout
     assert "431" in refused.stderr, refused.stderr
+
+
+# --- one handler per subcommand (#1769) ---------------------------------
+
+SUBCOMMAND_HANDLERS = {
+    "seat": "cmd_seat", "box": "cmd_box", "dispatch": "cmd_dispatch",
+    "sweep": "cmd_sweep", "hub": "cmd_hub", "landing": "cmd_landing",
+}
+
+
+def test_each_subcommand_parses_to_its_own_handler_1769():
+    argv = {
+        "seat": ["seat"],
+        "box": ["box", "--committed-gb", "1", "--live", "0"],
+        "dispatch": ["dispatch", "--candidates", "c", "--in-flight", "f",
+                     "--run", "r", "--free", "1", "--committed-gb", "1"],
+        "sweep": ["sweep", "--run", "r"],
+        "hub": ["hub", "--candidates", "c", "--landed", "a"],
+        "landing": ["landing", "--clump", "1", "--agent", "a"],
+    }
+    parser = loop.build_parser()
+    for command, handler in SUBCOMMAND_HANDLERS.items():
+        assert parser.parse_args(argv[command]).func is getattr(loop, handler)
+
+
+def test_cmd_dispatch_runs_alone_without_the_parser_1769(tmp, monkeypatch, capsys):
+    import argparse
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [20], "closure": ["b.js"]}], fh)
+    with open(live, "w") as fh:
+        json.dump([], fh)
+    cache = os.path.join(tmp, "cache")
+    os.mkdir(cache)
+    monkeypatch.setenv("SPEC_RUN_CACHE_DIR", cache)
+    run_id = fixture_run(cache, live)
+    args = argparse.Namespace(
+        candidates=cand, in_flight=live, run=run_id, free=1,
+        no_workspace_diff=True, processes=4, committed_gb=4.0)
+    assert loop.cmd_dispatch(args) == 0
+    assert "dispatch  #20  #20" in capsys.readouterr().out
+
+
+def test_run_turns_a_handlers_loop_error_into_a_refusal_1769(monkeypatch, capsys):
+    def refuse(args):
+        raise loop.LoopError("nope")
+    monkeypatch.setattr(loop, "cmd_seat", refuse)
+    assert loop.run(["loop.py", "seat"]) == 1
+    assert "loop.py: nope" in capsys.readouterr().err
