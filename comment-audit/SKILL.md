@@ -80,8 +80,11 @@ each rots into a lie the moment the code changes underneath it:
   pointer sends the reader off to reconstruct a reason that belongs right here.
   Cut the *whole* citation, not one pointer out of it — dropping `#4` from
   `(issue #4, decision 3)` leaves a barer `decision 3`, worse than what you
-  started with. If the citation carried a *why*, keep the *why* as plain prose
-  and delete every number. **One exception — an `ADR-NNNN` reference stays.**
+  started with. If the citation carried a *why*, it is always a salvage:
+  keep the *why* as plain prose and delete every number. A whole delete is
+  for a citation where nothing but the number remains (`# see #88`); a module
+  docstring or any other comment whose reason sits beside the number is a
+  salvage, never a whole delete. **One exception — an `ADR-NNNN` reference stays.**
   An ADR is a durable, addressable decision record, not an ephemeral ticket,
   so the reason it points to genuinely lives elsewhere and stays reachable —
   keep it, the way a domain-rule keeper does. Still drop a bare number riding
@@ -116,9 +119,11 @@ first. A good comment is a note, not a paragraph.
   exception — keep it; see Cut).
 - **The domain rule the code can't make self-evident.** A business constraint or
   legal requirement whose *why* lives outside the codebase.
+- **Test intent.** A comment in a test naming the failure the assertion
+  guards against, which the test's name and body do not say. A keep (`why`).
 - **Public API contract.** A docstring or doc-comment on a published interface,
   carrying what the signature cannot — the promise, the units, the failure modes
-  callers depend on. A docstring that only restates the signature is no
+  callers depend on. A Rust `///` line is a doc comment, not narration. A docstring that only restates the signature is no
   contract; cut it like any other restatement.
 
 ## The audit, worked
@@ -172,7 +177,13 @@ answer.
    every comment in the context of the code it sits on. Judgment needs the code
    beside the comment, so read them together; a grep of comment markers only
    tells you where to look. On a large tree, fan the sweep across subagents by
-   directory — but every comment in scope gets judged, never sampled.
+   directory — but every comment in scope gets judged, never sampled. Each
+   slice judges every row from that comment's own text read beside its code:
+   no category assigned by regex or keyword match, no `failure` text filled in
+   from a per-category template, no bulk-applied verdict. A `failure` names
+   this comment's concrete mistake or flaw, so no two rows read alike by
+   construction. `fixtures/answer-key.md` holds one graded case per mis-cut
+   seen so far; `fixtures_test.py` checks the key against the fixtures.
 
 3. **Judge each into one bucket** against the one test: load-bearing (never
    touch), keep (earns its place), or cut (default). For every keeper, write one
