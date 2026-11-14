@@ -12,7 +12,7 @@ trap 'rm -rf "$tmp" "$outside"' EXIT
 export HOME="$tmp/home"; mkdir -p "$HOME"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 fail=0
-check() { # name expected actual
+check() {
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (want '$2', got '$3')"; fail=1; fi
 }
 
@@ -35,8 +35,8 @@ fixture_identity "$tmp/missing" "$tmp" 2>"$tmp/err"
 check "missing repo is refused" 1 $?
 check "cwd checkout's email is untouched" "$before" "$(git -C "$here" config --local user.email)"
 
-# An empty or missing root resolves to "", and "/*" would admit any repo
-# (#1173 review C2): both are refused, and the repo is left unwritten.
+# An empty or missing root resolves to "", and "/*" would admit any repo:
+# both are refused, and the repo is left unwritten.
 git init -q "$outside/other"
 fixture_identity "$outside/other" "" 2>"$tmp/err"
 check "empty root is refused" 1 $?

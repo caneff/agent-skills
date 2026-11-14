@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-directory edges for `tests/all.sh --changed` (#1495).
+"""Cross-directory edges for `tests/all.sh --changed`.
 
 `--changed` keeps the suites under each touched top-level directory. A suite
 that loads, sources or reads a file in *another* directory is impacted when

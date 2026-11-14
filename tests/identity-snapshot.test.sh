@@ -10,11 +10,10 @@ root=$(git rev-parse --show-toplevel) || exit 1
 shadow=$(mktemp -d) || { echo "FAIL: mktemp -d"; exit 1; }
 trap 'rm -rf "$shadow"' EXIT
 fail=0
-check() { # name expected-exit actual-exit
+check() {
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "  FAIL $1 (want exit $2, got $3)"; fail=1; fi
 }
 
-# The fake suite's body is the argument; the shadow is reset per case.
 run_case() { # <suite body> [unset-first]; leaves the run's output in $out, status in $rc
   rm -rf "$shadow/repo"; mkdir -p "$shadow/repo/tests"
   cp "$root/tests/all.sh" "$shadow/repo/tests/all.sh"
