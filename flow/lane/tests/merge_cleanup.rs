@@ -90,7 +90,6 @@ fn the_deleted_tip_is_recorded_under_refs_deleted_keyed_by_its_short_sha() {
     assert!(run.stdout.contains(&line), "{}", run.text());
 }
 
-/// Every `refs/deleted/` record in `repo`, as `<ref> <sha>` lines.
 fn deleted_records(c: &Cleanup, repo: &std::path::Path) -> Vec<String> {
     c.git_out(&["-C", s(repo), "for-each-ref", "--format=%(refname) %(objectname)", "refs/deleted/"]).lines().map(str::to_string).collect()
 }
@@ -357,8 +356,6 @@ fn a_denied_remote_delete_changes_the_claim_clear_failure_wording() {
     assert!(!run.stderr.contains("git cleanup completed, but could not clear #53"), "{}", run.text());
 }
 
-/// A `git` whose `ls-remote` exits `code` and prints nothing; every other
-/// subcommand is the real git.
 fn git_with_ls_remote_exit(code: u8) -> String {
     format!(
         "#!/bin/bash\nfor a in \"$@\"; do [ \"$a\" = ls-remote ] && exit {code}; done\nexec \"{real}\" \"$@\"\n",
@@ -963,8 +960,7 @@ fn a_dry_run_removal_leaves_the_worker_record_in_place() {
     assert_eq!(lane::workers::read(&c.home(), "111").len(), 1, "a dry run must not touch the record");
 }
 
-/// The bash suite's r6 fixture: a workspace at the lane's own path holding
-/// the merged branch.
+/// A workspace at the lane's own path holding the merged branch.
 fn lane_workspace(c: &Cleanup, rel: &str, name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let r = c.mkfixture(rel);
     let wt = r.join(".claude/worktrees").join(name);
@@ -977,7 +973,7 @@ fn me() -> u32 {
 }
 
 /// This test process's own `/proc` starttime, for a registry fixture whose
-/// pid is `me()` to read as live (`live_in` now checks `procStart` matches).
+/// pid is `me()` to read as live (`live_in` checks `procStart` matches).
 fn me_start() -> String {
     lane::proc_info::read_stat(me() as i32).unwrap().start
 }
@@ -1013,7 +1009,7 @@ fn a_herdr_that_cannot_list_its_agents_refuses() {
     assert!(wt.is_dir());
 }
 
-/// The r6 siblings: an idle leftover, one with work ahead of main, one with a
+/// The siblings: an idle leftover, one with work ahead of main, one with a
 /// live session, one dirty, one holding only ignored files, a folder git no
 /// longer tracks, plus a live pid and a herdr agent in a path that merely
 /// starts with the workspace's, and a crashed session's registry file.
@@ -1112,7 +1108,6 @@ fn the_worktree_under_cleanup_is_not_a_stale_sibling() {
     assert_eq!(run.stale(), vec![wts.join("agent-old").display().to_string()], "{}", run.text());
 }
 
-/// The `blocker:` and `blockers:` lines of a run's stdout.
 fn blocker_lines(run: &support::cleanup::Run) -> Vec<String> {
     run.stdout.lines().filter(|l| l.starts_with("blocker: ") || l.starts_with("blockers: ")).map(str::to_string).collect()
 }
@@ -1630,7 +1625,7 @@ fn a_registry_session_with_no_matching_herdr_agent_refuses() {
     assert!(!c.calls().contains("pane close"), "{}", c.calls());
 }
 
-/// The bash suite's sweep root: `other` holds merged branches, a stale
+/// The sweep root: `other` holds merged branches, a stale
 /// sibling and implement-9's workspace (with a herdr workspace w4);
 /// `noremote` has a branch nothing can prove merged.
 fn sweep_root(c: &Cleanup) -> std::path::PathBuf {
@@ -1708,7 +1703,6 @@ fn a_sweep_with_yes_cleans_counts_and_reports() {
     assert!(run.ok, "{}", run.text());
     assert!(!c.has_branch(&other, "caneff/merged-one"), "{}", run.text());
 
-    // The summary table, aligned the way `column -t` aligned it.
     let rows: Vec<&str> = run.stdout.lines().skip_while(|l| *l != "sweep summary").skip(1).take_while(|l| l.starts_with("  ")).collect();
     assert!(rows.contains(&"  other  caneff/merged-one  cleaned  0 commits past PR #7"), "{rows:#?}");
     assert!(rows.contains(&"  other  caneff/ff-merged   cleaned  0 commits past origin/main"), "{rows:#?}");
@@ -1864,7 +1858,6 @@ fn a_recorded_build_sha_already_at_the_tip_skips_even_when_this_runs_pull_moves_
     assert_eq!(c.rev(&r, "main"), tip);
 }
 
-/// A modified tracked file, or an untracked one, in the workspace.
 fn dirty(wt: &std::path::Path, kind: &str) {
     match kind {
         "modified" => std::fs::write(wt.join("f"), "changed\n").unwrap(),
@@ -1927,8 +1920,6 @@ fn force_alone_still_refuses_a_dirty_worktree_and_discard_removes_it() {
     assert!(run.has(&format!("--discard: {} — 1 modified, 1 untracked file(s) would be lost: f, notes", wt.display())), "{}", run.text());
 }
 
-/// Ignore `names` through the repo's `.git/info/exclude` and create each as a
-/// directory holding one file in `wt`.
 fn ignored_dirs(r: &std::path::Path, wt: &std::path::Path, names: &[&str]) {
     let exclude: String = names.iter().map(|n| format!("{n}/\n")).collect();
     std::fs::write(r.join(".git/info/exclude"), exclude).unwrap();
@@ -2060,7 +2051,7 @@ fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-32");
     ignored_dirs(&r, &wt, &[".scratch"]);
-    dirty(&wt, "modified"); // "f", already tracked in the fixture
+    dirty(&wt, "modified");
     for name in ["a", "b", "c", "d"] {
         std::fs::write(wt.join(name), "unsaved\n").unwrap();
     }
@@ -3004,8 +2995,6 @@ fn slice_workspace(c: &Cleanup, rel: &str, n: &str) -> (std::path::PathBuf, std:
     (r, wt)
 }
 
-/// merge-cleanup on `implement-<n>` refused it as unmerged and left its
-/// workspace and branch in place.
 fn assert_refused(c: &Cleanup, r: &std::path::Path, wt: &std::path::Path, n: &str, run: &support::cleanup::Run) {
     assert!(!run.ok && run.stderr.contains(&format!("implement-{n} is not merged")), "{}", run.text());
     assert!(wt.exists() && c.has_branch(r, &format!("implement-{n}")), "{}", run.text());
@@ -3080,7 +3069,6 @@ fn a_recorded_base_that_names_no_integration_branch_is_no_slice() {
 fn without_gh_a_slice_on_origin_spec_is_cleaned_and_a_lone_ticket_there_is_refused() {
     let c = Cleanup::new();
     let (r, wt) = slice_workspace(&c, "s6", "76");
-    // A real merge: origin/spec-900 fast-forwards to the slice's tip.
     c.git_ok(&["-C", s(&r), "push", "-q", "origin", "implement-76:spec-900"]);
     c.git_ok(&["-C", s(&r), "config", "--unset", "branch.implement-76.base"]);
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-76"], &[]);
@@ -3210,11 +3198,9 @@ fn a_slice_with_commits_pushed_to_its_integration_branch_is_cleaned_up_with_a_fo
 #[test]
 fn without_a_fork_point_key_the_reflog_names_where_the_branch_started() {
     let c = Cleanup::new();
-    // No commits past its creation: refused.
     let (r, wt) = fresh_workspace(&c, "f5", "86", false);
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-86"], &[]);
     assert_refused(&c, &r, &wt, "86", &run);
-    // One commit past it, landed by fast-forward: cleaned.
     land_one_commit(&c, &wt);
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-86"], &[]);
     assert!(run.ok, "{}", run.text());

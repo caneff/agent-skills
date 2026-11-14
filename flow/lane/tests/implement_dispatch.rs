@@ -1,7 +1,5 @@
 //! Contract tests for the `implement-dispatch` binary, against a scratch
-//! origin/clone and the fake `gh`/`herdr` from `lane-fake` — the same seam
-//! the bash suite it replaces used. Covers every case in
-//! `flow/bin/implement-dispatch.test.sh`.
+//! origin/clone and the fake `gh`/`herdr` from `lane-fake`.
 
 mod support;
 use support::{default_scenario, out_text, with, Fixture};
@@ -196,7 +194,6 @@ fn creates_the_workspace_and_branch_off_origin_default_with_no_origin_head() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    // no origin/HEAD in this fixture
     let head_ref = std::process::Command::new("git")
         .args(["-C", repo.to_str().unwrap(), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
         .output()
@@ -706,7 +703,6 @@ fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("Broken pipe"), "{stderr}");
 }
-
 
 #[test]
 fn spec_mode_briefs_implement_spec_in_a_spec_workspace() {
@@ -2161,8 +2157,6 @@ fn an_unreadable_body_dispatches_heavy_and_keeps_the_documentation_label() {
     assert!(out_text(&out).contains("body unreadable, dispatched heavy: #403"), "{}", out_text(&out));
 }
 
-/// Writes `<dir>/<id>.json`, the run file `--run <id>` must name, under the
-/// fixture HOME's default `~/.cache/spec-run` unless `dir` is given.
 fn seed_run_file(f: &Fixture, dir: Option<&std::path::Path>, id: &str) {
     let dir = dir.map(std::path::Path::to_path_buf).unwrap_or_else(|| f.home().join(".cache/spec-run"));
     std::fs::create_dir_all(&dir).unwrap();
@@ -2385,7 +2379,6 @@ fn git_out(dir: &std::path::Path, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-/// The scratch origin `mkfixture` made for `name`.
 fn origin_of(f: &Fixture, name: &str) -> std::path::PathBuf {
     f.tmp.path().join("github.com/caneff").join(format!("{name}.git"))
 }
@@ -2432,7 +2425,6 @@ fn spec_mode_reuses_an_existing_integration_branch_without_moving_it() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(git_out(&origin_of(&f, name), &["rev-parse", "refs/heads/spec-395"]), landed, "the integration branch moved");
-    // The spec run's own workspace sees the slices already landed.
     assert_eq!(git_out(&repo.join(".claude/worktrees/spec-395"), &["rev-parse", "HEAD"]), landed);
     assert!(out_text(&out).contains("integration branch: spec-395 (reused)"), "{}", out_text(&out));
 }

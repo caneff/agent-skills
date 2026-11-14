@@ -13,7 +13,6 @@ use support::{dead_pid, out_text, stdout, worker_record, Fixture, LiveProc};
 const AGENT: &str = "scroller-345";
 const BRANCH: &str = "implement-345";
 
-/// This test process as the adopting session.
 fn adopter(f: &Fixture) -> (String, String) {
     let pid = std::process::id() as i32;
     f.live_session_at(pid, "controller-50", "sid-adopter");
@@ -41,7 +40,6 @@ fn restore(f: &Fixture, cwd: &str) -> Output {
     cmd(f, env!("CARGO_BIN_EXE_controller-restore"), cwd).output().unwrap()
 }
 
-/// Every record naming `AGENT`, across every sidecar, as (pid, record).
 fn holders(f: &Fixture) -> Vec<(String, WorkerRecord)> {
     let dir = f.home().join(".claude/sessions");
     let mut out = Vec::new();

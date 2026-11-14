@@ -41,8 +41,6 @@ fn run(f: &Fixture, stdin: &str, extra_env: &[(&str, &str)]) -> std::process::Ou
     run_in(f, &f.tmp.path().display().to_string(), stdin, extra_env)
 }
 
-/// `run`, with the hook's working directory — the session's cwd — set to
-/// `cwd`.
 fn run_in(f: &Fixture, cwd: &str, stdin: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
     use std::io::Write;
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_controller-restore"));
