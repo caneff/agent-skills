@@ -2348,7 +2348,7 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     // `worktree::primary(` (#849 correctness gate, C3/spec P1): dispatch's
     // own first git call, missed in the initial pass — bounded via
     // `worktree::primary_timeout`; `worktree::primary_checked` is
-    // controller-adopt's, out of scope.
+    // controller-adopt's and merge-cleanup's, out of scope.
     let unbounded_shared = [
         "git_origin::default_branch(",
         "git_origin::origin_slug(",

@@ -7,6 +7,7 @@ use lane::git_origin::{default_branch, origin_slug};
 use lane::herdr::{self, Agent};
 use lane::runner::{on_path, quiet_code_bounded, quiet_ok, quiet_stderr_ok, quiet_stdout, status_bounded};
 use lane::sessions::{self, in_tree};
+use lane::worktree::primary_checked;
 use lane::{safe_print, safe_println};
 use std::env;
 use std::io::IsTerminal;
@@ -242,13 +243,6 @@ fn pr_url_tail(arg: &str) -> Option<&str> {
     let after = &arg[scheme + 3..];
     let i = after.rfind("/pull/")?;
     Some(&after[i + "/pull/".len()..])
-}
-
-/// The repo's primary (non-linked) worktree, or empty.
-fn primary_of(path: &str) -> String {
-    quiet_stdout("git", &["-C", path, "worktree", "list", "--porcelain"])
-        .and_then(|o| o.lines().next().and_then(|l| l.strip_prefix("worktree ")).map(str::to_string))
-        .unwrap_or_default()
 }
 
 fn head_of(path: &str) -> Option<String> {
@@ -513,13 +507,10 @@ fn ignores_all(dir: &Path) -> bool {
 /// dropped. One path component each, with at most a leading or trailing `*`;
 /// `.git`, `.scratch` and a bare `*` are never honoured, since a declaration
 /// that reached them would discard the evidence this guard exists to keep.
-/// An unreadable file or a missing line declares nothing.
+/// An unreadable file, a missing line or a primary checkout git cannot name
+/// declares nothing.
 fn declared_discardable(wt: &str) -> Vec<String> {
-    let primary = primary_of(wt);
-    // An empty answer would read AGENTS.md from the process's cwd.
-    if primary.is_empty() {
-        return Vec::new();
-    }
+    let Ok(primary) = primary_checked(wt) else { return Vec::new() };
     let Ok(text) = std::fs::read_to_string(Path::new(&primary).join("AGENTS.md")) else { return Vec::new() };
     let Some(line) = text.lines().find_map(|l| l.strip_prefix("**Discardable**:")) else { return Vec::new() };
     line.split('`')
@@ -876,12 +867,12 @@ impl Cleanup {
     fn report_blockers(&self, path: &str, b: &str) {
         let mut lines = Vec::new();
         // A listing git could not produce is a blocker, not "no workspace".
-        let held = match worktree_holding(path, b) {
-            Err(()) => {
+        let held = match (worktree_holding(path, b), primary_checked(path)) {
+            (Ok(wt), Ok(primary)) => wt.filter(|wt| *wt != primary),
+            _ => {
                 lines.push("unreadable git worktree list failed".to_string());
                 None
             }
-            Ok(wt) => wt.filter(|wt| *wt != primary_of(path)),
         };
         let unheld = if held.is_none() { format!(" (no linked worktree holds {b})") } else { String::new() };
         if let Some(wt) = held {
@@ -1096,7 +1087,13 @@ impl Cleanup {
     /// longer tracks as a worktree is listed too, marked. This run's removal
     /// targets are not "other".
     fn stale_worktrees(&self, repo: &str) -> Vec<String> {
-        let primary = primary_of(repo);
+        let primary = match primary_checked(repo) {
+            Ok(p) => p,
+            Err(e) => {
+                skip("the stale-worktree report", &e);
+                return Vec::new();
+            }
+        };
         let default = default_branch(Path::new(repo));
         let mut base = format!("origin/{default}");
         if !quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/remotes/{base}")]) {
@@ -1310,14 +1307,14 @@ impl Cleanup {
         // run started inside a workspace would `git -C` its way into the
         // directory it had just removed — reaping one workspace and then
         // calling every workspace after it unmerged (the correctness axis on
-        // PR #876). A repo with no primary checkout git can name is left as
-        // it was passed.
-        let anchor = match primary_of(repo) {
-            p if p.is_empty() => repo.to_string(),
-            p => p,
+        // PR #876). A repo whose primary checkout git cannot name stops the
+        // run (#1762): a failed listing is not "nothing to reap".
+        let anchor = match primary_checked(repo) {
+            Ok(p) => p,
+            Err(e) => return die(e),
         };
-        let root = worktrees_root(repo);
-        let candidates = implement_workspaces(repo);
+        let root = worktrees_root(&anchor);
+        let candidates = implement_workspaces(repo, &anchor);
         if candidates.is_empty() {
             safe_println!("nothing to reap under {root}");
             return ExitCode::SUCCESS;
@@ -1616,7 +1613,15 @@ impl Cleanup {
         // failure onto this one.
         self.claim_clear_failed = false;
         self.remote_delete_failed = false;
-        let primary = primary_of(path);
+        // A listing git cannot produce stops the run (#1762): with no primary
+        // to anchor on, nothing below knows which checkout holds what.
+        let primary = match primary_checked(path) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("merge-cleanup: {e}");
+                return false;
+            }
+        };
         let default = default_branch(Path::new(path));
         if b == default {
             eprintln!("merge-cleanup: refusing to delete the default branch {b}");
@@ -1713,7 +1718,7 @@ impl Cleanup {
 
         // Step 4 — the local branch. Git refuses to delete a branch a
         // checkout holds, so move the primary off it first.
-        if !primary.is_empty() && head_of(&primary).as_deref() == Some(b) {
+        if head_of(&primary).as_deref() == Some(b) {
             let switched = if quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/heads/{default}")]) {
                 self.step(&format!("switching {primary} off {b} onto {default}"), "git", &["-C", &primary, "checkout", "-q", &default])
             } else {
@@ -1758,7 +1763,7 @@ impl Cleanup {
 
         // Step 6 — fast-forward the primary checkout, so the next branch
         // starts from the merge rather than from behind it.
-        if !primary.is_empty() && head_of(&primary).as_deref() == Some(default.as_str()) {
+        if head_of(&primary).as_deref() == Some(default.as_str()) {
             self.fast_forward_and_rebuild(&primary, &default);
         } else {
             skip("the fast-forward", &format!("{primary} is not on {default}"));
@@ -2160,8 +2165,8 @@ fn resolved_under(p: &str) -> Option<String> {
 }
 
 /// Where one repo keeps its workspaces: `<primary>/.claude/worktrees`.
-fn worktrees_root(repo: &str) -> String {
-    format!("{}/.claude/worktrees", primary_of(repo))
+fn worktrees_root(primary: &str) -> String {
+    format!("{primary}/.claude/worktrees")
 }
 
 /// The reaper's candidates: this repo's linked worktrees that sit under its
@@ -2169,9 +2174,8 @@ fn worktrees_root(repo: &str) -> String {
 /// (worktree path, branch), in path order. Nothing outside the repo can
 /// appear — `git worktree list` only ever reports the repo's own — and a
 /// worktree elsewhere on disk is left out however its branch is named.
-fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
-    let primary = primary_of(repo);
-    let Some(root) = resolved_under(&worktrees_root(repo)) else { return Vec::new() };
+fn implement_workspaces(repo: &str, primary: &str) -> Vec<(String, String)> {
+    let Some(root) = resolved_under(&worktrees_root(primary)) else { return Vec::new() };
     let out = quiet_stdout("git", &["-C", repo, "worktree", "list", "--porcelain"]).unwrap_or_default();
     let mut found = Vec::new();
     let mut current = "";
@@ -2200,8 +2204,10 @@ fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
 }
 
 /// The linked worktree — not the primary checkout — that has `b` checked
-/// out. A listing that could not be read is treated as no holder here, same
-/// as before (#975). That's safe at `cleanup_branch`'s own call site: `git
+/// out. A listing that could not be read, for the holder or for the primary
+/// checkout, is treated as no holder here, same as before (#975). That's safe
+/// at `cleanup_branch`'s own call site, which has already stopped on a
+/// primary checkout git cannot name (#1762), and `git
 /// branch -d` still refuses "used by worktree" on its own if a linked
 /// worktree really holds `b`, so nothing is removed out of scope. At
 /// `worktree_plan`'s call site there is no such backstop — a failed listing
@@ -2211,7 +2217,7 @@ fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
 /// target, so the cost is a misleading row, not a removal.
 fn linked_worktree_holding(path: &str, b: &str) -> Option<String> {
     let wt = worktree_holding(path, b).ok().flatten()?;
-    (wt != primary_of(path)).then_some(wt)
+    (wt != primary_checked(path).ok()?).then_some(wt)
 }
 
 /// The path of the worktree that has `b` checked out: `Ok(None)` when the
