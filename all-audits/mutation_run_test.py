@@ -113,9 +113,9 @@ def test_run_orders_the_plans_candidates_by_the_record_and_reports_no_tests(tmp_
     _tests_repo(repo, ["m.py", "n.py", "o.py"])
     open(os.path.join(repo, "lonely.py"), "w").write("x = 1\n")
     sha = _commit(repo, "lonely")
-    record = {mutation_run.MUTATION_KEY: {"o.py": _rec(sha, "2026-10-01T00:00:00+00:00")}}
+    record = {mutation_run.MUTATION_KEY: {"m.py": _rec(sha, "2026-10-01T00:00:00+00:00")}}
     result = mutation_run.run(repo, record, runner=_git_runner)
-    assert result.targets == ["m.py", "n.py", "o.py"]  # o.py ran and is unchanged: last
+    assert result.targets == ["n.py", "o.py", "m.py"]  # m.py ran and is unchanged: last
     assert result.no_tests == ["lonely.py"]
     assert result.total == 4
 
