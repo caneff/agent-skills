@@ -3,7 +3,7 @@
 StrykerJS JSON report (`.mjs`/`.js`) into candidate rows, and suggest target
 modules when none is given.
 
-mutmut 3.x has no clean structured export (see spec #365's recon) — `mutmut
+mutmut 3.x has no clean structured export — `mutmut
 results --all true` text is the stable contract: one line per mutant,
 `    <module>.x_<func>__mutmut_<N>: <status>`. `parse_mutmut_results`
 extracts every non-killed mutant mechanically into candidate rows — a
@@ -95,7 +95,7 @@ def parse_mutmut_results(text):
             bucket, extra = "no-coverage", {"mutant": mutant, "killed": False, "survived": False}
         else:
             # timeout/suspicious/skipped: neither killed nor a finding, so
-            # dropping it would read as a clean run (#962).
+            # dropping it would read as a clean run.
             raise Inconclusive(f"mutant {mutant} has status {status!r}, which this audit does not judge")
         row = auditlib.finding(
             bucket,
@@ -135,7 +135,7 @@ _STRYKER_NOT_RUN = frozenset({"CompileError", "Ignored"})
 def parse_or_inconclusive(text):
     """`parse_mutmut_results`, but text holding no mutant line at all (mutmut
     absent, misconfigured, or crashed before reporting) raises `Inconclusive`
-    instead of returning `[]`, which reads as a clean run (#962)."""
+    instead of returning `[]`, which reads as a clean run."""
     if not any(_RESULT_LINE_RE.match(line) for line in text.splitlines()):
         raise Inconclusive("no mutant lines in mutmut's results; mutmut did not report a run")
     return parse_mutmut_results(text)
@@ -275,7 +275,7 @@ def _sibling_tests(p):
     """The test paths for a mutation-worthy source module `p` (beside it, or
     under a root `tests/` tree, see below), or `None` when `p` is not a worthy
     source module at all — an `__init__.py`, a test file, or anything under a
-    skip/fixture dir (the shared `auditlib.is_test_or_fixture` check, #611).
+    skip/fixture dir (the shared `auditlib.is_test_or_fixture` check).
     The single predicate both `suggest_candidates` (keep when a test exists)
     and `no_test_modules` (keep when none does) share, so the two can never
     drift apart.

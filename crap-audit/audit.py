@@ -12,7 +12,7 @@ branch, commit `a95d390`), so no name-matching is needed even
 though the two tools spell nested-function names differently (radon: a bare
 name inside `closures`; coverage.py: a dotted qualname). A function entirely
 absent from coverage.json (its file was never imported by the test run)
-counts as 0% covered on both axes, per the ticket's missing-data rule.
+counts as 0% covered on both axes.
 
 `score` applies the formula, buckets findings against the floor, and
 suggests the two gate values. The judgment pass (bucket beyond score-band,
@@ -181,7 +181,7 @@ def normalize_ts(report_json):
 
 
 def _effective_coverage(row):
-    """min(statement, branch) as a 0-1 fraction — the ticket's coverage rule."""
+    """min(statement, branch) as a 0-1 fraction."""
     return min(row["statement_coverage"], row["branch_coverage"]) / 100.0
 
 
@@ -280,9 +280,8 @@ def score(rows, floor=FLOOR):
 
 def _parse_default(radon_text, coverage_text):
     """The two-file default path's `parse`, as `run_cli` expects: one row
-    out — the whole `score()` result — so `run_cli`'s `for row in parse(...):
-    print(json.dumps(row))` reproduces the prior single-line output exactly.
-    """
+    out, the whole `score()` result, so `run_cli` prints it as one JSON
+    object."""
     return [score(normalize(json.loads(radon_text), json.loads(coverage_text)))]
 
 

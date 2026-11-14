@@ -1,6 +1,6 @@
 """Tests for crap-audit's scoring core: normalize, score, and the thin CLI main.
 
-Plain pytest asserts. One function per acceptance criterion of ticket #505.
+Plain pytest asserts.
 """
 import json
 import os
@@ -40,7 +40,7 @@ def _parse_answer_key(path):
 
 
 def test_matches_answer_key_md_table():
-    """AC1: running the script over the fixture JSON reproduces the answer
+    """Running the script over the fixture JSON reproduces the answer
     key, parsed live from fixtures/sample_project/answer-key.md (not
     retyped) so the doc and the code can't silently drift apart. The table's
     row order is also the doc's ranking order, so this doubles as the
@@ -67,7 +67,7 @@ def test_matches_answer_key_md_table():
 
 
 def test_nested_uncovered_and_branchless_score_per_spec():
-    """AC2: nested (radon closures), missing-data, and branchless functions
+    """Nested (radon closures), missing-data, and branchless functions
     each score per the spec's rules, not just happen to land somewhere."""
     radon_json, coverage_json = _load_fixture()
     rows = audit.normalize(radon_json, coverage_json)
@@ -132,7 +132,7 @@ def test_cli_scored_count_counts_each_class_method_once(tmp_path):
 
 
 def test_line1_function_does_not_inherit_module_summary():
-    """P0 regression: coverage.py's `""` module-scope entry is always
+    """coverage.py's `""` module-scope entry is always
     start_line 1 and is emitted last in `functions`. A real function that
     also starts on line 1 must join on its own summary, not the module's --
     else a 0%-covered function silently reads as 100% covered and its
@@ -182,7 +182,7 @@ def test_line1_function_does_not_inherit_module_summary():
 
 
 def test_normalize_raises_on_zero_matched_files_when_both_sides_nonempty():
-    """P1 fix: a radon-vs-coverage.json file-key mismatch (e.g. absolute vs.
+    """A radon-vs-coverage.json file-key mismatch (e.g. absolute vs.
     repo-relative paths) must fail loudly, not silently score every function
     0%/0% and emit a page of fabricated `critical` findings."""
     radon_json = {"/abs/path/m.py": [{"type": "function", "name": "f", "lineno": 1, "complexity": 2, "closures": []}]}
@@ -195,7 +195,7 @@ def test_normalize_raises_on_zero_matched_files_when_both_sides_nonempty():
 
 
 def test_normalize_raises_on_partial_basename_collision_between_unmatched_files():
-    """P2 fix: a *partial* key mismatch -- some radon files join fine, one
+    """A *partial* key mismatch -- some radon files join fine, one
     doesn't, and the failure is the same file spelled two ways (its
     basename collides with a leftover, otherwise-unmatched coverage file)
     -- must fail loudly too, not just score that one file 0%/0% silently.
@@ -230,7 +230,7 @@ def _assert_findings_schema(findings):
 
 
 def test_findings_validate_against_findings_schema():
-    """AC3: findings rows carry every required findings-schema field."""
+    """Findings rows carry every required findings-schema field."""
     radon_json, coverage_json = _load_fixture()
     rows = audit.normalize(radon_json, coverage_json)
     result = audit.score(rows)
@@ -263,7 +263,7 @@ def test_category_dominant_ingredient_boundary():
 
 
 def test_under_floor_is_count_and_sample_not_full_rows():
-    """AC4: under-floor output is a count + a sampling, not every clean row;
+    """Under-floor output is a count + a sampling, not every clean row;
     the full ranking is emitted separately and does carry every row."""
     radon_json, coverage_json = _load_fixture()
     rows = audit.normalize(radon_json, coverage_json)
@@ -309,7 +309,7 @@ def test_recommend_refactor_when_complexity_alone_meets_or_exceeds_the_gate():
 
 
 def test_findings_carry_a_recommendation_in_extra():
-    """AC: findings.jsonl rows gain a recommendation without losing any
+    """findings.jsonl rows gain a recommendation without losing any
     existing extra field -- schema-compatible extension, not a breaking change."""
     radon_json, coverage_json = _load_fixture()
     rows = audit.normalize(radon_json, coverage_json)
@@ -326,7 +326,7 @@ def test_findings_carry_a_recommendation_in_extra():
 
 
 def test_gate_suggestions_present_and_correct():
-    """AC5: both suggested gate values are present and correct for the fixture."""
+    """Both suggested gate values are present and correct for the fixture."""
     radon_json, coverage_json = _load_fixture()
     rows = audit.normalize(radon_json, coverage_json)
     result = audit.score(rows)
@@ -362,10 +362,9 @@ def _load_ts_fixture():
 
 
 def test_normalize_ts_reproduces_captured_tool_crap_via_unchanged_score():
-    """TS AC: normalize_ts -> ticket 1's score() (imported, not reimplemented)
+    """normalize_ts feeding the imported (not reimplemented) score()
     reproduces @barney-media/crap-typescript-core's own `crap` field for every
-    measured row -- the two coverage definitions agree, per the ticket's
-    verify-first requirement."""
+    measured row: the two coverage definitions agree."""
     report = _load_ts_fixture()
     rows = audit.normalize_ts(report)
     result = audit.score(rows)
@@ -384,7 +383,7 @@ def test_normalize_ts_reproduces_captured_tool_crap_via_unchanged_score():
 
 
 def test_normalize_ts_attributes_the_arrow_function():
-    """TS AC: the fixture's arrow function is attributed a row at all, with
+    """The fixture's arrow function is attributed a row at all, with
     the right file/line/complexity -- normalize_ts must not silently drop
     arrow-function methods the way a naive declaration-only walk would."""
     report = _load_ts_fixture()
@@ -416,10 +415,10 @@ def test_normalize_ts_branch_axis_lands_on_branch_not_statement():
 
 
 def test_normalize_ts_missing_coverage_report_counts_as_zero_both_axes():
-    """Missing-data rule, same as ticket 1's Python path: a method the tool
-    could not attribute any coverage to at all (cov=null, covKind="N/A",
-    e.g. missing_report/unparseable_report/fnmap_conflict) counts as 0%
-    covered on both axes, not skipped and not silently 100%."""
+    """A method the tool could not attribute any coverage to at all
+    (cov=null, covKind="N/A", e.g. missing_report/unparseable_report/
+    fnmap_conflict) counts as 0% covered on both axes, not skipped and not
+    silently 100%, same as the Python path."""
     report = {
         "status": "failed",
         "threshold": 6,
@@ -471,8 +470,8 @@ def test_normalize_ts_structural_na_counts_as_fully_covered_both_axes():
 
 
 def test_ts_findings_validate_against_findings_schema():
-    """TS AC: score() -- ticket 1's, unmodified -- applied to normalize_ts's
-    rows produces findings-schema-valid rows, same as the Python path."""
+    """score() applied to normalize_ts's rows produces findings-schema-valid
+    rows, same as the Python path."""
     report = _load_ts_fixture()
     rows = audit.normalize_ts(report)
     result = audit.score(rows)
@@ -493,7 +492,7 @@ def _assert_axis_nulled(row, measured_axis, measured_value):
 
 
 def test_ts_findings_never_report_the_synthetic_unmeasured_axis():
-    """P1 fix: normalize_ts fills the non-dominant axis with a synthetic
+    """normalize_ts fills the non-dominant axis with a synthetic
     100.0 so score()'s min() ignores it -- that number must never leak into
     a finding's extra as if it were measured."""
     report = _load_ts_fixture()
@@ -506,7 +505,7 @@ def test_ts_findings_never_report_the_synthetic_unmeasured_axis():
 
 
 def test_ts_ranking_never_reports_the_synthetic_unmeasured_axis():
-    """P2 fix: ranking.jsonl carries every row, not just findings -- the
+    """ranking.jsonl carries every row, not just findings -- the
     synthetic 100.0 filler must be nulled there too, not only in the
     findings extra. Otherwise ranking.jsonl (which score() emits verbatim
     as the calibration asset) leaks a fabricated coverage percentage."""

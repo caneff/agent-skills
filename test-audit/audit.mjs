@@ -33,8 +33,6 @@ import {
 import { join, basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// --- parser bootstrap ------------------------------------------------------
-
 let parse;
 try {
   ({ parse } = await import("@babel/parser"));
@@ -60,8 +58,6 @@ function parseSource(source, path) {
   return parse(source, { sourceType: "module", plugins });
 }
 
-// --- AST walk --------------------------------------------------------------
-
 function walk(node, visit) {
   if (!node || typeof node.type !== "string") return;
   visit(node);
@@ -76,12 +72,10 @@ function walk(node, visit) {
   }
 }
 
-/** An Identifier node's name, else null. */
 function identifierName(node) {
   return node && node.type === "Identifier" ? node.name : null;
 }
 
-/** The bare callee name for an Identifier call, else null. */
 function calleeName(node) {
   if (node.type !== "CallExpression") return null;
   return identifierName(node.callee);
@@ -103,10 +97,9 @@ const SUITE_ROOTS = new Set(["describe", "it", "test"]);
 // the same root as their tests (`test.after(...)`, `test.describe(...)`,
 // `test.use(...)`), so a root match alone collects each as a test in its own
 // right -- a lifecycle hook or config call as an assertion-free/empty/skipped
-// test (#677), a suite alias as a duplicate of every finding inside it
-// (#679). A denylist, not an allowlist: a missed entry is a visible false
-// positive, an allowlist's missed entry silently drops a real test (#679
-// triage ruling). An unlisted runner variant (`concurrent`, `failing`,
+// test, a suite alias as a duplicate of every finding inside it. A
+// denylist, not an allowlist: a missed entry is a visible false positive, an
+// allowlist's missed entry silently drops a real test. An unlisted runner variant (`concurrent`, `failing`,
 // `sequential`) stays collected, and so does `it.skip`/`test.todo`.
 const HOOK_METHODS = new Set(["after", "before", "beforeEach", "afterEach", "beforeAll", "afterAll"]);
 // `describe`/`suite` are real evidence a file organizes tests this way (kept
@@ -127,9 +120,8 @@ const CONFIG_METHODS = new Set(["step", "use", "setTimeout", "slow", "extend", "
  * `TEST_ROOTS` for isTestCall's use (a describe.only/describe.each modifier
  * is suite evidence, never a test in its own right); the suite gate in
  * isVitestFile passes `SUITE_ROOTS` so `describe.only(...)`/`describe.each`
- * still count there, matching pre-#679 behavior. One predicate either way, so
- * the two can no longer disagree about what a `test.<method>` call means
- * (#679 triage ruling). */
+ * still count there. One predicate either way, so the two cannot disagree
+ * about what a `test.<method>` call means. */
 function isTestFrameworkMember(mem, roots = TEST_ROOTS) {
   return !!(mem && roots.has(mem.root) && !HOOK_METHODS.has(mem.method) && !CONFIG_METHODS.has(mem.method));
 }
@@ -148,7 +140,7 @@ function isTestFrameworkMember(mem, roots = TEST_ROOTS) {
 // (`it.skip('t', fn)`, `it.skip(computedTitle, sharedFn)`); the bare
 // annotation's last argument is always its trailing reason string, whatever
 // the condition looks like (`test.skip(cond, 'why')`,
-// `test.skip(fnCond, 'why')`) (#774). Checking the *last* argument, not the
+// `test.skip(fnCond, 'why')`). Checking the *last* argument, not the
 // first, is what keeps a computed/non-literal title (`it.skip(c.name, fn)`)
 // from being mistaken for the annotation shape. A single argument
 // (`test.skip(cond)`, `it.skip('title')`) stays ambiguous either way and is
@@ -168,7 +160,7 @@ function isTestCall(node) {
   // A zero-argument `test.<method>()` call is an in-body annotation
   // (`test.fixme()`, `test.slow()`), never a test definition -- `.fixme`
   // isn't in the denylist above because `test.fixme('title', fn)` is still a
-  // real (skipped) test (#679 triage ruling).
+  // real (skipped) test.
   if (node.arguments.length === 0) return false;
   if (MODIFIER_METHODS.has(mem.method) && node.arguments.length > 1 && isReasonArg(node.arguments[node.arguments.length - 1]))
     return false;
@@ -189,7 +181,6 @@ function testCallback(node) {
   return null;
 }
 
-/** Every single-test CallExpression in the tree. */
 function testCalls(tree) {
   const found = [];
   walk(tree, (n) => {
@@ -198,17 +189,15 @@ function testCalls(tree) {
   return found;
 }
 
-// --- recognize-or-skip gate ------------------------------------------------
-
 // A file is audited only when it identifies as one of the two runners in
-// scope (#287: vitest and node:test) -- see SKILL.md § JS/TS reach for the
-// rule and its remaining blind spot.
+// scope (vitest and node:test) -- see SKILL.md § JS/TS reach for the rule
+// and its remaining blind spot.
 //
-// Importing the runner is the signal that matters, and #685 added it. The
-// original #287 guard was the assertion vocabulary alone, which costs exactly
+// Importing the runner is the signal that matters. The older
+// guard was the assertion vocabulary alone, which costs exactly
 // the file the gate most wants to catch: one whose every test is
 // assertion-free has no assertion anywhere to be recognized by. The import
-// does not reopen the #287 floodgate, because it is the stronger evidence of
+// does not reopen that floodgate, because it is the stronger evidence of
 // the two -- a homegrown harness imports its own `ok()`/`eq()`, never `vitest`
 // or `node:test`.
 //
@@ -216,7 +205,6 @@ function testCalls(tree) {
 // skipped file to a build-blocking false finding. `assertBindings` below is
 // what pays that cost.
 
-/** Does the tree import from `module`? */
 function importsFrom(tree, module) {
   let found = false;
   walk(tree, (n) => {
@@ -234,7 +222,7 @@ function isVitestFile(tree) {
     const bare = calleeName(n);
     const mem = memberCallee(n);
     // A hook or config call carries no evidence the file names tests this
-    // way (#679 triage ruling) -- the shared predicate, not a raw root
+    // way -- the shared predicate, not a raw root
     // match, is what keeps this gate and isTestCall from disagreeing.
     if ((bare && SUITE_ROOTS.has(bare)) || isTestFrameworkMember(mem, SUITE_ROOTS)) hasSuite = true;
     if (bare === "expect") hasExpect = true;
@@ -245,8 +233,6 @@ function isVitestFile(tree) {
 function isNodeTestFile(tree) {
   return importsFrom(tree, "node:test");
 }
-
-// --- assertion vocabulary --------------------------------------------------
 
 /** The dotted name chain of a (possibly nested) MemberExpression callee, e.g.
  * `t.mock.fn` -> ["t", "mock", "fn"]. Null if any link isn't a plain name. */
@@ -299,7 +285,7 @@ const ASSERT_MODULES = new Set(["node:assert", "node:assert/strict", "assert", "
  * Both spellings are ordinary node:test style, and both were invisible while
  * the vocabulary was the literal `assert.*` alone. That was survivable when a
  * file had to show an `assert.*` call to be audited at all; once the runner
- * import admits the file (#685), an unrecognized assertion turns a correct
+ * import admits the file, an unrecognized assertion turns a correct
  * test into a build-blocking `assertion-free` finding.
  */
 /** The name an import specifier reads from the module -- `x` in
@@ -394,8 +380,6 @@ function assertionsIn(func, bindings) {
   });
   return out;
 }
-
-// --- detectors -------------------------------------------------------------
 
 // Every detector takes the same triple — the test CallExpression, the file
 // source, and the file's node:assert bindings — mirroring audit.py's uniform
@@ -815,8 +799,6 @@ function duplicateTitles(tree) {
   return found;
 }
 
-// --- scan ------------------------------------------------------------------
-
 function lineOf(node) {
   return node.loc ? node.loc.start.line : 0;
 }
@@ -901,8 +883,6 @@ function scanPath(root) {
   return findings;
 }
 
-// --- gate mode -------------------------------------------------------------
-
 // The smells a build gates on -- the Python side's GATE_SMELLS, each with the
 // label its fixtures-suppression count is reported under. SKILL.md § Gate mode
 // says why these two and no other.
@@ -916,7 +896,7 @@ const GATE_SMELLS = new Map([
 // returns 1 -- a report never fails a build -- but 0 and 2 mean the same in
 // both. A root that does not exist gets 2 and never 0: a gate that reports
 // success while it scanned nothing is a lie, and it fails silently and
-// permanently once wired into a repo's build (#685). Mirrors audit.py.
+// permanently once wired into a repo's build. Mirrors audit.py.
 const EXIT_UNABLE = 2;
 
 /** Does `path` lie under a `fixtures/` directory? A fixture is a deliberate
@@ -931,7 +911,7 @@ function underFixtures(path) {
  * The count is returned, and reported by `main`, because `underFixtures`
  * matches a `fixtures` segment at any depth: without it a repo could park
  * hollow tests under any directory it named `fixtures` and never see that the
- * gate had stopped looking at them (#685). Mirrors audit.py. */
+ * gate had stopped looking at them. Mirrors audit.py. */
 function gate(root) {
   const gated = scanPath(root).filter(([, , smell]) => GATE_SMELLS.has(smell));
   const findings = gated.filter(([path]) => !underFixtures(path));
@@ -942,8 +922,6 @@ function gate(root) {
   return [findings, suppressed];
 }
 
-// --- main ------------------------------------------------------------------
-
 // A function returning its exit status rather than calling process.exit, so
 // audit.test.mjs can assert on that status -- mirrors audit.py's `main(argv)`.
 function main(argv) {
@@ -953,7 +931,7 @@ function main(argv) {
   // Refuse a root that does not exist before scanning it. Walking a missing
   // directory finds nothing, and "nothing" is indistinguishable from a clean
   // tree -- so a typo in a repo's wiring would make its gate permanently
-  // green (#685).
+  // green.
   if (!existsSync(root)) {
     process.stderr.write(`test-audit: no such path: ${root} -- nothing was scanned.\n`);
     return EXIT_UNABLE;
@@ -961,7 +939,7 @@ function main(argv) {
   // The same lie by a different errno: a root that exists but cannot be read
   // walks to zero files, which is indistinguishable from a clean tree. Only
   // the root is checked here -- an unreadable directory deeper in the tree is
-  // still swallowed by `collect`, which is a wider fix than #685 asked for.
+  // still swallowed by `collect`, which is a wider fix than this check needs.
   try {
     // A directory needs X_OK as well: R_OK alone lists it, but opening the
     // files inside it still fails, so the walk yields nothing.

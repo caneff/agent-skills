@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pins what both pass-one scanners report on the candidate-smell fixtures
-# (#1489): private-API access, a stub that is also asserted called, and a
+# Pins what both pass-one scanners report on the candidate-smell fixtures:
+# private-API access, a stub that is also asserted called, and a
 # vacuous loop assertion, each beside its nearest negatives, which must stay
 # unreported. Line numbers are the fixtures' own, so edit a fixture and this
 # file together.

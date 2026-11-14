@@ -1,6 +1,6 @@
 // Tests for audit.mjs, the JS sibling of audit.py. One node:test case per
 // detector group, so a failure names the group instead of stopping the whole
-// check at its first bad assertion (#1743). These were audit.mjs's `--selfcheck`.
+// check at its first bad assertion. These were audit.mjs's `--selfcheck`.
 import { test } from "node:test";
 import assert from "node:assert";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -71,7 +71,7 @@ function quietMain(argv) {
 }
 
 test('test-call collection: modifiers are tests, lifecycle hooks are not (#677)', () => {
-  // 0. test-call collection: modifiers are tests, lifecycle hooks are not (#677)
+  // 0. test-call collection: modifiers are tests, lifecycle hooks are not
   assert(testCallCount("test.after(() => { server.close(); })") === 0, "lifecycle hook is not a test call");
   assert(testCallCount("test.before(() => { server.listen(); })") === 0, "before hook is not a test call");
   assert(testCallCount("test.beforeEach(() => { reset(); })") === 0, "beforeEach hook is not a test call");
@@ -88,7 +88,7 @@ test("Playwright's in-body test.skip(cond, 'why') is an annotation, not a test c
   // 0a. Playwright's bare conditional-skip form -- `test.skip(cond, 'why')`,
   // called in-body with no callback -- is a real test's own annotation, not a
   // test definition. Shape (condition+reason, no callback), not the `skip`
-  // name, is what distinguishes it from `it.skip('title', fn)` (#774).
+  // name, is what distinguishes it from `it.skip('title', fn)`.
   assert(
     testCallCount(
       "test('t', ({ browserName }) => { test.skip(browserName === 'webkit', 'not supported'); expect(compute()).toBe(1); });",
@@ -133,8 +133,7 @@ test("Playwright's in-body test.skip(cond, 'why') is an annotation, not a test c
 
 test('suite aliases, config calls and in-body annotations are not test calls (#679)', () => {
   // 0b. suite aliases, config calls and bare in-body annotations are not test
-  // calls (#679 triage ruling) -- one acceptance case per bullet in the
-  // ruling comment.
+  // calls.
   assert.deepEqual(
     smellsOf("test.describe('group', () => { test('works', () => { assert.equal(1, 1); }); });"),
     ["tautology"],
@@ -181,10 +180,9 @@ test('suite aliases, config calls and in-body annotations are not test calls (#6
     "a file whose only test.<method> calls are hooks plus expect does not count as a suite via the gate",
   );
   // The gate's evidence predicate covers SUITE_ROOTS (describe/it/test), not
-  // just TEST_ROOTS -- describe.only/describe.each are still suite evidence,
-  // matching pre-#679 behavior; the widened denylist still excludes a
-  // describe.<hook>/describe.<config> combination the same way (#679
-  // verification pass).
+  // just TEST_ROOTS: describe.only/describe.each are still suite evidence, and
+  // the widened denylist still excludes a describe.<hook>/describe.<config>
+  // combination.
   // No bare `it`/`test`/`describe` call anywhere in these two -- only the
   // modifier member call itself can supply suite evidence, isolating the
   // regression from a nested real test masking it.
@@ -203,7 +201,6 @@ test('suite aliases, config calls and in-body annotations are not test calls (#6
 });
 
 test('assertion-free', () => {
-  // 1. assertion-free
   assert(isAssertionFree(testCallFrom("it('x', () => { const y = compute(); })")), "assertion-free positive");
   assert(!isAssertionFree(testCallFrom("it('x', () => { expect(compute()).toBe(5); })")), "assertion-free negative");
   assert(
@@ -217,7 +214,6 @@ test('assertion-free', () => {
 });
 
 test('tautology', () => {
-  // 2. tautology
   assert(tautologyOf("it('x', () => { expect(x).toBe(x); })"), "tautology positive");
   assert(!tautologyOf("it('x', () => { expect(x).toBe(5); })"), "tautology negative");
   assert(tautologyOf("test('x', () => { assert.equal(x, x); })"), "tautology positive (node:test)");
@@ -225,7 +221,6 @@ test('tautology', () => {
 });
 
 test('empty/skipped', () => {
-  // 3. empty/skipped
   assert(isEmptyOrSkipped(testCallFrom("it('x', () => {})")), "empty body positive");
   assert(isEmptyOrSkipped(testCallFrom("it.skip('x', () => { expect(a).toBe(b); })")), "skip positive");
   assert(!isEmptyOrSkipped(testCallFrom("it('x', () => { expect(a).toBe(b); })")), "empty/skipped negative");
@@ -241,7 +236,6 @@ test('empty/skipped', () => {
 });
 
 test('recognize-or-skip gate: runner imports identify a test file (#685)', () => {
-  // recognize-or-skip gate
   assert(isVitestFile(parseSource("it('x', () => { expect(a).toBe(b); })", "s.test.js")), "gate recognizes vitest");
   assert(
     !isVitestFile(parseSource("harness('x', () => { check(a, b); })", "s.test.js")),
@@ -258,7 +252,7 @@ test('recognize-or-skip gate: runner imports identify a test file (#685)', () =>
     !isVitestFile(parseSource(nodeTestSrc, "s.test.js")),
     "gate: node:test file is not vitest",
   );
-  // #685 reverses this: an import of the runner is what identifies the
+  // An import of the runner is what identifies the
   // harness, so an all-hollow node:test file is audited rather than skipped.
   assert(
     isNodeTestFile(
@@ -267,13 +261,12 @@ test('recognize-or-skip gate: runner imports identify a test file (#685)', () =>
     "a node:test import identifies the file even with no assert.* call",
   );
   // The same for vitest: importing the runner is proof enough, so a file whose
-  // every test is assertion-free is no longer skipped whole (#685).
+  // every test is assertion-free is no longer skipped whole.
   assert(
     isVitestFile(parseSource("import { it } from 'vitest';\nit('x', () => { compute(); });\n", "s.test.js")),
     "a vitest import identifies the file even with no expect call",
   );
-  // The #287 guard is what the import signal replaces, and it must still
-  // hold: a homegrown harness imports neither runner, so it stays skipped
+  // The older assertion-vocabulary guard still holds: a homegrown harness imports neither runner, so it stays skipped
   // whether or not it imports something of its own.
   const homegrown = parseSource(
     "import { ok, eq } from './harness.mjs';\ntest('x', () => { ok(compute()); });\n",
@@ -291,7 +284,6 @@ test('recognize-or-skip gate: runner imports identify a test file (#685)', () =>
 });
 
 test('mock-the-world', () => {
-  // 4. mock-the-world
   assert(
     isMockTheWorld(
       testCallFrom(
@@ -335,7 +327,6 @@ test('mock-the-world', () => {
 });
 
 test('interaction-only assertion', () => {
-  // 5. interaction-only assertion
   assert(
     isInteractionOnly(
       testCallFrom("it('x', () => { fn(); expect(fn).toHaveBeenCalled(); })"),
@@ -453,7 +444,7 @@ test('gate mode: fixtures exemption, exit statuses and a missing root (#685)', (
   try {
     // These two files carry a real `expect`, so the assertion signal alone
     // admits them; the all-hollow case further down is the one that needs the
-    // runner import to be seen at all (#685).
+    // runner import to be seen at all.
     const hollow = "it('hollow', () => { compute(); });\nit('real', () => { expect(a).toBe(1); });\n";
     mkdirSync(join(tmp, "fixtures"));
     writeFileSync(join(tmp, "fixtures", "specimen.test.js"), hollow);
@@ -464,7 +455,7 @@ test('gate mode: fixtures exemption, exit statuses and a missing root (#685)', (
 
     // ...but the exemption is counted and reported. `fixtures` matches any
     // directory of that name at any depth, so without this line a repo could
-    // park hollow tests under one and never see it (#685).
+    // park hollow tests under one and never see it.
     assert.deepEqual(gate(tmp)[1], { "assertion-free": 1 }, "gate counts what the fixtures exemption dropped");
     {
       const [code, err] = mainStderr(["node", "audit.mjs", "--gate", tmp]);
@@ -514,7 +505,7 @@ test('gate mode: fixtures exemption, exit statuses and a missing root (#685)', (
     // Two ordinary node:test assertion spellings. The runner import admits
     // these files, so a vocabulary that did not recognize their assertions
     // would report every test in them as assertion-free and block the build --
-    // the inverse of the bug #685 fixes.
+    // the inverse of the bug the import signal exists to fix.
     const ctxAssert = join(tmp, "ctx-assert.test.js");
     writeFileSync(
       ctxAssert,
@@ -572,7 +563,7 @@ test('gate mode: fixtures exemption, exit statuses and a missing root (#685)', (
 
     // The file the gate most wants to catch: every test in it is hollow, so
     // there is no `expect` anywhere to identify it by. The runner import is
-    // what identifies it now (#685).
+    // what identifies it now.
     const allHollow = join(tmp, "all-hollow.test.js");
     writeFileSync(allHollow, "import { it } from 'vitest';\nit('x', () => { compute(); });\n");
     assert.equal(quietMain(["node", "audit.mjs", "--gate", tmp]), 1, "an all-hollow vitest file fails the gate");
@@ -581,7 +572,7 @@ test('gate mode: fixtures exemption, exit statuses and a missing root (#685)', (
     // A root that does not exist was not checked, so the gate must not report
     // success: EXIT_UNABLE, distinct from both 0 (clean) and 1 (hollow tests
     // found), so a typo in a repo's wiring reads differently from a real
-    // finding (#685).
+    // finding.
     const missing = join(tmp, "no-such-dir");
     {
       // Each guard is witnessed by its own message: `accessSync` also rejects a
@@ -599,7 +590,7 @@ test('gate mode: fixtures exemption, exit statuses and a missing root (#685)', (
 
 test('a root that cannot be read is refused, not reported clean (#685)', () => {
   // A root that exists but cannot be read was not checked either -- the same
-  // lie as a missing root, reached by EACCES instead of ENOENT (#685). Its own
+  // lie as a missing root, reached by EACCES instead of ENOENT. Its own
   // root, never the shared one above: a hollow fixture parked under a root that
   // later assertions gate on is what makes those assertions pass.
   //
@@ -626,7 +617,6 @@ test('a root that cannot be read is refused, not reported clean (#685)', () => {
 });
 
 test('candidate smells: stub asserted called, vacuous loop, private-API access', () => {
-  // 8. candidate smells: stub asserted called, vacuous loop, private-API access
   const has = (src, smell) => smellsOf(src).includes(smell);
   assert(
     has("it('t', () => { const g = vi.fn().mockReturnValue(1); expect(f(g)).toBe(1); expect(g).toHaveBeenCalled(); });", STUB_SMELL),

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Single-diff witness mode (#1331): does one covering test notice one change?
+# Single-diff witness mode: does one covering test notice one change?
 #
 #   witness.sh --patch <file> --test '<covering test command>'
 #              [--worktree <path>] [--id <id>] [--call-site]

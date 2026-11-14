@@ -1,4 +1,4 @@
-"""Tests for docstring-coverage's parser (#1744; was `audit.py`'s `_selfcheck`)."""
+"""Tests for docstring-coverage's parser."""
 import json
 import os
 import sys

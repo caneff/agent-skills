@@ -1,7 +1,7 @@
 """Tests for mutation-audit's parsers, candidate selection and `audit.py` CLI.
 
 One pytest function per behaviour, so a failure names the behaviour that broke
-(#1744). These were `audit.py`'s `_selfcheck` checks.
+These were `audit.py`'s `_selfcheck` checks.
 """
 import contextlib
 import io
@@ -133,7 +133,7 @@ def test_cli_path():
             main(["audit.py", "--suggest", tmpdir])
         lines = [line for line in buf.getvalue().splitlines() if line.strip()]
         printed = [json.loads(line)["candidate"] for line in lines]
-        assert len(printed) == pair_count, printed  # --suggest must not cap output (#395)
+        assert len(printed) == pair_count, printed  # --suggest must not cap output
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -148,7 +148,7 @@ def _run_cli(argv, path_dirs, cwd=None, extra_env=None):
     """Run audit.py as a subprocess with PATH limited to `path_dirs` plus the
     interpreter's own dir; returns (returncode, stdout, stderr)."""
     # PATH is exactly `path_dirs`: the interpreter is run by absolute path, and
-    # the stub uses only shell builtins, so a real uvx cannot leak in (#962).
+    # the stub uses only shell builtins, so a real uvx cannot leak in.
     env = dict(os.environ, PATH=os.pathsep.join(path_dirs), **(extra_env or {}))
     r = subprocess.run([sys.executable, AUDIT_PY, *argv],
                        capture_output=True, text=True, env=env, cwd=cwd)
@@ -173,14 +173,14 @@ def _stub_uvx(dirpath, run_exit, results_text, results_exit=0, hang=False):
 
 def test_inconclusive_when_mutmut_cannot_run():
     """A box without mutmut must say so, exit 3, and print no findings —
-    never the empty output of a clean run (#962)."""
+    never the empty output of a clean run."""
     with tempfile.TemporaryDirectory() as empty, tempfile.TemporaryDirectory() as cwd:
         code, out, err = _run_cli(["--run", "sample.py"], [empty], cwd)
         assert code == 3, (code, out, err)
         assert "INCONCLUSIVE" in err and "uvx" in err, err
         assert out == "", out
 
-    # uvx present but `mutmut run` fails (the subprocess-test abort of #962's comment).
+    # uvx present but `mutmut run` fails.
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
         _stub_uvx(d, 1, "")
         code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
@@ -198,7 +198,7 @@ def test_inconclusive_when_mutmut_cannot_run():
 
 
 def test_run_inconclusive_on_each_broken_mutmut_output():
-    """Each way `mutmut results` can be unusable names its own cause (#962)."""
+    """Each way `mutmut results` can be unusable names its own cause."""
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
         # mutmut ran and reported nothing: the run path must not read it as clean.
         _stub_uvx(d, 0, "no mutants here")
@@ -220,7 +220,7 @@ def test_run_inconclusive_on_each_broken_mutmut_output():
 
 def test_unmodelled_status_is_inconclusive():
     """A mutant status the parser neither counts as killed nor emits (timeout,
-    suspicious, skipped) must not pass as a clean run (#962, Codex round)."""
+    suspicious, skipped) must not pass as a clean run."""
     for status in ("timeout", "suspicious", "skipped"):
         line = f"    sample.x_clamp__mutmut_1: {status}"
         with tempfile.TemporaryDirectory() as cwd:

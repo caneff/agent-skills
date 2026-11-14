@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pass one of docstring-coverage: parse ruff D + interrogate text into findings rows.
 
-ruff D1xx is JSON-native (spec #365's R1 recon); interrogate has no JSON
+ruff D1xx is JSON-native; interrogate has no JSON
 output — its text summary is the stable contract, exactly like vulture's text
 was for dead-code. `parse_coverage` pulls one finding row per ruff D1xx hit
 (private and already-documented symbols are naturally absent from that
