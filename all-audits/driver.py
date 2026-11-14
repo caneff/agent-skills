@@ -25,7 +25,6 @@ import dataclasses
 import datetime as _dt
 import hashlib
 import html
-import glob
 import json
 import os
 import re
@@ -42,6 +41,12 @@ import pagelib  # noqa: E402
 import audit_record  # noqa: E402
 import findings_log  # noqa: E402
 import mutation_run  # noqa: E402
+from procs import claude_env, scrubbed_env, run as _run  # noqa: E402
+from stored_sweeps import (  # noqa: E402
+    MULTI_DIR, OWNER, RECORD_FILE, earlier_record, file_audit_record, find_stored_sweep, label_refusal,
+    latest_record_url, prune_closed_sweeps, record_repo, repo_identity, repo_sweep_dirs, resume_unposted,
+    stored_sweeps_base, triage_label, write_json,
+)
 from mutation_run import parse_utc  # noqa: E402
 
 DEFAULT_THRESHOLD = 10
@@ -125,35 +130,6 @@ def save_record(path, record):
 
 def _record_file(repo, base=None):
     return os.path.join(base or cache_base(), repo_key(repo) + ".json")
-
-
-# Git reads these ahead of any `-C` or path argument, so a caller's leaked
-# GIT_DIR (a shell export, a git hook's environment) silently redirects every
-# git call at that repo instead of the one the driver was handed (#625).
-GIT_REDIRECT_VARS = (
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-)
-
-
-def scrubbed_env():
-    """The current environment minus the git-redirecting variables (#625).
-    Every child the driver spawns gets at least this — `claude` and `uv` run
-    git of their own inside a worktree, so they must not inherit the leak
-    either."""
-    return {k: v for k, v in os.environ.items() if k not in GIT_REDIRECT_VARS}
-
-
-def claude_env():
-    """`scrubbed_env` plus an unlimited `claude -p` background-task wait
-    (#1278): an audit fans out shards that outlive `claude -p`'s 600 s
-    default wait ceiling, which terminates the process with no report; `0`
-    waits forever."""
-    return {**scrubbed_env(), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
-
-
-def _run(cmd, cwd=None, env=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False, env=env or scrubbed_env())
 
 
 def git_state(repo, last_sha):
@@ -906,7 +882,7 @@ def run_sweep(repo, out, only, short, force, key=None, standalone=True):
 
 
 def sweep(repo, out, only, short, force):
-    prune_closed_sweeps()
+    prune_closed_sweeps(RUN_TTL_DAYS)
     failed = run_sweep(repo, out, only, short, force).failed
     if failed:
         print(f"FAILED audits: {', '.join(failed)}", file=sys.stderr)
@@ -922,198 +898,6 @@ def rebuild_index(repo, out):
 
 
 # --- multi-repo mode (#1679) --------------------------------------------------
-
-OWNER = "caneff"
-
-
-def stored_sweeps_base():
-    """Where finished sweeps live: outside the pruned cache (`RUN_TTL_DAYS`)."""
-    return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "all-audits")
-
-
-def repo_identity(repo):
-    """(`owner/name` on GitHub, None) when `gh` reports `caneff` owns the repo,
-    else (None, why it is refused). The GitHub name, never the checkout's
-    directory, keys the stored sweeps, so two checkouts of one repo share
-    them. Anything `gh` cannot answer is a refusal, never a pass."""
-    if not os.path.isdir(repo):
-        return None, "no such directory"
-    r = _run(["gh", "repo", "view", "--json", "owner,name"], cwd=repo)
-    if r.returncode != 0:
-        return None, f"owner check failed (gh exit {r.returncode})"
-    try:
-        reply = json.loads(r.stdout)
-        owner, name = reply["owner"]["login"], reply["name"]
-    except (ValueError, KeyError, TypeError):
-        return None, "owner check failed (gh reply unreadable)"
-    if owner != OWNER:
-        return None, f"owner is {owner}, not {OWNER}"
-    return f"{owner}/{name}", None
-
-
-TRIAGE_ROLE = "needs-triage"
-
-
-def triage_label(checkout):
-    """The repo's label string for the `needs-triage` role: its
-    docs/agents/triage-labels.md mapping, else the role's own name."""
-    path = os.path.join(checkout, "docs", "agents", "triage-labels.md")
-    if os.path.isfile(path):
-        for line in open(path, encoding="utf-8", errors="replace"):
-            cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
-            if len(cells) >= 2 and cells[0] == TRIAGE_ROLE and cells[1]:
-                return cells[1]
-    return TRIAGE_ROLE
-
-
-def label_refusal(repo, label):
-    """None when `repo` has `label`, else why it is refused. A `gh` that cannot
-    answer is a refusal, never a pass; no label is ever created."""
-    r = _run(["gh", "label", "list", "--limit", "1000", "--json", "name"], cwd=repo)
-    if r.returncode != 0:
-        return f"label check failed (gh exit {r.returncode})"
-    try:
-        names = {row["name"] for row in json.loads(r.stdout)}
-    except (ValueError, KeyError, TypeError):
-        return "label check failed (gh reply unreadable)"
-    return None if label in names else f"label `{label}` is missing"
-
-
-RECORD_FILE = "audit-record.json"
-
-
-def repo_sweep_dirs(name="*", sweep_id="*"):
-    """Every repo's stored sweep folder, sorted, `name` and `sweep_id` as glob
-    patterns. The multi-repo index folder (`MULTI_DIR`, #1721) holds no repo's
-    sweeps and is never one."""
-    return [d for d in sorted(glob.glob(os.path.join(stored_sweeps_base(), name, sweep_id)))
-            if os.path.isdir(d) and os.path.basename(os.path.dirname(d)) != MULTI_DIR]
-
-
-def stored_records(name=None):
-    """Each stored sweep holding an audit record, oldest first within a repo:
-    (sweep dir, record) with `issue` an int, or (sweep dir, None) when the
-    record cannot be read. `name` keeps one repo's."""
-    for sweep in repo_sweep_dirs(name or "*"):
-        path = os.path.join(sweep, RECORD_FILE)
-        if not os.path.isfile(path):
-            continue
-        try:
-            rec = json.load(open(path, encoding="utf-8"))
-            rec["issue"], rec["url"] = int(rec["issue"]), str(rec["url"])
-        except (OSError, ValueError, KeyError, TypeError):
-            rec = None
-        yield sweep, rec
-
-
-def record_repo(sweep, rec):
-    """The GitHub repo a record was filed in. A record written before it held
-    `owner/name` falls back to its directory's name."""
-    slug = str(rec.get("repo", ""))
-    return slug if "/" in slug else f"{OWNER}/{os.path.basename(os.path.dirname(sweep))}"
-
-
-def issue_state(number, slug):
-    """("OPEN" or "CLOSED", "") from `gh`, or (None, why). An answer that is
-    neither is never read as either."""
-    r = _run(["gh", "issue", "view", str(number), "--repo", slug, "--json", "state"])
-    try:
-        state = json.loads(r.stdout)["state"] if r.returncode == 0 else None
-    except (ValueError, KeyError, TypeError):
-        state = None
-    if state in ("OPEN", "CLOSED"):
-        return state, ""
-    err = r.stderr.strip()
-    return None, f"gh exit {r.returncode}, state {state!r}{': ' + err if err else ''}"
-
-
-def earlier_record(name):
-    """(url, None) when `name`'s newest audit record is still open on GitHub,
-    ("", None) when there is none or it is closed, and (None, why) when that
-    cannot be told: an unreadable record or an unanswered state is a refusal,
-    never "closed" (#1681)."""
-    records = list(stored_records(name))
-    if not records:
-        return "", None
-    sweep, rec = records[-1]
-    if rec is None:
-        return None, f"earlier record check failed ({os.path.join(sweep, RECORD_FILE)} unreadable)"
-    state, why = issue_state(rec["issue"], record_repo(sweep, rec))
-    if state is None:
-        return None, f"earlier record check failed (issue #{rec['issue']}: {why})"
-    return (rec["url"] if state == "OPEN" else ""), None
-
-
-def _record_history(name):
-    """Every audit record filed for `name`, one JSON line each. A dot-directory,
-    so no `<repo>/<sweep-id>` glob ever reads it as a repo or a sweep."""
-    return os.path.join(stored_sweeps_base(), ".records", name + ".jsonl")
-
-
-def resume_unposted(name):
-    """Post, in order, the comments `name`'s newest audit record is still
-    missing, before anything reads that record. Returns None, or why it could
-    not: the record stays incomplete and says so."""
-    records = list(stored_records(name))
-    if not records or records[-1][1] is None or not records[-1][1].get("unposted"):
-        return None
-    sweep, rec = records[-1]
-    while rec["unposted"]:
-        c = _run(["gh", "issue", "comment", str(rec["issue"]), "--repo", record_repo(sweep, rec),
-                  "--body-file", os.path.join(sweep, rec["unposted"][0])])
-        if c.returncode != 0:
-            return (f"audit record {rec['url']} still misses comments {', '.join(rec['unposted'])} "
-                    f"(gh exit {c.returncode}): {c.stderr.strip()}")
-        rec["unposted"].pop(0)
-        _write_json(os.path.join(sweep, RECORD_FILE), rec)
-    print(f"{name}: posted the missing comments of {rec['url']}")
-    return None
-
-
-def latest_record_url(name):
-    """The newest audit record ever filed for `name`, open or closed, or "":
-    where a skipped-as-unchanged audit's findings went. Read from the repo's
-    record history, which outlives the stored sweeps closing deletes."""
-    path = _record_history(name)
-    urls = []
-    for line in open(path, encoding="utf-8").read().splitlines() if os.path.isfile(path) else []:
-        try:
-            urls.append(str(json.loads(line)["url"]))
-        except (ValueError, KeyError, TypeError):
-            continue
-    return urls[-1] if urls else ""
-
-
-def prune_closed_sweeps():
-    """Delete each stored sweep whose audit record is CLOSED on GitHub (#1682).
-    One whose record is open, unreadable, or whose state `gh` does not answer
-    is kept, and a failed lookup is printed, never read as closed. A stored
-    sweep with no record at all (its issue was never filed) is deleted once it
-    is older than `RUN_TTL_DAYS`, so nothing grows without bound. A multi-repo
-    index (#1721) is deleted once it is that old and no stored sweep carrying
-    its sweep id is left for it to link."""
-    for sweep, rec in stored_records():
-        if rec is None:
-            print(f"stored sweep {sweep}: kept ({RECORD_FILE} unreadable)", file=sys.stderr)
-            continue
-        state, why = issue_state(rec["issue"], record_repo(sweep, rec))
-        if state == "CLOSED":
-            shutil.rmtree(sweep, ignore_errors=True)
-        elif state is None:
-            print(f"stored sweep {sweep}: kept (record #{rec['issue']}: {why})", file=sys.stderr)
-    cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
-    for sweep in repo_sweep_dirs():
-        if not os.path.exists(os.path.join(sweep, RECORD_FILE)) and os.path.getmtime(sweep) < cutoff:
-            print(f"stored sweep {sweep}: deleted (no audit record, older than {RUN_TTL_DAYS} days)",
-                  file=sys.stderr)
-            shutil.rmtree(sweep, ignore_errors=True)
-    for page_dir in glob.glob(os.path.join(stored_sweeps_base(), MULTI_DIR, "*")):
-        if (os.path.isdir(page_dir) and os.path.getmtime(page_dir) < cutoff
-                and not repo_sweep_dirs(sweep_id=os.path.basename(page_dir))):
-            print(f"multi-repo index {page_dir}: deleted (no stored sweep left to link, older than "
-                  f"{RUN_TTL_DAYS} days)", file=sys.stderr)
-            shutil.rmtree(page_dir, ignore_errors=True)
-
 
 @dataclasses.dataclass
 class Outcome:
@@ -1199,44 +983,6 @@ def aborted_model(sweep_id, sha, clean, stored, reason, logs, open_record=""):
 SWEEP_STATE_FILE = "sweep-state.json"
 
 
-def _write_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-
-def file_audit_record(repo, stored, title, label, chunks, meta):
-    """Open the issue with `chunks[0]` and add the rest as comments, in order.
-    The chunks stay in the stored sweep, and the record file is written the
-    moment the issue exists, naming every comment not yet posted, so a failure
-    part-way loses nothing. Returns (url, None) or (url_or_"", why it failed)."""
-    paths = []
-    for i, text in enumerate(chunks):
-        paths.append(os.path.join(stored, f"audit-record-{i}.md"))
-        with open(paths[-1], "w", encoding="utf-8") as f:
-            f.write(text)
-    created = _run(["gh", "issue", "create", "--title", title, "--label", label, "--body-file", paths[0]], cwd=repo)
-    match = re.search(r"/issues/(\d+)", created.stdout)
-    if created.returncode != 0 or not match:
-        return "", (f"audit record not filed (gh exit {created.returncode}): "
-                    f"{created.stderr.strip() or created.stdout.strip()}; its text is in {stored}")
-    url, number = created.stdout.strip().splitlines()[-1], match.group(1)
-    meta = {**meta, "issue": int(number), "url": url, "unposted": [os.path.basename(p) for p in paths[1:]]}
-    record_path = os.path.join(stored, RECORD_FILE)
-    _write_json(record_path, meta)
-    history = _record_history(os.path.basename(os.path.dirname(stored)))
-    os.makedirs(os.path.dirname(history), exist_ok=True)
-    with open(history, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"sweep": os.path.basename(stored), "url": url}) + "\n")
-    for path in paths[1:]:
-        c = _run(["gh", "issue", "comment", number, "--body-file", path], cwd=repo)
-        if c.returncode != 0:
-            return url, (f"audit record {url} is missing continuation comments {', '.join(meta['unposted'])} "
-                         f"(gh exit {c.returncode}): {c.stderr.strip()}; their text is in {stored}")
-        meta["unposted"].pop(0)
-        _write_json(record_path, meta)
-    return url, None
-
-
 def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_record=""):
     """Sweep a fresh worktree of `repo`'s origin/main, store the result, and
     file the audit record. Returns an Outcome."""
@@ -1278,7 +1024,7 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
         else:
             model = record_model(result, sweep_id, sha, clean, stored,
                                  os.path.isfile(os.path.join(wt, ".audit-ignore.md")), open_record, earlier)
-            _write_json(os.path.join(stored, SWEEP_STATE_FILE),
+            write_json(os.path.join(stored, SWEEP_STATE_FILE),
                         {"skip_note": result.plan.skip_note,
                          "failed": {n: t.splitlines()[0] for n, t in model.failed.items()}})
             outcome = Outcome("failed" if result.failed else "swept", stored=stored)
@@ -1357,7 +1103,7 @@ def multi_mode(repos, out, only, short, force):
     repo that crashes is that repo's failure, and the rest still run. The
     multi-repo index is rewritten after each repo and opened once, at the end."""
     sweep_jobs()  # a bad SWEEP_JOBS stops the run before any repo is touched
-    prune_closed_sweeps()
+    prune_closed_sweeps(RUN_TTL_DAYS)
     sweep_id = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     base = os.path.abspath(out) if out else os.path.join(cache_base(), "multi-" + sweep_id)
     paths = [os.path.abspath(p) for p in repos]
@@ -1396,7 +1142,6 @@ def _write_page_or_say(sweep_id, rows):
 
 # --- the multi-repo index (#1721) --------------------------------------------
 
-MULTI_DIR = "multi"  # under stored_sweeps_base(): one folder per sweep id, never a repo's
 MULTI_STATE_FILE = "state.json"
 SWEEP_ID = re.compile(r"\d{8}-\d{6}")
 
@@ -1575,25 +1320,6 @@ def multi_index_mode(sweep_id):
 
 
 # --- load a stored sweep for triage (#1684) ----------------------------------
-
-def find_stored_sweep(issue, repo_name=None):
-    """(stored sweep dir, record) for the sweep whose audit record is issue
-    `issue`, else (None, why). Never a guess: no match, two matches (the same
-    number in two repos) and an unreadable record are each a refusal."""
-    pattern = os.path.join(stored_sweeps_base(), repo_name or "*", "*", RECORD_FILE)
-    found = []
-    for sweep, rec in stored_records(repo_name):
-        if rec is None:
-            return None, f"stored record {os.path.join(sweep, RECORD_FILE)} is unreadable"
-        if rec["issue"] == issue:
-            found.append((sweep, rec))
-    if not found:
-        return None, f"no stored sweep for audit record #{issue}: expected {pattern} with \"issue\": {issue}"
-    if len(found) > 1:
-        return None, (f"audit record #{issue} matches {len(found)} stored sweeps "
-                      f"({', '.join(s for s, _ in found)}): name the repo after the issue number")
-    return found[0], None
-
 
 def load_mode(issue, repo_name):
     """`load ISSUE [REPO]`: rebuild the stored sweep's index so it can be

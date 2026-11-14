@@ -20,6 +20,7 @@ os.environ.setdefault("AUDITS_NO_OPEN", "1")
 os.environ.setdefault("AUDITS_NO_SYNTH", "1")
 import driver  # noqa: E402
 import mutation_run  # noqa: E402
+import procs  # noqa: E402
 
 
 def _run_driver(*args):
@@ -368,7 +369,7 @@ def test_stale_manifest_from_an_earlier_run_does_not_count_as_success(tmp_path):
 def _leaked_git_env(victim):
     """Run the body with GIT_DIR/GIT_WORK_TREE pointing at `victim`, the way a
     caller's shell (or a git hook) leaks them into the driver (#625)."""
-    saved = {k: os.environ.get(k) for k in driver.GIT_REDIRECT_VARS}
+    saved = {k: os.environ.get(k) for k in procs.GIT_REDIRECT_VARS}
     os.environ["GIT_DIR"] = os.path.join(victim, ".git")
     os.environ["GIT_WORK_TREE"] = victim
     try:
