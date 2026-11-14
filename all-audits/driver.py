@@ -1604,6 +1604,15 @@ def _split(value):
     return [v.strip() for v in value.split(",") if v.strip()]
 
 
+def _modules(value):
+    """`--modules`: a list naming at least one module. An empty one is refused,
+    never read as a run that mutated nothing."""
+    modules = _split(value)
+    if not modules:
+        raise argparse.ArgumentTypeError(f"{value!r} names no module")
+    return modules
+
+
 def _sweep_flags(p):
     """The flags a sweep takes, shared by `sweep` and `multi`."""
     p.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
@@ -1669,7 +1678,7 @@ def _parser():
     m.add_argument("repo", nargs="?", default=os.getcwd(), help="repo to audit (default: the current directory)")
     m.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
     which = m.add_mutually_exclusive_group()
-    which.add_argument("--modules", metavar="A.PY,B.PY", type=_split, help="the modules to mutate")
+    which.add_argument("--modules", metavar="A.PY,B.PY", type=_modules, help="the modules to mutate")
     which.add_argument("--all", action="store_true",
                        help="every module the suggest list names, no MUTATION_MAX cap "
                             "(prints the module count and a cost estimate first)")

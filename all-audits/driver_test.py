@@ -835,6 +835,8 @@ def test_each_mode_help_lists_its_own_flags_and_no_other(mode, capsys):
     (["multi"], "REPO"),
     (["mutation", "--all", "--modules", "a.py"], "not allowed with"),
     (["mutation", "--only", "dead-code"], "unrecognized arguments: --only"),
+    (["mutation", "--modules", ""], "names no module"),
+    (["mutation", "--modules", " , "], "names no module"),
     (["load", "x"], "invalid int value"),
 ])
 def test_each_mode_refuses_a_flag_it_does_not_take_through_argparse(argv, refusal, capsys, monkeypatch):
