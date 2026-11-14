@@ -37,6 +37,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+from shellcmd import scrubbed_env  # noqa: E402
 
 CACHE_DIR = "~/.cache/spec-run"
 # How long a writer waits for the run file's lock before refusing, matching the
@@ -85,14 +87,6 @@ SIDECAR_OUTCOMES = ("fixed", "moved", "disputed")
 LEGACY_OUTCOMES = ("filed", "handed-back", "leftover")
 
 
-def clean_git_env():
-    # GIT_DIR and friends would repoint git at another repo whatever the path
-    # says. The scrub `checkout_top` and `counts.default_reviews_dir` share;
-    # `closure.git_listing` has its own, wider one.
-    return {k: v for k, v in os.environ.items()
-            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")}
-
-
 def checkout_top(where):
     """The absolute path of the **primary checkout** of the repo `where` is
     in — `where` a checkout root, a linked worktree, or any directory inside
@@ -107,7 +101,7 @@ def checkout_top(where):
         done = subprocess.run(
             ["git", "-C", os.path.expanduser(where), "worktree", "list",
              "--porcelain"], capture_output=True, text=True, timeout=30,
-            env=clean_git_env())
+            env=scrubbed_env())
     except (OSError, subprocess.SubprocessError) as exc:
         raise RunFileError(f"{where} is not a git checkout: {exc}") from exc
     first = done.stdout.split("\n", 1)[0]
@@ -275,6 +269,10 @@ def fsync_dir(directory):
 
 
 def load(run_id, root=None):
+    """The run file of `run_id` as a dict, validated field by field. Raises
+    `RunFileError` when the file is missing, not JSON, not a run, or names a
+    different run: a run file the code does not recognise is refused, never
+    read as an empty run."""
     target = path(run_id, root)
     try:
         with open(target) as fh:
@@ -342,6 +340,10 @@ def load(run_id, root=None):
 
 
 def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None, repo=None):
+    """Create the run file of `run_id` with no clumps and return it. `repo` is
+    required and is recorded as its primary checkout (`checkout_top`). Raises
+    `RunFileError` on a bad slot budget, a `repo` that is not a checkout, or
+    a run file that already exists, which a second start would wipe."""
     slots = slot_budget(slots)
     if repo is None:
         raise RunFileError(

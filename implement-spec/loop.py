@@ -24,12 +24,14 @@ import posixpath
 import re
 import shlex
 import shutil
-import subprocess
 import sys
 import time
 
-import agents
-import runfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+
+import agents  # noqa: E402
+import runfile  # noqa: E402
+import shellcmd  # noqa: E402
 
 
 class LoopError(Exception):
@@ -37,27 +39,24 @@ class LoopError(Exception):
     a controller needs the reason it is refused, not a stack."""
 
 
-def origin_default(run):
-    """`origin/<default>`, as the checkout `run(args) -> stdout` runs in
-    records it — never assumed to be `main`."""
+def origin_default(repo="."):
+    """`origin/<default>`, as the checkout at `repo` records it — never
+    assumed to be `main`."""
     try:
-        return run(
-            ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
-    except LoopError as exc:
-        raise LoopError(
-            f"{exc} — this checkout has no recorded default branch, and the "
-            "loop will not assume `main`: record it with `git remote set-head "
-            "origin -a`") from None
+        return shellcmd.default_branch(repo)
+    except shellcmd.CmdError as exc:
+        raise LoopError(str(exc)) from None
 
 
 INTEGRATION_BRANCH = re.compile(r"spec-[0-9]+")
 
 
-def seat(run):
+def seat(run, default=origin_default):
     """The branch the controller is sitting on, or a refusal saying why this
     seat is not a controller's.
 
-    `run(args) -> stdout` is `git` with the arguments given. Three refusals:
+    `run(args) -> stdout` is `git` with the arguments given; `default()` reads
+    `origin/<default>`. Three refusals:
     a linked worktree, a detached HEAD, and any branch other than this
     checkout's default. One linked worktree is accepted, and the answer says
     so: a `spec-<n>` branch (#1312). Why each, why that one, and why the
@@ -81,7 +80,7 @@ def seat(run):
         raise LoopError(
             "detached HEAD — neither a controller's seat nor a worker's. "
             "Check out the default branch.")
-    default = origin_default(run)
+    default = default()
     default = default.split("/", 1)[1] if "/" in default else default
     if branch != default:
         raise LoopError(
@@ -592,7 +591,7 @@ def workspace_diff(workspace):
     if os.path.realpath(top) != os.path.realpath(workspace):
         raise LoopError(f"{workspace} is not a checkout root (git resolves it "
                         f"to {top}), so its diff is not its own")
-    base = slice_base(in_workspace) or origin_default(in_workspace)
+    base = slice_base(in_workspace) or origin_default(workspace)
     # NUL-separated, as `closure.py` reads `git ls-files`: the default output
     # C-quotes a non-ASCII name, which then matches no raw path. Committed
     # history, then what the worker has edited but not committed, then what it
@@ -964,17 +963,13 @@ def main(argv):
 
 def git(args, cwd=None, timeout=None):
     """`git` with the arguments given, from `cwd` (the cwd the controller is in
-    by default) — the seat check's runner and, with a workspace, the diff's."""
-    cmd = ["git", *args] if cwd is None else ["git", "-C", cwd, *args]
+    by default) — the seat check's runner and, with a workspace, the diff's.
+    Its stdout; a failure is a `LoopError`."""
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=timeout)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise LoopError(f"git {' '.join(args)} failed: {exc}") from exc
-    if done.returncode != 0:
-        raise LoopError(
-            f"git {' '.join(args)} failed: {done.stderr.strip()}")
-    return done.stdout
+        return shellcmd.git(args, cwd=cwd,
+                            timeout=timeout or shellcmd.TIMEOUT).stdout
+    except shellcmd.CmdError as exc:
+        raise LoopError(str(exc)) from None
 
 
 if __name__ == "__main__":

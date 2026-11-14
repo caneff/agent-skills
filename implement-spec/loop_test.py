@@ -42,21 +42,27 @@ def git_stub(branch="main", git_dir="/repo/.git", common_dir="/repo/.git",
 
     def run(args):
         return answers[tuple(args)]
+    run.default = lambda: head
     return run
 
 
+def seat(run):
+    """`loop.seat` with the default branch the stub answers (`git_stub`'s `head`)."""
+    return loop.seat(run, default=getattr(run, "default", None) or loop.origin_default)
+
+
 def test_seat_accepts_a_primary_checkout_on_its_default_branch():
-    assert loop.seat(git_stub()) == "main"
+    assert seat(git_stub()) == "main"
 
 
 def test_seat_accepts_a_default_branch_that_is_not_main():
-    assert loop.seat(git_stub(branch="trunk", head="origin/trunk")) == "trunk"
+    assert seat(git_stub(branch="trunk", head="origin/trunk")) == "trunk"
 
 
 def test_seat_refuses_a_worktree_and_says_why():
     run = git_stub(git_dir="/repo/.git/worktrees/implement-893")
     with pytest.raises(loop.LoopError) as exc:
-        loop.seat(run)
+        seat(run)
     assert "worktree" in str(exc.value)
     assert "worker" in str(exc.value)
 
@@ -66,7 +72,7 @@ def test_seat_accepts_a_spec_run_worktree_and_says_so():
     # `.claude/worktrees/spec-<n>`, a linked worktree on branch `spec-<n>`.
     run = git_stub(branch="spec-1262",
                    git_dir="/repo/.git/worktrees/spec-1262")
-    got = loop.seat(run)
+    got = seat(run)
     assert got.startswith("spec-1262"), got
     assert "spec" in got.split("spec-1262", 1)[1], got
 
@@ -77,7 +83,7 @@ def test_seat_still_refuses_a_worktree_whose_branch_only_looks_like_a_spec(branc
     run = git_stub(branch=branch,
                    git_dir="/repo/.git/worktrees/implement-12")
     with pytest.raises(loop.LoopError) as exc:
-        loop.seat(run)
+        seat(run)
     assert "worktree" in str(exc.value)
 
 
@@ -85,19 +91,19 @@ def test_seat_refuses_an_integration_branch_in_the_primary_checkout():
     # The exception is for the linked worktree `--spec` makes; an integration
     # branch on the primary checkout is still not the default branch.
     with pytest.raises(loop.LoopError) as exc:
-        loop.seat(git_stub(branch="spec-1262"))
+        seat(git_stub(branch="spec-1262"))
     assert "spec-1262" in str(exc.value) and "main" in str(exc.value)
 
 
 def test_seat_refuses_a_branch_that_is_not_the_default():
     with pytest.raises(loop.LoopError) as exc:
-        loop.seat(git_stub(branch="implement-893"))
+        seat(git_stub(branch="implement-893"))
     assert "implement-893" in str(exc.value) and "main" in str(exc.value)
 
 
 def test_seat_refuses_a_detached_head():
     with pytest.raises(loop.LoopError) as exc:
-        loop.seat(git_stub(branch=""))
+        seat(git_stub(branch=""))
     assert "detached" in str(exc.value)
 
 
@@ -687,16 +693,6 @@ def test_a_malformed_clump_file_is_one_line_and_not_a_traceback(
     assert "Traceback" not in got.stderr, got.stderr
     assert got.stderr.startswith("loop.py: "), got.stderr
     assert len(got.stderr.strip().splitlines()) == 1, got.stderr
-
-
-def test_seat_names_the_remedy_when_origin_head_is_unset():
-    def run(args):
-        if args[0] == "symbolic-ref":
-            raise loop.LoopError("git symbolic-ref failed: not a symbolic ref")
-        return git_stub()(args)
-    with pytest.raises(loop.LoopError) as exc:
-        loop.seat(run)
-    assert "git remote set-head origin -a" in str(exc.value)
 
 
 def test_the_cli_dispatch_refuses_when_the_box_has_no_room(tmp, empty_live):
@@ -1327,8 +1323,8 @@ HERDR_STUB = """#!/usr/bin/env bash
 # appended to $CALLS so the test can count them.
 echo "$3" >> "$CALLS"
 case "$3" in
-  skills-1) echo '{"result":{"agent_status":"working"}}' ;;
-  skills-2) echo '{"result":{"agent_status":"idle"}}' ;;
+  skills-1) echo '{"result":{"agent":{"agent_status":"working"}}}' ;;
+  skills-2) echo '{"result":{"agent":{"agent_status":"idle"}}}' ;;
   *) echo '{"error":{"code":"agent_not_found","message":"agent target '"$3"' not found"}}'
      exit 1 ;;
 esac
@@ -1496,7 +1492,7 @@ def test_a_probe_that_never_answers_is_given_up_on(tmp, monkeypatch):
         agents.herdr_get, budget=0.3)
     waited = time.monotonic() - started
     assert state["workers"][0]["verdict"] == "unreachable", state
-    assert "did not answer" in state["workers"][0]["detail"], state
+    assert "timed out" in state["workers"][0]["detail"], state
     assert waited < 5, f"the sweep waited {waited:.1f}s on one hung probe"
 
 
@@ -2091,3 +2087,22 @@ def test_run_turns_a_handlers_loop_error_into_a_refusal_1769(monkeypatch, capsys
     monkeypatch.setattr(loop, "cmd_seat", refuse)
     assert loop.run(["loop.py", "seat"]) == 1
     assert "loop.py: nope" in capsys.readouterr().err
+
+
+def test_origin_default_reads_the_repo_it_is_given_and_never_assumes_main(tmp):
+    work = make_workspace(tmp, [], default="trunk")
+    assert loop.origin_default(work) == "origin/trunk"
+    run_in(work, "git", "remote", "set-head", "origin", "-d")
+    with pytest.raises(loop.LoopError) as exc:
+        loop.origin_default(work)
+    assert "git remote set-head origin -a" in str(exc.value)
+
+
+def test_a_leaked_git_dir_does_not_repoint_the_loops_git(tmp, monkeypatch):
+    work = make_workspace(tmp, [], default="trunk")
+    want = run_in(work, "git", "branch", "--show-current").strip()
+    other = os.path.join(tmp, "other")
+    run_in(tmp, "git", "init", "-q", "-b", "elsewhere", other)
+    monkeypatch.setenv("GIT_DIR", os.path.join(other, ".git"))
+    assert want != "elsewhere"
+    assert loop.git(["branch", "--show-current"], cwd=work).strip() == want
