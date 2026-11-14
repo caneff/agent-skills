@@ -8,7 +8,7 @@ inline fallback from memory.
 
 <!-- SHARED-CORE:connection START -->
 
-**The deliverable is ALWAYS a published Agent-Native Plan, never inline chat
+**The deliverable is a published Agent-Native Plan, not inline chat
 content.** Do not hand the plan or recap to the user as Markdown prose, an ASCII
 sketch, a table, a fenced "wireframe", or a "here's the summary" paragraph. The
 entire value is the hosted, interactive, annotatable Plan; an inline summary is
@@ -25,9 +25,9 @@ Before declaring the connector missing, search/load tools with the host's
 discovery surface (`tool_search` when available) for `create_visual_plan`,
 `create_visual_recap`, or `get_plan_blocks`, then use the tools it exposes.
 
-**If the tools are still missing after discovery, do NOT fall back to inline
+**If the tools are still missing after discovery, do not fall back to inline
 output.** The usual cause is a connector that did not finish connecting this
-session (it registers zero tools), NOT necessarily an auth problem — so do not
+session (it registers zero tools), not necessarily an auth problem — so do not
 assume the user must re-authenticate. Stop and give the user the exact restore
 step for their current client:
 
