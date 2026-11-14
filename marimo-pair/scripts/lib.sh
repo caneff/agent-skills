@@ -21,7 +21,7 @@ require_tools() {
 detect_platform() {
   if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
     echo windows
-  elif [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+  elif [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft "${PROC_VERSION:-/proc/version}" 2>/dev/null; then
     echo wsl
   else
     echo posix

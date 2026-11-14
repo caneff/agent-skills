@@ -112,7 +112,7 @@ def week(tmp_path):
 def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(week):
     w = week
     # 1. The merge gate, one PR at a time.
-    status, line, m101 = w.pr(101, 11, {"lib/a.py": 120, "lib/a_test.py": 200, "tests/t.sh": 200,
+    status, line, _ = w.pr(101, 11, {"lib/a.py": 120, "lib/a_test.py": 200, "tests/t.sh": 200,
                                            "docs/a.md": 200})
     assert (status, line) == (40, "under size threshold (120 < 300)")
     w.skip(11, "size")
@@ -122,7 +122,7 @@ def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(week):
     assert "codex usage 40% — ok" in line
 
     w.set_usage(75)
-    status, line, m103 = w.pr(103, 13, {"lib/c.py": 300}, day=3)
+    status, line, _ = w.pr(103, 13, {"lib/c.py": 300}, day=3)
     assert status == 20, line
     assert line.startswith("usage 75% at or above reserve ceiling 70%, resets "), line
     w.skip(13, "ceiling")

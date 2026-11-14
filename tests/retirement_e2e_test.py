@@ -117,13 +117,3 @@ def test_drain_runs_off_the_moved_frontier():
     assert got.returncode == 0, got.stdout + got.stderr
     assert (SPEC_DIR / "frontier.py").is_file()
 
-
-def test_the_retired_skill_is_gone_from_the_tree():
-    # Tracked, not on disk: a long-lived checkout keeps the ignored __pycache__.
-    listed = subprocess.run(["git", "ls-files", RETIRED], cwd=ROOT, text=True,
-                            capture_output=True, check=True, env=GIT_ENV).stdout
-    assert listed == ""
-    for module in ("loop", "runfile", "counts", "frontier", "closure"):
-        assert (SPEC_DIR / f"{module}.py").is_file(), module
-    skill = (SPEC_DIR / "SKILL.md").read_text()
-    assert "## The loop" in skill

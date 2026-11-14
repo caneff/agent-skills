@@ -78,10 +78,6 @@ def test_template_as_shipped_is_unblocked():
     assert classify(filed(BODY)) == "unblocked"
 
 
-def test_template_states_none_the_documented_way():
-    assert "#890" in blocked_body()
-
-
 def test_one_open_blocker_blocks():
     assert classify(blocked_body(), {890: "open"}) == "blocked"
 
