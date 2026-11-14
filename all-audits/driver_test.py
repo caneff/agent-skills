@@ -341,6 +341,7 @@ def test_stale_manifest_from_an_earlier_run_does_not_count_as_success(tmp_path):
     own recovery command) finds the last run's manifest. An audit that writes
     nothing this time must still fail, not inherit the old manifest."""
     tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
+    (tmp_path / "tmp" / "mod.py").write_text("")  # a Python repo: out/ later holds .js assets, which must not matter
     first = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
     assert first.returncode == 0, first.stdout + first.stderr
     assert os.path.isfile(os.path.join(tmp, "out", "manifests", "dead-code", "manifest.json")), "fixture setup: run 1 leaves a manifest"
@@ -2260,3 +2261,26 @@ def test_multi_index_refuses_roots(tmp_path):
     _, env = _multi_fixture(tmp, [])
     r = _multi_index(env, "20990101-000000", "--roots", "/x")
     assert r.returncode == 2 and "combines with nothing else" in r.stderr, r.stderr
+
+
+def test_python_only_audits_are_not_applicable_on_a_js_repo(tmp_path):
+    """#1751: dead-code, type-tightness and docstring-coverage read only Python.
+    On a repo of `.js` files the sweep never starts them: each gets a manifest
+    saying "not applicable: JavaScript", and the index shows that apart from a
+    clean pass. The fake `claude` writes nothing for these audits, so a run
+    that did start one would fail with "no manifest"."""
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
+    (tmp_path / "tmp" / "app.js").write_text("")
+    starts = str(tmp_path / "starts")
+    r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code,type-tightness,docstring-coverage,duplication",
+                                FAKE_CLAUDE_STARTS=starts)
+    assert "[type-tightness] FAILED" not in r.stdout and "[dead-code] FAILED" not in r.stdout, r.stdout
+    started = open(starts).read()
+    assert "/duplication" in started
+    assert not any(n in started for n in ("/dead-code", "/type-tightness", "/docstring-coverage")), started
+    for name in ("dead-code", "type-tightness", "docstring-coverage"):
+        manifest = json.load(open(os.path.join(tmp, "out", "manifests", name, "manifest.json")))
+        assert manifest["not_applicable"] == "JavaScript" and manifest["count"] == 0, manifest
+        assert manifest["headline"] == "not applicable: JavaScript"
+    index = open(os.path.join(tmp, "out", "collection", "index.html")).read()
+    assert index.count("NOT APPLICABLE: JavaScript") == 3, index

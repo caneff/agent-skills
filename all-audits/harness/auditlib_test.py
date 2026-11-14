@@ -48,3 +48,27 @@ def test_run_cli_prints_one_json_line_per_row(tmp_path, capsys):
     path.write_text("abc", encoding="utf-8")
     auditlib.run_cli(["audit.py", str(path)], lambda text: [{"n": len(text)}, {"n": 0}])
     assert capsys.readouterr().out.splitlines() == ['{"n": 3}', '{"n": 0}']
+
+
+def test_not_applicable_names_the_language_found(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.js").write_text("")
+    (tmp_path / "b.mjs").write_text("")
+    assert auditlib.not_applicable(str(tmp_path)) == "not applicable: JavaScript"
+
+
+def test_not_applicable_is_none_with_python_source(tmp_path):
+    (tmp_path / "a.js").write_text("")
+    (tmp_path / "b.py").write_text("")
+    assert auditlib.not_applicable(str(tmp_path)) is None
+
+
+def test_not_applicable_ignores_vendored_python_and_unknown_languages(tmp_path):
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "dep.py").write_text("")
+    (tmp_path / "a.js").write_text("")
+    assert auditlib.not_applicable(str(tmp_path)) == "not applicable: JavaScript"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "notes.txt").write_text("")
+    assert auditlib.not_applicable(str(empty)) is None, "no recognised language: nothing to call not applicable"

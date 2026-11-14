@@ -39,6 +39,42 @@ def walk_source(root, suffix=".py", skip=None):
     return sorted(paths)
 
 
+# Source suffixes the Python-only audits (dead-code, type-tightness,
+# docstring-coverage) name when a repo has none of their own language.
+OTHER_LANGUAGES = {
+    "JavaScript": (".js", ".mjs", ".cjs", ".jsx"),
+    "TypeScript": (".ts", ".tsx", ".mts", ".cts"),
+    "Rust": (".rs",),
+    "Go": (".go",),
+    "Java": (".java",),
+    "Ruby": (".rb",),
+    "Shell": (".sh",),
+}
+
+
+def not_applicable(root):
+    """`"not applicable: <language>"` when `root` holds no Python source but
+    does hold another recognised language's, else None.
+
+    An audit that only reads Python finds nothing on such a repo, and "nothing
+    found" reads as a clean pass (defect class 1). None also covers a repo
+    with no recognised source at all: with no language to name, the audit runs
+    as before rather than being waved off."""
+    if walk_source(root, ".py"):
+        return None
+    counts = {lang: len(walk_source(root, suffixes)) for lang, suffixes in OTHER_LANGUAGES.items()}
+    language, count = max(counts.items(), key=lambda kv: kv[1])
+    return f"not applicable: {language}" if count else None
+
+
+def applicable_cli(root):
+    """The `--applicable <repo>` answer: print `applicable` and return 0, or
+    print `not applicable: <language>` and return 3."""
+    verdict = not_applicable(root)
+    print(verdict or "applicable")
+    return 3 if verdict else 0
+
+
 def is_test_or_fixture(path):
     """True when `path` (a `/`-joined relative path) is not a worthy,
     testable source module: a test file itself (`test_*.py`, `*_test.py`,
@@ -79,6 +115,8 @@ def run_cli(argv, parse, nargs=1, usage=None):
     Reads `nargs` file arguments (or stdin when `nargs == 1` and none is
     given), calls `parse(*contents)`, and prints one JSON line per row.
     """
+    if argv[1:2] == ["--applicable"] and len(argv) == 3:
+        sys.exit(applicable_cli(argv[2]))
     if nargs == 1:
         text = sys.stdin.read() if len(argv) < 2 else open(argv[1], encoding="utf-8").read()
         args = (text,)
@@ -103,7 +141,9 @@ def main(argv):
     if argv[1:2] == ["--write-json-mirror"]:
         write_json_mirror(argv[2])
         return
-    print("usage: auditlib.py --write-json-mirror <path>", file=sys.stderr)
+    if argv[1:2] == ["--applicable"] and len(argv) == 3:
+        sys.exit(applicable_cli(argv[2]))
+    print("usage: auditlib.py --write-json-mirror <path> | --applicable <repo>", file=sys.stderr)
     sys.exit(1)
 
 
