@@ -209,6 +209,46 @@ def _first_text(obj: dict) -> str | None:
     return None
 
 
+def _parse_stamp(ts) -> tuple[datetime, str] | None:
+    """(aware time, the text it came from) of one transcript timestamp, None when it does not parse."""
+    if not isinstance(ts, str):
+        return None
+    try:
+        when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (when if when.tzinfo else when.replace(tzinfo=timezone.utc), ts)
+
+
+def _readable_usage(msg: dict) -> dict | None:
+    """The usage block of an assistant message when every token kind in it is an int and input and
+    output are present, else None."""
+    u = msg.get("usage")
+    if isinstance(u, dict) and all(isinstance(u.get(_USAGE_FIELDS[k], 0), int) for k in TOKEN_KINDS) \
+            and all(_USAGE_FIELDS[k] in u for k in ("input", "output")):
+        return u
+    return None
+
+
+def _transcript_tokens(per_id: dict[str, dict], lost: int, no_usage: int) -> dict:
+    why = ([f"{lost} unreadable line(s) in the transcript"] if lost else []) + (
+        [f"{no_usage} assistant message(s) with no readable usage"] if no_usage and per_id else [])
+    if not per_id and not lost:
+        why = ["transcript has no usage block"]
+    if why:
+        return {"status": "unknown", "reason": "; ".join(why)}
+    return {"status": "known", **{k: sum(m[k] for m in per_id.values()) for k in TOKEN_KINDS}}
+
+
+def _transcript_wall(stamps: list[tuple[datetime, str]], lost: int, bad_stamps: int) -> dict:
+    if lost or bad_stamps or not stamps:
+        return {"status": "unknown", "reason": (
+            f"{lost} unreadable line(s) in the transcript" if lost else
+            f"{bad_stamps} timestamp(s) do not parse" if bad_stamps else "transcript has no readable timestamp")}
+    lo, hi = min(stamps), max(stamps)
+    return {"status": "known", "start": lo[1], "end": hi[1], "seconds": round((hi[0] - lo[0]).total_seconds(), 3)}
+
+
 def read_transcript(path: Path) -> dict:
     """The first user message, model, token totals and wall clock of one transcript.
     A streamed message is written as several lines sharing an id, each with the usage so
@@ -227,12 +267,11 @@ def read_transcript(path: Path) -> dict:
         if obj is None:
             lost += 1
             continue
-        ts = obj.get("timestamp")
-        if isinstance(ts, str):
-            try:
-                when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                stamps.append((when if when.tzinfo else when.replace(tzinfo=timezone.utc), ts))
-            except ValueError:
+        if isinstance(obj.get("timestamp"), str):
+            stamp = _parse_stamp(obj["timestamp"])
+            if stamp:
+                stamps.append(stamp)
+            else:
                 bad_stamps += 1
         if first is None and obj.get("type") == "user":
             first = _first_text(obj)
@@ -241,29 +280,16 @@ def read_transcript(path: Path) -> dict:
             continue
         if isinstance(msg.get("model"), str):
             models[msg["model"]] += 1
-        u = msg.get("usage")
-        if isinstance(u, dict) and all(isinstance(u.get(_USAGE_FIELDS[k], 0), int) for k in TOKEN_KINDS) \
-                and all(_USAGE_FIELDS[k] in u for k in ("input", "output")):
-            mine = per_id.setdefault(str(msg.get("id") or f"line{n}"), dict.fromkeys(TOKEN_KINDS, 0))
-            for k in TOKEN_KINDS:
-                mine[k] = max(mine[k], u.get(_USAGE_FIELDS[k], 0))
-        else:
+        u = _readable_usage(msg)
+        if u is None:
             no_usage += 1
-    why = ([f"{lost} unreadable line(s) in the transcript"] if lost else []) + (
-        [f"{no_usage} assistant message(s) with no readable usage"] if no_usage and per_id else [])
-    if not per_id and not lost:
-        why = ["transcript has no usage block"]
-    tokens = {"status": "unknown", "reason": "; ".join(why)} if why else \
-        {"status": "known", **{k: sum(m[k] for m in per_id.values()) for k in TOKEN_KINDS}}
-    if lost or bad_stamps or not stamps:
-        wall = {"status": "unknown", "reason": (
-            f"{lost} unreadable line(s) in the transcript" if lost else
-            f"{bad_stamps} timestamp(s) do not parse" if bad_stamps else "transcript has no readable timestamp")}
-    else:
-        lo, hi = min(stamps), max(stamps)
-        wall = {"status": "known", "start": lo[1], "end": hi[1], "seconds": round((hi[0] - lo[0]).total_seconds(), 3)}
+            continue
+        mine = per_id.setdefault(str(msg.get("id") or f"line{n}"), dict.fromkeys(TOKEN_KINDS, 0))
+        for k in TOKEN_KINDS:
+            mine[k] = max(mine[k], u.get(_USAGE_FIELDS[k], 0))
     return {"first": first, "model": models.most_common(1)[0][0] if models else None,
-            "tokens": tokens, "wall_clock": wall}
+            "tokens": _transcript_tokens(per_id, lost, no_usage),
+            "wall_clock": _transcript_wall(stamps, lost, bad_stamps)}
 
 
 def attribute(meta: dict, project: str, first: str | None) -> tuple[dict | None, str]:
@@ -729,6 +755,52 @@ def _finding_entry(fid, severity, joined: Joined, file, title) -> dict:
             "outcome_status": joined.status, "partial": joined.partial, "file": file, "title": title}
 
 
+def _read_codex_record(path: Path, ticket: int, phase: str) -> dict | None:
+    """The record at `path` when it is readable and agrees with its file name's ticket and phase
+    and carries an int exit status, else None."""
+    try:
+        rec = json.loads(path.read_text())
+    except (ValueError, OSError):
+        return None
+    if isinstance(rec, dict) and isinstance(rec.get("status"), int) and not isinstance(rec["status"], bool) \
+            and rec.get("ticket") == ticket and rec.get("phase") == phase:
+        return rec
+    return None
+
+
+def _join_codex_finding(labels: tuple, groups: list[str], dispositions: dict[str, dict[str, dict]],
+                        credited: dict[tuple, str], joined: set, phase: str, stem: str, facts: HarvestFacts,
+                        row_mappings: list[Mapping]) -> Joined:
+    """The outcome one Codex finding takes from the dispositions: a whole `codex-<phase>-<label>` id
+    or its two halves, credited to this record alone. No line, two labels naming it, or a line
+    another finding already took is `unknown`."""
+    # (label, group, the dispositions ids it takes): a whole id, or the two halves of a split one.
+    hits = []
+    for label in labels:
+        fid = f"codex-{phase}-{label}"
+        for g in groups:
+            if fid in dispositions[g]:
+                hits.append((label, g, (fid,)))
+            elif fid + "a" in dispositions[g] or fid + "b" in dispositions[g]:
+                hits.append((label, g, (fid + "a", fid + "b")))
+    if not hits:
+        return Joined.unknown(f"no dispositions line codex-{phase}-{labels[0]} or -{labels[1]}")
+    if len(hits) > 1:
+        return Joined.unknown(f"labels {' and '.join(h[0] for h in hits)} both name this finding")
+    label, g, ids = hits[0]
+    taken = [i for i in ids if (g, i) in credited]
+    if taken:
+        return Joined.unknown(f"{taken[0]} already credits {credited[(g, taken[0])]}")
+    credited.update({(g, i): stem for i in ids})
+    joined.update((g, i) for i in ids)
+    outcome = (normalise_outcome(dispositions[g][ids[0]]) if len(ids) == 1
+               else _split_outcome(f"codex-{phase}-{label}", dispositions[g]))
+    if not label.isdigit():
+        facts.tally(Mapping(f"codex label {label[0]}<k>", "k-th finding of that severity"), row_mappings)
+    facts.tally(outcome.mapping, row_mappings)
+    return outcome
+
+
 def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dict[str, dict[str, dict]],
                   joined: set, facts: HarvestFacts) -> list[dict]:
     """One row per `codex-adversarial-<n>-<phase>.json` in a repo's cache directory. Findings
@@ -745,12 +817,8 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
         if not m:
             continue
         where = f"{repo_dir.name}/{name}"
-        try:
-            rec = json.loads((repo_dir / name).read_text())
-        except (ValueError, OSError):
-            rec = None
-        if not (isinstance(rec, dict) and isinstance(rec.get("status"), int) and not isinstance(rec["status"], bool)
-                and rec.get("ticket") == int(m.group(1)) and rec.get("phase") == m.group(2)):
+        rec = _read_codex_record(repo_dir / name, int(m.group(1)), m.group(2))
+        if rec is None:
             facts.skipped.append(f"{where}: record is unreadable or disagrees with its file name")
             continue
         phase = _CODEX_PHASES.get(rec["phase"])
@@ -772,33 +840,8 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
         else:
             groups = _ticket_groups(dispositions, ticket)
             for k, (f, labels) in enumerate(zip(parsed or [], _codex_labels(parsed or [])), 1):
-                # (label, group, the dispositions ids it takes): a whole id, or the two halves of a split one.
-                hits = []
-                for label in labels:
-                    fid = f"codex-{phase}-{label}"
-                    for g in groups:
-                        if fid in dispositions[g]:
-                            hits.append((label, g, (fid,)))
-                        elif fid + "a" in dispositions[g] or fid + "b" in dispositions[g]:
-                            hits.append((label, g, (fid + "a", fid + "b")))
-                if len(hits) == 1:
-                    label, g, ids = hits[0]
-                    taken = [i for i in ids if (g, i) in credited]
-                    if taken:
-                        joined_outcome = Joined.unknown(f"{taken[0]} already credits {credited[(g, taken[0])]}")
-                    else:
-                        credited.update({(g, i): stem for i in ids})
-                        joined.update((g, i) for i in ids)
-                        joined_outcome = (normalise_outcome(dispositions[g][ids[0]]) if len(ids) == 1
-                                          else _split_outcome(f"codex-{phase}-{label}", dispositions[g]))
-                        if not label.isdigit():
-                            facts.tally(Mapping(f"codex label {label[0]}<k>", "k-th finding of that severity"),
-                                        row_mappings)
-                        facts.tally(joined_outcome.mapping, row_mappings)
-                elif hits:
-                    joined_outcome = Joined.unknown(f"labels {' and '.join(h[0] for h in hits)} both name this finding")
-                else:
-                    joined_outcome = Joined.unknown(f"no dispositions line codex-{phase}-{labels[0]} or -{labels[1]}")
+                joined_outcome = _join_codex_finding(labels, groups, dispositions, credited, joined, phase,
+                                                      stem, facts, row_mappings)
                 findings.append(_finding_entry(f"codex-{phase}-{k}", f["severity"], joined_outcome, f["file"], f["title"]))
             if findings:
                 sources += [f"{repo_dir.name}/dispositions-{g}.jsonl" for g in groups]
@@ -823,14 +866,8 @@ def _claim_row_id(seen: set[str], repo_dir: str, repo: str, ticket, row_type: st
     return row_id, run_id
 
 
-def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = None,
-                  only: tuple[str, int] | None = None, held: dict[str, str] | None = None) -> tuple[list[dict], dict]:
-    """(rows, review-file facts) for a whole cache tree. `transcripts` is the tree the
-    Claude reviewers' cost is read from; None means there is none, for the reason `missing`.
-    `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
-    what `append` does, so its rows are the ones a full harvest writes. `held` maps each
-    transcript an appended row already counts to that row's id: no other row is costed from it
-    (#1304)."""
+def _select_pairs(cache: Path, only: tuple[str, int] | None) -> list[tuple[str, str]]:
+    """Every (cache directory, file name) a harvest reads; `only` narrows to one repo's ticket."""
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
     codex_pairs = find_codex_records(cache)
     if only:
@@ -840,7 +877,106 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
         raise ValueError(f"no findings or dispositions sidecars or Codex records under {cache}")
     if only:  # a cache directory name is literal; only a transcript's project directory loses `_` and `.`
         pairs = [(d, n) for d, n in pairs if fold_repo(d) == fold_repo(only[0]) and only[1] in _name_tickets(n)]
-    pairs += codex_pairs
+    return pairs + codex_pairs
+
+
+def _read_dispositions(cache: Path, repo_dir: str, names: list[str], facts: HarvestFacts) -> dict[str, dict[str, dict]]:
+    """Pass 1: each `dispositions-<group>.jsonl` of one cache directory, as {group: {id: line}}."""
+    dispositions: dict[str, dict[str, dict]] = {}
+    for name in sorted(names):
+        if not name.startswith("dispositions-"):
+            continue
+        group = _dispositions_group(name)
+        if group is None:
+            facts.unharvested.append(f"{repo_dir}/{name}")
+            continue
+        table: dict[str, dict] = {}
+        for d in _read_sidecar(cache / repo_dir / name, facts.skipped)[0]:
+            if not isinstance(d.get("id"), str):
+                facts.skipped.append(f"{repo_dir}/{name}: disposition without a string id")
+            elif d["id"] in table:
+                facts.skipped.append(f"{repo_dir}/{name}: duplicate disposition id {d['id']} (the later line wins)")
+                table[d["id"]] = d
+            else:
+                table[d["id"]] = d
+        dispositions[group] = table
+    return dispositions
+
+
+def _findings_file_status(raw_findings: list, lost: int) -> dict:
+    if lost:
+        return {"status": "unknown", "reason": f"{lost} unreadable line(s) in the sidecar"}
+    if not raw_findings:
+        return {"status": "unknown", "reason": "sidecar is empty: nothing found, or nothing written"}
+    return {"status": "known"}
+
+
+def _harvest_findings_file(cache: Path, repo_dir: str, repo: str, name: str, parsed: tuple,
+                           dispositions: dict[str, dict[str, dict]], joined: set, seen_finding_ids: set,
+                           seen_ids: set[str], facts: HarvestFacts) -> list[dict]:
+    """Pass 2: the rows of one `findings-*` sidecar, one per (type, round) its finding ids name,
+    each finding joined to its disposition."""
+    axis, group, name_round = parsed
+    tickets = [int(t) for t in group.split("-")]
+    # A mapping the file name carries is every row's of this file, and counted once.
+    file_mappings = [Mapping("verify", "verification (axis in filename)")] if axis == "verify" else []
+    facts.mappings.update(file_mappings)
+    base = "verification" if axis in ("verify", "verification") else axis
+    path = cache / repo_dir / name
+    raw_findings, lost = _read_sidecar(path, facts.skipped)
+    by_type: dict[tuple[str, int], list] = {(base, name_round): []}
+    file_dispositions = dispositions.get(group)
+    row_mappings: dict[tuple[str, int], list] = {}
+    for raw in raw_findings:
+        if not all(isinstance(raw.get(k), str) and raw[k] for k in ("id", "severity", "file", "title")):
+            facts.skipped.append(f"{repo_dir}/{name}: finding without id/severity/file/title")
+            lost += 1
+            continue
+        if (group, raw["id"]) in seen_finding_ids:
+            facts.skipped.append(f"{repo_dir}/{name}: duplicate finding id {raw['id']} for ticket {group} "
+                                 "(both kept; they join the same disposition)")
+        seen_finding_ids.add((group, raw["id"]))
+        row_type = "over-engineering" if base == "standards" and _OE_ID_RE.match(raw["id"]) else base
+        rm = _ROUND_ID_RE.match(raw["id"])
+        key = (row_type, int(rm.group(1)) if rm else name_round)
+        if file_dispositions is None:
+            joined_outcome = Joined.unknown(f"no dispositions file for ticket {group}")
+        elif raw["id"] not in file_dispositions:
+            joined_outcome = Joined.unknown(f"no disposition line for {raw['id']}")
+        else:
+            joined.add((group, raw["id"]))
+            joined_outcome = normalise_outcome(file_dispositions[raw["id"]])
+        facts.tally(joined_outcome.mapping, row_mappings.setdefault(key, []))
+        by_type.setdefault(key, []).append(_finding_entry(
+            raw["id"], raw["severity"], joined_outcome, raw["file"], raw["title"]))
+    # A file named for round 1 whose every id says round 2 holds no round-1 run.
+    base_key = (base, name_round)
+    other_rounds = [row_key[1] for row_key in by_type if row_key != base_key]
+    if not by_type[base_key] and other_rounds and name_round not in other_rounds:
+        del by_type[base_key]
+    findings_status = _findings_file_status(raw_findings, lost)
+    rows = []
+    for (row_type, rnd), findings in by_type.items():
+        row_id, run_id = _claim_row_id(seen_ids, repo_dir, repo, tickets[0], row_type, rnd, path.stem)
+        sources = [f"{repo_dir}/{name}"]
+        if file_dispositions is not None:
+            sources.append(f"{repo_dir}/dispositions-{group}.jsonl")
+        rows.append(new_row(
+            row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources,
+            mappings=file_mappings + row_mappings.get((row_type, rnd), [])))
+    return rows
+
+
+def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = None,
+                  only: tuple[str, int] | None = None, held: dict[str, str] | None = None) -> tuple[list[dict], dict]:
+    """(rows, review-file facts) for a whole cache tree. `transcripts` is the tree the
+    Claude reviewers' cost is read from; None means there is none, for the reason `missing`.
+    `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
+    what `append` does, so its rows are the ones a full harvest writes. `held` maps each
+    transcript an appended row already counts to that row's id: no other row is costed from it
+    (#1304). Three passes per cache directory: dispositions, findings files, Codex records;
+    then the transcripts cost the rows."""
+    pairs = _select_pairs(cache, only)
     by_repo: dict[str, list[str]] = {}
     for repo_dir, name in pairs:
         by_repo.setdefault(repo_dir, []).append(name)
@@ -851,24 +987,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     orphans: list[str] = []
     for repo_dir in sorted(by_repo):
         repo = fold_repo(repo_dir)
-        dispositions: dict[str, dict[str, dict]] = {}
-        for name in sorted(by_repo[repo_dir]):
-            if not name.startswith("dispositions-"):
-                continue
-            group = _dispositions_group(name)
-            if group is None:
-                facts.unharvested.append(f"{repo_dir}/{name}")
-                continue
-            table: dict[str, dict] = {}
-            for d in _read_sidecar(cache / repo_dir / name, facts.skipped)[0]:
-                if not isinstance(d.get("id"), str):
-                    facts.skipped.append(f"{repo_dir}/{name}: disposition without a string id")
-                elif d["id"] in table:
-                    facts.skipped.append(f"{repo_dir}/{name}: duplicate disposition id {d['id']} (the later line wins)")
-                    table[d["id"]] = d
-                else:
-                    table[d["id"]] = d
-            dispositions[group] = table
+        dispositions = _read_dispositions(cache, repo_dir, by_repo[repo_dir], facts)
         joined: set[tuple[str, str]] = set()
         seen_finding_ids: set[tuple[str, str]] = set()
         for name in sorted(by_repo[repo_dir]):
@@ -878,59 +997,8 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
             if parsed is None:
                 facts.unharvested.append(f"{repo_dir}/{name}")
                 continue
-            axis, group, name_round = parsed
-            tickets = [int(t) for t in group.split("-")]
-            # A mapping the file name carries is every row's of this file, and counted once.
-            file_mappings = [Mapping("verify", "verification (axis in filename)")] if axis == "verify" else []
-            facts.mappings.update(file_mappings)
-            base = "verification" if axis in ("verify", "verification") else axis
-            path = cache / repo_dir / name
-            raw_findings, lost = _read_sidecar(path, facts.skipped)
-            by_type: dict[tuple[str, int], list] = {(base, name_round): []}
-            file_dispositions = dispositions.get(group)
-            row_mappings: dict[tuple[str, int], list] = {}
-            for raw in raw_findings:
-                if not all(isinstance(raw.get(k), str) and raw[k] for k in ("id", "severity", "file", "title")):
-                    facts.skipped.append(f"{repo_dir}/{name}: finding without id/severity/file/title")
-                    lost += 1
-                    continue
-                if (group, raw["id"]) in seen_finding_ids:
-                    facts.skipped.append(f"{repo_dir}/{name}: duplicate finding id {raw['id']} for ticket {group} "
-                                   "(both kept; they join the same disposition)")
-                seen_finding_ids.add((group, raw["id"]))
-                row_type = "over-engineering" if base == "standards" and _OE_ID_RE.match(raw["id"]) else base
-                rm = _ROUND_ID_RE.match(raw["id"])
-                key = (row_type, int(rm.group(1)) if rm else name_round)
-                if file_dispositions is None:
-                    joined_outcome = Joined.unknown(f"no dispositions file for ticket {group}")
-                elif raw["id"] not in file_dispositions:
-                    joined_outcome = Joined.unknown(f"no disposition line for {raw['id']}")
-                else:
-                    joined.add((group, raw["id"]))
-                    joined_outcome = normalise_outcome(file_dispositions[raw["id"]])
-                facts.tally(joined_outcome.mapping, row_mappings.setdefault(key, []))
-                by_type.setdefault(key, []).append(_finding_entry(
-                    raw["id"], raw["severity"], joined_outcome, raw["file"], raw["title"]))
-            # A file named for round 1 whose every id says round 2 holds no round-1 run.
-            base_key = (base, name_round)
-            other_rounds = [row_key[1] for row_key in by_type if row_key != base_key]
-            if not by_type[base_key] and other_rounds and name_round not in other_rounds:
-                del by_type[base_key]
-            if lost:
-                findings_status = {"status": "unknown", "reason": f"{lost} unreadable line(s) in the sidecar"}
-            elif not raw_findings:
-                findings_status = {"status": "unknown",
-                                   "reason": "sidecar is empty: nothing found, or nothing written"}
-            else:
-                findings_status = {"status": "known"}
-            for (row_type, rnd), findings in by_type.items():
-                row_id, run_id = _claim_row_id(seen_ids, repo_dir, repo, tickets[0], row_type, rnd, path.stem)
-                sources = [f"{repo_dir}/{name}"]
-                if file_dispositions is not None:
-                    sources.append(f"{repo_dir}/dispositions-{group}.jsonl")
-                rows.append(new_row(
-                    row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources,
-                    mappings=file_mappings + row_mappings.get((row_type, rnd), [])))
+            rows += _harvest_findings_file(cache, repo_dir, repo, name, parsed, dispositions, joined,
+                                           seen_finding_ids, seen_ids, facts)
         for r in harvest_codex(cache / repo_dir, repo, by_repo[repo_dir], dispositions, joined, facts):
             r["row_id"], r["run_id"] = _claim_row_id(seen_ids, repo_dir, repo, r["ticket"], r["type"], r["round"],
                                                      r["run_id"])
@@ -1440,6 +1508,36 @@ def _write_appended(args, mine: list[dict], refresh: list[dict] = ()) -> int:
     return 0
 
 
+def _harvest_for_append(args) -> list[dict]:
+    """The rows a harvest writes for `args.repo` #`args.ticket`; FileNotFoundError when the
+    transcripts tree is missing."""
+    transcripts = args.transcripts or DEFAULT_TRANSCRIPTS
+    if not transcripts.is_dir():
+        raise FileNotFoundError(f"transcripts tree not found: {transcripts}")
+    return harvest_cache(args.cache, transcripts, only=(args.repo, args.ticket))[0]
+
+
+def _findings_source(row: dict) -> str | None:
+    """The findings sidecar a row was harvested from, None when it has none."""
+    return next((x for x in row["status"]["sources"] if Path(x).name.startswith("findings-")), None)
+
+
+def _stamp_appended_rows(cache: Path, mine: list[dict]) -> str | None:
+    """Refuse (return why) a row whose cost is unknown for a verification row; otherwise date each
+    row to the sidecar it was appended for (#1555), so a later dispatch's gate can tell this wave's
+    row from an earlier one's. None when every row is stamped."""
+    for r in mine:
+        if (why := _unknown_cost_why(r)):
+            return f"{r['row_id']}: {why}"
+        source = _findings_source(r)
+        if source:
+            try:
+                r["sidecar_sha256"] = sidecar_digest(cache / source)
+            except OSError as e:
+                return f"{source} is unreadable: {e}"
+    return None
+
+
 def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
@@ -1464,33 +1562,19 @@ def cmd_append(args) -> int:
         return cmd_append_codex(args)
     args.cache = args.cache or REVIEWS_ROOT
     try:
-        transcripts = args.transcripts or DEFAULT_TRANSCRIPTS
-        if not transcripts.is_dir():
-            raise FileNotFoundError(f"transcripts tree not found: {transcripts}")
-        rows, _ = harvest_cache(args.cache, transcripts, only=(args.repo, args.ticket))
+        rows = _harvest_for_append(args)
     except (FileNotFoundError, ValueError) as e:
         print(f"review_ledger append: {e}", file=sys.stderr)
         return 2
     want = {args.type} | ({"over-engineering"} if args.type == "standards" else set())
     mine = [r for r in rows if r["type"] in want and r["round"] == args.round]
-    if not any(r["type"] == args.type and any(Path(x).name.startswith("findings-") for x in r["status"]["sources"])
-               for r in mine):
+    if not any(r["type"] == args.type and _findings_source(r) for r in mine):
         print(f"review_ledger append: no findings sidecar for {args.type} round {args.round} of "
               f"{args.repo} #{args.ticket} under {args.cache}", file=sys.stderr)
         return 2
-    for r in mine:
-        if (why := _unknown_cost_why(r)):
-            print(f"review_ledger append: {r['row_id']}: {why}", file=sys.stderr)
-            return 2
-        # Date the row to the sidecar it was appended for (#1555), so a later dispatch's gate can
-        # tell this wave's row from an earlier one's.
-        source = next((x for x in r["status"]["sources"] if Path(x).name.startswith("findings-")), None)
-        if source:
-            try:
-                r["sidecar_sha256"] = sidecar_digest(args.cache / source)
-            except OSError as e:
-                print(f"review_ledger append: {source} is unreadable: {e}", file=sys.stderr)
-                return 2
+    if (failed := _stamp_appended_rows(args.cache, mine)):
+        print(f"review_ledger append: {failed}", file=sys.stderr)
+        return 2
     refresh = [r for r in rows if args.type == "verification" and r["round"] == args.round
                and r["type"] in REVIEWER_TYPES and r["type"] != "verification"]
     return _write_appended(args, mine, refresh)
