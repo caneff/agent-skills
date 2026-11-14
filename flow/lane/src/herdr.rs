@@ -1,5 +1,4 @@
-//! Typed `herdr agent list` and `herdr workspace list` output, standing in
-//! for the bash port's `jq` filters over the same JSON, plus the shared
+//! Typed `herdr agent list` and `herdr workspace list` output, plus the shared
 //! timeout bound for a plain herdr query — the two binaries that call herdr
 //! read that bound from here rather than each keeping their own copy.
 
@@ -10,7 +9,7 @@ use std::time::Duration;
 /// list): a herdr server that answers at all answers within this, so a hang
 /// past it means the subprocess itself is stuck, not that the work is
 /// legitimately slow. One crate-level const so `implement-dispatch` and
-/// `resolve-controller` can't drift apart on it (#1011 S4).
+/// `resolve-controller` can't drift apart on it.
 pub const HERDR_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Deserialize)]
@@ -38,7 +37,6 @@ struct AgentSession {
 }
 
 impl Agent {
-    /// `.name // .agent`.
     pub fn name(&self) -> &str {
         self.name.as_deref().or(self.agent.as_deref()).unwrap_or("")
     }

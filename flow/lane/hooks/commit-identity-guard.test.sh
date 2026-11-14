@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test for the commit-identity guard (#934): a commit whose author or
+# Test for the commit-identity guard: a commit whose author or
 # committer email is not the checkout's configured user.email is refused at
 # commit time. Runs the real hook under real `git commit` in a scratch repo.
 set -uo pipefail

@@ -1,4 +1,4 @@
-//! Controller→worker pairs (#964): `implement-dispatch` appends one record
+//! Controller→worker pairs: `implement-dispatch` appends one record
 //! per worker it starts, keyed to the controller's own session pid, so a
 //! `SessionStart` hook can restore what a `/clear` wipes from context. A
 //! `/clear` kills the context, not the process — the session's pid, and this
@@ -31,7 +31,7 @@ pub struct WorkerRecord {
     /// call failed — never fails the write over a clock it can't reach.
     pub dispatched_at: String,
     /// The controller session's own `/proc/<pid>/stat` starttime at dispatch
-    /// time (#964 fix round 1, Codex high): pids are small and get reused,
+    /// time: pids are small and get reused,
     /// especially across a WSL restart, so a stale record from a dead
     /// controller must never restore into whatever session now holds that
     /// pid. `controller-restore` drops any record whose value here does not
@@ -67,7 +67,7 @@ pub fn now_iso8601() -> String {
 ///
 /// Under the sidecar's exclusive lock (`lock`), the whole file is read, the
 /// line added, and the result published as a complete replacement
-/// (`publish`) rather than appended in place (#1101, PR #1099 Codex CX3-1):
+/// (`publish`) rather than appended in place:
 /// an in-place `write_all` cut off after a prefix leaves an unterminated line
 /// that the next append's record merges into, and `read` then skips both. A
 /// replacement cut off anywhere leaves the old file whole.
@@ -96,14 +96,14 @@ fn add_line(path: &Path, line: &str) -> std::io::Result<()> {
 /// No file at all reads as no workers, the ordinary case for a session that
 /// has never dispatched one.
 ///
-/// Takes the sidecar's lock shared before reading (#1044), so a read waits
+/// Takes the sidecar's lock shared before reading, so a read waits
 /// out any writer holding it exclusively. Every write now replaces the file
 /// by rename, so no reader can see a torn one either way; the lock is what
 /// orders a read against a read-modify-publish in progress. A lock that
 /// cannot be taken falls back to reading unlocked rather than losing every
 /// worker over a lock that failed for an unrelated reason — noted on stderr
 /// rather than swallowed outright, since a silent fallback here is the same
-/// class of failure (#1044 review, S1/P1/C2) the lock exists to remove:
+/// class of failure the lock exists to remove:
 /// nothing would otherwise distinguish "read while the lock could not be
 /// taken" from "no workers were ever dispatched." No lock file is created for
 /// a sidecar that does not exist.
@@ -137,7 +137,7 @@ pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
 /// The lock file beside a sidecar, `<pid>.workers.jsonl.lock`. The lock
 /// lives here rather than on the sidecar's own handle because `publish`
 /// swaps the sidecar's inode by rename: a lock on the old inode would not
-/// exclude a writer that opens the new one (#1101). This file is never
+/// exclude a writer that opens the new one. This file is never
 /// replaced or removed, so every holder locks the same inode.
 fn lock_path(sidecar: &Path) -> PathBuf {
     sibling(sidecar, "lock")
@@ -158,7 +158,7 @@ fn open_lock(sidecar: &Path) -> std::io::Result<std::fs::File> {
 /// The sidecar's exclusive lock, held until the returned handle drops. Every
 /// writer — `append`, `remove_workspace` and adoption's move — holds it
 /// across its whole read-modify-publish, so no write lands between another's
-/// read and its publish and is lost to it (#964 fix round 1, Codex high).
+/// read and its publish and is lost to it.
 fn lock(sidecar: &Path) -> std::io::Result<std::fs::File> {
     let f = open_lock(sidecar)?;
     f.lock()?;
@@ -178,7 +178,7 @@ fn non_empty_lines(raw: &str) -> Vec<&str> {
 }
 
 /// Normalizes a workspace path for storage in, or a query against, a
-/// `WorkerRecord` (#1040). `implement-dispatch` builds this path itself with
+/// `WorkerRecord`. `implement-dispatch` builds this path itself with
 /// `PathBuf::join`; `merge-cleanup` reads one back from `git worktree list`.
 /// The two are independent construction sites, and a symlinked repo root
 /// makes them spell the same directory two different ways, so
@@ -204,7 +204,7 @@ pub fn canonical_workspace_path(path: &str) -> String {
 /// a step `merge-cleanup` can fail over.
 ///
 /// Holds the sidecar's exclusive lock (`lock`) across the whole
-/// read-filter-publish (#964 fix round 1, Codex high), so an `append` cannot
+/// read-filter-publish, so an `append` cannot
 /// land between the read and the publish and be discarded by it; the lock
 /// releases at the end of each loop iteration. A file this run cannot lock,
 /// read or publish is skipped rather than erroring, matching every other
@@ -231,7 +231,7 @@ pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
 
 /// Replaces the whole of a locked sidecar with `lines`, one record each, so
 /// that a death, kill or full disk at any point leaves either the old file or
-/// the new one, never a truncated one (#1101): the new contents go to
+/// the new one, never a truncated one: the new contents go to
 /// `<sidecar>.tmp` and replace the sidecar through `atomic::replace`. The caller
 /// holds `lock`, which is what makes one fixed temp name safe; a temp file a
 /// crash left behind is truncated by the next publish.
@@ -281,12 +281,12 @@ fn sidecars(home: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// Whether the controller that wrote `record` under `pid` is gone (#1098):
+/// Whether the controller that wrote `record` under `pid` is gone:
 /// the pid's `/proc` entry does not exist, or it does with a starttime other
 /// than the record's — a reused pid, an unrelated session. Anything short of
 /// that proof is not orphaned: a record with no `proc_start` under a live
 /// pid, a `/proc` entry that exists but cannot be read, a sidecar named by no
-/// pid at all (#1098 review S2). Two controllers for one worker is the
+/// pid at all. Two controllers for one worker is the
 /// failure adoption must never cause, so an absent answer never reads as
 /// dead.
 fn is_orphaned(pid: &str, record: &WorkerRecord) -> bool {
@@ -303,7 +303,7 @@ fn is_orphaned(pid: &str, record: &WorkerRecord) -> bool {
 /// A workspace already torn down has nothing left to adopt, and a worker a
 /// live controller holds is no orphan whatever stale copies say: adoption
 /// lands the record before removing the dead copy, so a crash between the
-/// two leaves both (#1098 Codex [high]).
+/// two leaves both.
 pub fn orphans(home: &Path) -> Vec<(String, WorkerRecord)> {
     let all: Vec<(String, WorkerRecord)> =
         sidecars(home).into_iter().flat_map(|(pid, _)| read(home, &pid).into_iter().map(move |r| (pid.clone(), r))).collect();

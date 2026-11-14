@@ -1,7 +1,6 @@
 //! Replace a file so a reader, or a process that dies partway, sees the old
-//! contents or the new ones and never a mix (#1254, folding the three
-//! temp-and-rename writers the crate had grown: the worker sidecar, the
-//! trust seed and the installed hooks).
+//! contents or the new ones and never a mix. One writer for the
+//! worker sidecar, the trust seed and the installed hooks.
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -15,7 +14,7 @@ use std::path::Path;
 ///
 /// The rename has landed by the time the directory is synced, so a failed
 /// directory fsync is noted on stderr rather than returned: a caller told a
-/// landed write failed acts on a false answer (#1101 review C2).
+/// landed write failed acts on a false answer.
 pub fn replace(path: &Path, tmp: &Path, bytes: &[u8], mode: Option<u32>, before_write: impl FnOnce(&mut std::fs::File)) -> std::io::Result<()> {
     let written = (|| {
         let mut f = std::fs::File::create(tmp)?;

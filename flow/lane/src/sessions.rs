@@ -118,7 +118,7 @@ pub fn find_controller_session(home: &Path, start_ancestor: i32) -> Option<(Stri
 
 /// The pid of the nearest live ancestor session record from `start_ancestor` —
 /// what a `SessionStart` hook uses to find its own session's sibling files
-/// (`<pid>.workers.jsonl`, #964), since the hook process's own pid is not the
+/// (`<pid>.workers.jsonl`), since the hook process's own pid is not the
 /// Claude session's pid, only an ancestor of it. Unlike `find_controller_session`,
 /// this accepts a record with no `name` — the hook needs its own pid whether
 /// or not the session has been named yet.
@@ -144,13 +144,13 @@ pub fn find_live_by_name(home: &Path, name: &str) -> Option<LiveSession> {
 /// The live, named registry session carrying Claude sessionId `id`, the second
 /// hop of a herdr agent name's resolution. `None` when no live record carries
 /// that id or the record has no name. Deliberately not built on
-/// `find_live_by_session_id` (#964 correctness C7): that returns the first
+/// `find_live_by_session_id`: that returns the first
 /// live record matching `id` regardless of whether it has a name, so if two
 /// live records ever shared a sessionId — a race between an old record not
 /// yet cleaned up and a new one — composing through it could return `None`
 /// on an unnamed first match while a later match with the same id has a real
-/// name. This scans for the first record that is both a match and named, the
-/// same single pass the pre-#964 version made.
+/// name. This scans for the first record that is both a match and named, in
+/// one pass.
 pub fn named_session_of(home: &Path, id: &str) -> Option<LiveSession> {
     if id.is_empty() {
         return None;
