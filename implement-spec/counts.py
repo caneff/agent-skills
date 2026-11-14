@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "multi-axis-code-review"))
 import runfile  # noqa: E402
-from review_cache import CacheDirError, cache_dir_for  # noqa: E402
+from review_cache import CacheDirError, repo_for_checkout  # noqa: E402
 
 
 def default_reviews_dir(checkout):
@@ -31,7 +31,10 @@ def default_reviews_dir(checkout):
     submodule or a `--separate-git-dir` checkout where the primary
     checkout's own name is not the key. `checkout` is `runfile.checkout_top`'s
     answer, so it is already a checkout of the repo the run targets."""
-    return str(cache_dir_for(checkout, runfile.clean_git_env()))
+    # Home is read at call time, as before #1774: `review_cache.REVIEWS_ROOT` is fixed at import,
+    # so a caller that sets HOME afterwards (the sidecar-name test) would not move it.
+    repo = repo_for_checkout(checkout, runfile.clean_git_env())
+    return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 
 
 def counts(run, reviews_dir, spec=None):
