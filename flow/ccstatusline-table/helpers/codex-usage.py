@@ -49,7 +49,6 @@ WINDOWS = ("primary", "secondary")
 
 
 def countdown(seconds: float) -> str:
-    """Leading unit only — `6d`, `3h`, `20m` — matching the Claude cell."""
     if seconds <= 0:
         return ""
     for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
@@ -81,7 +80,7 @@ def window(limit: object, now: float) -> str:
         return ""
     pct, resets = parsed
     if resets <= now:
-        return ""  # window already rolled over; the percentage is about nothing
+        return ""
     return " ".join(x for x in (f"{int(pct)}%", countdown(resets - now)) if x)
 
 
@@ -93,7 +92,6 @@ def cell(limits: dict | None, now: float) -> str:
 
 
 def read_cache(now: float) -> dict | None:
-    """Cached `primary`/`secondary` limits, or None if missing/stale."""
     try:
         data = json.loads(CACHE_PATH.read_text())
     except (OSError, ValueError):

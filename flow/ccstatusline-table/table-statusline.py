@@ -23,7 +23,6 @@ from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-# Dracula palette
 PURPLE, CYAN, GREEN, PINK = "BD93F9", "8BE9FD", "50FA7B", "FF79C6"
 ORANGE, YELLOW, FG = "FFB86C", "F1FA8C", "F8F8F2"
 RED = "FF5555"
@@ -37,7 +36,6 @@ CFG = Path(__file__).resolve().parent / "helpers"
 
 
 def run(cmd: list[str], stdin: bytes, cwd: str | None = None) -> str:
-    """Run a helper, feed it the session JSON, return its trimmed stdout."""
     try:
         out = subprocess.run(
             cmd, input=stdin, capture_output=True, timeout=1.5, cwd=cwd
@@ -152,7 +150,7 @@ def frame_color(tokens: int | None) -> str:
     if tokens is None:
         return ORANGE
     if tokens <= 0:
-        return PURPLE  # no data yet
+        return PURPLE
     if tokens >= 180_000:
         return RED
     if tokens >= 140_000:
@@ -187,7 +185,7 @@ def table(rows: list[list[tuple[str, str]]], frame: str) -> str:
 
 
 def write_usage_cache(data: object) -> None:
-    """Keep the `rate_limits` block for `multi-axis-code-review/claude-usage-gate.py` (#1436)."""
+    """Keep the `rate_limits` block for `multi-axis-code-review/claude-usage-gate.py`."""
     try:
         spec = importlib.util.spec_from_file_location("claude_usage", CFG / "claude-usage.py")
         mod = importlib.util.module_from_spec(spec)

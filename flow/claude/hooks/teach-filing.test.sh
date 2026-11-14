@@ -47,9 +47,7 @@ else
   echo "FAIL: search args were: $(paste -sd' ' "$STUB_ARGS")"; fails=1
 fi
 # The section is shown once per session; the search runs on every filing,
-# since its matches belong to the ticket being filed (#1409 story 6, and its
-# "the hook runs the open-issue search for the same component and returns the
-# matches").
+# since its matches belong to the ticket being filed.
 got=$(context "$hook" s1 'gh issue create --repo caneff/agent-skills --title "merge-cleanup: another" --body x')
 expect_has "second filing in the session still lists the matches" "$got" "#1365 merge-cleanup: repo-declared discardable paths"
 expect_lacks "second filing does not repeat the section" "$got" "${section[0]}"

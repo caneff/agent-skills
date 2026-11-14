@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude plan-usage cache (#1436): the status line's `rate_limits` block, kept for scripts.
+"""Claude plan-usage cache: the status line's `rate_limits` block, kept for scripts.
 
 Claude Code hands `rate_limits.five_hour` / `.seven_day` (`used_percentage`, `resets_at`
 epoch seconds) only to the status-line command, never to a script. `table-statusline.py`
@@ -41,7 +41,6 @@ def cache_path() -> Path:
 
 
 def valid_window(win: object) -> tuple[float, float] | None:
-    """(used_percentage, resets_at) of a well-formed window, else None."""
     if not isinstance(win, dict):
         return None
     pct, resets = win.get("used_percentage"), win.get("resets_at")
@@ -54,7 +53,6 @@ def valid_window(win: object) -> tuple[float, float] | None:
 
 
 def merge(old: object, new: dict) -> dict:
-    """`new` unless `old` is the same window with a higher reading, or a later window."""
     prev = valid_window(old)
     if prev is None:
         return new
@@ -65,7 +63,6 @@ def merge(old: object, new: dict) -> dict:
 
 
 def write_cache(session: object, now: float) -> None:
-    """Merge `session["rate_limits"]` into the cache; never raises."""
     try:
         block = session.get("rate_limits") if isinstance(session, dict) else None
         if not isinstance(block, dict):

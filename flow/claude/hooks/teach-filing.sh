@@ -21,7 +21,7 @@
 
 runs gh issue create || teach_emit
 # The section once per session; the search below on every filing, since its
-# matches belong to the ticket being filed (#1409 story 6).
+# matches belong to the ticket being filed.
 teach WORKFLOW.md "Before filing a ticket" "\`gh issue create\` files a ticket"
 
 # The `gh issue create` command as the shell runs it (quoted text dropped),
@@ -29,7 +29,6 @@ teach WORKFLOW.md "Before filing a ticket" "\`gh issue create\` files a ticket"
 create=$(printf '%s\n' "$TEACH_RUN" | grep -m1 -E '^gh[[:space:]]+issue[[:space:]]+create')
 cd_arg=$(printf '%s\n' "$TEACH_RUN" | sed -nE '/^gh[[:space:]]+issue[[:space:]]+create/q; s/^cd([[:space:]]+([^[:space:]]*))?([[:space:]].*)?$/=\2/p' | tail -1)
 
-# A flag's value from the command, quoted or bare: flag_value <regex of names>.
 flag_value() {
   local pre="(^|[[:space:]])($1)[= ]+"
   if [[ "$TEACH_SCAN" =~ $pre\"([^\"]*)\" ]] || [[ "$TEACH_SCAN" =~ $pre\'([^\']*)\' ]] \
@@ -48,7 +47,6 @@ if [ -z "$component" ]; then
   teach_emit
 fi
 
-# github_repo <origin or GH_REPO value>: its owner/name, or nothing.
 github_repo() {
   local r
   case "$1" in

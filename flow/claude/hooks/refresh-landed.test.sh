@@ -23,7 +23,6 @@ STUB
 chmod +x "$stubdir/python3"
 
 fails=0
-# run <name> <expected-exit> <command-string>
 run() {
   local name=$1 want=$2 cmd=$3
   local out rc
@@ -42,10 +41,9 @@ run() {
 rm -f "$tmp/python3.args" "$tmp/python3.calls"
 run "non-push command allowed" 0 "git status"
 
-# Push command: exits 0, and generate.py is invoked in the background.
 run "push command allowed" 0 "git push origin main"
-# The hook backgrounds the call; give it up to ten seconds to land, since the
-# suite runs concurrently (#1415) and a loaded box can delay a background start.
+# The hook backgrounds the call; wait up to ten seconds, since the suite runs
+# concurrently and a loaded box can delay the start.
 for _ in $(seq 100); do
   grep -qx "push command allowed" "$tmp/python3.calls" 2>/dev/null && break
   sleep 0.1

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # PostToolUse hook on SendMessage: tell the controller's pane at once when a
-# worker's send to its controller failed (#1540). Two episodes in one week had
-# a worker whose sends all failed (a Claude Code upgrade moved the socket
-# directory) while nothing said so until the worker stopped. The Stop hook
-# worker-stop-alert.sh is that stop-time alert (its entry is unregistered by
-# design, flow/claude/OPERATIONS.md); this one fires at the failed send.
+# worker's send to its controller failed. A worker whose sends all fail (a
+# Claude Code upgrade moved the socket directory) says nothing until it stops.
+# The Stop hook worker-stop-alert.sh is that stop-time alert (its entry is
+# unregistered by design, flow/claude/OPERATIONS.md); this one fires at the
+# failed send.
 #
-# Contract: read the PostToolUse event JSON on stdin. Observed live
-# 2026-10-16 (docs/research/2026-10-16-send-time-alert-proofs.md): the event
+# Contract: read the PostToolUse event JSON on stdin. As observed in
+# docs/research/2026-10-16-send-time-alert-proofs.md, the event
 # carries `tool_name`, `tool_use_id`, `tool_input.to` and `tool_response`,
 # whose `success` is false on a send that did not deliver. The session is a
 # worker when its transcript opens with an `/implement` or `/implement-spec`
@@ -27,7 +27,7 @@ set -u
 
 hook_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 log="$HOME/.claude/worker-send-alerts.log"
-lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
+lib_missing() {
   mkdir -p "$(dirname "$log")"
   printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" "$1" >> "$log"
   exit 0
@@ -64,7 +64,6 @@ worker_alert_is_controller_target "$to" "$controller" || exit 0
 key="$(jq -r '.tool_use_id // empty' <<<"$event" 2>/dev/null)"
 [ -n "$key" ] || key="event-$(sha1sum <<<"$event" | cut -c1-16)"
 logline() { worker_alert_logline "$log" "$key" "$1" "$2"; }
-# One alert per send: a send already in the log never alerts again.
 grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
 # The answer, three ways: delivered, failed, or absent. `success` must be

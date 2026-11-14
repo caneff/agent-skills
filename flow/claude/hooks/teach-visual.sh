@@ -1,6 +1,6 @@
 #!/bin/bash
 # Teaching hook (PreToolUse, Bash): the first `zed` call, or the first call of
-# an image opener (`wslview` and its kin, #1531), answers with
+# an image opener (`wslview` and its kin), answers with
 # VISUAL-INSPECTION.md § Showing me a file, the first `shot-scraper` call with
 # § Reading a rendered page yourself, each once per session, so the calls
 # after it follow the section. Shared mechanics: teach-lib.sh.
@@ -19,7 +19,6 @@ for opener in zed wslview xdg-open explorer.exe eog feh mspaint.exe; do
     break
   fi
 done
-# `cmd.exe /c start <file>` opens it in the Windows default viewer.
 if runs cmd.exe /c start; then
   teach VISUAL-INSPECTION.md "Showing me a file" "\`cmd.exe /c start\` opens a file for Chris"
 fi
