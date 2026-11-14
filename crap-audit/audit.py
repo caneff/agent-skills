@@ -31,6 +31,15 @@ UNDER_FLOOR_SAMPLE = 5
 
 
 def _flatten_radon(entries):
+    """Radon `cc -j` entries -> unique (name, lineno, complexity) rows.
+
+    radon lists a class method both flat at top level and under its class's
+    `methods`, so a row is kept once per (name, lineno); the first wins.
+    """
+    return list(dict.fromkeys(_walk_radon(entries)))
+
+
+def _walk_radon(entries):
     """Recurse radon `cc -j` entries into (name, lineno, complexity) rows.
 
     Skips `class` entries themselves (their complexity is a rollup, not a
@@ -42,9 +51,9 @@ def _flatten_radon(entries):
     for entry in entries:
         if entry["type"] in ("function", "method"):
             rows.append((entry["name"], entry["lineno"], entry["complexity"]))
-            rows.extend(_flatten_radon(entry.get("closures", [])))
+            rows.extend(_walk_radon(entry.get("closures", [])))
         elif entry["type"] == "class":
-            rows.extend(_flatten_radon(entry.get("methods", [])))
+            rows.extend(_walk_radon(entry.get("methods", [])))
     return rows
 
 
