@@ -41,6 +41,7 @@ import audit_record  # noqa: E402
 import findings_log  # noqa: E402
 import mutation_run  # noqa: E402
 from procs import claude_env, scrubbed_env, run as _run  # noqa: E402
+import shellcmd  # noqa: E402
 from stored_sweeps import (  # noqa: E402
     MULTI_DIR, OWNER, RECORD_FILE, earlier_record, file_audit_record, find_stored_sweep, label_refusal,
     latest_record_url, prune_closed_sweeps, record_repo, repo_identity, repo_sweep_dirs, resume_unposted,
@@ -132,10 +133,12 @@ def _record_file(repo, base=None):
 
 
 def git_state(repo, last_sha):
-    dirty = bool(_run(["git", "-C", repo, "status", "--porcelain"]).stdout.strip())
+    status = shellcmd.git(["-C", repo, "status", "--porcelain"], ok=range(256))
+    # A status that failed proves nothing about cleanliness: force dirty, as for a failed diff below.
+    dirty = status.returncode != 0 or bool(status.stdout.strip())
     changed = []
     if last_sha:
-        result = _run(["git", "-C", repo, "diff", "--name-only", f"{last_sha}..HEAD"])
+        result = shellcmd.git(["-C", repo, "diff", "--name-only", f"{last_sha}..HEAD"], ok=range(256))
         if result.returncode != 0:
             # A SHA `git diff` can't resolve (never a real commit, or pruned)
             # proves nothing about staleness — force dirty so should_run can
@@ -146,7 +149,7 @@ def git_state(repo, last_sha):
 
 
 def head_sha(repo):
-    return _run(["git", "-C", repo, "rev-parse", "HEAD"]).stdout.strip()
+    return shellcmd.git(["-C", repo, "rev-parse", "HEAD"]).stdout.strip()
 
 
 def now_iso():
@@ -1016,61 +1019,68 @@ def _sweep_origin_main(repo, slug, run_root, sweep_id, only, short, force, open_
     """Sweep a fresh worktree of `repo`'s origin/main, store the result, and
     file the audit record. Returns an Outcome."""
     name = slug.split("/", 1)[1]
-    fetch = _run(["git", "-C", repo, "fetch", "origin"])
-    if fetch.returncode != 0:
-        return Outcome("failed", f"git fetch failed: {fetch.stderr.strip()}")
+    try:
+        shellcmd.git(["-C", repo, "fetch", "origin"])
+    except shellcmd.CmdError as e:
+        return Outcome("failed", f"git fetch failed: {e}")
     wt = os.path.join(run_root, "checkout")
     os.makedirs(run_root, exist_ok=True)
-    add = _run(["git", "-C", repo, "worktree", "add", "--detach", wt, "origin/main"])
-    if add.returncode != 0:
-        return Outcome("failed", f"git worktree add origin/main failed: {add.stderr.strip()}")
+    added = False
     try:
-        label = triage_label(wt)
-        refusal = label_refusal(repo, label)  # before any audit starts
-        if refusal:
-            return Outcome("refused", refusal)
-        earlier = latest_record_url(name)  # before this sweep stores its own
-        result, failure = None, None
-        try:
-            result = run_sweep(wt, os.path.join(run_root, "run"), only, short, force, key="github:" + slug,
-                               standalone=False)
-        except SystemExit as e:
-            if e.code not in (0, None):
-                failure = f"sweep stopped before collecting: {e.code if isinstance(e.code, str) else f'exit {e.code}'}"
-        stored = os.path.join(stored_sweeps_base(), name, sweep_id)
-        run = os.path.join(run_root, "run")
-        os.makedirs(stored, exist_ok=True)
-        for sub in ("collection", "logs"):
-            if os.path.isdir(os.path.join(run, sub)):
-                shutil.copytree(os.path.join(run, sub), os.path.join(stored, sub), dirs_exist_ok=True)
-        sha = head_sha(wt)
-        dirty = _run(["git", "-C", wt, "status", "--porcelain"]).stdout.splitlines()
-        clean = "yes" if not dirty else f"no ({len(dirty)} changed paths)"
-        if result is None:
-            model = aborted_model(sweep_id, sha, clean, stored, failure or "sweep stopped before collecting",
-                                  os.path.join(stored, "logs"), open_record)
-            outcome = Outcome("failed", model.failed["the sweep"].splitlines()[0], stored)
-        else:
-            model = record_model(result, sweep_id, sha, clean, stored,
-                                 os.path.isfile(os.path.join(wt, ".audit-ignore.md")), open_record, earlier)
-            write_json(os.path.join(stored, SWEEP_STATE_FILE),
-                        {"skip_note": result.plan.skip_note,
-                         "failed": {n: t.splitlines()[0] for n, t in model.failed.items()}})
-            outcome = Outcome("failed" if result.failed else "swept", stored=stored)
-            if result.failed:
-                outcome.reason = f"{len(result.failed)} audit(s) failed: {', '.join(result.failed)}"
-        if not audit_record.worth_filing(model):
-            return outcome  # stored with no record: `prune_closed_sweeps` drops it after RUN_TTL_DAYS
-        meta = {"repo": slug, "checkout": repo}
-        url, error = file_audit_record(repo, stored, f"Audit record: {name} {sweep_id}", label,
-                                       audit_record.build(model), meta)
-        outcome.issue_url = url
-        if error:
-            outcome.status, outcome.reason = "failed", "; ".join(x for x in (outcome.reason, error) if x)
-        return outcome
-    finally:
-        _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
-        _run(["git", "-C", repo, "worktree", "prune"])
+        with shellcmd.scratch_worktree(repo, "origin/main", wt):
+            added = True
+            return _sweep_checkout(repo, slug, name, wt, run_root, sweep_id, only, short, force, open_record)
+    except shellcmd.CmdError as e:
+        if added:
+            raise
+        return Outcome("failed", f"git worktree add origin/main failed: {e}")
+
+
+def _sweep_checkout(repo, slug, name, wt, run_root, sweep_id, only, short, force, open_record):
+    """The body of `_sweep_origin_main` once its worktree `wt` exists."""
+    label = triage_label(wt)
+    refusal = label_refusal(repo, label)  # before any audit starts
+    if refusal:
+        return Outcome("refused", refusal)
+    earlier = latest_record_url(name)  # before this sweep stores its own
+    result, failure = None, None
+    try:
+        result = run_sweep(wt, os.path.join(run_root, "run"), only, short, force, key="github:" + slug,
+                           standalone=False)
+    except SystemExit as e:
+        if e.code not in (0, None):
+            failure = f"sweep stopped before collecting: {e.code if isinstance(e.code, str) else f'exit {e.code}'}"
+    stored = os.path.join(stored_sweeps_base(), name, sweep_id)
+    run = os.path.join(run_root, "run")
+    os.makedirs(stored, exist_ok=True)
+    for sub in ("collection", "logs"):
+        if os.path.isdir(os.path.join(run, sub)):
+            shutil.copytree(os.path.join(run, sub), os.path.join(stored, sub), dirs_exist_ok=True)
+    sha = head_sha(wt)
+    dirty = shellcmd.git(["-C", wt, "status", "--porcelain"]).stdout.splitlines()
+    clean = "yes" if not dirty else f"no ({len(dirty)} changed paths)"
+    if result is None:
+        model = aborted_model(sweep_id, sha, clean, stored, failure or "sweep stopped before collecting",
+                              os.path.join(stored, "logs"), open_record)
+        outcome = Outcome("failed", model.failed["the sweep"].splitlines()[0], stored)
+    else:
+        model = record_model(result, sweep_id, sha, clean, stored,
+                             os.path.isfile(os.path.join(wt, ".audit-ignore.md")), open_record, earlier)
+        write_json(os.path.join(stored, SWEEP_STATE_FILE),
+                    {"skip_note": result.plan.skip_note,
+                     "failed": {n: t.splitlines()[0] for n, t in model.failed.items()}})
+        outcome = Outcome("failed" if result.failed else "swept", stored=stored)
+        if result.failed:
+            outcome.reason = f"{len(result.failed)} audit(s) failed: {', '.join(result.failed)}"
+    if not audit_record.worth_filing(model):
+        return outcome  # stored with no record: `prune_closed_sweeps` drops it after RUN_TTL_DAYS
+    meta = {"repo": slug, "checkout": repo}
+    url, error = file_audit_record(repo, stored, f"Audit record: {name} {sweep_id}", label,
+                                   audit_record.build(model), meta)
+    outcome.issue_url = url
+    if error:
+        outcome.status, outcome.reason = "failed", "; ".join(x for x in (outcome.reason, error) if x)
+    return outcome
 
 
 @dataclasses.dataclass
@@ -1378,7 +1388,6 @@ def load_mode(issue, repo_name):
 
 SUGGEST_DAYS = 14
 DEFAULT_ROOTS = "~/src,~/.agents"  # agent-skills lives at ~/.agents/skills, as `landed` scans it
-_ORIGIN_SLUG = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 
 
 SEARCH_LIMIT = 1000  # `gh search` returns at most 1000 results
@@ -1390,10 +1399,11 @@ def recent_pr_repos():
     reply that hit the result limit: an empty or short list must mean "no
     more PRs", never "the search broke" or "the search was cut off"."""
     since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=SUGGEST_DAYS)).strftime("%Y-%m-%d")
-    r = _run(["gh", "search", "prs", "--author", "@me", "--created", f">={since}",
-              "--json", "repository", "--limit", str(SEARCH_LIMIT)])
-    if r.returncode != 0:
-        raise RuntimeError(f"gh search prs failed (exit {r.returncode}): {r.stderr.strip()}")
+    try:
+        r = shellcmd.gh(["search", "prs", "--author", "@me", "--created", f">={since}",
+                         "--json", "repository", "--limit", str(SEARCH_LIMIT)])
+    except shellcmd.CmdError as e:
+        raise RuntimeError(f"gh search prs failed: {e}") from e
     try:
         rows = json.loads(r.stdout)
         names = {pr["repository"]["nameWithOwner"] for pr in rows}
@@ -1417,11 +1427,13 @@ def local_checkouts(roots):
             path = os.path.join(root, entry)
             if not os.path.exists(os.path.join(path, ".git")):
                 continue
-            url = _run(["git", "-C", path, "remote", "get-url", "origin"]).stdout.strip()
-            m = _ORIGIN_SLUG.search(url)
-            if m:
+            try:
+                slug = shellcmd.origin_slug(path)
+            except shellcmd.CmdError:
+                continue  # a checkout with no origin has no slug to sweep under
+            if slug:
                 key = (not os.path.isdir(os.path.join(path, ".git")), len(path), path)
-                found.setdefault(m.group(1), []).append((key, path))
+                found.setdefault(slug, []).append((key, path))
     return {slug: min(c)[1] for slug, c in found.items()}
 
 
@@ -1538,8 +1550,8 @@ def mutation_mode(repo, modules, out, whole_repo=False):
             failed = [m for m, reason in zip(final_targets, results) if reason]
     finally:
         for d in os.listdir(run.worktrees):
-            _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(run.worktrees, d)])
-        _run(["git", "-C", repo, "worktree", "prune"])
+            shellcmd.git(["-C", repo, "worktree", "remove", "--force", os.path.join(run.worktrees, d)], ok=range(256))
+        shellcmd.git(["-C", repo, "worktree", "prune"], ok=range(256))
 
     print(f"\ncollection: {collection}")
     # Only the mutation page: `collect` would rebuild the top index and rerun
@@ -1554,7 +1566,6 @@ def mutation_mode(repo, modules, out, whole_repo=False):
         sys.exit(1)
 
 
-_GIT_LOCK = threading.Lock()   # `git worktree add` and the cache record are not safe to run at once
 _RECORD_LOCK = threading.Lock()
 
 
@@ -1585,41 +1596,41 @@ def _run_mutation_module(repo, module, run):
     clear_inconclusive(collection, slug)
 
     print(f"[mutation:{module}] creating worktree")
+    reason = None
     try:
-        with open(log, "w", encoding="utf-8") as f:
-            with _GIT_LOCK:
-                r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
-        if r.returncode != 0:
-            reason = "git worktree add failed"
-        elif not (os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml"))):
-            reason = "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling"
-        else:
-            print(f"[mutation:{module}] resolving env (uv sync)")
-            with open(log, "a", encoding="utf-8") as f:
-                r = subprocess.run(["uv", "sync"], cwd=wt, stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
-            if r.returncode != 0:
-                reason = "uv sync failed"
-            else:
-                print(f"[mutation:{module}] running /mutation-audit {module}")
-                prompt = (f"/mutation-audit {module}\n{NO_OPEN_INSTRUCTION}"
-                          f"{manifest_instruction(manifest)}{INCONCLUSIVE_INSTRUCTION}")
-                with open(log, "a", encoding="utf-8") as f:
-                    r = subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False, env=claude_env())
-                reason = audit_failure(
-                    r.returncode, lambda: (mutation_answer_failure(run.manifests, slug)
-                                           or collect_from_manifest(run.manifests, slug, collection, slug)))
-                if not reason:
-                    record_inconclusive(run.manifests, slug, collection)
-        if reason:
-            report_failure(f"mutation:{module}", reason, log)
-            write_setup_failure_report(collection, module, reason)
-            return reason
-    finally:
-        # The one cleanup for this worktree — every exit path, including an
-        # exception, comes through here (#606). mutation_mode keeps an outer
+        # The one cleanup for this worktree: `scratch_worktree` removes it on
+        # every exit, an exception included (#606). mutation_mode keeps an outer
         # sweep of `worktrees/` as the backstop for a crash mid-`add`.
-        _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
-        _run(["git", "-C", repo, "worktree", "prune"])
+        with shellcmd.scratch_worktree(repo, "HEAD", wt):
+            if not (os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml"))):
+                reason = "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling"
+            else:
+                print(f"[mutation:{module}] resolving env (uv sync)")
+                with open(log, "w", encoding="utf-8") as f:
+                    r = subprocess.run(["uv", "sync"], cwd=wt, stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
+                if r.returncode != 0:
+                    reason = "uv sync failed"
+                else:
+                    print(f"[mutation:{module}] running /mutation-audit {module}")
+                    prompt = (f"/mutation-audit {module}\n{NO_OPEN_INSTRUCTION}"
+                              f"{manifest_instruction(manifest)}{INCONCLUSIVE_INSTRUCTION}")
+                    with open(log, "a", encoding="utf-8") as f:
+                        r = subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False, env=claude_env())
+                    reason = audit_failure(
+                        r.returncode, lambda: (mutation_answer_failure(run.manifests, slug)
+                                               or collect_from_manifest(run.manifests, slug, collection, slug)))
+                    if not reason:
+                        record_inconclusive(run.manifests, slug, collection)
+    except shellcmd.CmdError as e:
+        if os.path.isdir(wt):
+            raise
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(f"{e}\n")
+        reason = "git worktree add failed"
+    if reason:
+        report_failure(f"mutation:{module}", reason, log)
+        write_setup_failure_report(collection, module, reason)
+        return reason
     why = inconclusive_reason(collection, slug)
     if why is None:
         with _RECORD_LOCK:

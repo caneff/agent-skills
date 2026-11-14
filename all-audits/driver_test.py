@@ -2490,3 +2490,8 @@ def test_a_corrupt_mutation_log_is_not_counted_as_measured_on_the_main_index(tmp
     assert r.returncode == 0, r.stdout + r.stderr
     index = open(os.path.join(tmp, "collection", "index.html")).read()
     assert "1 modules measured, 3 total survivors, 1 CORRUPT" in index, index
+
+
+def test_git_state_of_a_non_repo_is_dirty_never_clean(tmp_path):
+    """#1778: a `git status` that failed is no answer; it must force a run, not read as clean."""
+    assert driver.git_state(str(tmp_path), None) == {"dirty": True, "changed_files": []}
