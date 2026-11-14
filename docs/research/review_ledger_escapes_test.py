@@ -106,7 +106,7 @@ class TestEscape:
         repo.pr_a = repo.land({"a.py": "a1\nA2\na3\na4\na5\na6\n"}, "a: add the thing (#31)", 1, "Closes #11")
         repo.skip(11, "standards", "ablation")
         # PR B (ticket 12) rewrites b.py line 5; its Codex pass was skipped for size.
-        repo.pr_b = repo.land({"b.py": "b1\nb2\nb3\nb4\nB5\nb6\n"}, "b: add the other thing (#32)", 2, "Closes #12")
+        repo.land({"b.py": "b1\nb2\nb3\nb4\nB5\nb6\n"}, "b: add the other thing (#32)", 2, "Closes #12")
         repo.skip(12, "codex-gate", "size")
         return repo
 

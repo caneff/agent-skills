@@ -109,8 +109,8 @@ class TestCodexHarvest:
 
     @pytest.mark.parametrize("phase", ["gate", "second"])
     def test_codex_passes_of_one_ticket_do_not_share_credit_with_each_other(self, env, phase):
-        for f in self.row(env, 200, phase)["findings"]:
-            assert (f["overlap"], f["k"]) == ("unique", 1)
+        findings = self.row(env, 200, phase)["findings"]
+        assert [(f["overlap"], f["k"]) for f in findings] == [("unique", 1)] * 2
 
     def test_another_tickets_line_with_a_joined_id_stays_an_orphan(self, env):
         assert "#207 `codex-gate-1`" in section(env.review.read_text(), "Dispositions with no finding")
