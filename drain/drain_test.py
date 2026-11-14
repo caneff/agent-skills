@@ -497,6 +497,23 @@ def test_the_choose_log_holds_the_prompt_the_chooser_judged_from_even_when_it_fa
     assert "- #2 ticket 2: distinctive-excerpt" in log
 
 
+def test_the_chooser_prompt_calls_a_drain_a_drain_not_a_run(sb):
+    sb.write_state({1: {}, 2: {}})
+    r = sb.drain("--once")
+    assert r.returncode == 0, r.stderr
+    prompt = sb.chooser_runs()[0]["prompt"]
+    assert prompt.startswith("Bundle choice for an unattended drain. ")
+
+
+def test_the_nudge_calls_a_drain_a_drain_not_a_run(sb):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("drain_under_test", DRAIN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for pr_up, kind in ((True, mod.TICKET), (False, mod.TICKET), (False, mod.SPEC)):
+        assert mod.nudge_text("why.", pr_up, kind).startswith("Unattended drain, no controller: ")
+
+
 def test_a_candidate_with_no_body_and_no_comments_is_listed_as_empty_not_blank(sb):
     # A ticket unblocked by native dependencies alone can have an empty body; the
     # fake gh's frontier needs a `Blocked by` body to offer one, so call excerpt directly.
@@ -727,9 +744,9 @@ def test_a_candidate_count_is_never_read_as_a_ticket(sb):
     assert sb.handed_comment(3) == []
 
 
-def test_a_bundle_comment_left_by_an_earlier_run_touches_nothing(sb):
+def test_a_bundle_comment_left_by_an_earlier_drain_touches_nothing(sb):
     # Ticket 5 is another worker's live ticket; the old note naming it
-    # predates this run's claim of ticket 1, so a failed bundle leaves it be.
+    # predates this drain's claim of ticket 1, so a failed bundle leaves it be.
     sb.write_state({1: {}, 5: {"labels": ["in-progress"]}}, comments=[["1", "drain bundle: 5"]])
     sb.drain("--once", env={"FAIL_TICKETS": "1"})
     assert "ready-for-human" in sb.labels(1)

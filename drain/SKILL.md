@@ -75,9 +75,9 @@ Read the progress file
 - the bundle in flight: the last `bundle started:` line with no
   `bundle ended:` after it, its tickets with titles, its pane, and that pane's
   herdr state;
-- each bundle already ended in this run, with its `bundle ended:` outcome.
+- each bundle already ended in this drain, with its `bundle ended:` outcome.
 
-A run that is not alive has no batch to list: say so, quoting
+A drain that is not alive has no batch to list: say so, quoting
 `job-run --status`.
 
 ## On completion
@@ -86,11 +86,11 @@ Run `job-run --status drain-<repo-short>`. A line beginning `killed` means the
 run died with no record: say so and quote its last progress line. Otherwise
 read the background command's own output: a refusal (`already live`, an
 argparse error, `drain.py: ...`) is reported verbatim as a start that never
-ran, not as a crash. A run that ran ends with drain's summary, in
+ran, not as a crash. A drain that ran ends with drain's summary, in
 `~/.cache/agent-jobs/drain-<repo-short>/progress` after the timestamp on each
 line, starting at the line `merged:`, `closed, no PR:`, `handed to Chris:`,
 `stopped:` or `nothing to drain`, and ending with its `ended:` line. Open
-the report with every bundle the run worked, one per
+the report with every bundle this drain worked, one per
 `bundle started:` line in the progress file with its `bundle ended:` outcome,
 then the summary:
 
@@ -103,12 +103,12 @@ then the summary:
   in the `drain/drain.py` docstring), then each `passed over:` ticket with
   its reason. It is not a stop: an empty queue exits 0.
 - **Live layer**: when the target repo declares a live layer above its merge
-  seam in its `AGENTS.md` § End-to-end seam, a command run once per run on
+  seam in its `AGENTS.md` § End-to-end seam, a command run once per drain on
   Chris's go (`./e2e.sh` in twitch-rules-scroller, #1392), end the report with the ask
   and run nothing yet: it takes Chris's screen, and its `permissions.ask` rules
   make a start without his go a prompt. On his go, run it once on merged
   `main` (in the primary checkout, after `git pull --ff-only`) with the owed
-  live checks: the "Live check after merge" items of the tickets this run
+  live checks: the "Live check after merge" items of the tickets this drain
   merged. File a fix or revert ticket for anything red, and say so before the
   report closes. A repo with no declared live layer gets no ask: say "no live
   layer declared".
