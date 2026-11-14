@@ -56,6 +56,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
 from closing_ticket import declaration  # noqa: E402
 
+sys.path.insert(0, os.path.join(_HERE, os.pardir, "common"))
+import tracker as issue_tracker  # noqa: E402  (#1786)
+
 LISTING_SECONDS = 600
 _FAIL = re.compile(r"^FAIL (\S.*?)\s*$")
 # How `command` starts its refusal on stderr; `drain/drain.py` reads the reason
@@ -196,15 +199,14 @@ def record(state_path):
     return f"selector: listed {len(listing)} {noun} from `{state['command']}`\n\n```\n" + "\n".join(listing) + "\n```"
 
 
-def post(pr, repo, body):
-    """`None` when posted, else why not: said, never raised."""
+def post(pr, repo, body, tracker=None):
+    """`None` when posted, else why not: said, never raised. `tracker` is the issue module's
+    adapter for `repo`, the `gh` one unless a test passes the in-memory one."""
     try:
-        out = subprocess.run(["gh", "pr", "comment", str(pr), "--repo", repo, "--body", body],
-                             capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return " ".join(str(exc).split())[:150]
-    if out.returncode:
-        return " ".join((out.stderr or out.stdout).split())[:150] or f"gh exited {out.returncode}"
+        (tracker or issue_tracker.GhTracker(repo)).comment(pr, body)
+    except issue_tracker.TrackerError as exc:
+        # The error reads `<command>: <why>` and the command carries the whole body: the tail is the reason.
+        return " ".join(str(exc).split())[-150:]
     return None
 
 
