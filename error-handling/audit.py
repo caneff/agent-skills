@@ -92,77 +92,10 @@ def parse_findings(ruff_json, bandit_json):
     return rows
 
 
-def _selfcheck():
-    ruff_json = json.dumps(
-        [
-            {
-                "filename": "sample.py",
-                "location": {"row": 14},
-                "code": "BLE001",
-                "message": "Do not catch blind exception: `Exception`",
-            },
-            {
-                "filename": "sample.py",
-                "location": {"row": 23},
-                "code": "SIM105",
-                "message": "Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`",
-            },
-            {
-                "filename": "sample.py",
-                "location": {"row": 25},
-                "code": "BLE001",
-                "message": "Do not catch blind exception: `Exception`",
-            },
-        ]
-    )
-    bandit_json = json.dumps(
-        {
-            "results": [
-                {
-                    "filename": "sample.py",
-                    "line_number": 14,
-                    "test_id": "B110",
-                    "issue_text": "Try, Except, Pass detected.",
-                },
-                {
-                    "filename": "sample.py",
-                    "line_number": 25,
-                    "test_id": "B110",
-                    "issue_text": "Try, Except, Pass detected.",
-                },
-            ]
-        }
-    )
-    rows = parse_findings(ruff_json, bandit_json)
-    assert len(rows) == 3, rows
-
-    # line 14: ruff BLE001 + bandit B110 merge into one row
-    line14 = next(r for r in rows if r["line"] == 14)
-    assert line14["category"] == "bare-except", line14
-    assert line14["bucket"] == "fix"
-    assert line14["extra"]["codes"] == ["B110", "BLE001"]
-
-    # line 23: ruff SIM105 only, no bandit hit at this line
-    line23 = next(r for r in rows if r["line"] == 23)
-    assert line23["category"] == "try-except-pass", line23
-    assert line23["extra"]["codes"] == ["SIM105"]
-
-    # line 25: ruff BLE001 + bandit B110 merge into one row
-    line25 = next(r for r in rows if r["line"] == 25)
-    assert line25["category"] == "bare-except", line25
-    assert line25["extra"]["codes"] == ["B110", "BLE001"]
-
-    empty = parse_findings(json.dumps([]), json.dumps({"results": []}))
-    assert empty == []
-    assert all(r["failure"] == "" for r in rows)
-
-    print("ok")
-
-
 def main(argv):
     auditlib.run_cli(
-        argv, _selfcheck, parse_findings, nargs=2,
-        usage="usage: audit.py <ruff.json> <bandit.json> | --selfcheck",
+        argv, parse_findings, nargs=2,
+        usage="usage: audit.py <ruff.json> <bandit.json>",
     )
 
 

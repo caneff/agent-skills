@@ -277,21 +277,6 @@ def _parse_default(radon_text, coverage_text):
     return [score(normalize(json.loads(radon_text), json.loads(coverage_text)))]
 
 
-def _selfcheck():
-    """Reproduce fixtures/sample_project's known findings — the same fixture
-    `audit_test.py`'s test_cli_main_prints_whole_score_result pins against."""
-    fixtures = os.path.join(os.path.dirname(__file__), "fixtures", "sample_project")
-    radon_json = json.load(open(os.path.join(fixtures, "radon.json"), encoding="utf-8"))
-    coverage_json = json.load(open(os.path.join(fixtures, "coverage.json"), encoding="utf-8"))
-    result = score(normalize(radon_json, coverage_json))
-    assert len(result["findings"]) == 2, result
-    assert {row["file"] for row in result["findings"]} == {"sample.py"}, result
-    assert {row["line"] for row in result["findings"]} == {2, 17}, result
-    for row in result["findings"]:
-        assert set(row) == {"bucket", "file", "line", "category", "summary", "failure", "extra"}, row
-    print("ok")
-
-
 def main(argv):
     if argv[1:2] == ["--ts"]:
         if len(argv) < 3:
@@ -302,10 +287,9 @@ def main(argv):
         return
     auditlib.run_cli(
         argv,
-        _selfcheck,
         _parse_default,
         nargs=2,
-        usage="usage: audit.py <radon.json> <coverage.json> | --ts <ts.json> | --selfcheck",
+        usage="usage: audit.py <radon.json> <coverage.json> | --ts <ts.json>",
     )
 
 

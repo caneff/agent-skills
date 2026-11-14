@@ -509,3 +509,14 @@ def test_cli_main_ts_mode_prints_whole_score_result():
     assert set(result) == {"findings", "under_floor", "gates", "ranking"}
     assert len(result["findings"]) == 2
     assert {row["file"] for row in result["findings"]} == {"src/sample.ts"}
+
+
+def test_sample_project_known_findings():
+    """The fixture's two findings, as `audit.py`'s `_selfcheck` pinned them."""
+    radon_json, coverage_json = _load_fixture()
+    result = audit.score(audit.normalize(radon_json, coverage_json))
+    assert len(result["findings"]) == 2, result
+    assert {row["file"] for row in result["findings"]} == {"sample.py"}, result
+    assert {row["line"] for row in result["findings"]} == {2, 17}, result
+    for row in result["findings"]:
+        assert set(row) == {"bucket", "file", "line", "category", "summary", "failure", "extra"}, row

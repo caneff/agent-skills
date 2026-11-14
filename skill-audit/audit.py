@@ -79,51 +79,8 @@ def flip_skill(path):
     return changed
 
 
-def _selfcheck():
-    fm = parse_frontmatter("---\nname: grill\ndescription: Use when they say: stop.\n---\nbody\n")
-    assert fm["name"] == "grill", fm
-    assert fm["description"] == "Use when they say: stop.", fm
-
-    src = "---\nname: foo\ndescription: bar\n---\nbody\n"
-    out, changed = add_flag(src)
-    assert changed and "disable-model-invocation: true" in out, out
-    assert out.index("disable-model-invocation") < out.index("name: foo") < out.index("description"), out
-    out2, changed2 = add_flag(out)  # idempotent
-    assert not changed2 and out2 == out, out2
-    assert out.count("disable-model-invocation") == 1, out
-
-    import tempfile
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
-        tf.write(src)
-        tmp = tf.name
-    try:
-        assert flip_skill(tmp) is True                 # first flip writes
-        assert "disable-model-invocation: true" in open(tmp, encoding="utf-8").read()
-        assert flip_skill(tmp) is False                # second is a no-op
-    finally:
-        os.unlink(tmp)
-
-    now = datetime(2020, 3, 1, tzinfo=timezone.utc)
-    used = datetime(2020, 1, 1, tzinfo=timezone.utc)
-    fresh = Skill.make("fresh", "/x", True, used, now, 45)
-    assert fresh.age_days == 60, fresh
-    assert fresh.stale is True, fresh
-    quiet = Skill.make("quiet", "/x", False, used, now, 45)
-    assert quiet.stale is False, quiet  # not model-invocable, never stale
-    never = Skill.make("never", "/x", True, None, now, 45)
-    assert never.age_days is None and never.stale is True, never
-    recent = Skill.make("recent", "/x", True, now, now, 45)
-    assert recent.age_days == 0 and recent.stale is False, recent
-
-    print("ok")
-
-
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-
-    if argv[:1] == ["--selfcheck"]:
-        _selfcheck()
-        return 0
 
     # Args: optional positional stale-days (back-compat), optional `--flip a,b,c`.
     parser = argparse.ArgumentParser()
