@@ -4,7 +4,7 @@
 memory:
 
     python3 implement-spec/loop.py seat
-    python3 implement-spec/loop.py box [--processes <n>] --committed-gb <g> [--add-gb <g>]
+    python3 implement-spec/loop.py box [--processes <n>] --committed-gb <g>
     python3 implement-spec/loop.py sweep --run <run-id> | --workers <clumps.json>
 
 The judgment steps stay in the skill. What lives here is what a run got wrong
@@ -196,9 +196,9 @@ def picks(state, free):
     before the guard runs
     (#1026): why widest-first, and what it costs: `references/loop.md`.
 
-    Split from `refill` so a caller that also reports what is holding the
-    rest reads the frontier once: two reads of one question can disagree
-    while a worker lands between them.
+    A caller reads the frontier once and passes it here, so the picks and
+    what is holding the rest come from one read: two reads of one question
+    can disagree while a worker lands between them.
     """
     if free <= 0:
         return [], []
@@ -229,19 +229,6 @@ def picks(state, free):
         if len(picked) < free:
             picked.append(clump)
     return picked, held
-
-
-def refill(candidates, in_flight, free):
-    """The clumps to dispatch into the free slots, widest closure first,
-    ties broken by lowest ticket — every free slot at once, not one wave's
-    worth.
-
-    Recomputed at each landing and never held for another clump. Why no
-    waves, and the two consequences a controller has to state out loud:
-    `references/loop.md`.
-    """
-    picked, _ = picks(frontier(candidates, in_flight), free)
-    return picked
 
 
 def hubs(clumps):
@@ -514,7 +501,7 @@ def projected_processes(processes, workers, live):
     return reserve, processes + reserve + workers * SLOT_PEAK_PROCESSES
 
 
-def box_check(processes, committed_gb, add_gb=0, workers=1,
+def box_check(processes, committed_gb, workers=1,
               counter=UNSTATED_COUNTER, live=0):
     """Whether the box has room for one more worker, and every reason it does
     not.
@@ -546,11 +533,10 @@ def box_check(processes, committed_gb, add_gb=0, workers=1,
             f"{PROCESS_CAP}, which "
             "counts agent processes — Claude sessions, subagents included "
             "— not OS processes")
-    if committed_gb + add_gb * workers > VM_BUDGET_GB:
+    if committed_gb > VM_BUDGET_GB:
         refusals.append(
-            f"{committed_gb} GB of ulimit -v caps committed plus {add_gb} GB "
-            f"for each of {workers} workers is over the ~{VM_BUDGET_GB} GB "
-            "budget")
+            f"{committed_gb} GB of ulimit -v caps committed is over the "
+            f"~{VM_BUDGET_GB} GB budget")
     return {"ok": not refusals, "refusals": refusals}
 
 
@@ -604,17 +590,17 @@ def agent_count(args, herdr=None, ps=None, sessions=None):
     return working + unlisted, HERDR_COUNTER, working, unlisted
 
 
-def box_room(processes, committed_gb, add_gb, want,
+def box_room(processes, committed_gb, want,
              counter=UNSTATED_COUNTER, live=0):
     """How many of `want` workers the box has room for, and the refusals if
     that is none. Fewer than asked is the normal answer on a shared box, and
     holding the extra slots empty is the point."""
     for workers in range(want, 0, -1):
-        verdict = box_check(processes, committed_gb, add_gb, workers, counter,
+        verdict = box_check(processes, committed_gb, workers, counter,
                             live)
         if verdict["ok"]:
             return workers, []
-    return 0, box_check(processes, committed_gb, add_gb, 1, counter,
+    return 0, box_check(processes, committed_gb, 1, counter,
                         live)["refusals"]
 
 
@@ -698,67 +684,6 @@ def render_peak(count, live, room, working=None, unlisted=None):
             f"{'worker' if live == 1 else 'workers'} holding {reserve} of "
             f"fan-out headroom, cap {PROCESS_CAP} — {room} more at "
             f"{SLOT_PEAK_PROCESSES} each projects {projected}")
-
-
-def resolve_via_binary(agent):
-    """`resolve-controller <agent>` as `announce`'s default resolver: the
-    worker's herdr agent name resolved to the live Claude session name
-    `SendMessage` can reach — the same resolution `implement-dispatch` does
-    for the controller (#923). Raises rather than guessing when the binary
-    is missing, times out, or prints nothing.
-    """
-    try:
-        done = subprocess.run(["resolve-controller", agent],
-                              capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise LoopError(
-            f"resolve-controller {agent} could not run: {exc}") from exc
-    if done.returncode != 0:
-        raise LoopError((done.stderr or done.stdout).strip()
-                        or f"resolve-controller {agent} failed")
-    name = done.stdout.strip()
-    if not name:
-        raise LoopError(f"resolve-controller {agent} printed nothing")
-    return name
-
-
-def announce(state, send, resolve=resolve_via_binary):
-    """Tell every live, unsettled worker who its controller is now — exactly
-    one message each, and nothing to anyone else.
-
-    `state` is `runfile.reconcile`'s answer; `send(agent, message)` is the
-    caller's messenger and `resolve(agent) -> session name` (default
-    `resolve_via_binary`) is called immediately before each send, so `send`
-    never sees the worker's durable herdr agent name. A name that does not
-    resolve refuses by name. Why: `references/loop.md`.
-    """
-    sent = []
-    for entry in state["announce"]:
-        tickets = ", ".join(f"#{n}" for n in entry["tickets"])
-        agent = entry["agent"]
-        message = (f"Your controller is now {state['controller']} — before every "
-                   f"send, resolve that name with `resolve-controller` and send "
-                   f"your questions and finish notice to what it prints. Run "
-                   f"{state['run_id']}, clump {tickets}, workspace "
-                   f"{entry['workspace']}.")
-        try:
-            address = resolve(agent)
-        except Exception as exc:
-            reached = ", ".join(sent) or "none"
-            raise LoopError(
-                f"could not resolve {agent} ({tickets}) to a live session: "
-                f"{exc} — already reached: {reached}, so a retry covers the "
-                "rest and not these") from exc
-        try:
-            send(address, message)
-        except Exception as exc:
-            reached = ", ".join(sent) or "none"
-            raise LoopError(
-                f"could not re-announce to {agent} ({tickets}): "
-                f"{exc} — already reached: {reached}, so a retry covers the "
-                "rest and not these") from exc
-        sent.append(agent)
-    return sent
 
 
 def questions(clump, outstanding):
@@ -935,28 +860,6 @@ def render_sweep(state):
              f"  {w['detail']}".rstrip()
              for w in state["workers"]]
     return "\n".join(lines) or "no live slots to sweep"
-
-
-def admit(candidates, clump, stuck_on=None):
-    """The frozen candidate set, plus the one ticket allowed to join it.
-
-    A ticket filed while the run is going does not extend it. The one
-    exception is a ticket filed *during* the run **because the run is stuck
-    on what it fixes**; `stuck_on` names the clump it unblocks, which has to
-    be one of this run's. Why the freeze and why the exception is narrow:
-    `references/loop.md`. Returns a new list; the frozen set is never
-    mutated in place.
-    """
-    if stuck_on is None:
-        raise LoopError(
-            f"the candidate set is frozen at this run's initial exploration, "
-            f"so #{key_of(clump)} waits for the next run — unless the run is "
-            "stuck on what it fixes, which is stated as stuck_on=<clump>")
-    if not any(stuck_on in c["tickets"] for c in candidates):
-        raise LoopError(
-            f"#{stuck_on} is not a ticket of this run, so #{key_of(clump)} "
-            "cannot be the ticket the run is stuck on")
-    return list(candidates) + [clump]
 
 
 def read_clumps(path, live=False, closure=True):
@@ -1213,9 +1116,8 @@ def render_dispatch(picked, held, run_id, repo):
 def run(argv):
     parser = argparse.ArgumentParser(
         prog="loop.py", description=(
-            "The run loop's mechanical steps. `announce` has no subcommand: "
-            "sending is SendMessage, which the controller calls itself — and "
-            "so is `landing`'s answer step, which is why `landing` reports "
+            "The run loop's mechanical steps. Sending is SendMessage, which "
+            "the controller calls itself — and so is `landing`'s answer step, which is why `landing` reports "
             "what is owed and gates cleanup rather than answering anything."))
     subs = parser.add_subparsers(dest="command", required=True)
     agent_help = ("Override for the agent count this run's cap check reads "
@@ -1231,7 +1133,6 @@ def run(argv):
     box.add_argument("--live", type=live_count, required=True,
                      help="workers already running, each held at its peak; "
                           "0 is a count you took, not a default")
-    box.add_argument("--add-gb", type=float, default=0)
     dispatch = subs.add_parser(
         "dispatch", help="which clumps go into the free slots")
     dispatch.add_argument("--candidates", required=True)
@@ -1256,7 +1157,6 @@ def run(argv):
     dispatch.add_argument("--processes", type=process_count,
                           help=agent_help)
     dispatch.add_argument("--committed-gb", type=float, required=True)
-    dispatch.add_argument("--add-gb", type=float, default=0)
     sweep_cmd = subs.add_parser(
         "sweep", help="one herdr probe per live slot, the backstop under the "
                       "wake")
@@ -1285,7 +1185,7 @@ def run(argv):
             print(seat(git))
         elif args.command == "box":
             count, counter, _working, _unlisted = agent_count(args)
-            verdict = box_check(count, args.committed_gb, args.add_gb,
+            verdict = box_check(count, args.committed_gb,
                                 counter=counter, live=args.live)
             if not verdict["ok"]:
                 for refusal in verdict["refusals"]:
@@ -1342,7 +1242,7 @@ def run(argv):
                 return 0
             live = len(unsettled)
             room, refusals = box_room(count, args.committed_gb,
-                                      args.add_gb, cores["room"], counter,
+                                      cores["room"], counter,
                                       live)
             if refusals:
                 for refusal in refusals:

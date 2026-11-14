@@ -1,6 +1,5 @@
 """Tests for the dispatch loop (#893). The seams the ticket names: a fixture run
-over a stub tracker and a stub agent list, and the resume announce against a
-stub messenger. The loop's prose — its step list, its refusals, its stated
+over a stub tracker and a stub agent list. The loop's prose — its step list, its refusals, its stated
 consequences — has no test: there is no harness that runs a skill's own text.
 """
 import json
@@ -121,6 +120,10 @@ def candidates_781():
     ]
 
 
+def picked_for(candidates, in_flight, free):
+    return loop.picks(loop.frontier(candidates, in_flight), free)[0]
+
+
 def parked_455():
     return [{"tickets": [455], "workspace": "/w/implement-455",
              "agent": "burn-455", "closure": ["examples/renban.js", HOT],
@@ -141,17 +144,17 @@ def test_the_freed_slot_goes_outside_the_blocked_family():
     # A controller reading only "open, unblocked, unclaimed" dispatches #452
     # into the collision; the loop takes #501.
     assert [c["tickets"] for c in
-            loop.refill(candidates_781(), parked_455(), 1)] == [[501]]
+            picked_for(candidates_781(), parked_455(), 1)] == [[501]]
 
 
-def test_refill_fills_every_free_slot_widest_first_ticket_ties():
+def test_picks_fills_every_free_slot_widest_first_ticket_ties():
     # No wave: two slots free and nothing in flight, so both go at once.
     # #452, #457 and #458 tie at closure size 2 (widest); #501 is narrower at
     # 1. The same-tick guard holds #457 and #458 over #452's shared file, so
     # #452 and the untied #501 are what actually goes out — this fixture
     # cannot tell widest-first from lowest-ticket-first on its own; the
     # untied case is `test_picks_takes_the_widest_closure_first`.
-    picked = loop.refill(candidates_781(), [], 2)
+    picked = picked_for(candidates_781(), [], 2)
     assert [c["tickets"] for c in picked] == [[452], [501]]
 
 
@@ -274,7 +277,7 @@ def test_a_wide_clump_held_by_a_live_workspace_stays_off_the_frontier():
         {"tickets": [20], "closure": ["b.js", "c.js", "d.js", HOT]},
         {"tickets": [30], "closure": ["f.js", "g.js"]},
     ]
-    picked = loop.refill(candidates, parked_455(), 2)
+    picked = loop.picks(loop.frontier(candidates, parked_455()), 2)[0]
     assert [c["tickets"] for c in picked] == [[30]]
 
 
@@ -360,8 +363,8 @@ def test_the_cli_names_a_same_tick_collision_as_a_held_line(tmp):
     assert "held      #458  by #452 this tick" in got.stdout, got.stdout
 
 
-def test_refill_takes_nothing_when_no_slot_is_free():
-    assert loop.refill(candidates_781(), [], 0) == []
+def test_picks_takes_nothing_when_no_slot_is_free():
+    assert picked_for(candidates_781(), [], 0) == []
 
 
 def test_a_landing_frees_its_slot_without_waiting_for_the_other_clump():
@@ -369,9 +372,9 @@ def test_a_landing_frees_its_slot_without_waiting_for_the_other_clump():
     # blocked family, so the freed slot stays empty rather than colliding —
     # and the run drains out of ticket order.
     left = [c for c in candidates_781() if c["tickets"] != [501]]
-    assert loop.refill(left, parked_455(), 1) == []
+    assert loop.picks(loop.frontier(left, parked_455()), 1)[0] == []
     # #455 lands too, and the same call now fills from the family it held.
-    assert [c["tickets"] for c in loop.refill(left, [], 1)] == [[452]]
+    assert [c["tickets"] for c in picked_for(left, [], 1)] == [[452]]
 
 
 def test_a_clump_clumped_by_subtree_is_checked_on_its_named_files():
@@ -380,7 +383,7 @@ def test_a_clump_clumped_by_subtree_is_checked_on_its_named_files():
     candidates = [{"tickets": [601], "files": ["examples/thermo.js"]}]
     live = [{"tickets": [455], "workspace": "/w/implement-455",
              "agent": "burn-455", "files": ["examples/thermo.js"]}]
-    assert loop.refill(candidates, live, 1) == []
+    assert loop.picks(loop.frontier(candidates, live), 1)[0] == []
 
 
 def test_the_hot_shared_file_is_the_only_hub():
@@ -401,18 +404,18 @@ def test_a_landing_that_touched_no_hub_does_not():
 
 
 def test_box_check_allows_a_dispatch_with_room_on_the_box():
-    assert loop.box_check(processes=12, committed_gb=6, add_gb=4) == {
+    assert loop.box_check(processes=12, committed_gb=6) == {
         "ok": True, "refusals": []}
 
 
 def test_box_check_refuses_when_one_more_process_breaks_the_cap():
-    got = loop.box_check(processes=28, committed_gb=0, add_gb=0)
+    got = loop.box_check(processes=28, committed_gb=0)
     assert got["ok"] is False
     assert any("28" in r for r in got["refusals"]), got
 
 
-def test_box_check_refuses_when_the_ulimit_sum_breaks_the_budget():
-    got = loop.box_check(processes=2, committed_gb=22, add_gb=4)
+def test_box_check_refuses_when_the_committed_caps_break_the_budget():
+    got = loop.box_check(processes=2, committed_gb=25)
     assert got["ok"] is False
     assert any("24" in r for r in got["refusals"]), got
 
@@ -421,8 +424,8 @@ def test_box_check_refuses_at_the_process_cap_boundary():
     # The cap is the box's, so the reading it is checked against counts
     # agent processes on the box — a new worker is charged at its peak, so 23
     # leaves room for one more and 24 does not.
-    assert loop.box_check(processes=23, committed_gb=0, add_gb=0)["ok"] is True
-    assert loop.box_check(processes=24, committed_gb=0, add_gb=0)["ok"] is False
+    assert loop.box_check(processes=23, committed_gb=0)["ok"] is True
+    assert loop.box_check(processes=24, committed_gb=0)["ok"] is False
 
 
 def test_a_live_worker_keeps_its_fan_out_headroom_against_the_cap():
@@ -764,175 +767,6 @@ def test_the_cli_refuses_when_ps_cannot_be_run(tmp):
     assert "box ok" not in got.stdout, got.stdout
 
 
-def resume_state():
-    """What `runfile.reconcile` hands a resumed controller: one live worker to
-    re-announce to, one vanished, one landed."""
-    return {
-        "run_id": "burn-781", "slots": 3, "controller": "skills-dc",
-        "free": 1, "held": 2,
-        "announce": [{"tickets": [455], "workspace": "/w/implement-455",
-                      "agent": "burn-455", "landed": None}],
-        "vanished": [{"tickets": [452], "workspace": "/w/implement-452",
-                      "agent": "burn-452", "landed": None}],
-        "landed": [{"tickets": [453], "workspace": "/w/implement-453",
-                    "agent": "burn-453", "landed": "abc1234"}],
-    }
-
-
-def test_resume_sends_exactly_one_message_per_live_unsettled_worker():
-    sent = []
-
-    def send(agent, msg):
-        assert agent != "burn-455", (
-            "send must never see the durable herdr agent name")
-        sent.append((agent, msg))
-
-    def resolve(agent):
-        assert agent == "burn-455", agent
-        return "session-455"
-
-    loop.announce(resume_state(), send, resolve)
-    assert [agent for agent, _ in sent] == ["session-455"]
-    assert sent[0][1].count("skills-dc") == 1, sent[0][1]
-    assert "#455" in sent[0][1]
-    assert "resolve-controller" in sent[0][1], sent[0][1]
-
-
-# One canned answer per name. `burn-bad-exit` and `burn-empty-ok` exist to
-# keep resolve_via_binary's two guards from masking each other (#1013 C1):
-# each fails a different way, so a test can delete either guard on its own
-# and still see a red that only that guard would have caught.
-RESOLVE_CONTROLLER_STUB = """#!/usr/bin/env bash
-case "$1" in
-  burn-455) echo "session-455" ;;
-  burn-bad-exit) echo "not-a-name"; exit 1 ;;
-  burn-empty-ok) exit 0 ;;
-  *) echo "resolve-controller: $1 is neither a herdr agent name nor the name of a live session" >&2
-     exit 1 ;;
-esac
-"""
-
-
-@pytest.fixture
-def resolve_controller_stub(tmp_path, monkeypatch):
-    """Puts a fake `resolve-controller` on `PATH` for the test — the ritual
-    every test below needs, in one place rather than copied three times
-    (#1013 S1). `prepend` sets `PATH` to the stub's directory alone when no
-    `PATH` is set (`env -i`), rather than raising concatenating past it
-    (#1013 S2/C3)."""
-    stub = tmp_path / "resolve-controller"
-    stub.write_text(RESOLVE_CONTROLLER_STUB)
-    stub.chmod(0o755)
-    monkeypatch.setenv("PATH", str(tmp_path), prepend=os.pathsep)
-    return tmp_path
-
-
-def test_resolve_via_binary_prints_the_resolved_session_name(resolve_controller_stub):
-    assert loop.resolve_via_binary("burn-455") == "session-455"
-
-
-def test_resolve_via_binary_refuses_a_name_that_does_not_resolve(resolve_controller_stub):
-    with pytest.raises(loop.LoopError) as exc:
-        loop.resolve_via_binary("burn-999")
-    assert "burn-999" in str(exc.value)
-
-
-def test_resolve_via_binary_refuses_a_nonzero_exit_even_with_stdout_output(
-        resolve_controller_stub):
-    # A binary that exits non-zero after printing something on stdout must
-    # not be read as a resolved name — that reading is the mask deleting
-    # the exit-status check alone would leave in place.
-    with pytest.raises(loop.LoopError) as exc:
-        loop.resolve_via_binary("burn-bad-exit")
-    # No stderr, so the refusal falls back to the stdout it must not
-    # treat as a resolved name.
-    assert "not-a-name" in str(exc.value)
-
-
-def test_resolve_via_binary_refuses_a_zero_exit_with_empty_stdout(resolve_controller_stub):
-    # A binary that exits 0 but prints nothing must not resolve to "" — the
-    # mask deleting the empty-stdout check alone would leave in place.
-    with pytest.raises(loop.LoopError) as exc:
-        loop.resolve_via_binary("burn-empty-ok")
-    assert "burn-empty-ok" in str(exc.value)
-
-
-def test_resolve_via_binary_refuses_when_the_binary_is_missing(tmp, monkeypatch):
-    monkeypatch.setenv("PATH", tmp)
-    with pytest.raises(loop.LoopError) as exc:
-        loop.resolve_via_binary("burn-455")
-    assert "resolve-controller" in str(exc.value)
-
-
-def test_announce_uses_the_default_resolver_when_none_is_passed(resolve_controller_stub):
-    # #1013 P2: every other announce test injects its own `resolve`, so
-    # nothing exercises the wiring between `announce` and its default
-    # (`resolve_via_binary`) — a regression that swapped the default for an
-    # identity function would still pass the suite. This one calls
-    # `announce` with only `send`, over a stubbed `resolve-controller`.
-    sent = []
-
-    def send(agent, msg):
-        assert agent != "burn-455", (
-            "send must never see the durable herdr agent name")
-        sent.append((agent, msg))
-
-    loop.announce(resume_state(), send)
-    assert sent == [("session-455", sent[0][1])]
-
-
-def test_resume_sends_nothing_to_a_landed_or_vanished_worker():
-    sent = []
-    state = resume_state()
-    state["announce"] = []
-    loop.announce(state, lambda agent, message: sent.append((agent, message)))
-    assert sent == []
-
-
-def test_announce_returns_the_agents_it_sent_to_and_reports_a_failure():
-    def send(agent, message):
-        raise RuntimeError("no such peer")
-    state = resume_state()
-    with pytest.raises(loop.LoopError) as exc:
-        loop.announce(state, send, resolve=lambda agent: f"session-{agent}")
-    assert "burn-455" in str(exc.value)
-
-
-def test_announce_refuses_a_worker_whose_name_does_not_resolve():
-    state = resume_state()
-
-    def resolve(agent):
-        raise RuntimeError(f"{agent} is neither a herdr agent nor a live session")
-
-    with pytest.raises(loop.LoopError) as exc:
-        loop.announce(state, lambda agent, msg: None, resolve=resolve)
-    assert "burn-455" in str(exc.value)
-    assert "#455" in str(exc.value)
-
-
-def test_the_candidate_set_is_frozen_against_a_ticket_filed_mid_run():
-    frozen = candidates_781()
-    with pytest.raises(loop.LoopError) as exc:
-        loop.admit(frozen, {"tickets": [700], "closure": ["docs/new.md"]})
-    assert "frozen" in str(exc.value)
-    assert len(frozen) == 4
-
-
-def test_a_ticket_the_run_is_stuck_on_joins_the_run():
-    frozen = candidates_781()
-    grown = loop.admit(frozen, {"tickets": [700], "closure": ["docs/new.md"]},
-                       stuck_on=452)
-    assert [c["tickets"] for c in grown][-1] == [700]
-    assert len(frozen) == 4, "admit returns a new list, never mutates"
-
-
-def test_a_stuck_on_ticket_the_run_never_had_is_refused():
-    with pytest.raises(loop.LoopError) as exc:
-        loop.admit(candidates_781(), {"tickets": [700], "closure": ["d.md"]},
-                   stuck_on=999)
-    assert "#999" in str(exc.value)
-
-
 LOOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
 
 
@@ -998,7 +832,7 @@ def fixture_run(cache, in_flight_path):
 
 def test_the_cli_box_check_exits_nonzero_on_a_refusal():
     ok = loop_py("box", "--processes", "4", "--committed-gb", "4",
-                 "--add-gb", "4", "--live", "0")
+                 "--live", "0")
     assert ok.returncode == 0, ok.stderr
     refused = loop_py("box", "--processes", "40", "--committed-gb", "0",
                      "--live", "0")
@@ -1083,13 +917,13 @@ def test_the_exclusion_reads_the_closure_and_not_the_named_files():
     live = [{"tickets": [455], "workspace": "/w/implement-455",
              "agent": "burn-455", "files": ["examples/renban.js"],
              "closure": ["examples/renban.js", HOT]}]
-    assert loop.refill(candidates, live, 1) == []
+    assert loop.picks(loop.frontier(candidates, live), 1)[0] == []
 
 
-def test_refill_takes_nothing_for_a_free_count_below_zero():
+def test_picks_takes_nothing_for_a_free_count_below_zero():
     # A miscounted budget reads as a negative free count, and "fill every
     # free slot" must not read that as "fill them all".
-    assert loop.refill(candidates_781(), [], -1) == []
+    assert picked_for(candidates_781(), [], -1) == []
 
 
 # A closure that failed to resolve is not an empty closure. Refused with
@@ -1098,12 +932,12 @@ def test_refill_takes_nothing_for_a_free_count_below_zero():
 @pytest.mark.parametrize("in_flight", [[], parked_455()])
 def test_a_clump_with_no_files_is_refused_whatever_is_in_flight(in_flight):
     with pytest.raises(loop.LoopError) as exc:
-        loop.refill([{"tickets": [452]}], in_flight, 1)
+        picked_for([{"tickets": [452]}], in_flight, 1)
     assert "#452" in str(exc.value) and "files" in str(exc.value)
 
 
 def test_the_frontier_itself_refuses_a_clump_with_no_files():
-    # `refill` would also refuse it later, in `picks`; the frontier's own
+    # `picks` would also refuse it later; the frontier's own
     # check is what refuses it to a caller reading only the frontier.
     with pytest.raises(loop.LoopError) as exc:
         loop.frontier([{"tickets": [452]}], [])
@@ -1134,27 +968,6 @@ def test_seat_names_the_remedy_when_origin_head_is_unset():
     with pytest.raises(loop.LoopError) as exc:
         loop.seat(run)
     assert "git remote set-head origin -a" in str(exc.value)
-
-
-def test_announce_names_the_workers_already_reached_when_a_send_fails():
-    # A retry that re-messages an announced worker breaks the one-message
-    # rule, so the refusal has to say who was already reached.
-    state = resume_state()
-    state["announce"] = [
-        {"tickets": [455], "workspace": "/w/455", "agent": "burn-455",
-         "landed": None},
-        {"tickets": [457], "workspace": "/w/457", "agent": "burn-457",
-         "landed": None},
-    ]
-
-    def send(agent, message):
-        if agent == "session-457":
-            raise RuntimeError("no such peer")
-
-    with pytest.raises(loop.LoopError) as exc:
-        loop.announce(state, send, resolve=lambda agent: f"session-{agent[5:]}")
-    assert "burn-457" in str(exc.value)
-    assert "burn-455" in str(exc.value)
 
 
 def test_the_cli_dispatch_refuses_when_the_box_has_no_room(tmp, empty_live):
@@ -1229,8 +1042,6 @@ def test_box_check_weighs_every_worker_a_dispatch_would_start():
     # three.
     assert loop.box_check(processes=13, committed_gb=0, workers=3)["ok"] is True
     assert loop.box_check(processes=14, committed_gb=0, workers=3)["ok"] is False
-    assert loop.box_check(processes=2, committed_gb=21, add_gb=1,
-                          workers=4)["ok"] is False
 
 
 def test_the_cli_dispatch_takes_only_what_the_box_has_room_for(tmp, empty_live):
@@ -1240,8 +1051,7 @@ def test_the_cli_dispatch_takes_only_what_the_box_has_room_for(tmp, empty_live):
                    {"tickets": [457], "closure": ["b.js"]},
                    {"tickets": [458], "closure": ["c.js"]}], fh)
     got = loop_py("dispatch", "--in-flight", empty_live, "--candidates", cand, "--free", "3",
-                  "--processes", "23", "--committed-gb", "23",
-                  "--add-gb", "1")
+                  "--processes", "23", "--committed-gb", "23")
     assert got.returncode == 0, got.stderr
     assert got.stdout.count("dispatch  ") == 1, got.stdout
     assert "room for 1 of 3" in got.stdout, got.stdout
