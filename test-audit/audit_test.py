@@ -61,13 +61,12 @@ def _quiet_main(argv):
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 1. assertion-free
     ("def test_x():\n    x = compute()\n", True),
     ("def test_x():\n    x = compute()\n    assert x is not None\n", True),
     ("def test_x():\n    x = compute()\n    assert x == 5\n", False),
     # a private helper is still a delegated assertion: `_assert_*` is the
     # module-local convention for one, so the leading underscores are stripped
-    # before the prefix test (#678).
+    # before the prefix test.
     ("def test_x():\n    _assert_foo(compute())\n", False),
     ("def test_x():\n    _check_foo(compute())\n", True),
 ])
@@ -76,7 +75,6 @@ def test_is_assertion_free(source, expected):
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 2. tautology
     ("def test_x():\n    x = compute()\n    assert x == x\n", True),
     ("def test_x():\n    x = compute()\n    assert x == 5\n", False),
 ])
@@ -85,8 +83,6 @@ def test_is_tautology(source, expected):
 
 
 def test_unittest_testcase_is_not_collected_as_pytest():
-    """unittest.TestCase methods are a different framework, not pytest:
-    skipped, not silently treated as pytest."""
     unittest_tree = ast.parse(
         "class FooTest(unittest.TestCase):\n"
         "    def test_x(self):\n"
@@ -105,7 +101,6 @@ def test_pytest_class_methods_are_collected():
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 3. mock-the-world
     ("@patch('mod.a')\n"
             "@patch('mod.b')\n"
             "def test_x(a, b):\n"
@@ -118,7 +113,7 @@ def test_pytest_class_methods_are_collected():
             "    assert result == 3\n", False),
     # the same underscore stripping decides the real-call count here: three
     # mocks against three `_assert_*` helpers only reads as mock-the-world
-    # while the helpers are not counted as real calls (#678).
+    # while the helpers are not counted as real calls.
     ("def test_x():\n"
             "    m1 = MagicMock()\n"
             "    m2 = MagicMock()\n"
@@ -132,11 +127,10 @@ def test_is_mock_the_world(source, expected):
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 4. interaction-only assertion
     ("def test_x():\n    mock_obj.run()\n    mock_obj.assert_called_once()\n", True),
     ("def test_x():\n    result = subject.run()\n    assert result == 'ok'\n", False),
     # the private-helper spelling reaches this detector too: without it a
-    # spy-only test escapes both assertion-free and interaction-only (#678).
+    # spy-only test escapes both assertion-free and interaction-only.
     ("def test_x():\n    mock_obj.run()\n    _assert_called_once(mock_obj)\n", True),
 ])
 def test_is_interaction_only(source, expected):
@@ -144,7 +138,6 @@ def test_is_interaction_only(source, expected):
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 5. empty/skipped
     ("def test_x():\n    pass\n", True),
     ("@pytest.mark.skip\ndef test_x():\n    assert True\n", True),
     ("@pytest.mark.skip(reason='flaky')\ndef test_x():\n    assert True\n", False),
@@ -164,7 +157,6 @@ def test_is_empty_or_skipped(source, expected):
     # a generic method name on code under test is a call into that code
     ("def test_x():\n    out = report.format('SKILL.md')\n    assert 'a sentence' in out\n", False),
     ("def test_x():\n    out = T.resolve('SKILL.md')\n    assert 'a sentence' in out\n", False),
-    # 6. prose-assertion
     ("def test_x():\n    text = (ROOT / 'SKILL.md').read_text()\n    assert 'a sentence' in text\n", True),
 ])
 def test_is_prose_assertion(source, expected):
@@ -172,7 +164,6 @@ def test_is_prose_assertion(source, expected):
 
 
 def test_is_prose_assertion_follows_a_module_constant_prose_path():
-    """the prose path may sit in a module-level constant"""
     assert is_prose_assertion(
         _func_from("def test_x():\n    assert 'a sentence' in SKILL.read_text()\n"), {"SKILL"}
     )
@@ -218,7 +209,7 @@ def test_scan_path_flags_prose_tests_by_language():
 
 
 def test_scan_path_prunes_dot_dirs():
-    """scan_path walks via auditlib.walk_source (#611), so .tox is pruned
+    """scan_path walks via auditlib.walk_source, so .tox is pruned
     like every other audit."""
     tmp = tempfile.mkdtemp()
     try:
@@ -231,8 +222,6 @@ def test_scan_path_prunes_dot_dirs():
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 7. dead assertion in an expect-exception block: every statement after the
-    # first call in the block never runs.
     ("def test_x():\n    with pytest.raises(ValueError):\n        parse('')\n        assert parse.calls == 1\n", True),
     ("def test_x():\n    with raises(ValueError) as e:\n        parse('')\n        x = 1\n", True),
     ("def test_x():\n    with pytest.raises(ValueError):\n        assert ready\n        parse('')\n", False),
@@ -269,7 +258,6 @@ def test_lost_tests(source, expected):
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 9. broad exception expectation
     ("def test_x():\n    with pytest.raises(Exception):\n        parse('')\n", True),
     ("def test_x():\n    with raises(BaseException) as e:\n        parse('')\n", True),
     ("def test_x():\n    with pytest.raises(Exception, match='empty'):\n        parse('')\n", False),
@@ -298,7 +286,6 @@ def test_is_nonstrict_xfail(decorators, strict, expected):
 
 
 def test_is_nonstrict_xfail_class_mark_covers_every_method():
-    # a class mark covers every method in it
     assert is_nonstrict_xfail(ast.parse("@pytest.mark.xfail\nclass TestA:\n    pass\n").body[0], False)
     assert not is_nonstrict_xfail(ast.parse("@pytest.mark.xfail(strict=True)\nclass TestA:\n    pass\n").body[0], False)
 
@@ -394,7 +381,7 @@ def test_scan_path_wires_in_the_exact_match_smells():
 
 def test_gate_counts_fixture_duplicates_and_keeps_the_rest_report_only():
     # gate mode: the duplicate-name case joins assertion-free; the rest of the
-    # new four stay report-only. Its own fixtures exemption and count.
+    # exact-match smells stay report-only. Its own fixtures exemption and count.
     tmp = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(tmp, "fixtures"))
@@ -440,7 +427,7 @@ def test_gate_fails_assertion_free_never_a_fixture_and_refuses_a_missing_root():
 
         # ...but the exemption is counted and reported. `fixtures` matches any
         # directory of that name at any depth, so without this line a repo
-        # could park hollow tests under one and never see it (#685).
+        # could park hollow tests under one and never see it.
         assert gate(tmp)[1] == {"assertion-free": 1}, gate(tmp)
         code, err = _main_stderr(["audit.py", "--gate", tmp])
         assert code == 0, (code, err)
@@ -459,7 +446,7 @@ def test_gate_fails_assertion_free_never_a_fixture_and_refuses_a_missing_root():
         # A root that does not exist was not checked, so the gate must not
         # report success: EXIT_UNABLE, distinct from both 0 (clean) and 1
         # (hollow tests found), so a typo in a repo's wiring reads
-        # differently from a real finding (#685).
+        # differently from a real finding.
         # Each guard is witnessed by its own message: `os.access` also rejects
         # a missing path, so a status-only assertion would leave the existence
         # branch passing with its constraint stripped.
@@ -474,7 +461,7 @@ def test_gate_fails_assertion_free_never_a_fixture_and_refuses_a_missing_root():
 
 def test_gate_refuses_an_unreadable_root_and_skips_an_unreadable_file():
     # A root that exists but cannot be read was not checked either -- the same
-    # lie, reached by EACCES instead of ENOENT (#685). Its own root, never one
+    # lie, reached by EACCES instead of ENOENT. Its own root, never one
     # earlier assertions gate on: a hollow fixture parked under such a root is
     # what makes those assertions pass.
     #
@@ -515,7 +502,6 @@ def test_gate_refuses_an_unreadable_root_and_skips_an_unreadable_file():
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 11. stub asserted called: the stubbed receiver must be the one checked
     ("def test_x():\n    m.get.return_value = 1\n    assert f(m) == 1\n    m.get.assert_called_once()\n", True),
     ("def test_x():\n    m = Mock(side_effect=[1])\n    assert f(m) == 1\n    assert m.called\n", True),
     ("def test_x():\n    m.get.return_value = 1\n    assert f(m) == 1\n    m.put.assert_called_once()\n", False),
@@ -530,7 +516,6 @@ def test_has_called_stub(source, expected):
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 12. private-API access
     ("def test_x():\n    assert c._store == 1\n", True),
     ("def test_x():\n    assert self.obj._store == 1\n", True),
     ("def test_x():\n    assert self._store == c.__class__\n", False),
@@ -544,7 +529,6 @@ def test_private_imports_flags_underscore_names_only():
 
 
 @pytest.mark.parametrize("source, expected", [
-    # 13. vacuous loop assertion
     ("def test_x():\n    r = f()\n    for i in r:\n        assert i > 0\n", True),
     ("def test_x():\n    for i in enumerate(f().items()):\n        assert i\n", True),
     ("def test_x():\n    r = f()\n    assert r\n    for i in r:\n        assert i > 0\n", False),

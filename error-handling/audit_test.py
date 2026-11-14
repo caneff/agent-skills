@@ -1,4 +1,4 @@
-"""Tests for error-handling's ruff+bandit merge (#1744; was `audit.py`'s `_selfcheck`)."""
+"""Tests for error-handling's ruff+bandit merge."""
 import json
 import os
 import sys

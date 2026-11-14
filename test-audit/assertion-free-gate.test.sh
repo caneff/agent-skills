@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# The assertion-free and duplicate-name checks as this repo's own merge gate
-# (#645, #1488). Both parsers run over the whole tree in --gate mode: those two
+# The assertion-free and duplicate-name checks as this repo's own merge gate.
+# Both parsers run over the whole tree in --gate mode: those two
 # smells only, fixtures excluded, non-zero exit on any hit. Every other smell
 # stays report-only -- see SKILL.md § Gate mode for why.
 #
 # all.sh: repo-wide (scans every tracked file, so no directory edge can pin it)
-# Discovered by tests/all.sh's `*.test.sh` rule, so wiring is this file alone.
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
 root=$(git rev-parse --show-toplevel)

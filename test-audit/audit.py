@@ -54,7 +54,6 @@ MOCK_CEILING = 3
 
 
 def _name_of(node):
-    """Attribute -> its `.attr`, Name -> its `.id`, else None."""
     if isinstance(node, ast.Attribute):
         return node.attr
     if isinstance(node, ast.Name):
@@ -71,7 +70,7 @@ def _call_name(node):
 def _bare_name(node):
     """`_call_name` with leading underscores stripped. `_assert_*` is the
     private-helper spelling of a delegated assertion, and every detector that
-    keys off the `assert` prefix means the same thing by it (#678)."""
+    keys off the `assert` prefix means the same thing by it."""
     name = _call_name(node)
     return name.lstrip("_") if name else name
 
@@ -123,7 +122,6 @@ def _assertion_mechanisms(func):
 
 
 def is_assertion_free(func):
-    """1. assertion-free test."""
     mechs = _assertion_mechanisms(func)
     if not mechs:
         return True
@@ -135,7 +133,7 @@ def is_tautology(func):
 
     ponytail: covers the literal self-comparison (`assert x == x`), including
     the case where both sides are the identical call expression (e.g.
-    `assert f(x) == f(x)`). The broader form named in #277 — the test body
+    `assert f(x) == f(x)`). The broader form — the test body
     re-implements the function under test with different code and compares —
     needs reading what the implementation actually does, which isn't
     syntactically detectable; that's judgment-pass territory, not this pass.
@@ -154,7 +152,6 @@ def is_tautology(func):
 
 
 def is_mock_the_world(func):
-    """3. mock-the-world — many mocks, little real code exercised."""
     mock_calls = real_calls = 0
     for n in ast.walk(func):
         name = _call_name(n)
@@ -184,7 +181,6 @@ def _interaction_check(node):
 
 
 def is_interaction_only(func):
-    """4. interaction-only assertion — only checks that a mock was called."""
     checks = []
     for n in ast.walk(func):
         if isinstance(n, ast.Assert):
@@ -244,7 +240,6 @@ VACUOUS_SMELL = "vacuous loop assertion"
 
 
 def _is_private_name(name):
-    """`_x` or `__x`, not a dunder such as `__class__`."""
     return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
 
 
@@ -331,7 +326,6 @@ def has_vacuous_loop_assertion(func):
 
 
 def is_empty_or_skipped(func):
-    """5. empty/skipped test — pass-body, or @skip with no reason."""
     body = [
         n
         for n in func.body
@@ -352,7 +346,6 @@ def is_empty_or_skipped(func):
             return True
     return False
 
-# --- 7-10. exact-match smells -----------------------------------------------
 
 LOST_DUPLICATE = "lost test (duplicate name)"
 LOST_UNCOLLECTED = "lost test (uncollected class)"
@@ -381,14 +374,12 @@ def has_dead_assertion_in_raises(func):
 
 
 def _expected_exception(call):
-    """The exception argument of a `raises(...)` call, positional or by keyword."""
     if call.args:
         return call.args[0]
     return next((kw.value for kw in call.keywords if kw.arg == "expected_exception"), None)
 
 
 def has_broad_raises(func):
-    """9. broad exception expectation — `raises(Exception)` with no `match=`."""
     for node in ast.walk(func):
         if (
             _call_name(node) == "raises"
@@ -526,8 +517,6 @@ def xfail_strict_for(path):
     return strict
 
 
-# --- 6. prose-assertion ------------------------------------------------------
-
 PROSE_FILE = re.compile(r"\.md\b")
 # A call outside this set might run code under test, so the test is not a pure
 # prose assertion. The set is file reads and string handling only; anything
@@ -548,7 +537,8 @@ PROSE_OK_MODULE_METHODS = {
     "re": frozenset({"search", "match", "fullmatch", "findall", "sub", "compile", "escape"}),
     "path": frozenset({"join", "dirname", "abspath", "exists"}),
 }
-# Shell commands that only read or reshape text. Same idea as PROSE_OK_CALLS.
+# Shell commands that only read or reshape text: the shell counterpart of the
+# PROSE_OK_* sets above.
 SHELL_OK_WORDS = frozenset(
     {
         "grep", "egrep", "fgrep", "sed", "tr", "cat", "awk", "test", "[", "[[", "echo", "printf", "cd",
@@ -588,7 +578,6 @@ def _is_prose_call(call):
 
 
 def _prose_names(tree):
-    """Module-level names bound from an expression that spells a `.md` path."""
     names = set()
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -601,9 +590,6 @@ def _prose_names(tree):
 
 
 def is_prose_assertion(func, prose_names=frozenset()):
-    """6. prose-assertion (Python) — every assertion is a containment check,
-    the test reads a prose file, and it calls nothing but file reads and
-    string handling."""
     mechs = _assertion_mechanisms(func)
     if not mechs or not all(isinstance(m, ast.Assert) and _is_containment_assert(m) for m in mechs):
         return False
@@ -653,9 +639,6 @@ def _shell_command_words(source):
 
 
 def is_shell_prose_test(source):
-    """6. prose-assertion (shell) — a `*.test.sh` that names a Markdown file
-    and runs nothing but text commands (`grep`, `sed`, `case`, `test`, ...)
-    or functions it defines itself."""
     code = "\n".join(l for l in source.splitlines() if not l.strip().startswith("#"))
     if not PROSE_FILE.search(code):
         return False
@@ -745,8 +728,6 @@ def scan_path(root):
     return findings
 
 
-# --- gate mode -------------------------------------------------------------
-
 # The smells a build gates on, each with the label its fixtures-suppression
 # count is reported under. SKILL.md § Gate mode says why these two and no other.
 GATE_SMELLS = {"assertion-free test": "assertion-free", LOST_DUPLICATE: "duplicate-name"}
@@ -755,7 +736,7 @@ GATE_SMELLS = {"assertion-free test": "assertion-free", LOST_DUPLICATE: "duplica
 # gate mode ever returns 1 -- a report never fails a build -- but 0 and 2 mean
 # the same in both. A root that does not exist gets 2 and never 0 --
 # a gate that reports success while it scanned nothing is a lie, and it fails
-# silently and permanently once wired into a repo's build (#685).
+# silently and permanently once wired into a repo's build.
 EXIT_UNABLE = 2
 
 
@@ -775,7 +756,7 @@ def gate(root):
     The count is returned, and reported by `main`, because `_under_fixtures`
     matches a `fixtures` segment at any depth: without it a repo could park
     hollow tests under any directory it named `fixtures` and never see that
-    the gate had stopped looking at them (#685)."""
+    the gate had stopped looking at them."""
     gated = [f for f in scan_path(root) if f[2] in GATE_SMELLS]
     findings = [f for f in gated if not _under_fixtures(f[0])]
     suppressed = {}
@@ -792,14 +773,14 @@ def main(argv):
     # Refuse a root that does not exist before scanning it. Walking a missing
     # directory finds nothing, and "nothing" is indistinguishable from a clean
     # tree -- so a typo in a repo's wiring would make its gate permanently
-    # green (#685).
+    # green.
     if not os.path.exists(root):
         print(f"test-audit: no such path: {root} -- nothing was scanned.", file=sys.stderr)
         return EXIT_UNABLE
     # The same lie by a different errno: a root that exists but cannot be read
     # walks to zero files, which is indistinguishable from a clean tree. Only
     # the root is checked here -- an unreadable directory deeper in the tree is
-    # still swallowed by `os.walk`, which is a wider fix than #685 asked for.
+    # still swallowed by `os.walk`.
     # A directory needs X_OK as well: R_OK alone lists it, but opening the
     # files inside it still fails, so the walk yields nothing.
     needed = os.R_OK | os.X_OK if os.path.isdir(root) else os.R_OK

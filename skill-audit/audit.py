@@ -58,7 +58,6 @@ def add_flag(text):
     unchanged.
     """
     lines = text.splitlines(keepends=True)
-    # Locate the frontmatter block: the first two `---` fence lines.
     fences = [i for i, ln in enumerate(lines) if ln.strip() == "---"]
     if len(fences) < 2:
         raise ValueError("no frontmatter block")

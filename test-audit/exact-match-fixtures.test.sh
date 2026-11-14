@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pins what both pass-one scanners report on the exact-match-smell fixtures
-# (#1488): the four pytest smells, the two vitest ones, and the near-miss
+# Pins what both pass-one scanners report on the exact-match-smell fixtures:
+# the four pytest smells, the two vitest ones, and the near-miss
 # negatives beside each, which must stay unreported. Line numbers are the
 # fixtures' own, so edit a fixture and this file together.
 set -euo pipefail
@@ -26,7 +26,7 @@ js=fixtures/vitest_exact_match_smells.test.js
 check "audit.mjs on $js" "$js:13: lost test (duplicate name)
 $js:29: broad exception expectation" "$(node audit.mjs "$js" 2>/dev/null | sort -t: -k2,2n)"
 
-# Both scanners gate on the duplicate-name case and nothing else new. A copy of
+# Both scanners gate on the duplicate-name case and no other exact-match smell. A copy of
 # each fixture outside fixtures/ must fail the gate on that one finding.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

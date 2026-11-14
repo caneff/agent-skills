@@ -105,7 +105,6 @@ def test_file_outside_the_source_list_is_not_instrumented(project):
 
 
 def _fake_systemd_run(tmp_path):
-    """A systemd-run on PATH that records its argv, one per line, then exits 0."""
     bindir = tmp_path / "bin"
     bindir.mkdir()
     log = tmp_path / "argv.log"
@@ -154,8 +153,6 @@ def test_capped_run_names_the_hook_variables_for_the_unit(tmp_path):
 
 @pytest.mark.skipif(not _real_user_systemd(), reason="no working systemd --user")
 def test_capped_run_delivers_the_hook_variables_into_the_real_unit(tmp_path):
-    """The unit starts in the user manager's environment; without passthrough the
-    preload never loads and a suite passes uninstrumented."""
     env = _minimal_env(os.environ["PATH"], NODE_OPTIONS="--no-warnings", CRAP_HITS="/some/hits")
     r = subprocess.run(
         ["bash", CAPPED, "1G", "--", "sh", "-c", 'echo "$NODE_OPTIONS|$CRAP_HITS"'],

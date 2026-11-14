@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Guards #1331: mutation-audit's single-diff witness mode. One patch and one
+# mutation-audit's single-diff witness mode. One patch and one
 # covering test command go in; one outcome line (`red`, `green` or `unknown`)
 # and the suite's own message come out, from a throwaway worktree, with the
 # reviewed checkout left exactly as found.
 # BASH_SOURCE rather than `git rev-parse --show-toplevel`, and GIT_* scrubbed:
-# a caller's leaked GIT_DIR/GIT_WORK_TREE would point git at the caller's repo
-# (#620).
+# a caller's leaked GIT_DIR/GIT_WORK_TREE would point git at the caller's repo.
 set -uo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,13 +53,11 @@ expect() { # <out-name> <outcome>
     { echo "FAIL: $1 exited $(cat "$scratch/$1.rc"), not 0" >&2; fail=1; }
 }
 
-# A patch that breaks the asserted behaviour: red, with the suite's own message.
 run red --patch "$scratch/breaks.patch" --test 'python3 test_mod.py' --no-ledger
 expect red red
 grep -q 'MUTANT-mod' "$scratch/red.out" ||
   { echo "FAIL: the red outcome did not carry the assertion's own message" >&2; cat "$scratch/red.out" >&2; fail=1; }
 
-# A patch the test cannot see: green, the hollow-witness answer.
 run green --patch "$scratch/inert.patch" --test 'python3 test_mod.py' --no-ledger
 expect green green
 
@@ -94,7 +91,6 @@ stub_rc=0
 { [ "$stub_rc" -eq 1 ] && ! grep -q '^outcome:' "$scratch/noline.out"; } ||
   { echo "FAIL: a report with no line for the id was not refused (exit $stub_rc)" >&2; cat "$scratch/noline.out" >&2; fail=1; }
 
-# The reviewed tree is untouched by every run above.
 [ "$(cat "$repo/mod.py")" = "$(printf 'def f():\n    return 1')" ] ||
   { echo "FAIL: a witness run wrote its patch into the reviewed tree" >&2; fail=1; }
 [ -z "$(git -C "$repo" status --porcelain)" ] ||
