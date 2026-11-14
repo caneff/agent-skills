@@ -158,9 +158,10 @@ An area closes on its own.
   areas do not merge.
   The edge holds the dependent slice until the other spec's integration PR
   merges, since a blocker frees early only when it landed on the dependent
-  ticket's own integration branch. Keep the edges between any two areas pointing one
-  way: edges in both directions deadlock both specs. When drafting produces
-  opposite edges, move one ticket to the other area to break the cycle.
+  ticket's own integration branch. Keep the edges between any two areas
+  pointing one way: edges in both directions deadlock both specs. When
+  drafting produces opposite edges, move one ticket to the other area to break
+  the cycle.
 - **No parent over the specs.** Each spec carries one line naming the sweep
   run, as `Sweep run: <the run folder holding index.html>`, and nothing else
   ties them together.

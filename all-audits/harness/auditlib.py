@@ -2,9 +2,10 @@
 """Shared plumbing for the audit family's Python parsers.
 
 Owns the excluded-directory set, a repo-relative source-file walk that prunes
-before descending, the CLI entry (parse a captured tool output), and the six-key findings-schema row. Each audit's `audit.py`
-keeps only its own parse function and imports this module via a short path
-hook (see `dead-code/audit.py` for the pattern).
+before descending, the CLI entry (parse a captured tool output), and the
+six-key findings-schema row. Each audit's `audit.py` keeps only its own parse
+function and imports this module via a short path hook (see
+`dead-code/audit.py` for the pattern).
 """
 import json
 import os
@@ -25,8 +26,9 @@ JS_SUFFIXES = (".mjs", ".js")
 
 
 def walk_source(root, suffix=".py", skip=None):
-    """Sorted repo-relative `suffix` paths (a string or a tuple of them) under `root`, pruning
-    `EXCLUDED_DIRS` and dot-dirs before descending into them.
+    """Sorted repo-relative `suffix` paths (a string or a tuple of them)
+    under `root`, pruning `EXCLUDED_DIRS` and dot-dirs before descending into
+    them.
 
     `skip`, when given, is a callable taking a `/`-joined relative path and
     returning True to drop it from the result — an additional per-file

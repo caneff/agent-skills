@@ -85,7 +85,8 @@ def test_is_tautology(source, expected):
 
 
 def test_unittest_testcase_is_not_collected_as_pytest():
-    """unittest.TestCase methods are a different framework, not pytest: skipped, not silently treated as pytest."""
+    """unittest.TestCase methods are a different framework, not pytest:
+    skipped, not silently treated as pytest."""
     unittest_tree = ast.parse(
         "class FooTest(unittest.TestCase):\n"
         "    def test_x(self):\n"
@@ -196,7 +197,8 @@ def test_is_shell_prose_test(source, expected):
 
 
 def test_scan_path_flags_prose_tests_by_language():
-    """the detector is wired into scanning: a prose Python test, a prose shell test, and a test that runs code"""
+    """the detector is wired into scanning: a prose Python test, a prose
+    shell test, and a test that runs code"""
     tmp = tempfile.mkdtemp()
     try:
         with open(os.path.join(tmp, "test_prose.py"), "w", encoding="utf-8") as f:
@@ -216,7 +218,8 @@ def test_scan_path_flags_prose_tests_by_language():
 
 
 def test_scan_path_prunes_dot_dirs():
-    """scan_path walks via auditlib.walk_source (#611), so .tox is pruned like every other audit."""
+    """scan_path walks via auditlib.walk_source (#611), so .tox is pruned
+    like every other audit."""
     tmp = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(tmp, ".tox"))

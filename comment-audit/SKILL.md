@@ -84,10 +84,10 @@ each rots into a lie the moment the code changes underneath it:
   keep the *why* as plain prose and delete every number. A whole delete is
   for a citation where nothing but the number remains (`# see #88`); a module
   docstring or any other comment whose reason sits beside the number is a
-  salvage, never a whole delete. **One exception — an `ADR-NNNN` reference stays.**
-  An ADR is a durable, addressable decision record, not an ephemeral ticket,
-  so the reason it points to genuinely lives elsewhere and stays reachable —
-  keep it, the way a domain-rule keeper does. Still drop a bare number riding
+  salvage, never a whole delete. **One exception — an `ADR-NNNN` reference
+  stays.** An ADR is a durable, addressable decision record, not an ephemeral
+  ticket, so the reason it points to genuinely lives elsewhere and stays
+  reachable — keep it, the way a domain-rule keeper does. Still drop a bare number riding
   beside an ADR: `per ADR-0007 (#412)` → `per ADR-0007`.
 - **The plausible-but-inferable why.** A because-clause a reader would already
   know from the code: `# use a set for fast lookup`, `# sort so output is
@@ -123,8 +123,9 @@ first. A good comment is a note, not a paragraph.
   guards against, which the test's name and body do not say. A keep (`why`).
 - **Public API contract.** A docstring or doc-comment on a published interface,
   carrying what the signature cannot — the promise, the units, the failure modes
-  callers depend on. A Rust `///` line is a doc comment, not narration. A docstring that only restates the signature is no
-  contract; cut it like any other restatement.
+  callers depend on. A Rust `///` line is a doc comment, not narration. A
+  docstring that only restates the signature is no contract; cut it like any
+  other restatement.
 
 ## The audit, worked
 

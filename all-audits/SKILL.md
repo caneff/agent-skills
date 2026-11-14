@@ -49,16 +49,18 @@ instead, with no separate log file:
 `skill-audit` is **not** in the set — it scans the global skills directory, not
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and
 targeted at one module; invoke it by name, or run
-`driver.py mutation <repo> --modules a.py,b.py` for the scripted per-module form. The whole
-repo is a separate explicit ask, never part of this sweep:
+`driver.py mutation <repo> --modules a.py,b.py` for the scripted per-module
+form. The whole repo is a separate explicit ask, never part of this sweep:
 `driver.py mutation <repo> --all` (`mutation-audit/SKILL.md` § Whole-repo mode).
 Mutation mode runs up to `MUTATION_JOBS` modules at once (default 4). No
 module's run opens its report; the driver opens the mutation index
 (`collection/mutation/index.html`, printed as `index:`) once, when the run
-finishes, and nothing when no page exists. A standalone `/mutation-audit <module>` still opens its own.
-With neither `--modules` nor `--all`, `mutation` takes its candidates from `mutation-audit/audit.py`'s
-`plan` (the same list `--suggest` prints; the model's prepass only ranks that list) and orders them never-run
-first, then changed since their recorded sha, then oldest run first, before
+finishes, and nothing when no page exists. A standalone
+`/mutation-audit <module>` still opens its own. With neither `--modules` nor
+`--all`, `mutation` takes its candidates from `mutation-audit/audit.py`'s
+`plan` (the same list `suggest` prints; the model's prepass only ranks that
+list) and orders them never-run first, then changed since their recorded sha,
+then oldest run first, before
 `MUTATION_MAX` cuts. Each finished module is recorded under `mutation_modules`
 in the per-repo cache file.
 
@@ -77,8 +79,8 @@ subcommand with only its own flags — `sweep`, `index`, `multi`,
 its mode does not take. `driver.py --help` lists the modes, from the module
 docstring, and `driver.py <mode> --help` is that mode's flag reference; this
 doc doesn't restate them, so the two can't drift apart. The stored sweeps and
-their audit records on GitHub belong to `stored_sweeps.py`. A run is three steps:
-`plan_sweep` asks the staleness cache what still needs running, `execute`
+their audit records on GitHub belong to `stored_sweeps.py`. A sweep is three
+steps: `plan_sweep` asks the staleness cache what still needs running, `execute`
 spawns the audits (the only step that does), and `collect` assembles the
 collection and renders the index — the `index` mode calls `collect` alone.
 `audits_data.py` holds the audit set — adding an audit is one entry there.
@@ -106,7 +108,8 @@ them. Opt-in per repo — see [`harness/IGNORE-FILE.md`](harness/IGNORE-FILE.md)
 "nothing found" is also what the audit not running produces, so a clean
 report there would be a false pass (#1751). The rule, stated once here:
 
-- **The check.** `python3 ~/.agents/skills/all-audits/harness/auditlib.py --applicable <scope>`
+- **The check.**
+  `python3 ~/.agents/skills/all-audits/harness/auditlib.py --applicable <scope>`
   prints `applicable` and exits 0, or prints `not applicable: <language>` and
   exits 3. It counts the files git tracks under `<scope>` (minus vendored and
   excluded trees), so an untracked stray `.py` or a report folder's `.js`

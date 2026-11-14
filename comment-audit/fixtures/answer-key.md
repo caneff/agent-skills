@@ -3,8 +3,9 @@
 The verdict the skill must reach for each comment in `sample.py`,
 `test_sample.py` and `sample.rs`, each judged from its own text. A citation
 that carries a why is a salvage (strip every number, keep the why); a whole
-delete only when nothing but the number remains. `comment-audit/fixtures_test.py`
-parses this table and checks it against the fixture files.
+delete only when nothing but the number remains.
+`comment-audit/fixtures_test.py` parses this table and checks it against the
+fixture files.
 
 | # | File | Line | Bucket | Category | After |
 |---|------|------|--------|----------|-------|

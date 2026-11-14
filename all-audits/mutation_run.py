@@ -1,11 +1,10 @@
 """Mutation mode's planning, beside the sweep driver (#1746).
 
-Owns what the driver used to hold for its `mutation` mode: the per-module mutation
-record (which module was mutated at which sha, when), the order modules run
-in, and `run`, the one call the
-driver makes to learn which modules to mutate. The driver keeps the process
-work (worktrees, `claude`, the pages); this module never spawns anything but
-the `git diff` calls `changed` makes.
+Owns what the driver used to hold for its `mutation` mode: the per-module
+mutation record (which module was mutated at which sha, when), the order
+modules run in, and `run`, the one call the driver makes to learn which modules
+to mutate. The driver keeps the process work (worktrees, `claude`, the pages);
+this module never spawns anything but the `git diff` calls `changed` makes.
 
 The module list and the sibling-test rule come from `mutation-audit/audit.py`'s
 public `plan(repo)`, loaded by path because its directory name is not an
