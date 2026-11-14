@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop hook: tell the controller when a worker stops without reporting (#820).
+# Stop hook: tell the controller when a worker stops without reporting.
 #
 # Contract: read the Stop event JSON on stdin. The session is a worker when its
 # transcript opens with an `/implement` or `/implement-spec` brief carrying
@@ -7,24 +7,24 @@
 # that is not a subagent hand-back. The worker has reported when, after that
 # turn start, a SendMessage to the controller came back with `success: true`.
 # A stop while something launched this turn — or an earlier turn, with
-# liveness evidence since this turn's start (#900) — is still out is a wait,
+# liveness evidence since this turn's start — is still out is a wait,
 # not a finish. A subagent is "handed back" in one of three shapes: an
 # `.origin.senderTaskId` peer message (an anonymous `Agent` call's
 # hand-back), a `<task-id>...</task-id>` tag (a task-notification), or a
 # named teammate's plain-text `<teammate-message teammate_id="...">` reply
-# (#859) — that last shape carries no `origin` at all, and its launch id is
+# — that last shape carries no `origin` at all, and its launch id is
 # qualified (`name@session-...`) where the reply's `teammate_id` is bare, so
 # matching strips the `@session-...` suffix before comparing. A background
-# shell and a Monitor task are out on the same footing (#886), and end only
+# shell and a Monitor task are out on the same footing, and end only
 # at a status-bearing task-notification, a `TaskStop`, or a Monitor timeout
 # notification (`<event>[Monitor timed out — re-arm if needed.]</event>`,
-# statusless but a finish, not a touch — #981). Also not a silent
+# statusless but a finish, not a touch). Also not a silent
 # stop: a worker that reported and has done nothing since — an inbound peer
 # message starts a turn, so a controller closing its own loop (`merged, sha
-# X`) otherwise manufactures an alert on that worker's next stop (#886).
+# X`) otherwise manufactures an alert on that worker's next stop.
 # Otherwise submit one line into the controller's herdr pane
 # with `herdr agent prompt` — a hook command, so the auto-mode classifier never
-# sees it (#466's report was denied there). One alert per stop: every attempt
+# sees it (a report sent that way was once denied there). One alert per stop: every attempt
 # is logged to ~/.claude/worker-stop-alerts.log keyed by session and the
 # transcript's last entry, and a logged stop never alerts again. Always exit
 # 0 — a hook failure must never block the worker's own stop.
@@ -33,8 +33,7 @@ set -u
 
 # Through the symlink: install.sh links this hook into ~/.claude/hooks/, and a
 # lib looked for beside the link goes missing whenever install.sh has not
-# been re-run since the lib was added (#1148: every stop from 2026-09-22 to
-# 2026-09-24 logged lib-missing).
+# been re-run since the lib was added, and every stop then logs lib-missing.
 hook_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 log="$HOME/.claude/worker-stop-alerts.log"
 lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
@@ -44,7 +43,7 @@ lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
 }
 # A missing lib (an installed hook whose sibling was never deployed) must not
 # join the "not a worker transcript" exit 0 below via a bare command-not-found
-# on stderr — that is exactly the silent-exit-0 hazard #991 exists to fix, one
+# on stderr — that is exactly the silent-exit-0 hazard the shared lib exists to fix, one
 # layer up. Logged so a run of missing alerts has a trace to find.
 source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
   lib_missing "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller"
@@ -54,7 +53,7 @@ source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
 # command-not-found under `set -u` alone (no `-e`), silently reaching the
 # same "not a worker transcript" exit 0 — including the log line itself,
 # since worker_alert_logline can be exactly the missing symbol. Checked here
-# with `lib_missing`, which needs none of them (Codex gate pass on PR #1066).
+# with `lib_missing`, which needs none of them.
 for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
           worker_alert_worker_agent_name worker_alert_controller_pane \
           worker_alert_resolve_controller worker_alert_prompt_pane \
@@ -77,7 +76,7 @@ entries() { jq -nc '[inputs | fromjson? | objects]' -R "$transcript" 2>/dev/null
 IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 [ -n "${controller:-}" ] || exit 0
 
-# The brief carries the controller's herdr agent name (#923); a compliant
+# The brief carries the controller's herdr agent name; a compliant
 # worker resolves that to a session name or socket before sending, so
 # matching on the brief's literal alone can miss a delivered report. Resolve
 # the same two hops `resolve-controller` does, but keep matching the brief's
@@ -92,7 +91,7 @@ worker_alert_resolve_controller "$controller"
 # literal controller value (a herdr agent name or an already-live session
 # name), `$names` every resolved session name and `$socks` every resolved
 # `uds:` address — a report is counted against any of them, since nothing
-# here requires a worker to have resolved before sending (#1014).
+# here requires a worker to have resolved before sending.
 IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   --argjson names "$(jq -nc '$ARGS.positional' --args -- ${names[@]+"${names[@]}"})" \
   --argjson socks "$(jq -nc '$ARGS.positional' --args -- ${sockets[@]+"${sockets[@]}"})" '
@@ -115,7 +114,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
       | .key] as $reports
   | [$reports[] | select(. > $start)] as $delivered
   # An inbound peer message starts a turn, so a controller closing a loop
-  # (`merged, sha X`) used to manufacture an alert on the next stop (#886).
+  # (`merged, sha X`) used to manufacture an alert on the next stop.
   # A report still stands while nothing has happened since it: any tool call
   # or tool result after the last delivered report is work that owes the
   # controller a new one.
@@ -124,7 +123,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
       | select((.value.type == "assistant"
                 and ([.value.message.content[]? | select(.type == "tool_use")] | length > 0))
                or (.value.toolUseResult != null))] as $since_report
-  # Liveness evidence (#900): a launch from an earlier turn counts as out
+  # Liveness evidence: a launch from an earlier turn counts as out
   # only if something since the start of this turn names its id — a tool call
   # by the worker whose task_id, shell_id, agentId or `to` is that id (a
   # `BashOutput`/`TaskOutput` poll, a `SendMessage` to the subagent), or a
@@ -143,7 +142,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   # A Monitor timeout notification (exactly `<event>[Monitor timed out —
   # re-arm if needed.]</event>`, no `<status>`) is the monitor stopping, not
   # a tick: it reads a finish, not a touch, or the launch it names stays
-  # outstanding across every later turn (#981). Matched on the literal
+  # outstanding across every later turn. Matched on the literal
   # marker inside `<event>`, not a bare substring test, so a monitor whose
   # own tailed output happens to mention "Monitor timed out" in free text
   # is not misread as its own end.
@@ -203,7 +202,7 @@ grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 # Every herdr call below ends by a 10 s deadline, measured from here — not
 # 12 s, because the controller resolution above already spent up to its own
 # 2 s budget on the same 15 s hook timeout, and this deadline has to leave
-# room for that whether or not the stop turned out silent (#1014).
+# room for that whether or not the stop turned out silent.
 deadline=$((SECONDS + 10))
 
 worker_agent="$(worker_alert_worker_agent_name)"

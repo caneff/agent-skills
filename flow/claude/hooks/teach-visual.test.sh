@@ -25,7 +25,7 @@ expect_has "extraction: both triggers in one command, new session" \
   "$(context "$hook" s2 "shot-scraper page.html -o p.png && zed p.png")" "${showing[@]}" "${reading[@]}"
 
 # The image openers share § Showing me a file with zed, once per session across
-# all of them (#1531).
+# all of them.
 for opener in "wslview sheet-2.png" "xdg-open sheet.png" "explorer.exe sheet.png" "eog sheet.png" "feh sheet.png" "mspaint.exe sheet.png" "/mnt/c/Windows/explorer.exe sheet.png" "/usr/bin/xdg-open sheet.png" "cmd.exe /c start sheet.png"; do
   sid="open-$(printf %s "${opener%% *}" | tr -c 'A-Za-z0-9' _)"
   expect_has "extraction: ${opener%% *} returns § Showing me a file" \
