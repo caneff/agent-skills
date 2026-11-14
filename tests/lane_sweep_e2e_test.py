@@ -82,12 +82,16 @@ def test_loop_dispatches_a_subcommand_through_its_handler(tmp_path):
 
 
 def test_one_heading_rule_for_blockers_and_the_seam(tmp_path):
-    for indent, is_heading in (("", True), ("   ", True), ("    ", False)):
+    # " \t" is the case that tells the rules apart: `visible()` keeps the line
+    # (it drops only four spaces or a leading tab), CommonMark reads it as code,
+    # and the old `[ \t]*` rule read it as a heading.
+    for indent, is_heading in (("", True), ("   ", True), ("    ", False),
+                               (" \t", False)):
         body = f"{indent}## Blocked by\n\n- #12\n"
         stated = frontier.blocked_by_section(body)
         assert (frontier.section_blockers(stated)[0] == [12]) is is_heading, (indent, stated)
 
-        repo = tmp_path / f"indent{len(indent)}"
+        repo = tmp_path / f"indent{indent!r}".replace("'", "")
         repo.mkdir()
         (repo / "AGENTS.md").write_text(
             f"# R\n\n{indent}## End-to-end seam\n\n- **Seam**: `bash t.sh`\n"
