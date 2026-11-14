@@ -1817,3 +1817,45 @@ def test_a_relative_log_dir_still_gives_the_seam_its_selector_listing(sb):
                        cwd=sb.tmp, env=sb.drain_env({"DRAIN_LOG_DIR": "rel-logs"}))
     assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
     assert pr_comments(sb) == [LISTED]
+
+
+# --- The in-memory tracker -------------------------------------------------
+
+def mem_issue(n, labels, body="", parent=None, **extra):
+    return {"number": n, "title": f"t{n}", "state": "open", "body": body, "assignees": [],
+            "labels": [{"name": x} for x in labels], **({"parent": parent} if parent else {}), **extra}
+
+
+def test_resumable_and_claimed_slices_share_one_claimed_read(d, ctx, monkeypatch):
+    import tracker
+    mem = tracker.MemoryTracker([mem_issue(1, ["spec", "in-progress"]), mem_issue(2, ["in-progress"], parent=1),
+                                 mem_issue(3, ["in-progress", "ready-for-human"], parent=1),
+                                 mem_issue(4, ["in-progress"], pull_request={"url": "u"})])
+    reads = []
+    real = mem.claimed
+    mem.claimed = lambda: reads.append(1) or real()
+    monkeypatch.setattr(d, "tracker_for", lambda repo: mem)
+    monkeypatch.setattr(d, "gh_json", lambda *a: {"state": "open", "labels": [{"name": "in-progress"}],
+                                                 "comments": [], "body": ""})
+    assert d.claimed_slices(ctx, 1) == [2]
+    d.resumable(ctx, set())
+    assert len(reads) == 2  # one tracker call each, none of the old second listing path
+    assert [i["number"] for i in d.claimed_issues(ctx)] == [1, 2]
+
+
+def test_read_queue_runs_on_the_in_memory_tracker(d, ctx, monkeypatch):
+    import tracker
+    mem = tracker.MemoryTracker([mem_issue(5, ["ready-for-agent"], body="## Blocked by\n\nNone\n"),
+                                 mem_issue(6, ["ready-for-agent", "ready-for-human"], body="## Blocked by\n\nNone\n"),
+                                 mem_issue(7, ["ready-for-agent", "in-progress"])])
+    monkeypatch.setattr(d, "tracker_for", lambda repo: mem)
+    queue, waiting, stranded, passed = d.read_queue(ctx)
+    assert queue == [(5, "t5", d.TICKET)] and waiting == [] and stranded == []
+    assert dict(passed)[6] == "ready-for-human" and dict(passed)[7].startswith("claimed")
+
+
+def test_a_tracker_that_cannot_answer_is_a_drain_error(d, ctx, monkeypatch):
+    import tracker
+    monkeypatch.setattr(d, "tracker_for", lambda repo: tracker.MemoryTracker(broken={"claimed": "gh down"}))
+    with pytest.raises(d.DrainError, match="gh down"):
+        d.claimed_issues(ctx)

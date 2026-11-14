@@ -119,6 +119,7 @@ for _dir in ("implement-spec", "implement", "common"):
 import frontier  # noqa: E402
 import pr_settle  # noqa: E402
 import shellcmd  # noqa: E402
+import tracker  # noqa: E402
 from selector_check import UNDECLARED  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
@@ -232,13 +233,30 @@ def git(args, cwd, ok=(0,)):
 
 def gh_json(*args):
     try:
-        return frontier.gh_json(list(args))
-    except frontier.FrontierError as exc:
+        return tracker.gh_json(list(args))
+    except tracker.TrackerError as exc:
         raise DrainError(str(exc)) from exc
 
 
 def labels_of(issue):
-    return {x["name"] for x in issue["labels"]}
+    """The label names of a REST or `gh issue view` issue, the one parser (`tracker.labels`)."""
+    try:
+        return tracker.labels(issue)
+    except tracker.TrackerError as exc:
+        raise DrainError(str(exc)) from exc
+
+
+def tracker_for(repo):
+    """The tracker drain asks about `repo`'s issues: `gh`, which a test replaces."""
+    return tracker.GhTracker(repo)
+
+
+def ask(repo, op, *args):
+    """`tracker_for(repo).<op>(*args)`, a tracker that cannot answer being a `DrainError`."""
+    try:
+        return getattr(tracker_for(repo), op)(*args)
+    except tracker.TrackerError as exc:
+        raise DrainError(str(exc)) from None
 
 
 def _kill(proc):
@@ -304,14 +322,17 @@ def read_queue(ctx):
     the other open ready tickets, which a drain passes over (human-held,
     claimed, blocked, unresolved, or carrying a non-dispatchable label)."""
     issues = {}
+    reading = tracker_for(ctx.repo)
+    listing = reading.issues
 
-    def fetch(r, label):
-        got = frontier.fetch_issues(r, label)
+    def issues_with(label):
+        got = listing(label)
         issues.update({i["number"]: i for i in got})
         return got
 
+    reading.issues = issues_with
     try:
-        buckets = frontier.frontier(ctx.repo, READY, fetch=fetch)
+        buckets = frontier.frontier(ctx.repo, READY, tracker=reading)
     except frontier.FrontierError as exc:
         raise DrainError(f"frontier: {exc}") from exc
     queue = [(t["number"], t["title"], kind) for kind, bucket in ((TICKET, "unblocked"), (SPEC, "spec"))
@@ -421,8 +442,16 @@ def note_anchor(ctx, anchor, kind):
         view = gh_json("issue", "view", str(anchor), "--repo", ctx.repo, "--json", "state,labels")
         if view["state"].lower() != "open" or READY not in labels_of(view) or CLAIMED in labels_of(view):
             return False
-        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body", f"{ANCHOR_NOTE} {branch_of(anchor, kind)}")
+        ask(ctx.repo, "comment", anchor, f"{ANCHOR_NOTE} {branch_of(anchor, kind)}")
     return True
+
+
+def claimed_issues(ctx):
+    """The open in-progress tickets, lowest first, with pull requests and human-held tickets
+    dropped: the one claimed-queue read `resumable` and `claimed_slices` share."""
+    claimed = ask(ctx.repo, "claimed")
+    return sorted((i for i in claimed if not i.get("pull_request") and HUMAN not in labels_of(i)),
+                  key=lambda i: i["number"])
 
 
 def resumable(ctx, ended):
@@ -433,12 +462,8 @@ def resumable(ctx, ended):
     The open list can still carry a ticket just closed, so each candidate's
     state and labels are read again, and an anchor this drain already took up
     (`ended`) is never taken twice."""
-    try:
-        claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
-    except frontier.FrontierError as exc:
-        raise DrainError(f"frontier: {exc}") from exc
-    for issue in sorted(claimed, key=lambda i: i["number"]):
-        if issue["number"] in ended or HUMAN in labels_of(issue) or issue.get("pull_request"):
+    for issue in claimed_issues(ctx):
+        if issue["number"] in ended:
             continue
         view = gh_json("issue", "view", str(issue["number"]), "--repo", ctx.repo, "--json", "state,labels,comments")
         if view["state"].lower() != "open" or CLAIMED not in labels_of(view):
@@ -471,7 +496,7 @@ def parent_number(ctx, issue):
     key = (ctx.repo, issue["number"])
     if key not in _PARENTS:
         try:
-            parent = frontier.fetch_parent(ctx.repo, issue)
+            parent = frontier.fetch_parent(tracker_for(ctx.repo), issue)
         except frontier.FrontierError as exc:
             raise DrainError(f"parent of #{issue['number']}: {exc}") from exc
         _PARENTS[key] = parent and parent["number"]
@@ -487,13 +512,9 @@ def is_slice_of(ctx, n, spec):
 def claimed_slices(ctx, spec):
     """The in-progress tickets whose parent is `spec`: the slices its run holds.
     Read live, since the spec run claims them, not drain."""
-    try:
-        claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
-    except frontier.FrontierError as exc:
-        raise DrainError(f"frontier: {exc}") from exc
     held = []
-    for i in claimed:
-        if i["number"] == spec or i.get("pull_request") or HUMAN in labels_of(i):
+    for i in claimed_issues(ctx):
+        if i["number"] == spec:
             continue
         try:
             if parent_number(ctx, i) == spec:
@@ -684,7 +705,7 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
 
 
 def open_pr(ctx, branch):
-    prs = gh_json("pr", "list", "--repo", ctx.repo, "--head", branch, "--state", "open", "--json", "number,url")
+    prs = ask(ctx.repo, "open_prs", branch)
     return prs[0] if prs else None
 
 
@@ -974,10 +995,8 @@ def work(ctx, anchor, others, resumed, started, kind):
                 if kind == TICKET:  # a spec's slices are its bundle: nothing to choose
                     bundle, why = choose_bundle(ctx, anchor, others, os.path.join(ctx.log_dir, f"{repo_slug(ctx)}-{branch}-choose.log"))
                     if why:
-                        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
-                           f"{CHOOSER_NOTE} #{anchor} alone: {why}")
-                    gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
-                       f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)} {count_note(len(others))}")
+                        ask(ctx.repo, "comment", anchor, f"{CHOOSER_NOTE} #{anchor} alone: {why}")
+                    ask(ctx.repo, "comment", anchor, f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)} {count_note(len(others))}")
                 dispatch(ctx, bundle, kind)
             tickets = [anchor] + (sorted(noted(ctx, anchor)) if kind == TICKET else [])
             if attempt == 1:
@@ -1011,8 +1030,7 @@ def hand_to_chris(ctx, anchor, reason, kind):
     for n in bundle:
         gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", HUMAN,
            "--remove-assignee", "@me")
-        gh("issue", "comment", str(n), "--repo", ctx.repo, "--body",
-           f"{HANDED_NOTE} this ticket (bundle {refs(bundle)}) after two attempts. "
+        ask(ctx.repo, "comment", n, f"{HANDED_NOTE} this ticket (bundle {refs(bundle)}) after two attempts. "
            f"Last failure: {reason} The worktree {branch} is kept for inspection and its worker's "
            "pane is closed; drain skips this ticket until that worktree is removed.")
     return bundle
@@ -1214,7 +1232,7 @@ def main(argv):
         common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=args.repo)
         root = os.path.dirname(common)
         repo = origin_slug(root)
-        login = gh("api", "user", "--jq", ".login")
+        login = ask(repo, "viewer_login")
         if repo.split("/")[0] != login:
             raise DrainError(f"{repo} is not owned by {login}; drain only runs on the caller's own repos")
         default = shellcmd.default_branch(root)

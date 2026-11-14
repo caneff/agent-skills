@@ -21,11 +21,13 @@ is still open — the cost is a whole build. The grammar this parses, and what
 each answer means, are specified in `references/frontier.md`.
 """
 import functools
-import json
+import os
 import re
-import subprocess
 import sys
-from urllib.parse import quote
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+
+import tracker as tracker_mod  # noqa: E402
 
 # An ATX heading whose text is exactly "Blocked by", any level, any case —
 # `##` is what `/to-tickets` emits and what the grammar specifies.
@@ -71,7 +73,7 @@ _NONE = re.compile(r"^[-*\s]*none\b", re.IGNORECASE)
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
 _FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
-CLAIMED_LABEL = "in-progress"
+CLAIMED_LABEL = tracker_mod.CLAIMED_LABEL
 
 # Labels that put a ticket off the frontier by its own nature rather than by
 # a blocking relationship. `implement-dispatch` refuses each of them on the
@@ -110,9 +112,9 @@ _ISSUE_LINK = r"https://github\.com/{repo}/issues/(\d+)\b"
 _ANY_ISSUE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/\d+|[\w.-]+/[\w.-]+#\d+")
 
 
-class FrontierError(Exception):
-    """The tracker could not be read. One stderr line, never a traceback:
-    this reader's whole point is that an answer it cannot get has a name."""
+# The tracker could not be read. One stderr line, never a traceback: this
+# reader's whole point is that an answer it cannot get has a name.
+FrontierError = tracker_mod.TrackerError
 
 
 
@@ -240,19 +242,15 @@ def section_blockers(section):
     return None, "`Blocked by` names no `#NNN` and does not say None"
 
 
-def _labels(issue):
-    return {label.get("name") for label in issue.get("labels") or []}
-
-
 def _is_claimed(issue):
-    return bool(issue.get("assignees")) or CLAIMED_LABEL in _labels(issue)
+    return bool(issue.get("assignees")) or CLAIMED_LABEL in tracker_mod.labels(issue)
 
 
 def _is_non_dispatchable(issue):
     """A ticket no run may dispatch whatever its blockers say, because a
     label puts it out of reach. Read before any bucket is decided: the
     question a bucket answers does not apply to it."""
-    return bool(_labels(issue) & NON_DISPATCHABLE_LABELS)
+    return bool(tracker_mod.labels(issue) & NON_DISPATCHABLE_LABELS)
 
 
 def _native(issue):
@@ -337,7 +335,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             return set(), ""
         try:
             parent = parent_of(issue)
-            if not parent or SPEC_LABEL not in _labels(parent):
+            if not parent or SPEC_LABEL not in tracker_mod.labels(parent):
                 return set(), ""
             return landed_of(f"spec-{parent['number']}"), ""
         except FrontierError as exc:
@@ -409,7 +407,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
         entry = {"number": issue.get("number"), "title": issue.get("title"),
                  "blockers": [], "why": ""}
         name, stated = rank(issue, entry)
-        if SPEC_LABEL in _labels(issue) and _is_clear(name, stated):
+        if SPEC_LABEL in tracker_mod.labels(issue) and _is_clear(name, stated):
             # The prerequisites are checked *first*, so `blocked` outranks
             # `spec` on one entry: both are true claims, but only `spec`
             # carries a dispatch verb, and a controller copies lines like
@@ -436,7 +434,7 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
                 entry["why"] = f"{own}its parent could not be read ({exc})"
                 name = "unresolved"
             else:
-                if parent and SPEC_LABEL in _labels(parent):
+                if parent and SPEC_LABEL in tracker_mod.labels(parent):
                     entry["blockers"] = []
                     entry["spec"] = parent["number"]
                     stranded = _stranded_reason(parent, repo)
@@ -449,112 +447,31 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
     return buckets
 
 
-def gh_json(args):
-    """`gh <args>` parsed as JSON. Raises `FrontierError` on anything that
-    stops it answering — the caller decides whether that is fatal."""
-    try:
-        out = subprocess.run(["gh", *args], capture_output=True, text=True)
-    except OSError as exc:  # gh not installed, not executable, ...
-        raise FrontierError(f"gh: {exc}") from exc
-    if out.returncode != 0:
-        raise FrontierError(out.stderr.strip() or f"gh {' '.join(args)} failed")
-    try:
-        return json.loads(out.stdout or "null")
-    except ValueError as exc:
-        raise FrontierError(f"gh {' '.join(args)}: unreadable JSON") from exc
-
-
-def fetch_issues(repo, label, run=gh_json):
-    """Every open issue with `label`, from the REST endpoint — the GraphQL
-    one `gh issue list` uses does not carry `issue_dependencies_summary`.
-
-    The label and repo are percent-encoded into the path: a `#` in a raw URL
-    is a fragment marker `gh` drops, which answers a broader queue with exit
-    0 — the wrong queue reported as a good one — and a space hangs the
-    request. An empty answer is an empty queue, not `None`.
-
-    `--slurp` wraps the pages in an outer array, which this flattens. Without
-    it `gh` merges array pages itself (measured on 2.95.0), but that is
-    behaviour its own help does not promise — and a queue past one page is
-    exactly where a run needs the reader to work."""
-    path = (f"repos/{quote(repo, safe='/')}/issues"
-            f"?state=open&per_page=100&labels={quote(label, safe='')}")
-    pages = run(["api", "--paginate", "--slurp", path]) or []
-    issues = []
-    for page in pages:
-        if not isinstance(page, list):
-            raise FrontierError("gh answered with something other than pages of issues")
-        issues.extend(page)
-    return issues
-
-
-def fetch_state(repo, number, run=gh_json):
-    """`"open"` / `"closed"` for one issue, or `None` when it cannot be read
-    — a number that names nothing in this repo is not a closed blocker, and
-    neither is one whose lookup failed."""
-    try:
-        answer = run(["api", f"repos/{quote(repo, safe='/')}/issues/{int(number)}"])
-    except (FrontierError, OSError):
-        return None
-    return (answer or {}).get("state")
-
-
 _CLOSES = re.compile(r"^[ \t]*Closes[ \t]+#(\d+)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 
-def fetch_landed(repo, integration_branch, run=gh_json):
+def fetch_landed(tracker, integration_branch):
     """The ticket numbers whose PR merged into `integration_branch` (#1466,
     ruling (a)): each merged PR's bare `Closes #<n>` body lines, which a
     clump's PR carries once per ticket. GitHub's own closing references stay
     empty for a PR into a non-default branch, so the body is the record.
     Raises `FrontierError` when the list cannot be read."""
-    prs = run(["pr", "list", "--repo", repo, "--base", integration_branch,
-               "--state", "merged", "--json", "body", "--limit", "200"])
-    if not isinstance(prs, list):
-        raise FrontierError("the merged-PR list was not a list")
-    return {int(n) for pr in prs if isinstance(pr, dict)
-            for n in _CLOSES.findall(pr.get("body") or "")}
+    return {int(n) for body in tracker.merged_bodies(integration_branch)
+            for n in _CLOSES.findall(body)}
 
 
-def fetch_native_blockers(repo, ticket, run=gh_json):
-    """The numbers of `ticket`'s open native blockers, every page of them.
-    Raises `FrontierError` when the list cannot be read or names a blocker
-    outside `repo`, whose number could collide with a local one."""
-    path = (f"repos/{quote(repo, safe='/')}/issues/{int(ticket['number'])}"
-            "/dependencies/blocked_by?per_page=100")
-    pages = run(["api", "--paginate", "--slurp", path])
-    if not isinstance(pages, list) or not all(isinstance(p, list) for p in pages):
-        raise FrontierError("the dependencies endpoint answered with no pages of issues")
-    open_numbers = []
-    for blocker in (b for page in pages for b in page):
-        if not isinstance(blocker, dict) or not isinstance(blocker.get("number"), int):
-            raise FrontierError("a native blocker came back malformed")
-        if not str(blocker.get("repository_url") or "").endswith(f"/repos/{repo}"):
-            raise FrontierError(f"native blocker #{blocker['number']} is outside {repo}")
-        if blocker.get("state") == "open":
-            open_numbers.append(blocker["number"])
-    return open_numbers
-
-
-def fetch_parent(repo, ticket, run=gh_json):
-    """The parent issue of `ticket`, `None` when it has none. The sub-issue
-    endpoint first; a 404 there means no sub-issue link, and the body's
-    parent line (`_parent_number`) is the fallback the tree writes where
-    sub-issues are not enabled. Any other failure raises `FrontierError`: a
-    call that did not answer is not an answer of "no parent"."""
-    base = f"repos/{quote(repo, safe='/')}/issues"
-    try:
-        answer = run(["api", f"{base}/{int(ticket['number'])}/parent"])
-        if not isinstance(answer, dict) or "number" not in answer:
-            raise FrontierError("the parent endpoint answered with no issue")
-        return answer
-    except FrontierError as exc:
-        # gh's own status marker, not a bare "404": a failed call's message
-        # can carry the request URL, and a ticket #1404 would match it.
-        if "(HTTP 404)" not in str(exc):
-            raise
-    parent = _parent_number(ticket.get("body") or "", repo)
-    return None if parent is None else run(["api", f"{base}/{parent}"])
+def fetch_parent(tracker, ticket, issue_of=None):
+    """The parent issue of `ticket`, `None` when it has none. The tracker's
+    sub-issue link first; none there means the body's parent line
+    (`_parent_number`) is the fallback the tree writes where sub-issues are
+    not enabled. Any other failure raises `FrontierError`: a call that did
+    not answer is not an answer of "no parent". `issue_of` reads the issue a
+    body line names (default `tracker.issue`)."""
+    link = tracker.parent_link(ticket)
+    if link is not None:
+        return link
+    parent = _parent_number(ticket.get("body") or "", tracker.repo)
+    return None if parent is None else (issue_of or tracker.issue)(parent)
 
 
 def _parent_number(body, repo):
@@ -604,32 +521,19 @@ def _parent_number(body, repo):
     return None
 
 
-def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
-             parent_of=fetch_parent, run=gh_json, landed_of=fetch_landed,
-             native_blockers_of=fetch_native_blockers):
-    """`(repo, label) -> {unblocked, blocked, unresolved, spec, slice}`. Each
-    blocker's state is read once however many tickets name it, and so is
-    each parent issue a `Part of` line names: slices of one spec share it.
-    The `/parent` call itself is one per ticket, which no cache shortens."""
-    seen, answers = {}, {}
-
-    def cached(number):
-        if number not in seen:
-            seen[number] = state_of(repo, number)
-        return seen[number]
-
-    def read_once(args):  # a failed call raises and is not kept
-        if tuple(args) not in answers:
-            answers[tuple(args)] = run(args)
-        return answers[tuple(args)]
-
-    landed = functools.cache(lambda integration_branch: landed_of(repo, integration_branch))
-
-    return classify(fetch(repo, label), cached,
-                    lambda ticket: parent_of(repo, ticket, run=read_once),
-                    landed,
-                    lambda ticket: native_blockers_of(repo, ticket),
-                    repo=repo)
+def frontier(repo, label, tracker=None):
+    """`(repo, label) -> {unblocked, blocked, unresolved, spec, slice}`, read
+    through `tracker` (default: `gh`). Each blocker's state is read once
+    however many tickets name it, and so is each parent issue a `Part of`
+    line names: slices of one spec share it. The sub-issue link call itself
+    is one per ticket, which no cache shortens."""
+    tracker = tracker or tracker_mod.GhTracker(repo)
+    state_of = functools.cache(tracker.state)
+    issue_of = functools.cache(tracker.issue)  # a failed read raises and is not kept
+    landed = functools.cache(lambda integration_branch: fetch_landed(tracker, integration_branch))
+    return classify(tracker.issues(label), state_of,
+                    lambda ticket: fetch_parent(tracker, ticket, issue_of),
+                    landed, tracker.native_blockers, repo=repo)
 
 
 def render(buckets):
