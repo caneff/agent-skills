@@ -18,7 +18,7 @@
 # widens to the full suite. A suite with a line `# all.sh: repo-wide (<why>)`
 # in its first twenty lines reads the whole tree and is always kept. A
 # narrowed run's last line says so:
-# `N of M suites passed (narrowed: ...)`. Suites run concurrently, `TESTS_JOBS` at a time (default `nproc`),
+# `N of M suites passed (narrowed: ...)`. Suites run concurrently, `TESTS_JOBS` at a time (default `nproc`, capped at 4 in a linked worktree, #1808),
 # and are reported in discovery order. A suite with a comment line
 # `# all.sh: serial (<why>)` in its first twenty lines cannot share the box (a
 # fixed port, a shared global path): it runs alone after the concurrent ones.
@@ -337,7 +337,18 @@ identity_before=$(identity_snapshot)
 # identity check runs after each suite against the baseline above: suites
 # overlap, so one that finishes after a leak is flagged along with the leaker,
 # and the failure says so rather than naming a suite that may be innocent.
-jobs=${TESTS_JOBS:-$(nproc 2>/dev/null || echo 4)}
+# A linked worktree is a worker's (#1808): an nproc-wide run there is a parallel
+# job nobody declared, charged at zero while every core runs a suite. With
+# `TESTS_JOBS` unset the default caps at 4 and says what the run then owes; the
+# primary checkout and the nightly backstop (which sets `TESTS_JOBS`) keep nproc.
+jobs=${TESTS_JOBS:-}
+if [ -z "$jobs" ]; then
+  jobs=$(nproc 2>/dev/null || echo 4)
+  if [ "$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" != "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ] && [ "$jobs" -gt 4 ]; then
+    jobs=4
+    echo "tests/all.sh: TESTS_JOBS unset in a linked worktree: capped at 4. Set TESTS_JOBS=<k> yourself and declare the job (implement/SKILL.md § Control) before launching a run." >&2
+  fi
+fi
 case $jobs in ''|*[!0-9]*|0) echo "tests/all.sh: TESTS_JOBS must be a positive integer, got '$jobs'" >&2; exit 2 ;; esac
 
 is_serial() { # <label>: a suite file with a `# all.sh: serial` comment line in its head
