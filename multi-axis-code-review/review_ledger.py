@@ -1114,10 +1114,10 @@ def _keep_known(old: dict, new: dict) -> dict:
     complete = set(old["status"]["sources"]) <= set(new["status"]["sources"])
     status = {**new["status"], "fields": dict(new["status"]["fields"]),
               "sources": list(dict.fromkeys(new["status"]["sources"] + old["status"]["sources"]))}
-    if _known(old["status"]["fields"].get("findings")) and not _known(status["fields"]["findings"]):
+    if _known(_findings_field(old)) and not _known(_findings_field(new)):
         # The findings source itself is gone (a Codex `.out` pruned before its record): keep them whole.
         findings = old["findings"]
-        status["fields"]["findings"], status["mappings"] = old["status"]["fields"]["findings"], old["status"]["mappings"]
+        status["fields"]["findings"], status["mappings"] = _findings_field(old), old["status"]["mappings"]
     else:
         known_outcomes = {f["id"]: f for f in old.get("findings", []) if f.get("outcome") != "unknown"}
         findings = [{**f, **{k: known_outcomes[f["id"]][k] for k in ("outcome", "outcome_status", "partial")}}
@@ -1557,6 +1557,114 @@ def _row_dollars(row: dict, prices: dict | None) -> float | None:
     return sum(tokens[k] * price[k] for k in TOKEN_KINDS) / 1_000_000
 
 
+def _findings_field(row: dict) -> dict | None:
+    """The row's status record for its findings, the one path `_keep_known`, `harvest_cache`,
+    `cmd_append` and the report read it by."""
+    return row["status"]["fields"].get("findings")
+
+
+def _findings_state(row: dict) -> str:
+    return _findings_field(row)["status"]
+
+
+# The report's columns, in output order, with the value a family that does not carry the column
+# reports. A family's builder returns only the columns that apply to it; `summarise` lays them over
+# these defaults, so a column is absent from its builder, never computed and then nulled.
+_TYPE_DEFAULTS = {
+    "type": None, "rows": None, "findings": None, "value": None, "unique_share": None,
+    "leftover_rate": None, "dispute_rate": None, "unknown_outcomes": None, "unweighted": None,
+    "unknown_finding_rows": 0, "skipped_rows": None, "usage_percent": None, "unknown_usage_rows": None,
+    "audited_prs": None, "refused_rows": 0, "clean_rows": None, "unknown_cost_rows": 0,
+    "red_rate": None, "unknown_mutations": None, "cost_note": None, "tokens": None,
+    "wall_clock_seconds": None, "dollars": None, "unpriced_rows": 0, "value_per_dollar": None}
+
+
+def _review_columns(mine: list[dict], per_row: list) -> dict:
+    """Every type that holds findings: their count, value, shares and rates."""
+    findings = [f for r in mine for f in r["findings"]]
+    value, unweighted = sum(v for _, v, _, _ in per_row), sum(u for _, _, u, _ in per_row)
+    known = [f for f in findings if f["outcome"] != "unknown"]
+    rate = lambda outcome: (sum(f["outcome"] == outcome for f in known) / len(known)) if known else None
+    return {
+        "findings": len(findings), "value": round(value, 4),
+        "unique_share": (sum(f["overlap"] == "unique" for f in findings) / len(findings)) if findings else None,
+        "leftover_rate": rate("leftover"), "dispute_rate": rate("disputed"),
+        "unknown_outcomes": len(findings) - len(known), "unweighted": unweighted}
+
+
+def _mutation_columns(mine: list[dict]) -> dict:
+    # The red rate leaves the `unknown` outcomes out, like the finding rates; they are counted beside it.
+    outcomes = Counter(r.get("outcome") for r in mine)
+    known_outcomes = outcomes["red"] + outcomes["green"]
+    return {"red_rate": outcomes["red"] / known_outcomes if known_outcomes else None,
+            "unknown_mutations": len(mine) - known_outcomes}
+
+
+def _codex_columns(mine: list[dict]) -> dict:
+    usage = [r["cost"].get("usage_delta", {}) for r in mine]
+    known_usage = [u["delta"] for u in usage if u["status"] == "known"]
+    return {
+        # Usage change in percentage points over the passes whose change is known; the rest are
+        # counted beside it, never added as zero.
+        "usage_percent": sum(known_usage) if known_usage else None,
+        "unknown_usage_rows": sum(u["status"] == "unknown" for u in usage),
+        # A refused Codex pass (usage limit, failed run) found nothing because it reviewed nothing:
+        # counted in `refused_rows`, never here, which holds only Codex passes that read the diff and
+        # found no finding; a Claude row's empty sidecar is `unknown`, so that column is n/a for them.
+        "clean_rows": sum(_findings_state(r) == "known" and not r["findings"] for r in mine)}
+
+
+def _cost_columns(t: str, mine: list[dict], per_row: list, oe_value: dict) -> dict:
+    costs = [r["cost"] for r in mine]
+    token_rows = [c["tokens"] for c in costs if c.get("tokens", {}).get("status") == "known"]
+    wall_rows = [c["wall_clock"] for c in costs if c.get("wall_clock", {}).get("status") == "known"]
+    priced = [(r, v, d) for r, v, _, d in per_row if d is not None]
+    # Value per dollar divides only the value of rows whose cost and findings are both
+    # known by those rows' dollars: an unknown row is left out, never counted as free.
+    rated = []
+    for r, v, d in priced:
+        if _findings_state(r) == "known":
+            # Over-engineering cost is inside its standards row's dollars, so its value joins the numerator.
+            oe = oe_value.pop((r["repo"], r["ticket"], r["round"]), 0.0) if t == "standards" else 0.0
+            rated.append((v + oe, d))
+    rated_dollars = sum(d for _, d in rated)
+    return {
+        "unknown_cost_rows": sum(
+            any(c.get(f, {}).get("status") not in ("known", "not-applicable") for f in ("tokens", "wall_clock"))
+            for c in costs),
+        "tokens": {k: sum(c[k] for c in token_rows) for k in TOKEN_KINDS} if token_rows else None,
+        "wall_clock_seconds": sum(c["seconds"] for c in wall_rows) if wall_rows else None,
+        "dollars": round(sum(d for _, _, d in priced), 4) if priced else None,
+        "unpriced_rows": sum(
+            1 for r, _, _, d in per_row if r["cost"].get("tokens", {}).get("status") == "known" and d is None),
+        "value_per_dollar": round(sum(v for v, _ in rated) / rated_dollars, 4) if rated_dollars else None}
+
+
+def _type_columns(t: str, mine: list[dict], per_row: list, oe_value: dict) -> dict:
+    """One type's report row: the columns of its family laid over the defaults."""
+    skipped = sum(_findings_state(r) == "skipped" for r in mine)
+    cols = {
+        "type": t, "rows": len(mine),
+        "unknown_finding_rows": sum(
+            _findings_state(r) not in ("known", "not-applicable", "refused", "skipped") for r in mine),
+        "refused_rows": sum(_findings_state(r) == "refused" for r in mine)}
+    if skipped or is_codex(t):
+        cols["skipped_rows"] = skipped
+    if t in MUTATION_TYPES:
+        cols.update(_mutation_columns(mine))
+    else:
+        cols.update(_review_columns(mine, per_row))
+    if is_codex(t):
+        cols.update(_codex_columns(mine))
+    if t == AUDIT_TYPE:
+        cols["audited_prs"] = sum(len(r.get("prs") or []) for r in mine)
+    if t == "over-engineering":
+        cols["cost_note"] = "inside standards"
+    else:
+        cols.update(_cost_columns(t, mine, per_row, oe_value))
+    return {**_TYPE_DEFAULTS, **cols}
+
+
 def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None = None) -> dict:
     types = []
     oe_value: dict[tuple, float] = {}
@@ -1567,68 +1675,8 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
     present = {r["type"] for r in rows}
     for t in [*(t for t in REVIEW_TYPES if t in present), *sorted(present - set(REVIEW_TYPES))]:
         mine = [r for r in rows if r["type"] == t]
-        findings = [f for r in mine for f in r["findings"]]
         per_row = [(r, *_row_value(r, weights, split), _row_dollars(r, prices)) for r in mine]
-        value, unweighted = sum(v for _, v, _, _ in per_row), sum(u for _, _, u, _ in per_row)
-        known = [f for f in findings if f["outcome"] != "unknown"]
-        rate = lambda outcome: (sum(f["outcome"] == outcome for f in known) / len(known)) if known else None
-        inside = t == "over-engineering"
-        mutation = t in MUTATION_TYPES
-        codex = is_codex(t)
-        usage = [r["cost"].get("usage_delta", {}) for r in mine] if codex else []
-        known_usage = [u["delta"] for u in usage if u["status"] == "known"]
-        skipped = sum(r["status"]["fields"]["findings"]["status"] == "skipped" for r in mine)
-        outcomes = Counter(r.get("outcome") for r in mine) if mutation else Counter()
-        known_outcomes = outcomes["red"] + outcomes["green"]
-        costs = [r["cost"] for r in mine]
-        token_rows = [c["tokens"] for c in costs if c.get("tokens", {}).get("status") == "known"]
-        wall_rows = [c["wall_clock"] for c in costs if c.get("wall_clock", {}).get("status") == "known"]
-        priced = [(r, v, d) for r, v, _, d in per_row if d is not None]
-        # Value per dollar divides only the value of rows whose cost and findings are both
-        # known by those rows' dollars: an unknown row is left out, never counted as free.
-        rated = []
-        for r, v, d in priced:
-            if r["status"]["fields"]["findings"]["status"] == "known":
-                # Over-engineering cost is inside its standards row's dollars, so its value joins the numerator.
-                oe = oe_value.pop((r["repo"], r["ticket"], r["round"]), 0.0) if t == "standards" else 0.0
-                rated.append((v + oe, d))
-        rated_dollars = sum(d for _, d in rated)
-        types.append({
-            "type": t, "rows": len(mine), "findings": None if mutation else len(findings), "value": None if mutation else round(value, 4),
-            "unique_share": (sum(f["overlap"] == "unique" for f in findings) / len(findings)) if findings else None,
-            "leftover_rate": rate("leftover"), "dispute_rate": rate("disputed"),
-            "unknown_outcomes": None if mutation else len(findings) - len(known),
-            "unweighted": None if mutation else unweighted,
-            "unknown_finding_rows": sum(
-                r["status"]["fields"]["findings"]["status"] not in ("known", "not-applicable", "refused", "skipped")
-                for r in mine),
-            "skipped_rows": skipped if codex or skipped else None,
-            # Usage change in percentage points over the passes whose change is known; the rest are
-            # counted beside it, never added as zero.
-            "usage_percent": sum(known_usage) if known_usage else None,
-            "unknown_usage_rows": sum(u["status"] == "unknown" for u in usage) if codex else None,
-            # A refused Codex pass (usage limit, failed run) found nothing because it reviewed nothing:
-            # counted here, never in `clean_rows`, which holds only Codex passes that read the diff and found no
-            # finding; a Claude row's empty sidecar is `unknown`, so that column is n/a for them.
-            "audited_prs": sum(len(r.get("prs") or []) for r in mine) if t == AUDIT_TYPE else None,
-            "refused_rows": sum(r["status"]["fields"]["findings"]["status"] == "refused" for r in mine),
-            "clean_rows": sum(r["status"]["fields"]["findings"]["status"] == "known" and not r["findings"]
-                              for r in mine) if codex else None,
-            "unknown_cost_rows": 0 if inside else sum(
-                any(c.get(f, {}).get("status") not in ("known", "not-applicable") for f in ("tokens", "wall_clock"))
-                for c in costs),
-            # A mutation type's red rate leaves the `unknown` ones out, like the outcome rates above;
-            # they are counted beside it. Only mutation rows carry either.
-            "red_rate": outcomes["red"] / known_outcomes if known_outcomes else None,
-            "unknown_mutations": len(mine) - known_outcomes if mutation else None,
-            "cost_note": "inside standards" if inside else None,
-            "tokens": None if inside or not token_rows else {k: sum(c[k] for c in token_rows) for k in TOKEN_KINDS},
-            "wall_clock_seconds": None if inside or not wall_rows else sum(c["seconds"] for c in wall_rows),
-            "dollars": None if inside or not priced else round(sum(d for _, _, d in priced), 4),
-            "unpriced_rows": 0 if inside else sum(
-                1 for r, _, _, d in per_row if r["cost"].get("tokens", {}).get("status") == "known" and d is None),
-            "value_per_dollar": round(sum(v for v, _ in rated) / rated_dollars, 4)
-            if not inside and rated_dollars else None})
+        types.append(_type_columns(t, mine, per_row, oe_value))
     notes = []
     notes.append("Reviews before #1270 carry no mutation data: a review run earlier has no mutation rows, "
                  "so a mutation type's counts start at that change and a type with no rows is left out, not shown as zero."
@@ -1742,7 +1790,7 @@ def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str, 
             continue
         for ticket in r.get("tickets") or [r["ticket"]]:
             reviewed.add(ticket)
-            if r["status"]["fields"]["findings"]["status"] == "skipped":
+            if _findings_state(r) == "skipped":
                 reason = r.get("skip_reason")
                 skipped.setdefault(ticket, set()).add(f"{r['type']}:{reason if reason in _SKIP_REASONS else 'other'}")
     pattern = re.compile(fix_pattern)
