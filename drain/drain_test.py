@@ -248,7 +248,7 @@ for t in env.get("TAKE_AFTER_BUILD", "").split():  # another worker claims it wh
 # Stands in for herdr. `agent get` answers for the worker: HERDR_STATUS (default
 # idle), HERDR_WORKING_POLLS (that many `working` answers first), HERDR_GONE
 # (agent_not_found), HERDR_DOWN (any other failure), HERDR_FLAKY (that many
-# failures first), HERDR_HOLD_FILE (`working` for as long as that file exists).
+# failures first), HERDR_HANG (`agent get` sleeps past the timeout), HERDR_HOLD_FILE (`working` for as long as that file exists).
 # Every call is logged.
 STUB_HERDR = r"""#!/usr/bin/env python3
 import json, os, sys
@@ -257,6 +257,8 @@ env = os.environ
 with open(env["HERDR_LOG"], "a") as f:
     f.write(json.dumps(args) + "\n")
 if args[:2] == ["agent", "get"]:
+    if env.get("HERDR_HANG"):
+        import time; time.sleep(60)
     flaky = env["HERDR_LOG"] + ".flaky"
     failed = int(open(flaky).read()) if os.path.exists(flaky) else 0
     if env.get("HERDR_DOWN") or failed < int(env.get("HERDR_FLAKY", 0)):
@@ -842,6 +844,14 @@ def test_a_herdr_that_cannot_be_asked_stops_the_run(sb):
     r = sb.drain("--once", env={"HERDR_DOWN": "1"})
     assert r.returncode == 1
     assert "stopped: herdr agent get repo-1 failed" in r.stdout
+    assert "ready-for-human" not in sb.labels(1)
+
+
+def test_a_herdr_that_hangs_stops_the_run_naming_herdr(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"HERDR_HANG": "1", "DRAIN_HERDR_SECONDS": "0.5"})
+    assert r.returncode == 1, (r.stdout, r.stderr)
+    assert "stopped: herdr agent get repo-1 timed out after 0.5s" in r.stdout
     assert "ready-for-human" not in sb.labels(1)
 
 

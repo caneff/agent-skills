@@ -162,6 +162,9 @@ EXCERPT_CHARS = 400
 # listing lags a relabel by about 30 s, so a ticket readied just before the run
 # starts is not listed yet.
 FRONTIER_RETRY_SECONDS = float(os.environ.get("DRAIN_FRONTIER_RETRY_SECONDS", 45))
+# How long one `herdr agent get` may take: a herdr that hangs would otherwise stall
+# an unattended drain with no message. Test hook, not an option.
+HERDR_SECONDS = float(os.environ.get("DRAIN_HERDR_SECONDS", 30))
 IDLE = ("idle", "done")
 # `blocked` is a permission or question dialog nobody here can answer.
 STALLED = ("blocked",)
@@ -515,7 +518,11 @@ def agent_info(name):
     """The worker's herdr record (`agent_status`, `pane_id`, ...), or `None` when
     herdr has no such agent. Any other herdr failure is a `DrainStop`: a herdr
     that cannot be asked is not a worker that is gone."""
-    out = subprocess.run(["herdr", "agent", "get", name], capture_output=True, text=True)
+    try:
+        out = subprocess.run(["herdr", "agent", "get", name], capture_output=True, text=True,
+                             timeout=HERDR_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise DrainStop(f"herdr agent get {name} timed out after {HERDR_SECONDS:g}s") from None
     body = {}
     for text in (out.stdout, out.stderr):  # herdr prints a result on stdout and an error on stderr
         with contextlib.suppress(ValueError):
