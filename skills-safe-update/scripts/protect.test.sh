@@ -18,7 +18,6 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK=$(mktemp -d); trap 'chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
 
-# This repo, as it stands before a single case runs — the tripwire for rule 3.
 REPO=$(command git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
 REPO_HEAD_BEFORE=$(command git -C "$REPO" rev-parse HEAD)
 REPO_STATUS_BEFORE=$(command git -C "$REPO" status --porcelain)
@@ -27,7 +26,7 @@ export SKILLS_DIR="$WORK"
 # shellcheck source=safe-update.sh
 source "$SCRIPT_DIR/safe-update.sh"
 set +e   # the sourced script sets -e; these tests assert on exit codes
-# safe-update.sh no longer forces an identity (#1450); fixtures bring one.
+# safe-update.sh forces no identity; the fixtures bring one.
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 cd "$WORK" || exit 1   # never stand in the repo, not even between cases
 
@@ -73,7 +72,7 @@ fixture(){
     git checkout -q "$BASE_C" -- "$skill"
     sed -i "$(echo "$spec" | cut -d: -f3)" "$skill/SKILL.md"
   done
-  # --allow-empty: a case whose upstream change IS the file mode (7) applies its
+  # --allow-empty: a case whose upstream change IS the file mode (the mode-only case) applies its
   # real delta after fixture() returns, so this commit legitimately holds nothing
   # — without the flag git refuses it and prints "nothing to commit" into the run.
   git add -A; git commit -q --allow-empty -m upstream
@@ -81,7 +80,6 @@ fixture(){
   PRELOCK=$dir/prelock
 }
 
-# --- 1. a clean merge commits ----------------------------------------------
 fixture "$WORK/clean" "alpha:s/^line1$/line1 LOCAL/:s/^line9$/line9 UP/"
 head_before=$(git rev-parse HEAD)
 protect_skills "$PRE" "$POST" "$PRELOCK"
@@ -91,7 +89,6 @@ if [ "$(git rev-parse HEAD)" != "$head_before" ]; then ok "clean merge commits"
 else bad "clean merge commits"; fi
 check "clean merge leaves a clean tree" "" "$(git status --porcelain)"
 
-# --- 2. a conflict must NOT commit, and must leave the markers in the tree ---
 fixture "$WORK/conflict" "beta:s/^line5$/line5 LOCAL/:s/^line5$/line5 UP/"
 head_before=$(git rev-parse HEAD)
 protect_skills "$PRE" "$POST" "$PRELOCK"
@@ -103,12 +100,10 @@ if grep -q '<<<<<<<' beta/SKILL.md; then ok "markers are left for the hand merge
 else bad "markers are left for the hand merge"; fi
 if git grep -q '<<<<<<<' HEAD -- beta 2>/dev/null; then bad "no markers reach a commit"
 else ok "no markers reach a commit"; fi
-# ...and resolving by hand is all it takes to commit
 sed -i '/^[<=>]\{7\}/d' beta/SKILL.md
 git add -A && git commit -qm resolved >/dev/null 2>&1
 check "resolving by hand leaves a clean tree" "" "$(git status --porcelain)"
 
-# --- 3. one conflict blocks the commit for every skill in the run -----------
 fixture "$WORK/mixed" \
   "good:s/^line1$/line1 LOCAL/:s/^line9$/line9 UP/" \
   "bad:s/^line5$/line5 LOCAL/:s/^line5$/line5 UP/"
@@ -118,7 +113,6 @@ check "the clean skill still merged" "good" "${merged[*]:-}"
 check "the conflicted one is named" "bad" "${conflicted[*]:-}"
 check "a single conflict blocks the whole commit" "$head_before" "$(git rev-parse HEAD)"
 
-# --- 4. .protected-skills forces a whole-file keep, never a merge ------------
 fixture "$WORK/manual" "gamma:s/^line1$/line1 LOCAL/:s/^line9$/line9 UP/"
 printf 'gamma' > .protected-skills   # deliberately unterminated: a hand-edited file often is
 protect_skills "$PRE" "$POST" "$PRELOCK"
@@ -127,7 +121,6 @@ check "a manual entry never merges" "" "${merged[*]:-}"
 if grep -q 'line9 UP' gamma/SKILL.md; then bad "upstream delta is not applied to a kept skill"
 else ok "upstream delta is not applied to a kept skill"; fi
 
-# --- 5. a skill upstream deleted outright is kept, not lost -----------------
 fixture "$WORK/deleted" "eps:s/^line1$/line1 LOCAL/:s/^line9$/line9 UP/"
 git rm -rq eps && git commit -qm "upstream drops the skill" && POST=$(git rev-parse HEAD)
 protect_skills "$PRE" "$POST" "$PRELOCK"
@@ -135,12 +128,10 @@ check "a deleted-upstream skill is kept" "eps" "${nobase[*]:-}"
 if grep -q 'line1 LOCAL' eps/SKILL.md 2>/dev/null; then ok "your copy of it survives"
 else bad "your copy of it survives"; fi
 
-# --- 6. an unedited skill is left alone entirely -----------------------------
 fixture "$WORK/unedited" "zeta:s/^line1$/line1/:s/^line9$/line9 UP/"
 protect_skills "$PRE" "$POST" "$PRELOCK"
 check "an unedited skill is not protected" "" "${merged[*]:-}${conflicted[*]:-}${nobase[*]:-}"
 
-# --- 7. a skill upstream only chmod'd gets no empty report block ------------
 fixture "$WORK/modeonly" "theta:s/^line1$/line1 LOCAL/:s/^line1$/line1 LOCAL/"
 chmod +x theta/SKILL.md; git add -A; git commit -qm "upstream flips a mode"
 POST=$(git rev-parse HEAD)
@@ -148,7 +139,6 @@ protect_skills "$PRE" "$POST" "$PRELOCK"
 check "a mode-only upstream change still merges" "theta" "${merged[*]:-}"
 check "and prints no empty report block" "" "$report"
 
-# --- 8. a merge that cannot write keeps your version rather than half of it --
 fixture "$WORK/broken" "eta:s/^line1$/line1 LOCAL/:s/^line9$/line9 UP/"
 chmod a-w eta
 protect_skills "$PRE" "$POST" "$PRELOCK" 2>/dev/null
@@ -156,10 +146,6 @@ chmod u+w eta
 check "a broken merge falls back to keeping yours" "eta" "${nobase[*]:-}"
 check "a broken merge is never reported as merged" "" "${merged[*]:-}"
 
-# --- 9. no case touched THIS repo -------------------------------------------
-# The tripwire. A case that resolved its target from the caller's cwd instead of
-# $SKILLS would show up here as a commit or a dirty tree on the branch running
-# the suite — which is how the loop once landed two commits of its own.
 check "the suite left this repo's HEAD alone" \
   "$REPO_HEAD_BEFORE" "$(command git -C "$REPO" rev-parse HEAD)"
 check "the suite left this repo's working tree alone" \
