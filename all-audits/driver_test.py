@@ -176,6 +176,20 @@ def test_mutation_subindex_and_single_main_row(tmp_path):
     assert "5/8" in sub  # oracle: killed 5, total 5+1+2
 
 
+def test_a_corrupt_mutation_log_line_shows_in_the_module_row_not_as_a_tally(tmp_path):
+    tmp = str(tmp_path)
+    d = os.path.join(tmp, "collection", "solver.py")
+    os.makedirs(d)
+    open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
+    row = {"extra": {"killed_count": 8, "survived_count": 2, "no_coverage_count": 0}}
+    open(os.path.join(d, "findings.jsonl"), "w").write("{not json\n" + json.dumps(row) + "\n")
+
+    r = _run_driver("--index", "--out", tmp)
+    assert r.returncode == 0, r.stdout + r.stderr
+    sub = open(os.path.join(tmp, "collection", "mutation", "index.html")).read()
+    assert "CORRUPT: findings.jsonl line 1" in sub and "8/10" not in sub
+
+
 def test_no_mutation_reports_no_row(tmp_path):
     tmp = str(tmp_path)
     for name in ("dead-code", "test-audit"):
@@ -1583,7 +1597,7 @@ def test_record_carries_the_synthesis_as_is_and_a_malformed_finding_line_is_kept
     assert r.returncode == 0, r.stdout + r.stderr
     body = _bodies(env)
     assert "## Synthesis" in body and "ceiling=" in body.split("## Synthesis", 1)[1]
-    assert "{not json" in body
+    assert "line 2: {not json" in body  # the corrupt line is named by its number, not skipped
 
 
 # --- prune stored sweeps whose record is closed (#1682) --------------------------

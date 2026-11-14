@@ -40,6 +40,7 @@ from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
 import auditlib  # noqa: E402
 import pagelib  # noqa: E402
 import audit_record  # noqa: E402
+import findings_log  # noqa: E402
 import mutation_run  # noqa: E402
 from mutation_run import parse_utc  # noqa: E402
 
@@ -312,8 +313,8 @@ def write_setup_failure_report(collection_dir, module, reason):
             body=f'<div class="vt-callout bad">{html.escape(reason)}</div>\n',
             prefix="../",
         ))
-    with open(os.path.join(d, "findings.jsonl"), "w", encoding="utf-8") as f:
-        f.write(json.dumps({"status": "setup_failure", "module": module, "reason": reason}) + "\n")
+    findings_log.write(os.path.join(d, "findings.jsonl"),
+                       [{"status": "setup_failure", "module": module, "reason": reason}])
 
 
 def manifest_path_for(manifests_dir, name):
@@ -561,11 +562,14 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
         out.append('<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">\n')
         out.append("<thead><tr><th>Module</th><th>Killed/total</th><th>Weak-assertion</th><th>No-coverage</th><th>Report</th></tr></thead><tbody>\n")
         for base in mutation_modules:
-            tally_row = mutation_run.tally(os.path.join(collection, base, "findings.jsonl"))
+            tally_row, corrupt = _mutation_tally(collection, base)
             why = inconclusive_reason(collection, base)
             if why is not None:
                 inconclusive.append(base)
                 tally = f"INCONCLUSIVE: {html.escape(why)}"
+                weak = nocov = "—"
+            elif corrupt:
+                tally = f"CORRUPT: findings.jsonl line {corrupt[0][0]} is not a JSON object"
                 weak = nocov = "—"
             elif tally_row:
                 k, t, s, n = tally_row
@@ -744,7 +748,7 @@ def scan_mutation(collection):
     survivors_sum = 0
     inconclusive = sum(1 for b in mutation_modules if inconclusive_reason(collection, b) is not None)
     for base_name in mutation_modules:
-        tally = mutation_run.tally(os.path.join(collection, base_name, "findings.jsonl"))
+        tally, _ = _mutation_tally(collection, base_name)
         if tally:
             _, _, s, n = tally
             survivors_sum += s + n
@@ -1127,18 +1131,21 @@ def log_tail(path):
     return "\n".join(text.splitlines()[-15:]) or "(empty log)"
 
 
-def _read_jsonl(path):
-    """Every line of a findings log: the parsed object, or the raw line when
-    it is not JSON."""
-    rows = []
-    for line in open(path, encoding="utf-8", errors="replace").read().splitlines():
-        if not line.strip():
-            continue
-        try:
-            rows.append(json.loads(line))
-        except ValueError:
-            rows.append(line)
-    return rows
+def _log_rows(path):
+    """A findings log's rows for the audit record: each object, then each
+    corrupt line as a string naming its line number, so the record shows it."""
+    log = findings_log.read(path)
+    return log.rows + [f"line {n}: {text}" for n, text in log.corrupt]
+
+
+def _mutation_tally(collection, module):
+    """(tally, corrupt) for a mutation module's log: `findings_log.tally` of
+    its rows, or None, and its corrupt lines. No log is no tally and no corrupt."""
+    path = os.path.join(collection, module, "findings.jsonl")
+    if not os.path.isfile(path):
+        return None, []
+    log = findings_log.read(path)
+    return findings_log.tally(log.rows), log.corrupt
 
 
 def _report_headings(collection, name):
@@ -1161,7 +1168,7 @@ def record_model(result, sweep_id, sha, clean, stored, has_ignore_file, open_rec
         manifest = read_manifest(run.manifests, name) or {}
         log = os.path.join(run.collection, name, "findings.jsonl")
         if os.path.isfile(log):
-            findings[name] = _read_jsonl(log)
+            findings[name] = _log_rows(log)
         else:
             no_log[name] = {"count": manifest.get("count"), "headline": manifest.get("headline")}
         if name in audit_record.STRUCTURAL:
