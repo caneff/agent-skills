@@ -83,10 +83,13 @@ ticket or notification could not be sent.
 """
 import argparse
 import collections
+import contextlib
 import datetime
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -94,21 +97,23 @@ import tempfile
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # One line per directory, each spelled out, so `tests/suite-edges.py` sees the
 # edge and a change there runs this directory's suites.
-sys.path.insert(0, os.path.join(_HERE, os.pardir, "drain"))
+sys.path.insert(0, os.path.join(_HERE, os.pardir, "common"))
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement"))
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
-# The worktree run, the origin reader and the seam section's grammar each have
-# one copy; the backstop takes them over rather than keeping a second one. A
-# neighbour that no longer imports is an inconclusive night, said by `main`.
+# The git and gh calls, the scratch worktree, the origin slug and the default
+# branch come from the shared helper; the seam section's grammar has one copy
+# too. A neighbour that no longer imports is an inconclusive night, said by
+# `main`.
 try:
-    from drain import (Ctx, DrainError, one_line, origin_slug, repo_slug, run,  # noqa: E402
-                       run_in_scratch_tree)
+    import shellcmd  # noqa: E402
     from closing_ticket import declaration  # noqa: E402
     from selector_check import command_of, failing_suites  # noqa: E402
     _IMPORT_ERROR = None
 except Exception as exc:  # noqa: BLE001 - any import failure, reported by main
     _IMPORT_ERROR = exc
 
+WALL_CLOCK_SECONDS = 3 * 60 * 60  # the seam's own bound; the helper's timeout is for its short calls
+Ctx = collections.namedtuple("Ctx", "root repo default log_dir")
 NOTIFY_SEND = os.path.join(_HERE, os.pardir, "flow", "bin", "notify-send")
 GREEN, RED, INCONCLUSIVE, UNSENT = 0, 1, 2, 3
 MAX_RUN_HOURS = 26
@@ -121,6 +126,61 @@ SEAM_BEGINS = "backstop: the seam output begins here"
 Night = collections.namedtuple("Night", "outcome sha detail ref run", defaults=(None, None, None, None))
 
 
+class BackstopError(Exception):
+    """A step failed; the message is the reason put in the night's note."""
+
+
+def one_line(text, limit=300):
+    return " ".join(str(text).split())[:limit]
+
+
+def repo_slug(ctx):
+    """`owner__name`: the repo as one file-name component."""
+    return ctx.repo.replace("/", "__")
+
+
+def run(args, cwd=None):
+    """Stdout of `git`/`gh <args>`, stripped; `BackstopError` on any failure."""
+    try:
+        return (shellcmd.gh if args[0] == "gh" else shellcmd.git)(args[1:], cwd=cwd).stdout.strip()
+    except shellcmd.CmdError as exc:
+        raise BackstopError(str(exc)) from exc
+
+
+def run_in_scratch_tree(ctx, cmd, log, rev):
+    """`cmd` in a throwaway worktree of `rev`, its output in `log`. Each directory holding a
+    tracked `package-lock.json` gets `npm ci` first (a bare worktree has no `node_modules`).
+    Raises `BackstopError` on a failed start or a non-zero exit."""
+    scratch = tempfile.mkdtemp(prefix="backstop-seam-")
+    try:
+        with shellcmd.scratch_worktree(ctx.root, rev, scratch), open(log, "w") as out:
+            listed = run(["git", "ls-files", "-z", "--", "package-lock.json", "*/package-lock.json"], cwd=scratch)
+            for lock in sorted(x for x in listed.split("\0") if x):
+                code = run_group(["npm", "ci"], os.path.join(scratch, os.path.dirname(lock)), out)
+                if code:
+                    raise BackstopError(f"`npm ci` failed (output in {log})")
+            if run_group(["sh", "-c", cmd], scratch, out):
+                raise BackstopError(f"`{cmd}` failed (output in {log})")
+    except (shellcmd.CmdError, OSError) as exc:
+        raise BackstopError(str(exc)) from exc
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def run_group(cmd, cwd, out):
+    """Exit code of `cmd` in its own process group, killed whole at the wall clock."""
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=out, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    try:
+        return proc.wait(timeout=WALL_CLOCK_SECONDS)
+    except BaseException as exc:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+        if isinstance(exc, subprocess.TimeoutExpired):
+            raise BackstopError(f"{cmd[0]} passed the {WALL_CLOCK_SECONDS}s wall clock") from None
+        raise
+
+
 def positive(text):
     value = int(text)
     if value < 1:
@@ -130,19 +190,19 @@ def positive(text):
 
 def seam_command(root, tip):
     """The `**Seam**` command `AGENTS.md` declares at `tip`. Raises
-    `DrainError` naming the gap."""
+    `BackstopError` naming the gap."""
     try:
         text = run(["git", "show", f"{tip}:AGENTS.md"], cwd=root)
-    except DrainError as exc:
-        raise DrainError(f"no AGENTS.md at {tip[:12]}: {one_line(exc, 150)}") from exc
+    except BackstopError as exc:
+        raise BackstopError(f"no AGENTS.md at {tip[:12]}: {one_line(exc, 150)}") from exc
     found = declaration(text)
     if found is None:
-        raise DrainError("AGENTS.md has no `## End-to-end seam` section")
+        raise BackstopError("AGENTS.md has no `## End-to-end seam` section")
     if "seam" not in found:
-        raise DrainError("AGENTS.md § End-to-end seam declares no `Seam` line")
+        raise BackstopError("AGENTS.md § End-to-end seam declares no `Seam` line")
     command = command_of(found["seam"])
     if not command:
-        raise DrainError("the `Seam` line names no command")
+        raise BackstopError("the `Seam` line names no command")
     return command
 
 
@@ -181,7 +241,7 @@ def ci_night(ctx, workflow):
         runs = json.loads(run(["gh", "run", "list", "--repo", ctx.repo, "--workflow", workflow, "--event", "schedule",
                                "--branch", branch, "--limit", "1",
                                "--json", "databaseId,status,conclusion,headSha,createdAt,url"]))
-    except (DrainError, ValueError) as exc:
+    except (BackstopError, ValueError) as exc:
         return Night(INCONCLUSIVE, None, f"the scheduled run could not be read: {one_line(exc, 200)}")
     if not runs:
         return Night(INCONCLUSIVE, None, f"no scheduled run of {workflow} on {branch}")
@@ -200,7 +260,7 @@ def ci_night(ctx, workflow):
                                         f"over {MAX_RUN_HOURS} hours ago", url)
     try:
         run(["git", "merge-base", "--is-ancestor", str(sha), ctx.default], cwd=ctx.root)
-    except DrainError:
+    except BackstopError:
         return Night(INCONCLUSIVE, None, f"the scheduled run {url} read {sha}, which is not on {ctx.default}", url)
     conclusion = latest.get("conclusion")
     if conclusion == "success":
@@ -212,7 +272,7 @@ def ci_night(ctx, workflow):
                                         "earlier night; no newer run has completed", url)
     try:
         text = run(["gh", "run", "view", str(run_id), "--repo", ctx.repo, "--log-failed"])
-    except DrainError as exc:
+    except BackstopError as exc:
         return Night(INCONCLUSIVE, sha, f"the scheduled run {url} failed, but its failed log could not be read: "
                                         f"{one_line(exc, 150)}", url)
     log = seam_log(ctx)
@@ -241,7 +301,7 @@ def local_night(ctx, tip, jobs):
     """The `Night` of a repo with no CI: its seam run here on `tip`."""
     try:
         cmd = seam_command(ctx.root, tip)
-    except DrainError as exc:
+    except BackstopError as exc:
         return Night(INCONCLUSIVE, tip, f"the seam could not start: {one_line(exc, 200)}")
     log = seam_log(ctx)
     ref = f"`{log}` on the machine the backstop ran on"
@@ -250,7 +310,7 @@ def local_night(ctx, tip, jobs):
     try:
         run_in_scratch_tree(ctx, marked, log, rev=tip)
         exited = 0
-    except DrainError as exc:
+    except BackstopError as exc:
         exited = one_line(str(exc).replace(marked, cmd), 200)
     failed, _ = failing_suites(log)
     if exited == 0:
@@ -271,7 +331,7 @@ def night(ctx, jobs, workflow):
     try:
         run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
         tip = run(["git", "rev-parse", ctx.default], cwd=ctx.root)
-    except DrainError as exc:
+    except BackstopError as exc:
         return Night(INCONCLUSIVE, None, f"the tip of {ctx.default} could not be read: {one_line(exc, 200)}")
     if workflow:
         return ci_night(ctx, workflow)
@@ -311,7 +371,7 @@ def commits_since(ctx, last, tip):
         return Since([], [], "no green run on record, so the merges since one cannot be listed")
     try:
         listed = run(["git", "log", "--first-parent", "--reverse", "--format=%H %s", f"{last}..{tip}"], cwd=ctx.root)
-    except DrainError as exc:
+    except BackstopError as exc:
         return Since([], [], f"the merges since {last} could not be listed: {one_line(exc, 150)}")
     lines = listed.splitlines()
     return Since([x for x in lines if _PR.search(x)], [x for x in lines if not _PR.search(x)], None)
@@ -323,7 +383,7 @@ def pr_listing(ctx, number):
     try:
         comments = json.loads(run(["gh", "pr", "view", number, "--repo", ctx.repo, "--json", "comments"]))["comments"]
         bodies = [c.get("body") or "" for c in comments]
-    except (DrainError, ValueError, KeyError, TypeError, AttributeError) as exc:
+    except (BackstopError, ValueError, KeyError, TypeError, AttributeError) as exc:
         return None, f"#{number}'s comments could not be read ({one_line(exc, 100)})"
     last = next((b for b in reversed(bodies) if b.startswith("selector:")), "")
     fence = re.search(r"\n```\n(.*?)\n?```", last, re.S)
@@ -440,7 +500,7 @@ def report_red(ctx, red, notifier):
         else:
             held = sorted({named[s] for s in failed})
             body = f"still red: {', '.join(failed)} at {tip[:12]}, open in " + ", ".join(f"#{n}" for n in held)
-    except (DrainError, ValueError, OSError) as exc:
+    except (BackstopError, ValueError, OSError) as exc:
         body = f"{', '.join(failed)} failing at {tip[:12]}; no ticket filed: {one_line(exc, 200)}"
         print(f"backstop.py: {body}", file=sys.stderr)
         notify(notifier, title, body)
@@ -466,24 +526,26 @@ def backstop(args):
     """One night for `args.repo`; the exit code."""
     root = os.path.abspath(args.repo)
     try:
-        repo = origin_slug(root)
-    except DrainError as exc:
+        repo = shellcmd.origin_slug(root)
+    except shellcmd.CmdError as exc:
         return report_inconclusive(args.repo, f"its origin could not be read: {one_line(exc, 200)}", args.notify)
+    if repo is None:
+        return report_inconclusive(args.repo, "its origin is not a github.com repo", args.notify)
     try:
         login = run(["gh", "api", "user", "--jq", ".login"])
-    except DrainError as exc:
+    except BackstopError as exc:
         return report_inconclusive(repo, f"the `gh` login could not be read: {one_line(exc, 200)}", args.notify)
     if repo.split("/")[0] != login:
         return report_inconclusive(repo, f"{repo} is not owned by {login}; the backstop files tickets only on the "
                                          "caller's own repos", args.notify)
     try:
-        default = run(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=root)
-    except DrainError as exc:
-        return report_inconclusive(repo, "origin/HEAD is not set, so the default branch is unknown (`git remote "
-                                         f"set-head origin --auto` sets it): {one_line(exc, 150)}", args.notify)
+        default = shellcmd.default_branch(root)
+    except shellcmd.CmdError as exc:
+        return report_inconclusive(repo, f"origin/HEAD is not set, so the default branch is unknown: "
+                                         f"{one_line(exc, 300)}", args.notify)
     state_dir = os.environ.get("BACKSTOP_DIR") or os.path.expanduser("~/.cache/backstop")
     os.makedirs(state_dir, exist_ok=True)
-    ctx = Ctx(root, repo, default, state_dir, None, None)
+    ctx = Ctx(root, repo, default, state_dir)
     result = night(ctx, args.jobs, args.workflow)
     if result.outcome == GREEN:
         with open(last_green_path(ctx), "w") as f:
