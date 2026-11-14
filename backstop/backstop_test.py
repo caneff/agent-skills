@@ -112,16 +112,15 @@ class Sandbox:
         self.state_path = os.path.join(t, "gh.json")
         self.notify_log = os.path.join(t, "notify.log")
         self.jobs_log = os.path.join(t, "jobs.log")
-        self.origin = os.path.join(t, "origin.git")
+        # A path carrying `github.com/me/repo`: the helper's origin_slug reads it as that repo's remote.
+        self.origin = os.path.join(t, "github.com", "me", "repo.git")
+        os.makedirs(os.path.dirname(self.origin))
         self.repo = os.path.join(t, "repo")
         self.git(t, "init", "-q", "--bare", "-b", "main", self.origin)
         self.git(t, "clone", "-q", self.origin, self.repo)
         self.git(self.repo, "checkout", "-q", "-b", "main")
         self.commit("init", {"AGENTS.md": AGENTS.format(seam="sh seam.sh"), "seam.sh": FAKE_SEAM})
         self.git(self.repo, "remote", "set-head", "origin", "main")
-        url = "https://github.com/me/repo.git"
-        self.git(self.repo, "remote", "set-url", "origin", url)
-        self.git(self.repo, "config", f"url.{self.origin}.insteadOf", url)
         self.save({"login": "me", "repo": "me/repo", "issues": []})
 
     def git(self, cwd, *args):
@@ -418,6 +417,16 @@ def test_a_backstop_that_cannot_import_its_neighbours_is_inconclusive(sb):
     assert sb.last_green() is None and not os.path.exists(sb.jobs_log)
     (note,) = sb.notes()
     assert "inconclusive" in note and "could not import" in note, note
+
+
+def test_a_backstop_night_never_loads_drain(sb):
+    """A `drain` on the import path that raises: the night still goes green, so nothing it
+    runs imports drain (#1779)."""
+    poison = os.path.join(sb.tmp, "poison")
+    write(os.path.join(poison, "drain.py"), "raise ImportError('drain was loaded')\n")
+    out = sb.run("green", extra={"PYTHONPATH": poison})
+    assert out.returncode == 0, out.stderr
+    assert sb.last_green() is not None
 
 
 def test_direct_commits_do_not_make_a_suite_unknown_and_are_listed(sb):
