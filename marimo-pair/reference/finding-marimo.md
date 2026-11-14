@@ -49,7 +49,7 @@ Before picking a runner, check the notebook file for a PEP 723 header:
 ```
 
 If the block is present, the notebook was authored as a self-contained
-sandboxed script and **SHOULD be opened with `--sandbox`**. Without the flag
+sandboxed script, so open it with `--sandbox`. Without the flag
 marimo runs in the ambient environment and silently ignores the inline
 dependencies. Imports will fail or, worse, resolve to a different version than
 the author pinned.
