@@ -140,7 +140,7 @@ frontier's own definition:
 ## The box check
 
 Two readings, `uptime` and `free -g`, before **every** dispatch, against the
-two caps `~/.claude/CLAUDE.md`'s memory rules set and `loop.box_check` holds
+two caps `~/.claude/CLAUDE.md`'s memory rules set and `agents.box_check` holds
 as its constants — a process count over the shared box, and the sum of the
 per-process `ulimit -v` caps. The numbers live there, once. Two WSL crashes
 forced PC restarts when the caps summed to nearly three times the budget.
@@ -182,7 +182,7 @@ way a herdr pane whose own session cannot be resolved is. A herdr listing
 that is empty, or that resolves to none of the box's actual pids while
 `claude` processes exist, is not read as an idle box: herdr's registry
 reads as broken, and the count refuses the same way an all-idle `ps`
-listing does. `loop.py` falls back to a flat process count (`ps -eo comm=
+listing does. `agents.py` falls back to a flat process count (`ps -eo comm=
 | grep -cx claude`, by command name, never a substring of the command line,
 which overcounted 2x) only when herdr or the pid match cannot be taken at
 all, and the refusal names which counter it used. The `peak:` line prints
