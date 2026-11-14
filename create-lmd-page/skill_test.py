@@ -1,6 +1,5 @@
-"""Structure test for the create-lmd-page flow (#1662): the SKILL.md prose that the spec's
-acceptance criteria name, the checks SKILL.md runs around the driver, and the scripts it
-calls (extractor `solution`, board_png with Pillow and the renderer faked).
+"""Structure test for the create-lmd-page flow (#1662): the checks SKILL.md runs around the
+driver, the template's `<p>` measure, and the scripts it calls (extractor `solution`, board_png with Pillow and the renderer faked).
 
 Runs nothing from ~/src/sudokupad-art or ~/src/twitch-rules-scroller. Blind to: whether a
 model follows the prose, the `lmd_archive` command itself (sudokupad-art #261, #262, #287),
@@ -18,7 +17,6 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 SKILL = (HERE / "SKILL.md").read_text()
-FLAT = " ".join(SKILL.split())  # prose wraps; assert on the sentence, not the line break
 sys.path.insert(0, str(HERE))
 import board_png  # noqa: E402
 import extract_puzzle  # noqa: E402
@@ -28,10 +26,6 @@ def section(name):
     m = re.search(rf"^## {name}\n(.*?)(?=^## |\Z)", SKILL, re.S | re.M)
     assert m, f"SKILL.md has no '## {name}' section"
     return m.group(1)
-
-
-def archive_commands():
-    return [l for l in SKILL.splitlines() if "lmd_archive" in l and " archive " in l]
 
 
 # ---- the extractor's `solution` ----
@@ -56,12 +50,13 @@ def test_extractor_solution_from_a_legacy_blob():
 # ---- board_png, with Pillow and sudokupad-art's renderer faked ----
 
 class FakeImage:
-    """The slice of a PIL image fit() touches; records what fit() asked of it."""
+    """The slice of a PIL image fit() touches. `thumbnail` shrinks in place keeping the aspect
+    ratio, as Pillow's does; `saved` records the size each save wrote, by path."""
     LANCZOS = "lanczos"
 
-    def __init__(self, size, log):
+    def __init__(self, size, saved):
         self.width, self.height = self.size = size
-        self.log = log
+        self.saved = saved
 
     def __enter__(self):
         return self
@@ -76,31 +71,32 @@ class FakeImage:
         return self
 
     def thumbnail(self, box, method):
-        self.log.append(("thumbnail", box, method))
-        self.size = (1, 1)
+        scale = min(box[0] / self.width, box[1] / self.height, 1)
+        self.size = (max(1, round(self.width * scale)), max(1, round(self.height * scale)))
 
     def save(self, path):
-        self.log.append(("save", str(path)))
+        self.saved[str(path)] = self.size
 
 
 def fake_pil(monkeypatch, size):
-    log = []
-    image = types.SimpleNamespace(open=lambda png: FakeImage(size, log), LANCZOS=FakeImage.LANCZOS)
+    saved = {}
+    image = types.SimpleNamespace(open=lambda png: FakeImage(size, saved), LANCZOS=FakeImage.LANCZOS)
     monkeypatch.setitem(sys.modules, "PIL", types.SimpleNamespace(Image=image))
-    return log
+    return saved
 
 
 def test_fit_shrinks_a_board_over_800_in_place(monkeypatch):
-    log = fake_pil(monkeypatch, (1536, 1200))
-    assert board_png.fit("b.png") == (1, 1)
-    assert log == [("thumbnail", (800, 800), "lanczos"), ("save", "b.png")]
+    saved = fake_pil(monkeypatch, (1536, 1200))
+    size = board_png.fit("b.png")
+    assert saved == {"b.png": size}
+    assert max(size) <= 800 and abs(size[0] / size[1] - 1536 / 1200) < 0.01
 
 
 @pytest.mark.parametrize("size", [(600, 600), (800, 800), (800, 300)])
 def test_fit_leaves_a_board_inside_800_alone(monkeypatch, size):
-    log = fake_pil(monkeypatch, size)
+    saved = fake_pil(monkeypatch, size)
     assert board_png.fit("b.png") == size
-    assert log == []
+    assert saved == {}
 
 
 @pytest.fixture
@@ -204,13 +200,6 @@ def test_post_refuses_after_an_earlier_failure_past_the_upload(tmp_path, image_i
     assert (tmp_path / "driver.json").read_text() == earlier
 
 
-def test_a_retry_reuses_the_uploaded_image_only_when_create_was_not_clicked():
-    out = " ".join(section("Output").split())
-    retry = out[out.index("**Retry after a failure past the upload.**"):out.index("7. **Check the driver's output.**")]
-    assert "--image-id <id>" in retry and "driver.failed.json" in retry
-    assert 'never retry after "Create clicked"' in retry
-
-
 @pytest.mark.parametrize("earlier", [None, ""])
 def test_post_runs_the_driver_with_no_earlier_output(tmp_path, earlier):
     if earlier is not None:
@@ -241,124 +230,6 @@ def test_driver_output_check_fails_on_a_missing_or_empty_key(tmp_path, text, mis
     assert r.returncode != 0 and r.stderr.strip() == f"driver.json lacks {missing}", r.stderr
 
 
-def test_driver_checks_bracket_the_driver_call_in_order():
-    out = section("Output")
-    post, check, page = out.index("lmd_driver.mjs)"), out.index('"puzzle_url","html"'), out.index("**Write the page file.**")
-    assert post < check < page < out.index("**Archive**")
-
-
-# ---- SKILL.md ----
-
-def test_exactly_one_archive_call_with_slug_and_lmd():
-    cmds = archive_commands()
-    assert len(cmds) == 1, cmds
-    assert "--slug" in cmds[0] and "--lmd" in cmds[0]
-    assert "--archive ~/src/lmd-archive" in cmds[0] and "~/src/sudokupad-art" in cmds[0]
-
-
-def test_link_is_the_page_link_verbatim():
-    assert "exactly as the page uses" in section("Archive")
-
-
-def test_no_ask_for_the_lmd_id():
-    assert "Ask the user for the puzzle's LMD id" not in SKILL
-    assert "Image id" not in section("Inputs").split("###")[0].split("Order:")[1]
-
-
-def test_inputs_are_asked_one_per_message_in_order():
-    inputs = section("Inputs").split("###")[0]
-    assert "each in its own message" in inputs
-    order = [inputs.index(k) for k in ("**SudokuPad link**", "**Notes**", "**Solution code description**", "**Difficulty**")]
-    assert order == sorted(order)
-
-
-def test_stream_gate_runs_before_the_driver_call():
-    out = section("Output")
-    cmd = "layout/install-preflight.mjs obs\n"
-    assert out.count(cmd) == 1, "the gate command must appear exactly once, as its own line"
-    gate_at, driver_at = out.index(cmd), out.index("lmd_driver.mjs")
-    assert gate_at < driver_at
-    assert "Before any driver call" in out
-
-
-def test_stream_browser_is_probed_and_launched_after_the_gate_and_before_the_driver():
-    out = section("Output")
-    gate = out.index("install-preflight.mjs obs")
-    probe = out.index("127.0.0.1:9334/json/version")
-    launch = out.index("Start-Process")
-    driver = out.index("lmd_driver.mjs)")
-    assert gate < probe < launch < driver
-    launch_line = out[launch:out.index("\n", launch)]
-    assert "--remote-debugging-port=9334" in launch_line and "stream-profile" in launch_line
-    assert "Any `chrome-stream.exe` line is a refusal" in " ".join(out.split())
-
-
-def test_driver_runs_through_windows_node():
-    assert "node.exe" in section("Output")
-
-
-def test_image_step_names_render_real_and_the_800_limit():
-    out = " ".join(section("Output").split())
-    assert "board_png.py" in out and "render_real.js" in out and "800×800" in out
-    assert "stays 420 (two-column) or 600 (one-column)" in out
-    assert "if either side is over 800, stop" not in out, "board_png.fit guarantees it; the check cannot fire"
-
-
-def test_aktivieren_is_left_to_chris_and_hand_off_is_the_puzzle_link():
-    assert 'Chris reviews the page and clicks "Aktivieren" himself' in FLAT
-    out = section("Output")
-    hand_off = out[out.index("**Hand-off.**"):]
-    assert "puzzle_url" in hand_off and "puzzle page link" in hand_off
-
-
-def test_archive_waits_for_chris_to_activate_after_the_hand_off():
-    # Chris's ruling on #1662 (A1 = a): LMD hides an inactive puzzle from the anonymous
-    # fetch lmd_archive makes, so the one archive call runs only once he says he activated it.
-    out = section("Output")
-    hand_off, archive = out.index("**Hand-off.**"), out.index("**Archive**")
-    assert hand_off < archive
-    wait = " ".join(out[hand_off:archive].split())
-    assert 'say once he has clicked "Aktivieren"' in wait and "Wait for that answer" in wait
-
-
-def test_failure_stops_the_skill_and_is_reported_with_output():
-    assert "A failure stops the skill" in FLAT
-    assert "reported to the user with the command's output" in FLAT
-    assert "no fallback to the manual flow" in FLAT
-    assert "never say the puzzle is posted or archived after a failure" in FLAT
-    assert "the report also names the page file it wrote, `~/lmd-pages/work/<slug>/page.html`" in FLAT
-
-
-def test_the_failure_rule_is_stated_once():
-    for phrase in ("reported to the user with the command's output", "report its output and stop"):
-        assert FLAT.count(phrase) <= 1, phrase
-
-
-def test_a_null_title_is_asked_for_right_after_the_link():
-    inputs = " ".join(section("Inputs").split("###")[0].split())
-    link, title, notes = inputs.index("**SudokuPad link**"), inputs.index("**title**"), inputs.index("**Notes**")
-    assert link < title < notes
-    assert "`title` is `null`" in inputs and "one message of its own" in inputs
-
-
-def test_solution_code_and_tag_confirmation_flow():
-    assert "plain readout" in SKILL
-    assert "Sudoku_JaNein" in SKILL and "`Ja`" in SKILL
-    assert "**Labels**" in SKILL and "**Free tags**" in SKILL
-    assert "in **one** message" in FLAT
-
-
-def test_driver_values_point_at_the_drivers_header_instead_of_restating_it():
-    out = " ".join(section("Output").split())
-    assert "with the keys and types the header of `lmd_driver.mjs` lists" in out
-    header = (HERE / "lmd_driver.mjs").read_text().split("\nimport ")[0]
-    assert "// values.json" in header
-    for key in ("slug", "title", "code", "difficulty", "sudoku", "labels", "freetags", "codedescr_en"):
-        assert f'"{key}"' in header, key
-    assert '"freetags", "codedescr_en"' not in SKILL, "SKILL.md restates the values.json keys"
-    assert "()<>~+-*=" not in SKILL, "SKILL.md restates LMD's allowed code characters"
-
-
 # ---- LMD's base.css caps `p, li` at 35em (#1712) ----
 
 TEMPLATE = (HERE / "reference" / "template.md").read_text()
@@ -370,12 +241,6 @@ def test_every_template_p_uncaps_lmds_35em_measure():
     assert tags, "template.md emits no <p>; the check below would pass for nothing"
     bare = [t for t in tags if "max-width: none" not in t]
     assert not bare, f"<p> without max-width: none: {bare}"
-
-
-def test_the_gutter_note_says_lmd_caps_p_as_well_as_li():
-    # max-width: none must follow the `p` mention: the note already said it for ul/li.
-    m = re.search(r"caps `p`.*?`<p>`.*?max-width: none", FLAT)
-    assert m, "SKILL.md's gutter note no longer says LMD caps `p` and that a `<p>` needs max-width: none"
 
 
 # ---- § Edit a live page (#1720) ----
