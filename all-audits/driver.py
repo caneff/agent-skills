@@ -25,7 +25,6 @@ import dataclasses
 import datetime as _dt
 import hashlib
 import html
-import importlib.util
 import glob
 import json
 import os
@@ -40,6 +39,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
 from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
 import pagelib  # noqa: E402
 import audit_record  # noqa: E402
+import mutation_run  # noqa: E402
+from mutation_run import parse_utc  # noqa: E402
 
 DEFAULT_THRESHOLD = 10
 DEFAULT_BACKSTOP_DAYS = 30
@@ -171,12 +172,6 @@ def head_sha(repo):
     return _run(["git", "-C", repo, "rev-parse", "HEAD"]).stdout.strip()
 
 
-def parse_utc(timestamp):
-    """An ISO timestamp as an aware datetime; a naive one is read as UTC."""
-    then = _dt.datetime.fromisoformat(timestamp)
-    return then if then.tzinfo else then.replace(tzinfo=_dt.timezone.utc)
-
-
 def now_iso():
     return _dt.datetime.now(_dt.timezone.utc).isoformat()
 
@@ -230,108 +225,13 @@ def update_cache(repo, name, report_dir, base=None, key=None):
 
 # --- mutation recency: what each module's last mutation run covered (#1567) --
 
-MUTATION_KEY = "mutation_modules"
-_EPOCH = _dt.datetime.min.replace(tzinfo=_dt.timezone.utc)
-
-
-def mutation_runs(record):
-    """The {module: {sha, date}} part of a cache record; a missing or
-    non-dict value is no recorded runs."""
-    runs = record.get(MUTATION_KEY)
-    return runs if isinstance(runs, dict) else {}
-
-
 def record_mutation(repo, module, base=None):
     """Stamp `module` as mutation-run at HEAD now, beside the audit records
-    in the same per-repo cache file. The key is the repo-relative path, so
-    `./a.py` and `a.py` are one module."""
+    in the same per-repo cache file."""
     path = _record_file(repo, base)
     record = load_record(path)
-    runs = mutation_runs(record)
-    runs[os.path.normpath(module)] = {"sha": head_sha(repo), "date": now_iso()}
-    record[MUTATION_KEY] = runs
+    mutation_run.stamp(record, module, head_sha(repo), now_iso())
     save_record(path, record)
-
-
-def _load_audit(here):
-    """`mutation-audit/audit.py` as a module, for its sibling-test rule."""
-    spec = importlib.util.spec_from_file_location(
-        "mutation_audit_probe", os.path.join(here, "..", "mutation-audit", "audit.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def mutation_changed(repo, runs, here=None):
-    """The modules in `runs` ({module: {sha, date}}) whose file or sibling
-    test differs between their recorded sha and HEAD. A sha git cannot
-    resolve, or no recorded sha, proves nothing, so it reads as changed,
-    never as unchanged."""
-    sibling_tests = _load_audit(here or os.path.dirname(os.path.abspath(__file__)))._sibling_tests
-    changed = set()
-    for module, entry in runs.items():
-        sha = entry.get("sha") if isinstance(entry, dict) else None
-        if not sha:
-            changed.add(module)
-            continue
-        paths = [module, *sorted(sibling_tests(module) or ())]
-        r = _run(["git", "-C", repo, "diff", "--quiet", f"{sha}..HEAD", "--", *paths])
-        if r.returncode != 0:
-            changed.add(module)
-    return changed
-
-
-def _run_date(entry):
-    """The run date of a record entry as an aware datetime, or None for an
-    entry with no readable date — which orders as never run."""
-    try:
-        return parse_utc(entry["date"])
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
-def order_mutation_targets(candidates, rank, record, changed):
-    """Pure: the candidates in the order mutation mode should run them.
-
-    candidates: [module]; rank: [module] in the prepass's order (may be
-    empty); record: {module: {sha, date}}; changed: {module} changed since its
-    recorded sha. Never-run first, then changed since their sha, then oldest
-    run first; the prepass rank breaks ties inside a group, unranked last.
-    Recency outranks risk, and nothing is dropped.
-    """
-    position = {m: i for i, m in enumerate(rank)}
-    dates = {m: _run_date(record.get(m)) for m in candidates}
-
-    def key(m):
-        tie = (position.get(m, len(position)), m)
-        if dates[m] is None:
-            return (0, _EPOCH, *tie)
-        if m in changed:
-            return (1, _EPOCH, *tie)
-        return (2, dates[m], *tie)
-
-    return sorted(candidates, key=key)
-
-
-def parse_mutation_rank(stdout, candidates):
-    """The prepass's printed lines kept only when they name a candidate, each
-    once, in printed order. A line outside the list is dropped."""
-    allowed = set(candidates)
-    return list(dict.fromkeys(
-        line for line in map(str.strip, stdout.splitlines()) if line in allowed))
-
-
-def suggest_mutation_candidates(repo, here):
-    """The modules `mutation-audit/audit.py --suggest` names. A probe that
-    crashes or prints unparseable output raises: no answer is not "no
-    candidates"."""
-    r = _run(["python3", os.path.join(here, "..", "mutation-audit", "audit.py"), "--suggest", repo])
-    if r.returncode != 0:
-        raise RuntimeError(f"audit.py --suggest exited {r.returncode}: {r.stderr.strip()}")
-    try:
-        return [json.loads(ln)["candidate"] for ln in r.stdout.splitlines() if ln.strip()]
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        raise RuntimeError(f"audit.py --suggest printed unparseable output: {e}") from e
 
 
 # --- filesystem / prompt helpers (ported from run-audits.sh) ----------------
@@ -610,24 +510,6 @@ def inconclusive_reason(collection, base):
         return f.read().strip() or "no reason recorded"
 
 
-def mutation_tally(findings_jsonl):
-    if not os.path.exists(findings_jsonl):
-        return None
-    for line in open(findings_jsonl, encoding="utf-8"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            extra = (json.loads(line) or {}).get("extra") or {}
-        except json.JSONDecodeError:
-            continue
-        keys = {"killed_count", "survived_count", "no_coverage_count"}
-        if keys <= extra.keys():
-            k, s, n = extra["killed_count"], extra["survived_count"], extra["no_coverage_count"]
-            return k, k + s + n, s, n
-    return None
-
-
 def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error=None):
     d = os.path.join(collection, "mutation")
     os.makedirs(d, exist_ok=True)
@@ -644,7 +526,7 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
         out.append('<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">\n')
         out.append("<thead><tr><th>Module</th><th>Killed/total</th><th>Weak-assertion</th><th>No-coverage</th><th>Report</th></tr></thead><tbody>\n")
         for base in mutation_modules:
-            tally_row = mutation_tally(os.path.join(collection, base, "findings.jsonl"))
+            tally_row = mutation_run.tally(os.path.join(collection, base, "findings.jsonl"))
             why = inconclusive_reason(collection, base)
             if why is not None:
                 inconclusive.append(base)
@@ -826,7 +708,7 @@ def scan_mutation(collection):
     survivors_sum = 0
     inconclusive = sum(1 for b in mutation_modules if inconclusive_reason(collection, b) is not None)
     for base_name in mutation_modules:
-        tally = mutation_tally(os.path.join(collection, base_name, "findings.jsonl"))
+        tally = mutation_run.tally(os.path.join(collection, base_name, "findings.jsonl"))
         if tally:
             _, _, s, n = tally
             survivors_sum += s + n
@@ -1778,32 +1660,41 @@ def mutation_cost_estimate(n, jobs=1, timeout_s=None):
             f"up to {hours:g}h worst case (2 x {timeout_s:g}s per module), plus one `claude` run per module")
 
 
-def mutation_mode(repo, modules, out, whole_repo=False):
-    """`whole_repo` (#1588): every `--suggest` candidate, no `MUTATION_MAX` cut
-    and no model prepass, so the order is the recency order alone."""
-    repo = os.path.abspath(repo)
-    here = os.path.dirname(os.path.abspath(__file__))
+def _prepass_ranker(repo):
+    """The `rank_fn` of `mutation_run.run`: the model prepass's order of the
+    candidates, which only breaks ties. A failed prepass is named and gives no
+    ranking, so the order is recency alone."""
+    def rank(candidates):
+        result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo, candidates)], env=claude_env())
+        ranked = mutation_run.parse_rank(result.stdout, candidates)
+        if result.returncode != 0 or not ranked:
+            print(f"mutation prepass gave no ranking (exit {result.returncode}); "
+                  "ordering by recency alone", file=sys.stderr)
+        return ranked
+    return rank
 
-    final_targets = None if modules is None else list(modules)
-    skipped = 0
-    if final_targets is None:
-        try:
-            candidates = suggest_mutation_candidates(repo, here)
-        except RuntimeError as e:
-            print(f"mutation-target probe failed: {e}", file=sys.stderr)
+
+def mutation_mode(repo, modules, out, whole_repo=False):
+    """`whole_repo` (#1588): every candidate, no `MUTATION_MAX` cut and no
+    model prepass, so the order is the recency order alone."""
+    repo = os.path.abspath(repo)
+
+    use_prepass = not whole_repo and os.environ.get("AUDITS_NO_SYNTH", "0") != "1"
+    try:
+        planned = mutation_run.run(
+            repo, load_record(_record_file(repo)), runner=_run, modules=modules,
+            rank_fn=_prepass_ranker(repo) if use_prepass else None)
+    except Exception as e:  # noqa: BLE001 - named below, never an empty target list
+        if modules is None:
+            print(f"mutation-target probe failed: {e!r}", file=sys.stderr)
             sys.exit(1)
-        rank = []
-        if candidates and not whole_repo and os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
-            result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo, candidates)], env=claude_env())
-            rank = parse_mutation_rank(result.stdout, candidates)
-            if result.returncode != 0 or not rank:
-                print(f"mutation prepass gave no ranking (exit {result.returncode}); "
-                      "ordering by recency alone", file=sys.stderr)
-        runs = mutation_runs(load_record(_record_file(repo)))
-        ordered = order_mutation_targets(candidates, rank, runs, mutation_changed(repo, runs, here))
-        max_n = len(ordered) if whole_repo else int(os.environ.get("MUTATION_MAX", "10"))
-        final_targets = ordered[:max_n]
-        skipped = max(0, len(ordered) - max_n)
+        planned = None  # the targets are given; only the no-tests count is unknown
+    final_targets = list(modules) if planned is None else planned.targets
+    skipped = 0
+    if modules is None:
+        max_n = len(final_targets) if whole_repo else int(os.environ.get("MUTATION_MAX", "10"))
+        skipped = max(0, len(final_targets) - max_n)
+        final_targets = final_targets[:max_n]
 
     for t in final_targets:
         print(f"mutation-target: {t}")
@@ -1818,18 +1709,11 @@ def mutation_mode(repo, modules, out, whole_repo=False):
     print(f"collecting under: {collection}\n")
 
     notest_json = os.path.join(collection, "mutation-no-tests.json")
-    r = _run(["python3", os.path.join(here, "..", "mutation-audit", "audit.py"), "--no-tests", repo])
-    data = None
-    if r.returncode == 0:
-        try:
-            data = json.loads(r.stdout)
-        except json.JSONDecodeError:
-            data = None
-    if data is None:
-        # A crash or unparseable output is a real "don't know", never a
-        # silent zero (#559) — the index must render this as could-not-
-        # determine, not as a repo with zero testless modules.
-        data = {"error": "no-tests probe crashed or returned unparseable output"}
+    # A planning failure is a real "don't know", never a silent zero (#559) —
+    # the index must render this as could-not-determine, not as a repo with
+    # zero testless modules.
+    data = ({"error": "no-tests probe failed"} if planned is None
+            else {"no_tests": planned.no_tests, "total": planned.total})
     with open(notest_json, "w", encoding="utf-8") as f:
         json.dump(data, f)
     notest_paths = set(data.get("no_tests", []))

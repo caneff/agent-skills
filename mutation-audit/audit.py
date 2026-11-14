@@ -110,6 +110,12 @@ def parse_mutmut_results(text):
             **extra,
         )
         rows.append(row)
+    return _stamp_counts(rows, killed_count, survived_count, no_coverage_count)
+
+
+def _stamp_counts(rows, killed_count, survived_count, no_coverage_count):
+    """Stamp the run's three counts on every row's `extra`, the keys the
+    all-audits driver's mutation tally reads. Both parsers end here."""
     for row in rows:
         row["extra"]["killed_count"] = killed_count
         row["extra"]["survived_count"] = survived_count
@@ -222,11 +228,7 @@ def parse_stryker_report(text):
     if killed_count + survived_count + no_coverage_count == 0:
         raise Inconclusive("Stryker's report holds no judged mutant; it did not mutate the target")
     rows.sort(key=lambda r: (r["file"], r["line"], int(r["extra"]["mutant"].rsplit("#", 1)[1])))
-    for row in rows:
-        row["extra"]["killed_count"] = killed_count
-        row["extra"]["survived_count"] = survived_count
-        row["extra"]["no_coverage_count"] = no_coverage_count
-    return rows
+    return _stamp_counts(rows, killed_count, survived_count, no_coverage_count)
 
 
 def js_test_file(target):
@@ -337,6 +339,23 @@ def no_test_modules(paths):
         p for p in paths
         if (siblings := _sibling_tests(p)) is not None and not (siblings & pathset)
     )
+
+
+def plan(repo):
+    """What a mutation sweep of `repo` works from, in one walk: `candidates`
+    (worthy modules with a sibling test, as `suggest_candidates`), `no_tests`
+    (worthy modules with none), `total` (the worthy modules), and `siblings`
+    ({candidate: its possible sibling test paths, sorted}). The one public
+    entry the all-audits driver reads, so it never reaches `_sibling_tests`.
+    """
+    paths = _source_paths(repo)
+    candidates = suggest_candidates(paths)
+    return {
+        "candidates": candidates,
+        "no_tests": no_test_modules(paths),
+        "total": sum(1 for p in paths if _sibling_tests(p) is not None),
+        "siblings": {c: sorted(_sibling_tests(c)) for c in candidates},
+    }
 
 
 def _check_parsing():
@@ -776,18 +795,15 @@ def _selfcheck():
 
 
 def main(argv):
-    if argv[1:2] == ["--suggest"]:
-        root = argv[2] if len(argv) > 2 else "."
-        for candidate in suggest_candidates(_source_paths(root)):
-            print(json.dumps({"candidate": candidate}))
-        return
-    if argv[1:2] == ["--no-tests"]:
-        # The worthy source modules with no sibling test, plus the worthy-module
-        # total, for the repo-wide "N of M source modules have no tests" stat.
-        root = argv[2] if len(argv) > 2 else "."
-        paths = _source_paths(root)
-        worthy = sum(1 for p in paths if _sibling_tests(p) is not None)
-        print(json.dumps({"no_tests": no_test_modules(paths), "total": worthy}))
+    if argv[1:2] in (["--suggest"], ["--no-tests"]):
+        planned = plan(argv[2] if len(argv) > 2 else ".")
+        if argv[1] == "--suggest":
+            for candidate in planned["candidates"]:
+                print(json.dumps({"candidate": candidate}))
+        else:
+            # The worthy source modules with no sibling test, plus the worthy-module
+            # total, for the repo-wide "N of M source modules have no tests" stat.
+            print(json.dumps({"no_tests": planned["no_tests"], "total": planned["total"]}))
         return
     try:
         if argv[1:2] == ["--run"]:
