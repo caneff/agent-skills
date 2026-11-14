@@ -47,8 +47,8 @@ Fill in a descriptive `--name`. It runs in the current working directory, outliv
 
 ### Sub mode (`sub ...`) — child that reports back here
 
-Spawn a fire-and-return subagent with the Agent tool: **no** `name`, prompt = the seed line above. It does the handed-off work and its result returns into *this* session as a completion notification. Use when you want the answer back in the current thread.
+Spawn a fire-and-return subagent with the Agent tool: **no** `name`, a `model` (the agent-model guard refuses an Agent call without one), prompt = the seed line above. It does the handed-off work and its result returns into *this* session as a completion notification. Use when you want the answer back in the current thread.
 
 ### Side mode (`side ...`) — background teammate alongside this session
 
-Spawn a persistent side-agent with the Agent tool: pass a descriptive `name`, prompt = the seed line above. The name makes it addressable; you keep working and reach it later with SendMessage. Use when the handed-off work should proceed in parallel without blocking you.
+Spawn a persistent side-agent with the Agent tool: pass a descriptive `name` and a `model` (the agent-model guard refuses an Agent call without one), prompt = the seed line above. The name makes it addressable; you keep working and reach it later with SendMessage. Use when the handed-off work should proceed in parallel without blocking you.

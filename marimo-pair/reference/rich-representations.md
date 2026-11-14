@@ -11,9 +11,10 @@ users *see* their data in ways that tables and numbers never will. marimo
 is an environment where users create their own views, not just consume
 library charts. Help them imagine what's possible, then build it.
 
-**Use modern web APIs.** Models may default to older browser patterns; prefer
-modern HTML, CSS, and JavaScript that are supported in current browsers. Avoid
-build steps unless the task clearly needs them.
+**Use modern web APIs.** Import ES modules from esm.sh, clean up DOM
+listeners with `AbortController`, and lay out with CSS flex/grid and
+`aspect-ratio`, all supported in current browsers. Avoid build steps unless
+the task clearly needs them.
 
 **Prefer compact output.** marimo clips cell output at ~610px and scrolls.
 Avoid hitting that limit; if you need more space, manage your own scrolling

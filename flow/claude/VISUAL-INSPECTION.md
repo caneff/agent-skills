@@ -55,7 +55,7 @@ a step your own hands can do.
   --profile-directory=Default <url-or-$(wslpath -w <file>)>`. `Default` is
   caneff@gmail.com; `Profile 4` is the mercor.expert work profile. Why:
   Chrome hands an outside link to whichever profile window was used last,
-  and on 2026-10-30 shopping links landed in the work profile. A link I click
+  which may be the work profile. A link I click
   in the terminal still goes to the last-used window; only links you open
   are pinned. That is my opener, not your reader — you read the page
   through `shot-scraper` below.
@@ -65,10 +65,10 @@ a step your own hands can do.
   filename** (never overwrite the one I already opened), decode it before
   opening (`python3 -c "from PIL import Image; Image.open('<f>').verify()"`,
   or `file <f>` naming the image type), and open it **once**, with one named
-  opener: `wslview <f>`, after `ls <f>` confirms it exists. Why: in the week
-  of 2026-09-21 I saw sheets opened mid-write (truncated), a reused filename
-  serving the previous round from cache, and `wslview` on a missing path
-  opening Explorer instead (#1231). In a design loop, every reply that
+  opener: `wslview <f>`, after `ls <f>` confirms it exists. Why: a
+  sheet opened mid-write shows truncated, a reused filename serves the
+  previous round from cache, and `wslview` on a missing path opens Explorer
+  instead (#1231). In a design loop, every reply that
   changes the picture opens the new render without being asked — the whole
   frame, beside the target at the same scale. Why: I can only rule on the
   image.

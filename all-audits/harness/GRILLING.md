@@ -29,7 +29,7 @@ default: grill every fresh finding per § Grilling a report, unchanged. Ask
 once per sweep; never re-offer between reports.
 
 The per-finding grill exists because a decision is the user's, not the
-agent's (#526, #579). The batch mode keeps that: the user opted in, and these
+agent's. The batch mode keeps that: the user opted in, and these
 categories still go to the user as questions, never decided by the agent:
 
 - a doc-vs-code contradiction — the user's precedence rules make it the

@@ -94,9 +94,11 @@ _existing() {
   printf '%s' "${line#*=}"
 }
 
-# ask KEY "Prompt" — read a value into $KEY. Offers the existing .env value as
-# a default on re-runs (Enter keeps it). Visible input (non-secret).
+# ask [--secret] KEY "Prompt" — read a value into $KEY. Offers the existing
+# .env value as a default on re-runs (Enter keeps it). --secret hides the input.
 ask() {
+  local secret=0
+  if [[ "$1" == "--secret" ]]; then secret=1; shift; fi
   local key="$1" prompt="$2" current input
   current=$(_existing "$key" || true)
   if [[ -n "$current" ]]; then
@@ -104,22 +106,12 @@ ask() {
   else
     printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
   fi
-  read -r input || true
-  [[ -z "$input" && -n "$current" ]] && input="$current"
-  printf -v "$key" '%s' "$input"
-}
-
-# ask_secret KEY "Prompt" — like ask, but input is hidden.
-ask_secret() {
-  local key="$1" prompt="$2" current input
-  current=$(_existing "$key" || true)
-  if [[ -n "$current" ]]; then
-    printf '  %s%s%s %s[Enter keeps current]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
+  if (( secret )); then
+    read -rs input || true
+    printf '\n'
   else
-    printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
+    read -r input || true
   fi
-  read -rs input || true
-  printf '\n'
   [[ -z "$input" && -n "$current" ]] && input="$current"
   printf -v "$key" '%s' "$input"
 }
@@ -194,7 +186,7 @@ open_url "https://dashboard.stripe.com/test/apikeys"
 step "On the API keys page, copy the Publishable key (starts pk_test_)."
 ask STRIPE_PUBLISHABLE_KEY "Paste the publishable key:"
 step "Click 'Reveal test key' on the Secret key row, then copy it."
-ask_secret STRIPE_SECRET_KEY "Paste the secret key:"
+ask --secret STRIPE_SECRET_KEY "Paste the secret key:"
 write_env STRIPE_PUBLISHABLE_KEY "$STRIPE_PUBLISHABLE_KEY"
 write_env STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
 set_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"   # CI needs this one

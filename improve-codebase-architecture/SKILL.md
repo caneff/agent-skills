@@ -26,7 +26,7 @@ Whatever you scope to, skip vendored, generated, and dependency trees (`node_mod
 
 Read the project's domain glossary (`GLOSSARY.md`) and any ADRs in the area you're touching first.
 
-Then spawn a sub-agent to walk the codebase. Don't follow rigid heuristics — explore organically and note where you experience friction:
+Then walk the codebase — through a sub-agent when the scoped area is big enough that the raw reads would crowd your context. Don't follow rigid heuristics — explore organically and note where you experience friction:
 
 - Where does understanding one concept require bouncing between many small modules?
 - Where are modules **shallow** — interface nearly as complex as the implementation?

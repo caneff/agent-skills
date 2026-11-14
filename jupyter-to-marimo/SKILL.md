@@ -8,7 +8,7 @@ description: Convert a Jupyter notebook (.ipynb) to a marimo notebook (.py).
 
 ## Convert first
 
-**Important:** Run the converter before you read the source notebook:
+Run the converter before you read the source notebook:
 
 ```bash
 uvx marimo convert <notebook.ipynb> -o <notebook.py>

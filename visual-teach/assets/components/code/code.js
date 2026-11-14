@@ -78,19 +78,15 @@
     );
   }
 
+  var api = {
+    wireCopyButton: wireCopyButton,
+    wireCodeBlock: wireCodeBlock,
+    wireIO: wireIO,
+    initPrism: initPrism,
+  };
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = {
-      wireCopyButton: wireCopyButton,
-      wireCodeBlock: wireCodeBlock,
-      wireIO: wireIO,
-      initPrism: initPrism,
-    };
+    module.exports = api;
   } else if (typeof window !== "undefined") {
-    window.vtCode = {
-      wireCopyButton: wireCopyButton,
-      wireCodeBlock: wireCodeBlock,
-      wireIO: wireIO,
-      initPrism: initPrism,
-    };
+    window.vtCode = api;
   }
 })();

@@ -37,4 +37,4 @@ repos:
         pass_filenames: false
 
 # pytest is deliberately absent — too slow for every commit, and blocking
-# commits trains --no-verify. It runs in CI (authoritative) instead.
+# commits trains --no-verify. It runs in the merge gate (`just check`) instead.

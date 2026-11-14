@@ -92,15 +92,12 @@ defines them.
   and Ctrl+V image paste into Claude Code were all checked working on Zed
   1.20.2. Image paste needs a live `WSL_INTEROP` in the Claude process itself:
   `wsl-interop-repoint.sh` fixes shells and Bash tool calls, not a Claude
-  already running on a dead socket, whose clipboard then reads empty
-  (2026-11-03: 14 of 15 Claudes dead, and the one live one pasted). Restart that
-  Claude from a new pane, or in its own pane after
-  `source ~/.agents/skills/flow/bin/wsl-interop-repoint.sh`, since a plain
-  restart there inherits the shell's dead socket; until then the controller
-  reads the clipboard
-  (`VISUAL-INSPECTION.md`). herdr takes one client at a time — attaching from another terminal
-  drops the current one; the server and panes keep running, so re-running
-  `herdr` is the whole recovery.
+  already running on a dead socket, whose clipboard then reads empty.
+  The fix that needs no restart is in `VISUAL-INSPECTION.md` § Getting a
+  pasted image to an agent as a file; until it is applied the controller
+  reads the clipboard. herdr takes one client at a time — attaching from
+  another terminal drops the current one; the server and panes keep
+  running, so re-running `herdr` is the whole recovery.
 - **Zed's terminal attaches herdr by itself.** The hook is in `~/.bashrc`,
   right after the `herdr()` wrapper: `ZED_TERM` is set only in a Zed
   terminal, so an interactive login shell there runs `herdr && exit`. It is
@@ -235,17 +232,13 @@ defines them.
   the worker with `notify_when_idle: true` and no `message` key at all:
   `SendMessage({to: "<worker session name>", notify_when_idle: true})`.
   Omit `message` rather than passing `""`: the tool's schema lists `message`
-  under `required` but defaults it, and a call that leaves it out validates
-  and routes (checked 2026-10-11 against a nonexistent name: the error was
-  "not reachable", not a schema error). The digest of 2026-10-04 reported an
-  empty `message` failing as invalid in two controller sessions (#1530). The
+  under `required` but defaults it, so a call that leaves it out validates
+  and routes, while an empty `message` fails as invalid. The
   idle notice reaches the controller only. On it, read that worker's pane
   (`herdr agent read <name>`) and say nothing to Chris unless the pane holds
-  a question for him. The `Stop` hook `worker-stop-alert.sh` used to do this
-  job by typing a line into the controller's herdr pane. It was unregistered
-  from `settings.json` on 2026-10-04 because it typed into Chris's own input
-  and fired about a dozen times in one burn without once being right. The script
-  stays installed, and re-adding its `Stop` entry restores it. Its
+  a question for him. The `Stop` hook `worker-stop-alert.sh` stays installed
+  but unregistered, because typing into the controller's pane landed in
+  Chris's own input; re-adding its `Stop` entry restores it. Its
   send-time sibling `worker-send-alert.sh` (`PostToolUse` on `SendMessage`,
   #1540) is registered; its header states when it fires.
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
@@ -269,10 +262,9 @@ defines them.
   (ADR 0003), and a Monitor expires and needs re-arming (#1223 reports 30
   minutes and about 15 re-arms over one multi-hour hunt).
 - Append a completion line to a progress file (e.g. `PROGRESS.md`) after
-  every step and read it on wake; never stage or commit it. Ending the turn
-  instead of blocking (`CLAUDE.md` § Work) was ruled 2026-10-04, superseding
-  the block-in-turn step written for lost monitor notifications; #925's 180
-  `echo ok` calls was the cost. If a notification is lost, the next real
+  every step and read it on wake; never stage or commit it. End the turn
+  instead of blocking (`CLAUDE.md` § Work): a block-in-turn wait spins on
+  no-op calls. If a notification is lost, the next real
   event — a message, the progress file on wake — catches it. Why: a spin is
   invisible; every liveness signal reads healthy while it burns.
 - A watch on a background job matches failure signatures
@@ -284,11 +276,12 @@ defines them.
   attempt; never retry the same configuration silently. Why: a per-item
   match fires on the first item and reads as finishing; a success-only
   watch sleeps through a crash.
-- A message that arrives while work is running changes that work. Check
-  messages on every poll. If it changes a run's parameters, kill the run
-  and restart with the new ones; if it adds to a deliverable, fold it in
-  and grep the deliverable for it before reporting done. Why: a message
-  read after the run is a run done twice.
+- A message that arrives while work is running changes that work. Read
+  it when it wakes you or when your current tool call returns. If it
+  changes a run's parameters, kill the run and restart with the new ones;
+  if it adds to a deliverable, fold it in and grep the deliverable for it
+  before reporting done. Why: a message read after the run is a run done
+  twice.
 - Scripts, logs and outputs of long runs go in a git-ignored scratch
   directory inside the worktree or the repo's research directory — never
   `/tmp` or the session scratchpad, which a WSL restart wipes. Parallel

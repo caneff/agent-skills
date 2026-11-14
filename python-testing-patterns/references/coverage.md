@@ -187,32 +187,6 @@ pytest --cov=src --cov-report=xml
 pytest --cov=src --cov-fail-under=80
 ```
 
-**Per-file thresholds in .coveragerc:**
-```ini
-[coverage:report]
-fail_under = 80
-
-[coverage:paths]
-source = src/
-
-[coverage:run]
-# Per-module configuration
-[src/critical.py]
-fail_under = 95
-
-[src/utils.py]
-fail_under = 90
-```
-
-## Incremental Coverage
-
-**Only check coverage of changed files:**
-```bash
-# Using coverage.py directly
-coverage run -m pytest
-coverage report --skip-covered
-```
-
 ## Coverage in CI/CD
 
 ### GitHub Actions

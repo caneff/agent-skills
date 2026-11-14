@@ -2,8 +2,9 @@
 
 One review component is switched off at a time (ADR 0005), and kept only if
 the review ledger shows bugs escaping without it. Each ablation is a section
-here whose heading ends in its state, `running` or `ended`. A worker reads the
-heading to know whether the component runs.
+here whose heading ends in its state, `running` or `ended`. A worker reads a
+section's first bullet to know whether the component runs; the heading states
+only whether the ablation is running or ended.
 
 ## Codex pass — ended
 

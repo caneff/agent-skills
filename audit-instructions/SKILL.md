@@ -89,7 +89,7 @@ differs in what the report holds. Write to
 count and the report's absolute path.
 
 - **Header** — a one-line verdict, then a `vt-metabar` with the **honest count**:
-  "307 lines in · 4 delete · 4 rewrite · 5 additions."
+  "307 lines in · 4 delete · 4 rewrite · 0 additions."
 - **Verdict rows** — one per instruction, in a `vt-table`: my line | verdict | why |
   Anthropic's line. Color the verdict `vt-pill bad` for DELETE, `vt-pill warn` for
   REWRITE, `vt-pill good` for KEEP.

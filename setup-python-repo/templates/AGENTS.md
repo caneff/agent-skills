@@ -9,6 +9,11 @@
 - Type check: `uv run ty check`
 - Lint + format: `just fmt`
 
+## End-to-end seam
+
+- **Seam**: `just check`
+- **Blind to**: anything a person sees using the program that no test asserts
+
 ## Where things are
 
 - Coding + testing standards → [`CODING_STANDARDS.md`](CODING_STANDARDS.md)
@@ -18,5 +23,5 @@
 ## Conventions (summary — full rules in CODING_STANDARDS.md)
 
 - Package manager is **uv**. Never `pip`, `pip-tools`, `poetry`, or `conda`.
-- Type checker is **ty**, linter/formatter is **ruff** — both gate CI.
+- Type checker is **ty**, linter/formatter is **ruff** — both gate `just check`.
 - Test files use the **`*_test.py`** suffix, never `test_*.py`.

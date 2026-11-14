@@ -4,7 +4,7 @@ description: Make a demo of a research paper in a marimo notebook fully automati
 disable-model-invocation: true
 ---
 
-You need to come up with a compelling story to tell from a paper. Do not ask the user for feedback/input. You need to apply thinking and come up with the best story yourself.
+You need to come up with a compelling story to tell from a paper. Do not ask the user for feedback/input. Choose the best story yourself.
 
 # Fetching Papers via AlphaXiv
 
@@ -54,7 +54,7 @@ Papers typically have more than one concept in them. So that means you need to p
 
 Pick the idea that is easiest to explain with a minimum code example. For a minimum code example to really work, it tends to help to have one, maybe two charts to look at. Maybe there's a dropdown that lets you try out different settings. Possibly even a slider. But the one thing we would want to do is prevent that the user needs to do a lot of scrolling. 
 
-It will be typical that you'll want to compare two approaches. But take a moment to think about the example, because that matters most to the story. Most of the time you don't want to use a toy example. They're not informative and they are overdone. It may be better to generate a creative example that shows where one approach can really shine. We don't want to cherry pick, but we also don't want to do examples that have been overdone either. 
+It will be typical that you'll want to compare two approaches. The example matters most to the story. Most of the time you don't want to use a toy example. They're not informative and they are overdone. It may be better to generate a creative example that shows where one approach can really shine. We don't want to cherry pick, but we also don't want to do examples that have been overdone either. 
 
 Settle the story and the example before you write any code: they matter more than the implementation. Give the user some interaction but keep scrolling to a minimum. A good example tells a story, it doesn't just state some facts.
 
