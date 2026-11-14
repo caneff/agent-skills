@@ -1,13 +1,13 @@
 ---
 name: setup-python-repo
-description: Set up a new Python repo — or convert an existing one — to my standard 2026 agent-assisted stack (uv, ruff, ty, pytest, pre-commit, GitHub Actions, justfile, AGENTS.md).
+description: Set up a new Python repo — or convert an existing one — to my standard 2026 agent-assisted stack (uv, ruff, ty, pytest, pre-commit, justfile, AGENTS.md).
 disable-model-invocation: true
 ---
 
 # Set up a Python repo
 
-Bring a repo to my standard stack: **uv, ruff, ty, pytest, pre-commit, GitHub
-Actions, justfile, AGENTS.md.** Works on an empty dir (new) or an existing repo
+Bring a repo to my standard stack: **uv, ruff, ty, pytest, pre-commit, justfile,
+AGENTS.md.** Works on an empty dir (new) or an existing repo
 (convert). The **target state is identical** either way — only the starting
 point differs.
 
@@ -96,26 +96,19 @@ uv run pre-commit install
 
 Pattern: upstream isolated hooks (ruff, hygiene) + one `local` system hook for
 `ty` (ty needs your venv to resolve imports). **pytest is NOT a hook** — too
-slow for every commit; it lives in CI only. (For a JS/TS repo, use
+slow for every commit; it runs in the merge gate (`just check`) only. (For a JS/TS repo, use
 `setup-pre-commit` instead — its hook does run tests, a reasonable tradeoff
 for faster JS/TS suites.)
 
 **Done when:** `uv run pre-commit run --all-files` executes end to end.
 
-## 6. Gates: CI
+## 6. Gates: merge gate
 
-Copy [`templates/ci.yml`](templates/ci.yml) → `.github/workflows/ci.yml`. Pin
-`astral-sh/setup-uv` to the current tag. CI = the same pre-commit config +
-pytest, so there's no bash mirror to keep in sync.
+CI is local, not GitHub Actions. Per
+`~/.agents/skills/flow/claude/WORKFLOW.md` § CI, set the merge gate with
+`git config land.testcmd 'just check'` and copy no workflow files.
 
-Also copy [`templates/clear-in-review.yml`](templates/clear-in-review.yml) →
-`.github/workflows/clear-in-review.yml`. It strips the `in-review` orchestration
-label when an issue closes, so a merged PR's `Closes #N` doesn't leave the label
-stranded on the closed issue. The job is gated on the label being present, so it
-sits inert until the `/implement` → PR flow starts using it.
-
-**Done when:** both workflow files exist; `ci.yml` references `setup-uv` +
-`pytest`.
+**Done when:** `git config land.testcmd` prints `just check`.
 
 ## 7. Docs + task runner
 
@@ -147,13 +140,13 @@ artifact.
 ## 9. GitHub (new repos only — LATE, after green)
 
 ```bash
-git add -A && git commit -m "Initial setup: uv + ruff + ty + pytest + CI"
+git add -A && git commit -m "Initial setup: uv + ruff + ty + pytest"
 gh repo create <name> --source=. --private --push
 ```
 
 Push a working repo, not a WIP. Skip if converting an already-remote repo.
 
-**Done when:** the remote exists and CI is running on the first push.
+**Done when:** the remote exists.
 
 ## 10. Matt Pocock skills config
 
