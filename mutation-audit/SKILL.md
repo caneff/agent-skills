@@ -133,7 +133,7 @@ in that setup.
    or when the results hold no mutant line at all.** Relay that line to the user
    as the result; an inconclusive run is not a clean run and never becomes
    "no findings". Inside a driver run (§ Whole-repo mode, and
-   `driver.py --mutation`) the report and manifest are still written, with the
+   `driver.py mutation`) the report and manifest are still written, with the
    `inconclusive` key. Exit 0 with no rows means mutmut ran and every mutant died.
    Known blocker (`docs/research/2026-09-20-mutmut-against-this-repo.md`):
    mutmut 3.x aborts on a suite that runs the target as a subprocess, which
@@ -213,7 +213,7 @@ merged into one report; it is never one mutmut run with repo-wide
 disposable git worktree:
 
 ```sh
-python3 ~/.agents/skills/all-audits/driver.py <repo> --mutation-all
+python3 ~/.agents/skills/all-audits/driver.py mutation <repo> --all
 ```
 
 - **Candidates** are the `--suggest` list (`suggest_candidates`: modules with a
@@ -222,7 +222,7 @@ python3 ~/.agents/skills/all-audits/driver.py <repo> --mutation-all
 - **No `MUTATION_MAX` cap.** The driver prints the module count and a worst-case
   time estimate before it starts (each module is at most two bounded commands
   of `MUTATION_AUDIT_TIMEOUT` seconds, `MUTATION_JOBS` modules at once).
-- **Parallel.** `driver.py --mutation` and `--mutation-all` run up to
+- **Parallel.** `driver.py mutation`, with `--modules` or `--all`, runs up to
   `MUTATION_JOBS` modules at once (default 4), each in its own worktree with
   its own log. A value that is not a positive integer stops the run.
 - **One report.** `collection/mutation/index.html` lists every module with its

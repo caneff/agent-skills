@@ -1,6 +1,6 @@
 """Mutation mode's planning, beside the sweep driver (#1746).
 
-Owns what the driver used to hold for `--mutation`: the per-module mutation
+Owns what the driver used to hold for its `mutation` mode: the per-module mutation
 record (which module was mutated at which sha, when), the order modules run
 in, and `run`, the one call the
 driver makes to learn which modules to mutate. The driver keeps the process
