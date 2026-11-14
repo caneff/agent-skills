@@ -1,9 +1,8 @@
-//! Contract tests for `controller-restore` (#1042, filed from #964's spec
-//! axis): the only tests `controller-restore` had before this were unit
-//! tests on its pure helpers (`restore_line`, `describe_pr`,
-//! `parse_pr_status`, `is_subagent`, `agent_status`) — `main()` itself, the
-//! `is_subagent` stdin-JSON gate, `find_own_pid` resolution, and the real
-//! `herdr`/`gh` subprocess invocations were never exercised. These tests run
+//! Contract tests for `controller-restore`: the unit tests on its pure
+//! helpers (`restore_line`, `describe_pr`, `parse_pr_status`, `is_subagent`,
+//! `agent_status`) leave `main()` itself, the `is_subagent` stdin-JSON gate,
+//! `find_own_pid` resolution, and the real `herdr`/`gh` subprocess
+//! invocations unexercised. These tests run
 //! the real binary as a subprocess against the fake `gh`/`herdr` from
 //! `lane-fake` and a scratch `~/.claude/sessions`, the same seam
 //! `resolve_controller.rs` and `merge_cleanup.rs` test at.
@@ -31,11 +30,11 @@ fn append_worker(f: &Fixture, record: &lane::workers::WorkerRecord) {
 }
 
 /// Runs the real binary with `stdin` on its stdin and `extra_env` layered
-/// over a base env that always carries `GH_PR_STATUS` (#1042 review, S5):
+/// over a base env that always carries `GH_PR_STATUS`:
 /// every test goes through the new `gh pr list --json number,state` fake by
 /// default, not only the three that used to opt in — the no-PR tests below
 /// exercise its missing-file branch precisely because nothing wrote into
-/// `pr_status_dir()` for their branch (P1: this is what makes "no PR yet"
+/// `pr_status_dir()` for their branch (this is what makes "no PR yet"
 /// mean the new fake's own "nothing recorded" case, not a fallback to a
 /// different fake entirely).
 fn run(f: &Fixture, stdin: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
@@ -65,8 +64,6 @@ fn run_in(f: &Fixture, cwd: &str, stdin: &str, extra_env: &[(&str, &str)]) -> st
     child.wait_with_output().unwrap()
 }
 
-// --- silent when there is nothing to restore ---------------------------------
-
 #[test]
 fn no_session_start_hook_json_and_no_workers_file_is_silent() {
     let f = Fixture::new();
@@ -78,7 +75,7 @@ fn no_session_start_hook_json_and_no_workers_file_is_silent() {
 
 #[test]
 fn a_session_record_whose_procstart_does_not_match_is_never_resolved_as_this_sessions_own() {
-    // #1042 review, C1 (correctness, CONFIRMED): the test above is silent
+    // The test above is silent
     // whether or not `find_own_pid`'s ancestor walk ever succeeds — a
     // session that never dispatched a worker and a session `find_own_pid`
     // fails to resolve both print nothing, so that test alone cannot tell
@@ -118,7 +115,7 @@ fn a_subagents_own_session_start_is_silent_even_with_workers_present() {
 
 #[test]
 fn the_agentid_spelling_of_the_subagent_gate_is_also_silent_through_the_real_binary() {
-    // #1042 review, P3 (spec, judgement): is_subagent's own unit tests cover
+    // is_subagent's own unit tests cover
     // both `agent_id` and `agentId`, but only `agent_id` reached main()
     // through the real binary above — worth its own case since a transcript
     // payload is what actually carries the `agentId` spelling.
@@ -129,8 +126,6 @@ fn the_agentid_spelling_of_the_subagent_gate_is_also_silent_through_the_real_bin
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(stdout(&out), "", "the agentId spelling of the subagent gate must be silent too");
 }
-
-// --- a fresh worker record is restored ----------------------------------------
 
 #[test]
 fn a_worker_with_no_pr_yet_and_a_live_agent_prints_the_restore_line() {
@@ -158,8 +153,6 @@ fn a_stale_worker_record_from_a_reused_pid_is_dropped_and_reported() {
     assert!(!line.contains("You control"), "a stale record must never be restored: {line}");
 }
 
-// --- gh pr list's OPEN/MERGED/CLOSED/no-PR branches, through the real binary --
-
 #[test]
 fn an_open_pr_is_reported_with_the_merge_pointer() {
     let f = Fixture::new();
@@ -171,7 +164,7 @@ fn an_open_pr_is_reported_with_the_merge_pointer() {
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
     assert!(line.contains("PR #152 open, not merged — follow implement/SKILL.md \u{a7} The merge"), "{line}");
-    // #1042 review, P2/C3: the output assertion above can't tell a right
+    // The output assertion above can't tell a right
     // answer from a lucky one if the invocation itself drifts — check the
     // actual argv the real gh/herdr calls carried, not only what they
     // printed back.
@@ -207,8 +200,6 @@ fn a_closed_pr_is_reported_as_such() {
     assert!(stdout(&out).contains("PR #152 closed without merging — check on the worker"), "{}", stdout(&out));
 }
 
-// --- a wedged herdr reads as unknown, never as "no live agent" ---------------
-
 #[test]
 fn a_failed_herdr_agent_list_reports_unknown_not_no_live_agent() {
     let f = Fixture::new();
@@ -220,8 +211,6 @@ fn a_failed_herdr_agent_list_reports_unknown_not_no_live_agent() {
     assert!(line.contains("herdr status unknown — could not ask herdr"), "{line}");
     assert!(!line.contains("no live herdr agent"), "{line}");
 }
-
-// --- orphans of a dead controller are offered for adoption (#1098) -----------
 
 #[test]
 fn a_dead_controllers_worker_under_this_cwd_is_offered_for_adoption() {
@@ -289,7 +278,7 @@ fn an_orphan_outside_this_sessions_cwd_is_not_offered() {
 
 #[test]
 fn a_worker_session_in_its_own_orphaned_workspace_is_not_told_to_adopt_itself() {
-    // #1098 review C1/P1: the hook runs in every session, workers included,
+    // The hook runs in every session, workers included,
     // and a worker's cwd is its own workspace. Adoption belongs to a session
     // above it — the primary checkout — never to the orphan itself.
     let f = Fixture::new();
@@ -303,7 +292,7 @@ fn a_worker_session_in_its_own_orphaned_workspace_is_not_told_to_adopt_itself() 
 
 #[test]
 fn a_dead_copy_of_a_worker_a_live_controller_holds_is_not_offered() {
-    // #1098 Codex [high]: adoption lands the record before removing the
+    // Adoption lands the record before removing the
     // dead copy, so a crash between leaves both. The live copy is the
     // worker's controller; the dead one must never be offered as an orphan.
     let f = Fixture::new();

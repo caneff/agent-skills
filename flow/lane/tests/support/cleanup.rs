@@ -238,7 +238,7 @@ impl Cleanup {
         std::fs::write(self.pr_heads().join(branch.replace('/', "__")), self.rev(repo, rev)).unwrap();
     }
 
-    /// A merged `implement-<n>` branch in `repo`, for the #821 ticket-clearing
+    /// A merged `implement-<n>` branch in `repo`, for the ticket-clearing
     /// tests: pushed, its tip recorded as a merged PR's head, main left
     /// checked out.
     pub fn mk_implement_branch(&self, repo: &Path, n: &str) {
@@ -251,7 +251,7 @@ impl Cleanup {
         self.record_pr_head(repo, &b, &b);
     }
 
-    /// A slice of spec `p` (#1460), as `implement-dispatch` leaves one:
+    /// A slice of spec `p`, as `implement-dispatch` leaves one:
     /// `spec-<p>` pushed off main, `implement-<n>` cut from it with one
     /// commit and pushed, and `branch.implement-<n>.base` set to `spec-<p>`.
     /// Nothing is merged: each test lands it where its case needs.
@@ -351,8 +351,8 @@ impl Cleanup {
     }
 
     /// Runs merge-cleanup with its stdout read one line then closed, the way
-    /// `| head -n1` or quitting `less` early leaves it — for #758's broken
-    /// pipe. Returns the exit code (`None` if killed by a signal) and
+    /// `| head -n1` or quitting `less` early leaves it — the broken-pipe
+    /// case. Returns the exit code (`None` if killed by a signal) and
     /// stderr.
     pub fn mc_broken_pipe(&self, tools: Tools, args: &[&str]) -> (Option<i32>, String) {
         use std::io::Read;
@@ -380,7 +380,7 @@ impl Cleanup {
 
 /// A run whose stdin is a real terminal (a pty from util-linux `script`),
 /// with stdout piped through `cat` into a file — the `| tee` / `| less`
-/// shape #733 is about.
+/// shape.
 pub struct TtyRun {
     pub ok: bool,
     /// What the terminal showed: stderr, and the typed answer's echo.

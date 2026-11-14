@@ -1,8 +1,5 @@
-//! Contract tests for the `merge-cleanup` binary, against scratch origins and
-//! clones and the fake `gh`/`herdr` from `lane-fake` — the seam the bash
-//! suite it replaces used. Covers every case in
-//! `flow/bin/merge-cleanup.test.sh` except the `jq`-missing ones (the port
-//! reads JSON itself), plus the regression tests for the bugs fixed in it.
+//! Contract tests for the `merge-cleanup` binary, against scratch origins and clones and the fake
+//! `gh`/`herdr` from `lane-fake`.
 
 mod support;
 use support::cleanup::{spawn, which, write_executable, Cleanup, Tools};
@@ -10,8 +7,6 @@ use support::cleanup::{spawn, which, write_executable, Cleanup, Tools};
 fn s(p: &std::path::Path) -> &str {
     p.to_str().unwrap()
 }
-
-// --- 1. dry run changes nothing ----------------------------------------------
 
 #[test]
 fn dry_run_leaves_branch_and_head_untouched() {
@@ -23,8 +18,6 @@ fn dry_run_leaves_branch_and_head_untouched() {
     assert!(c.has_branch(&r, "caneff/merged-one"));
     assert_eq!(c.rev(&r, "HEAD"), before);
 }
-
-// --- 2. an unmerged branch is refused, --force overrides ---------------------
 
 #[test]
 fn an_unmerged_branch_is_refused_and_force_cleans_it() {
@@ -48,8 +41,6 @@ fn a_branch_with_commits_past_its_merged_prs_head_is_refused() {
     assert!(c.has_branch(&r, "caneff/merged-then-more"));
 }
 
-// --- 3. the default branch is refused ----------------------------------------
-
 #[test]
 fn the_default_branch_is_refused() {
     let c = Cleanup::new();
@@ -59,8 +50,6 @@ fn the_default_branch_is_refused() {
     assert!(c.has_branch(&r, "main"));
 }
 
-// --- 4. a real merge is deleted with -d, not -D ------------------------------
-
 #[test]
 fn a_fast_forward_merge_is_deleted_with_d() {
     let c = Cleanup::new();
@@ -69,8 +58,6 @@ fn a_fast_forward_merge_is_deleted_with_d() {
     assert!(run.ok && run.has("deleted local branch caneff/ff-merged"), "{}", run.text());
     assert!(!run.has("-D"), "{}", run.text());
 }
-
-// --- 5. the full run ---------------------------------------------------------
 
 #[test]
 fn the_full_run_deletes_both_branches_and_fast_forwards() {
@@ -127,7 +114,7 @@ fn nested_branch_names_do_not_collide_under_refs_deleted() {
 
 #[test]
 fn deleting_a_branch_name_twice_keeps_both_tips() {
-    // #737: the second delete of a name must not overwrite the first record.
+    // The second delete of a name must not overwrite the first record.
     let c = Cleanup::new();
     let r = c.mkfixture("r1");
     for tip in ["caneff/local-only", "caneff/open-one"] {
@@ -166,8 +153,6 @@ fn a_branch_git_calls_unmerged_falls_back_to_capital_d() {
     assert!(!c.has_branch(&r, "caneff/local-only"));
 }
 
-// --- 6. --pr and a PR URL resolve to the head branch -------------------------
-
 #[test]
 fn pr_flag_resolves_to_the_head_branch() {
     let c = Cleanup::new();
@@ -196,8 +181,6 @@ fn a_bare_number_is_a_pr_and_a_number_with_letters_is_a_branch() {
     assert!(!run.ok && run.stderr.contains("8x is not merged"), "{}", run.text());
 }
 
-// --- 7. without gh, the ancestor test decides --------------------------------
-
 #[test]
 fn without_gh_an_ancestor_branch_is_cleaned_and_a_squash_is_refused() {
     let c = Cleanup::new();
@@ -207,8 +190,6 @@ fn without_gh_an_ancestor_branch_is_cleaned_and_a_squash_is_refused() {
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(!run.ok && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
 }
-
-// --- 8. a closed ticket's in-progress label and assignee are cleared --------
 
 #[test]
 fn a_closed_tickets_in_progress_label_and_assignee_are_cleared() {
@@ -229,9 +210,8 @@ fn a_closed_tickets_in_progress_label_and_assignee_are_cleared() {
 
 #[test]
 fn every_actual_assignee_is_removed_not_just_the_callers_own_login() {
-    // #829 Codex pass: `--remove-assignee @me` clears only the identity
-    // running cleanup, so a ticket reassigned to someone else kept its
-    // assignee. Read the issue's real assignees and remove those.
+    // `--remove-assignee @me` clears only the identity running cleanup, so a ticket reassigned to
+    // someone else kept its assignee. Read the issue's real assignees and remove those.
     let c = Cleanup::new();
     let r = c.mkfixture("r10");
     c.mk_implement_branch(&r, "47");
@@ -258,11 +238,10 @@ fn a_closed_ticket_with_no_assignee_only_removes_the_label() {
 
 #[test]
 fn a_failed_edit_exits_non_zero_and_names_the_exact_command_to_re_run() {
-    // #829 Codex pass found the edit's result was discarded, so an API
-    // failure after the branch and worktree are already gone reported
-    // success with no way to repair the claim later. #832: that was still
-    // wrong — the caller must see non-zero, with a message distinguishing
-    // "git cleanup completed" from "claim clearing failed, re-run this".
+    // The edit's result must not be discarded: an API failure after the branch and worktree are
+    // already gone would report success with no way to repair the claim later. The caller must see
+    // non-zero, with a message distinguishing "git cleanup completed" from "claim clearing failed,
+    // re-run this".
     let c = Cleanup::new();
     let r = c.mkfixture("r12");
     c.mk_implement_branch(&r, "49");
@@ -287,10 +266,9 @@ fn a_failed_edit_exits_non_zero_and_names_the_exact_command_to_re_run() {
 
 #[test]
 fn a_failed_claim_clear_still_reports_stale_siblings() {
-    // Review round on #832 (standards/correctness axes): folding the
-    // claim-clear failure into cleanup_branch's own bool made `ok` mean
-    // "either step failed", which silently skipped the stale report on a
-    // run whose git cleanup fully succeeded.
+    // Folding the claim-clear failure into cleanup_branch's own bool would make `ok` mean "either
+    // step failed", which silently skips the stale report on a run whose git cleanup fully
+    // succeeded.
     let c = Cleanup::new();
     let r = c.mkfixture("r13");
     c.mk_implement_branch(&r, "50");
@@ -308,10 +286,9 @@ fn a_failed_claim_clear_still_reports_stale_siblings() {
 
 #[test]
 fn a_sweep_row_for_a_claim_clear_failure_says_so_distinctly_and_still_fails_the_run() {
-    // Same round: the sweep table mapped this case to "FAILED", which reads
-    // as "the branch survived" — exactly what the new stderr line exists to
-    // rule out. A branch git fully cleaned gets its own verdict, not the
-    // one used for a branch that is still there.
+    // The sweep table must not map this case to "FAILED", which reads as "the branch survived" —
+    // exactly what the stderr line exists to rule out. A branch git fully cleaned gets its own
+    // verdict, not the one used for a branch that is still there.
     let c = Cleanup::new();
     let other = c.mkfixture("src2/other");
     c.mk_implement_branch(&other, "51");
@@ -329,11 +306,10 @@ fn a_sweep_row_for_a_claim_clear_failure_says_so_distinctly_and_still_fails_the_
 
 #[test]
 fn a_denied_remote_delete_is_reported_non_success_but_still_clears_the_claim() {
-    // Codex pass on PR #842: `step()`'s result on `git push origin --delete`
-    // was discarded, so a denied delete (branch protection, a race) left
-    // the remote branch alive while merge-cleanup still exited 0 and, worse,
-    // would have told an operator "git cleanup completed" on a run where it
-    // hadn't. The PR merged either way, so the claim still clears.
+    // `step()`'s result on `git push origin --delete` must not be discarded: a denied delete
+    // (branch protection, a race) would leave the remote branch alive while merge-cleanup still
+    // exited 0 and told an operator "git cleanup completed" on a run where it hadn't. The PR merged
+    // either way, so the claim still clears.
     let c = Cleanup::new();
     let r = c.mkfixture("r14");
     c.mk_implement_branch(&r, "52");
@@ -357,10 +333,9 @@ fn a_denied_remote_delete_is_reported_non_success_but_still_clears_the_claim() {
 
 #[test]
 fn a_denied_remote_delete_changes_the_claim_clear_failure_wording() {
-    // Same pass: the claim-clear failure message unconditionally said "git
-    // cleanup completed", which would be false when the remote delete also
-    // failed — an operator reading it would think only the label needed a
-    // re-run, missing the branch still on origin.
+    // The claim-clear failure message must not unconditionally say "git cleanup completed": that is
+    // false when the remote delete also failed, and an operator reading it would think only the
+    // label needed a re-run, missing the branch still on origin.
     let c = Cleanup::new();
     let r = c.mkfixture("r15");
     c.mk_implement_branch(&r, "53");
@@ -393,10 +368,9 @@ fn git_with_ls_remote_exit(code: u8) -> String {
 
 #[test]
 fn a_failed_remote_branch_lookup_is_a_partial_failure_not_branch_absent() {
-    // #845: `ls-remote --exit-code` exits 2 for "no such ref" and 128 for a
-    // lookup that never answered (auth, unreachable origin). Read as a bool,
-    // both said "origin has no branch", and the run exited 0 with the branch
-    // still on origin.
+    // `ls-remote --exit-code` exits 2 for "no such ref" and 128 for a lookup that never answered
+    // (auth, unreachable origin). Read as a bool, both say "origin has no branch", and the run
+    // would exit 0 with the branch still on origin.
     let c = Cleanup::new();
     let r = c.mkfixture("r16");
     let origin = c.root().join("r16.origin.git");
@@ -442,8 +416,8 @@ fn add_kill(c: &Cleanup, tools_dir: &str) {
 
 #[test]
 fn a_hung_remote_branch_lookup_is_killed_at_its_bound_and_fails_the_run() {
-    // #1406 P4: `ls-remote` hits the network, and with no bound a stalled
-    // origin hung merge-cleanup for as long as git did.
+    // `ls-remote` hits the network, and with no bound a stalled origin hangs merge-cleanup for as
+    // long as git does.
     let c = Cleanup::new();
     let r = c.mkfixture("r16");
     let origin = c.root().join("r16.origin.git");
@@ -460,8 +434,8 @@ fn a_hung_remote_branch_lookup_is_killed_at_its_bound_and_fails_the_run() {
 
 #[test]
 fn a_hung_step_is_killed_at_its_bound_and_fails_the_run() {
-    // #1406 P4: a step's command (here the remote delete) ran unbounded, with
-    // or without --quiet, so a hung push hung merge-cleanup.
+    // A step's command (here the remote delete) must be bounded, with or without --quiet, or a hung
+    // push hangs merge-cleanup.
     for (i, quiet) in [false, true].into_iter().enumerate() {
         let c = Cleanup::new();
         let name = format!("r18-{i}");
@@ -493,9 +467,9 @@ fn git_exec_hanging_on(sub: &str) -> String {
 
 #[test]
 fn the_bound_holds_with_no_kill_on_path() {
-    // #1406 C6: the group kill runs the `kill` on PATH and discarded its
-    // result, so with none there the wait after it blocked unbounded. No
-    // `add_kill` here: the fallback must end the direct child itself.
+    // The group kill runs the `kill` on PATH and its result must not be discarded, or with none
+    // there the wait after it blocks unbounded. No `add_kill` here: the fallback must end the
+    // direct child itself.
     for (sub, env) in [("ls-remote", "LANE_REMOTE_QUERY_TIMEOUT_MS"), ("push", "LANE_STEP_TIMEOUT_MS")] {
         let c = Cleanup::new();
         let r = c.mkfixture(&format!("r19-{sub}"));
@@ -528,13 +502,11 @@ fn a_sweep_row_for_a_denied_remote_delete_says_so_distinctly_and_still_fails_the
     assert!(rows.iter().any(|r| r.contains("implement-54") && r.contains("remote branch not deleted") && !r.contains("FAILED")), "{rows:#?}");
 }
 
-// --- 8b. a clump: every ticket the merged PR closes (#889) ------------------
-
 #[test]
 fn every_ticket_the_merged_pr_closes_has_its_claim_cleared() {
-    // A clump lands as one PR closing several tickets. Before #889 only the
-    // branch's own ticket was cleared and the rest kept a stale in-progress
-    // label and assignee, cleared by hand — six of them on one trial clump.
+    // A clump lands as one PR closing several tickets. Every one is cleared, not only the branch's
+    // own ticket; otherwise the rest keep a stale in-progress label and assignee that someone
+    // clears by hand.
     let c = Cleanup::new();
     let r = c.mkfixture("r20");
     c.mk_implement_branch(&r, "60");
@@ -735,9 +707,8 @@ fn a_wrong_shape_pr_answer_fails_the_run_like_an_unparseable_one() {
 
 #[test]
 fn a_pr_that_closes_nothing_still_clears_the_branchs_own_ticket() {
-    // A one-ticket PR whose closing reference never registered, and the
-    // --force path where no merged PR was read at all: the branch name is
-    // still the ticket, exactly as before #889.
+    // A one-ticket PR whose closing reference never registered, and the --force path where no
+    // merged PR was read at all: the branch name is still the ticket.
     let c = Cleanup::new();
     let r = c.mkfixture("r24");
     c.mk_implement_branch(&r, "69");
@@ -781,9 +752,8 @@ fn a_closed_ticket_with_no_in_progress_label_is_left_alone() {
 
 #[test]
 fn a_failed_issue_read_is_reported_not_swallowed() {
-    // GH_STATE unset is the fake's "no issue" failure, not an open issue —
-    // the two must not look the same, or a real gh outage silently leaves
-    // the stale claim #821 was filed over.
+    // GH_STATE unset is the fake's "no issue" failure, not an open issue — the two must not look
+    // the same, or a real gh outage silently leaves the stale claim in place.
     let c = Cleanup::new();
     let r = c.mkfixture("r8");
     c.mk_implement_branch(&r, "45");
@@ -804,8 +774,6 @@ fn an_integration_branchs_ticket_is_never_cleared() {
     assert!(!c.calls().contains("issue edit"), "{}", c.calls());
 }
 
-// --- argument handling -------------------------------------------------------
-
 #[test]
 fn help_prints_the_header_and_exits_zero() {
     let c = Cleanup::new();
@@ -822,9 +790,8 @@ fn help_prints_the_header_and_exits_zero() {
 
 #[test]
 fn help_states_the_cache_exemption_as_a_conjunction() {
-    // #875: the help once read "or inside one whose own .gitignore is `*`", a
-    // second independent way in. `is_cache` needs both: a name in CACHE_DIRS,
-    // and — when that component is not the entry — a `*` .gitignore on it.
+    // The help names one way in, not two: `is_cache` needs both a name in CACHE_DIRS and — when
+    // that component is not the entry — a `*` .gitignore on it.
     let c = Cleanup::new();
     let run = c.mc(Tools::Full, &["--help"], &[]);
     assert!(run.ok);
@@ -871,8 +838,6 @@ fn argument_refusals_exit_one_with_their_message() {
     }
 }
 
-// --- 8. without herdr, a linked worktree is removed anyway -------------------
-
 #[test]
 fn without_herdr_the_linked_worktree_is_removed_and_the_skip_reported() {
     let c = Cleanup::new();
@@ -885,8 +850,6 @@ fn without_herdr_the_linked_worktree_is_removed_and_the_skip_reported() {
     assert!(run.has("skipped the herdr agent check (herdr is not on PATH)"), "{}", run.text());
     assert!(run.has("skipped the herdr workspace close (herdr is not on PATH)"), "{}", run.text());
 }
-
-// --- #964: the controller/worker record is cleared with the workspace ------
 
 /// Swap the fixture's `<tools_dir>/git` stub for a wrapper script, so a test
 /// can make one git subcommand answer differently and pass the rest through.
@@ -928,10 +891,9 @@ fn a_removed_worktree_clears_its_worker_record_and_leaves_an_unrelated_one() {
     assert_eq!(lane::workers::read(&c.home(), "222").len(), 1, "an unrelated controller's record must survive");
 }
 
-/// #1209 (PR #1201 P1): the kill-mid-rewrite witness covered controller-adopt's
-/// removal only. `remove_workspace` publishes the same sidecar, so a death
-/// halfway through its rewrite must leave that sidecar in its old or its new
-/// version, the controller's other worker still readable.
+/// The kill-mid-rewrite witness must cover `remove_workspace` too, not only controller-adopt's
+/// removal: it publishes the same sidecar, so a death halfway through its rewrite must leave that
+/// sidecar in its old or its new version, the controller's other worker still readable.
 #[test]
 fn a_merge_cleanup_killed_mid_rewrite_of_the_sidecar_loses_none_of_its_other_records() {
     let c = Cleanup::new();
@@ -946,8 +908,8 @@ fn a_merge_cleanup_killed_mid_rewrite_of_the_sidecar_loses_none_of_its_other_rec
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[("LANE_SIDECAR_ABORT_MID_WRITE", "111.workers.jsonl")]);
     assert!(!run.ok, "merge-cleanup must die at the failpoint: {}", run.text());
     assert!(!run.has("cleared the controller's worker record"), "it died after the rewrite, not in it: {}", run.text());
-    // The half-written temp file is what only a death inside publish leaves; an
-    // exit before the rewrite, or after it, leaves none (#1209 C4, P11).
+    // The half-written temp file is what only a death inside publish leaves; an exit before the
+    // rewrite, or after it, leaves none.
     let sessions = c.home().join(".claude/sessions");
     let temps: Vec<_> = std::fs::read_dir(&sessions).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).collect();
     assert_eq!(temps.len(), 1, "expected the failpoint's half-written temp file in {sessions:?}");
@@ -1000,8 +962,6 @@ fn a_dry_run_removal_leaves_the_worker_record_in_place() {
     assert!(!run.has("cleared the controller's worker record"), "{}", run.text());
     assert_eq!(lane::workers::read(&c.home(), "111").len(), 1, "a dry run must not touch the record");
 }
-
-// --- 10. the live-session guard ----------------------------------------------
 
 /// The bash suite's r6 fixture: a workspace at the lane's own path holding
 /// the merged branch.
@@ -1152,8 +1112,6 @@ fn the_worktree_under_cleanup_is_not_a_stale_sibling() {
     assert_eq!(run.stale(), vec![wts.join("agent-old").display().to_string()], "{}", run.text());
 }
 
-// --- #1032: the dry run names its blockers; --quiet; nested-worktree parents -
-
 /// The `blocker:` and `blockers:` lines of a run's stdout.
 fn blocker_lines(run: &support::cleanup::Run) -> Vec<String> {
     run.stdout.lines().filter(|l| l.starts_with("blocker: ") || l.starts_with("blockers: ")).map(str::to_string).collect()
@@ -1259,9 +1217,9 @@ fn a_dry_run_on_a_branch_not_yet_merged_still_names_its_blockers() {
 
 #[test]
 fn a_dry_run_that_cannot_list_worktrees_names_that_as_a_blocker() {
-    // Review S1/P1/C2: a failed listing is not "no workspace, so none".
+    // A failed listing is not "no workspace, so none".
     let c = Cleanup::new();
-    // S10: the blocker carries git's own words, not just "failed".
+    // The blocker carries git's own words, not just "failed".
     let (r, _wt) = lane_workspace(&c, "r46", "implement-1032g");
     fail_worktree_list(&c, "noherdr");
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
@@ -1395,7 +1353,7 @@ fn a_directory_holding_only_nested_worktrees_is_not_stale() {
 
 #[test]
 fn a_directory_holding_a_nested_worktree_and_a_leftover_is_still_stale() {
-    // Review P3/C3: only a directory holding nothing but worktrees is exempt.
+    // Only a directory holding nothing but worktrees is exempt.
     let c = Cleanup::new();
     let (r, _wt) = lane_workspace(&c, "r47", "implement-1032h");
     let parent = r.join(".claude/worktrees/other-repo");
@@ -1404,8 +1362,6 @@ fn a_directory_holding_a_nested_worktree_and_a_leftover_is_still_stale() {
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.stale().contains(&format!("{} (not a git worktree)", parent.display())), "{}", run.text());
 }
-
-// --- 11. an idle herdr agent's pane is closed; working or blocked refuses ----
 
 #[test]
 fn an_idle_herdr_agents_pane_is_closed_and_the_cleanup_proceeds() {
@@ -1478,10 +1434,9 @@ fn a_live_registry_pid_with_no_herdr_agent_still_refuses() {
     assert!(!run.ok && run.has(&format!("pid {}", me())) && wt.is_dir(), "{}", run.text());
 }
 
-/// #851: a registry record whose pid is alive but whose `procStart` doesn't
-/// match that pid's own `/proc/<pid>/stat` starttime is a stale record from
-/// a dead session whose pid has since been reused, not a live one — the
-/// live-session guard must not refuse the removal over it.
+/// A registry record whose pid is alive but whose `procStart` doesn't match that pid's own
+/// `/proc/<pid>/stat` starttime is a stale record from a dead session whose pid has since been
+/// reused, not a live one — the live-session guard must not refuse the removal over it.
 #[test]
 fn a_registry_pid_alive_but_reused_does_not_block_removal() {
     let c = Cleanup::new();
@@ -1511,8 +1466,6 @@ fn a_herdr_agent_with_no_name_refuses_whatever_its_status() {
         assert!(!c.calls().contains("pane close"), "{}", c.calls());
     }
 }
-
-// --- #879: the state is re-read immediately before the forced removal -------
 
 /// Runs merge-cleanup on the merged branch with the debug-build failpoint
 /// `MERGE_CLEANUP_AFTER_GUARDS` set to `sh -c` text run once both guards
@@ -1552,8 +1505,8 @@ fn discard_covers_only_what_the_guards_reported_not_a_file_that_appears_after() 
 
 #[test]
 fn discard_does_not_cover_a_file_that_appears_inside_a_reported_untracked_directory() {
-    // Review C1: git collapses an untracked directory to one `dir/` entry, so
-    // a file added inside it after the guards read the same as before.
+    // Git collapses an untracked directory to one `dir/` entry, so a file added inside it after the
+    // guards read the same as before.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r33", "implement-879d");
     std::fs::create_dir_all(wt.join("evidence")).unwrap();
@@ -1567,8 +1520,8 @@ fn discard_does_not_cover_a_file_that_appears_inside_a_reported_untracked_direct
 
 #[test]
 fn a_session_whose_idle_pane_the_guard_closed_does_not_refuse_the_recheck() {
-    // Review C4: once its pane is closed herdr stops listing the agent, but
-    // the session's pid can outlive that; the guard already cleared it.
+    // Once its pane is closed herdr stops listing the agent, but the session's pid can outlive
+    // that; the guard already cleared it.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r34", "implement-879e");
     c.session("r34", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-34","procStart":"{}"}}"#, me(), wt.display(), me_start()));
@@ -1585,9 +1538,8 @@ fn a_session_whose_idle_pane_the_guard_closed_does_not_refuse_the_recheck() {
 
 #[test]
 fn an_idle_herdr_agent_that_appears_after_the_guards_refuses_the_removal() {
-    // Codex gate on PR #1197 (codex-gate-1): an idle agent explains its own
-    // registry session and is no blocker to `live_items`, so one that
-    // arrived after `guard_live` passed the recheck with a pane nobody closed.
+    // An idle agent explains its own registry session and is no blocker to `live_items`, so one
+    // that arrived after `guard_live` passed the recheck with a pane nobody closed.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r35", "implement-879f");
     let staged_agents = c.root().join("staged-agents.json");
@@ -1637,8 +1589,6 @@ fn a_live_session_that_appears_after_the_guards_refuses_the_removal() {
     assert!(run.stderr.contains(&want), "{}", run.text());
 }
 
-// --- 12. a herdr worker's own registry session is decided by its status ------
-
 #[test]
 fn a_registry_session_matching_an_idle_herdr_agent_has_its_pane_closed() {
     let c = Cleanup::new();
@@ -1680,8 +1630,6 @@ fn a_registry_session_with_no_matching_herdr_agent_refuses() {
     assert!(!c.calls().contains("pane close"), "{}", c.calls());
 }
 
-// --- 9. sweep ----------------------------------------------------------------
-
 /// The bash suite's sweep root: `other` holds merged branches, a stale
 /// sibling and implement-9's workspace (with a herdr workspace w4);
 /// `noremote` has a branch nothing can prove merged.
@@ -1716,8 +1664,8 @@ fn a_dry_run_sweep_labels_its_plan_never_asks_and_deletes_nothing() {
 
 #[test]
 fn a_sweep_with_stdin_not_a_terminal_prints_the_plan_refuses_and_deletes_nothing() {
-    // #733: a closed or piped stdin is told apart from an answered no, and
-    // no question is asked that nobody can answer.
+    // A closed or piped stdin is told apart from an answered no, and no question is asked that
+    // nobody can answer.
     for piped in [None, Some("y\n")] {
         let c = Cleanup::new();
         let root = sweep_root(&c);
@@ -1737,7 +1685,7 @@ fn a_sweep_with_stdin_not_a_terminal_prints_the_plan_refuses_and_deletes_nothing
 
 #[test]
 fn a_sweep_answered_n_at_the_terminal_deletes_nothing_reports_stale_and_exits_zero() {
-    // #734: a deliberate no is not a failure, and still shows the stale list.
+    // A deliberate no is not a failure, and still shows the stale list.
     let c = Cleanup::new();
     let root = sweep_root(&c);
     let other = root.join("other");
@@ -1774,7 +1722,7 @@ fn a_sweep_with_yes_cleans_counts_and_reports() {
 
 #[test]
 fn a_sweep_piped_through_cat_still_shows_the_question_and_y_cleans() {
-    // #733: the question goes to the terminal, not into the pipe.
+    // The question goes to the terminal, not into the pipe.
     let c = Cleanup::new();
     let root = sweep_root(&c);
     let run = c.mc_tty(Tools::Full, &["--sweep", "--root", s(&root)], "y\n");
@@ -1793,8 +1741,6 @@ fn a_sweep_with_nothing_merged_says_so() {
     assert!(run.ok && run.has(&format!("sweep summary\n  nothing merged to clean up under {}", root.display())), "{}", run.text());
 }
 
-// --- 17. the fast-forward step rebuilds the lane binaries --------------------
-
 fn lane_env(c: &Cleanup) -> (String, String) {
     let log = c.root().join("lane-install.log");
     let bin = c.root().join("installed-bin");
@@ -1812,18 +1758,16 @@ fn rebuilds_after_a_pull_that_changed_the_crate() {
     assert!(run.ok && run.has("no recorded build sha: rebuilding the lane binaries"), "{}", run.text());
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "ran\n");
     assert_eq!(std::fs::read_to_string(&bin).unwrap(), "NEW\n");
-    // #834 (Codex re-run): `flow/lane-install.sh` records the sha it built
-    // from on every successful install, so a later run with no pull of its
-    // own can still tell whether the binaries are current.
+    // `flow/lane-install.sh` records the sha it built from on every successful install, so a later
+    // run with no pull of its own can still tell whether the binaries are current.
     let build_sha_file = c.home().join(".local/state/lane/build-sha");
     assert_eq!(std::fs::read_to_string(&build_sha_file).unwrap().trim(), c.rev(&r, "main"));
 }
 
-/// #834 (Codex re-run): a missing record is untrusted, not a green light —
-/// it rebuilds even when the pull that just ran did not touch flow/lane, the
-/// same as when it did. `flow/lane-install.sh` now always writes the record
-/// on success, so this is the recovery path for whatever ran before that
-/// existed (a plain install, a lost or corrupted file).
+/// A missing record is untrusted, not a green light — it rebuilds even when the pull that just ran
+/// did not touch flow/lane, the same as when it did. `flow/lane-install.sh` always writes the
+/// record on success, so this is the recovery path for whatever ran before that existed (a plain
+/// install, a lost or corrupted file).
 #[test]
 fn no_recorded_build_sha_rebuilds_even_when_the_pull_did_not_touch_the_crate() {
     let c = Cleanup::new();
@@ -1836,11 +1780,10 @@ fn no_recorded_build_sha_rebuilds_even_when_the_pull_did_not_touch_the_crate() {
     assert_eq!(c.rev(&r, "main"), c.rev(&r, "origin/main"));
 }
 
-/// #834 (Codex re-run): the exact reported failure shape — no record at all
-/// (a plain lane-install ran before it existed), and main is already at the
-/// tip when this run starts, so this run's own `git pull --ff-only` moves
-/// nothing. The old old_head/new_head check read that as "nothing to do";
-/// a missing record must rebuild anyway.
+/// The exact failure shape: no record at all (a plain lane-install ran before it existed), and main
+/// is already at the tip when this run starts, so this run's own `git pull --ff-only` moves
+/// nothing. The old old_head/new_head check read that as "nothing to do"; a missing record must
+/// rebuild anyway.
 #[test]
 fn no_recorded_build_sha_rebuilds_even_when_this_runs_pull_moves_nothing() {
     let c = Cleanup::new();
@@ -1875,14 +1818,14 @@ fn a_dry_run_never_rebuilds() {
     let r = c.mk_lane_repo("r20", true);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/trivial", "--dry-run"], &[("LANE_INSTALL_LOG", &log), ("LANE_INSTALLED_BIN", &bin)]);
     assert!(run.ok && !run.has("rebuilding"), "{}", run.text());
-    // #834: the dry-run guard sits after the fast-forward's own `step` call,
-    // so a dry run still says what it would have pulled.
+    // The dry-run guard sits after the fast-forward's own `step` call, so a dry run still says what
+    // it would have pulled.
     assert!(run.has("would fast-forwarding main in"), "{}", run.text());
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
 }
 
-/// #834: a recorded build sha older than the tip rebuilds even when this
-/// run's own pull is a no-op (main already at the tip when this run starts).
+/// A recorded build sha older than the tip rebuilds even when this run's own pull is a no-op (main
+/// already at the tip when this run starts).
 #[test]
 fn a_stale_recorded_build_sha_rebuilds_even_when_this_runs_pull_moves_nothing() {
     let c = Cleanup::new();
@@ -1902,10 +1845,9 @@ fn a_stale_recorded_build_sha_rebuilds_even_when_this_runs_pull_moves_nothing() 
     assert_eq!(std::fs::read_to_string(&build_sha_file).unwrap().trim(), c.rev(&r, "main"));
 }
 
-/// #834: the mirror case — even when *this run's own* pull moves HEAD onto a
-/// commit touching flow/lane (which the old old_head-vs-new_head check alone
-/// would read as "rebuild"), a build sha already recorded at that same tip
-/// says the binaries are already current and must still skip.
+/// The mirror case — even when *this run's own* pull moves HEAD onto a commit touching flow/lane
+/// (which the old old_head-vs-new_head check alone would read as "rebuild"), a build sha already
+/// recorded at that same tip says the binaries are already current and must still skip.
 #[test]
 fn a_recorded_build_sha_already_at_the_tip_skips_even_when_this_runs_pull_moves_head() {
     let c = Cleanup::new();
@@ -1921,8 +1863,6 @@ fn a_recorded_build_sha_already_at_the_tip_skips_even_when_this_runs_pull_moves_
     assert_eq!(std::fs::read_to_string(&bin).unwrap(), "OLD\n");
     assert_eq!(c.rev(&r, "main"), tip);
 }
-
-// --- #736: uncommitted files in the worktree ---------------------------------
 
 /// A modified tracked file, or an untracked one, in the workspace.
 fn dirty(wt: &std::path::Path, kind: &str) {
@@ -1987,8 +1927,6 @@ fn force_alone_still_refuses_a_dirty_worktree_and_discard_removes_it() {
     assert!(run.has(&format!("--discard: {} — 1 modified, 1 untracked file(s) would be lost: f, notes", wt.display())), "{}", run.text());
 }
 
-// --- #801: an ignored entry that is not a cache is work too -----------------
-
 /// Ignore `names` through the repo's `.git/info/exclude` and create each as a
 /// directory holding one file in `wt`.
 fn ignored_dirs(r: &std::path::Path, wt: &std::path::Path, names: &[&str]) {
@@ -2021,9 +1959,8 @@ fn a_worktree_holding_scratch_is_refused_naming_it() {
 
 #[test]
 fn a_worktree_holding_only_a_scratch_pr_body_is_still_refused() {
-    // #1052 moved the worker's PR body to the review cache so a landing never
-    // hits this; the refusal itself stays, since a note in `.scratch/` is
-    // still worth one.
+    // The worker's PR body lives in the review cache, so a landing never hits this; the refusal
+    // itself stays, since a note in `.scratch/` is still worth one.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r26b", "implement-26");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
@@ -2052,8 +1989,8 @@ fn a_worktree_holding_only_caches_is_removed_and_they_are_listed() {
 
 #[test]
 fn a_worktree_holding_only_pants_workdir_logs_is_removed_without_discard() {
-    // #1583: Pants's workdir `.pants.d/` held the only ignored files in two
-    // drains and each worktree came out only on `--discard`.
+    // Pants's workdir `.pants.d/` held the only ignored files in two drains, and each worktree came
+    // out only on `--discard`.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r33", "implement-33");
     std::fs::write(r.join(".git/info/exclude"), ".pants.d/\n").unwrap();
@@ -2100,11 +2037,10 @@ fn an_ignored_file_under_a_folder_merely_named_like_a_cache_is_refused() {
 
 #[test]
 fn scratch_alongside_many_caches_is_never_elided_behind_the_cache_count() {
-    // #823: the two counts used to share the "ignored file(s)" label, so a
-    // reader could not tell whether `.scratch/` sat in the small non-cache
-    // list or the long cache list's own "and N more" tail. They're printed
-    // as two distinctly labelled lines, non-cache first, so `.scratch/`
-    // always appears by name regardless of how many caches follow it.
+    // The two counts must not share the "ignored file(s)" label, or a reader cannot tell whether
+    // `.scratch/` sat in the small non-cache list or the long cache list's own "and N more" tail.
+    // They're printed as two distinctly labelled lines, non-cache first, so `.scratch/` always
+    // appears by name regardless of how many caches follow it.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r31", "implement-31");
     ignored_dirs(&r, &wt, &[".scratch", "node_modules", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"]);
@@ -2117,11 +2053,10 @@ fn scratch_alongside_many_caches_is_never_elided_behind_the_cache_count() {
 
 #[test]
 fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
-    // #838: dirty_text's own name list chained modified, untracked, then
-    // ignored, so 5+ modified/untracked names filled first_names' NAMES_SHOWN
-    // and .scratch/ (the scarcest, least-recoverable class) fell into "and N
-    // more" with nothing else naming it. Ignored goes first in the chain, so
-    // it always shows regardless of how many modified/untracked names follow.
+    // dirty_text's name list must put ignored first in the chain: chained after modified and
+    // untracked, 5+ of those names fill first_names' NAMES_SHOWN and .scratch/ (the scarcest,
+    // least-recoverable class) falls into "and N more" with nothing else naming it. Ignored goes
+    // first, so it always shows regardless of how many modified/untracked names follow.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-32");
     ignored_dirs(&r, &wt, &[".scratch"]);
@@ -2139,11 +2074,10 @@ fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
 
 #[test]
 fn six_or_more_ignored_names_are_all_shown_none_elided() {
-    // Codex adversarial review on PR #847: dirty_text still fed every ignored
-    // name into the same NAMES_SHOWN-capped list, so six or more non-cache
-    // ignored entries could still push one — .scratch/ included — into "and N
-    // more". Non-cache ignored is exactly what --discard destroys unseen, so
-    // none of it may be capped; only modified/untracked names are.
+    // Ignored names must not share the NAMES_SHOWN-capped list: six or more non-cache ignored
+    // entries would push one — .scratch/ included — into "and N more". Non-cache ignored is exactly
+    // what --discard destroys unseen, so none of it may be capped; only modified/untracked names
+    // are.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r33", "implement-33");
     ignored_dirs(&r, &wt, &[".scratch", "z1", "z2", "z3", "z4", "z5"]);
@@ -2157,12 +2091,10 @@ fn six_or_more_ignored_names_are_all_shown_none_elided() {
 
 #[test]
 fn an_empty_ignored_directory_is_removed_and_named() {
-    // #869/#946, reversing #823: `--ignored=matching` collapses an ignored
-    // directory to one entry whatever it holds, so an empty one read as "1
-    // ignored file(s)" and forced a needless --discard through Chris's hands
-    // — six times running in twitch-rules-scroller on 2026-09-16. Nothing is
-    // lost, so it no longer refuses; the run still names what it took, so the
-    // output stays a full account of what cleanup touched.
+    // `--ignored=matching` collapses an ignored directory to one entry whatever it holds, so an
+    // empty one would read as "1 ignored file(s)" and force a needless --discard. Nothing is lost,
+    // so it does not refuse; the run still names what it took, so the output stays a full account
+    // of what cleanup touched.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-32");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
@@ -2195,10 +2127,9 @@ fn an_ignored_directory_of_only_empty_subdirectories_is_empty_too() {
 
 #[test]
 fn a_full_ignored_directory_refuses_with_its_real_count_and_names() {
-    // The dangerous direction of #946: one collapsed entry read as "1 ignored
-    // file(s) would be lost" however much it held, so --discard was approved
-    // against a count that understated the loss. The refusal now states every
-    // file, at any depth.
+    // The dangerous direction: one collapsed entry read as "1 ignored file(s) would be lost"
+    // however much it held, so --discard would be approved against a count that understated the
+    // loss. The refusal states every file, at any depth.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r35", "implement-35");
     std::fs::write(r.join(".git/info/exclude"), "e2e-artifacts/\n").unwrap();
@@ -2217,9 +2148,9 @@ fn a_full_ignored_directory_refuses_with_its_real_count_and_names() {
 
 #[test]
 fn an_unreadable_ignored_directory_still_refuses() {
-    // Fail closed (#801): a walk that cannot read the directory says nothing
-    // about what is in it, and an io::Error read as "nothing in there" would
-    // approve a destructive removal on a permission error.
+    // Fail closed: a walk that cannot read the directory says nothing about what is in it, and an
+    // io::Error read as "nothing in there" would approve a destructive removal on a permission
+    // error.
     use std::os::unix::fs::PermissionsExt;
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r36", "implement-36");
@@ -2246,12 +2177,10 @@ fn an_unreadable_ignored_directory_still_refuses() {
 
 #[test]
 fn a_quoted_ignored_directory_is_classified_by_its_contents_too() {
-    // Correctness axis C1 on the round-1 diff: git quotes a porcelain path
-    // holding a non-ASCII byte (`core.quotePath`), and the quoted form ends
-    // with `"`, not `/`. Matching on the slash filed `café/` as a plain file
-    // and never walked it, so both bugs survived intact for such a name — the
-    // empty one still forced a --discard, and a full one still claimed "1
-    // ignored file(s)" whatever it held.
+    // git quotes a porcelain path holding a non-ASCII byte (`core.quotePath`), and the quoted form
+    // ends with `"`, not `/`. Matching on the slash would file `café/` as a plain file and never
+    // walk it, so for such a name an empty one still forces a --discard, and a full one still
+    // claims "1 ignored file(s)" whatever it held.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r37", "implement-37");
     std::fs::write(r.join(".git/info/exclude"), "café/\n").unwrap();
@@ -2277,10 +2206,9 @@ fn a_quoted_ignored_directory_is_classified_by_its_contents_too() {
 
 #[test]
 fn the_empty_directory_line_is_not_printed_when_nothing_is_removed() {
-    // Correctness C2 / spec P1: the line was printed inside guard_files,
-    // which runs before the live-session guard, so a worktree someone was
-    // still working in announced a removal that never happened — the inverse
-    // of the full account of what cleanup touched that the line exists for.
+    // The line must not be printed inside guard_files, which runs before the live-session guard: a
+    // worktree someone was still working in would announce a removal that never happened — the
+    // inverse of the full account of what cleanup touched that the line exists for.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r38", "implement-38");
     std::fs::write(r.join(".git/info/exclude"), "e2e-artifacts/\n").unwrap();
@@ -2295,12 +2223,10 @@ fn the_empty_directory_line_is_not_printed_when_nothing_is_removed() {
 
 #[test]
 fn a_quoted_rename_decodes_both_of_its_paths() {
-    // Verification pass V1 on the C1 fix: porcelain v1 writes a rename as
-    // `<orig> -> <new>` with each path quoted on its own, so decoding the
-    // line as one path stripped the outer quotes and left the inner pair
-    // stranded — `"a" -> "b"` read as `a" -> "b`. Only the displayed name was
-    // affected, never a refusal, but a guard that exists to say what is about
-    // to be destroyed has to name it correctly.
+    // Porcelain v1 writes a rename as `<orig> -> <new>` with each path quoted on its own, so
+    // decoding the line as one path strips the outer quotes and leaves the inner pair stranded —
+    // `"a" -> "b"` would read as `a" -> "b`. Only the displayed name is affected, never a refusal,
+    // but a guard that exists to say what is about to be destroyed has to name it correctly.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r39", "implement-39");
     std::fs::write(wt.join("café.txt"), "x\n").unwrap();
@@ -2371,8 +2297,6 @@ fn a_sweep_never_removes_a_dirty_worktree_and_cleans_the_clean_ones() {
     assert!(!c.has_branch(&other, "caneff/merged-one") && !other.join(".claude/worktrees/implement-9").exists(), "{}", run.text());
 }
 
-// --- #735: a repo with no .claude/worktrees lists nothing ---------------------
-
 #[test]
 fn a_repo_with_no_worktrees_dir_adds_no_stale_line() {
     let c = Cleanup::new();
@@ -2387,8 +2311,6 @@ fn a_repo_with_no_worktrees_dir_adds_no_stale_line() {
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !run.has("stale, not removed"), "{}", run.text());
 }
-
-// --- #746: the stale report decides a worker's own session like the guard ----
 
 #[test]
 fn a_sibling_whose_only_live_signal_is_an_idle_workers_own_session_is_stale() {
@@ -2411,8 +2333,6 @@ fn a_sibling_whose_only_live_signal_is_an_idle_workers_own_session_is_stale() {
     }
 }
 
-// --- #758: a closed stdout stops the run instead of panicking ----------------
-
 #[test]
 fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
     let c = Cleanup::new();
@@ -2422,8 +2342,6 @@ fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("Broken pipe"), "{stderr}");
 }
-
-// --- #876: --reap, the scoped reaper -----------------------------------------
 
 /// A repo whose `.claude/worktrees/implement-<n>` workspaces hold merged
 /// `implement-<n>` branches — what the reaper is pointed at.
@@ -2584,11 +2502,9 @@ fn reap_on_a_repo_with_no_implement_workspaces_says_so() {
     assert!(run.ok && run.has(&want), "{}", run.text());
 }
 
-/// #875: every claim here is one a test above holds the behaviour to — the
-/// dry-run default (`reap_without_yes_...`), what --yes then does
-/// (`reap_with_yes_...`), the missing overrides
-/// (`reap_refuses_every_flag_...`) and the reach
-/// (`reap_considers_only_this_repos_...`).
+/// Every claim here is one a test above holds the behaviour to — the dry-run default
+/// (`reap_without_yes_...`), what --yes then does (`reap_with_yes_...`), the missing overrides
+/// (`reap_refuses_every_flag_...`) and the reach (`reap_considers_only_this_repos_...`).
 #[test]
 fn help_describes_reap_as_dry_run_by_default_and_unable_to_discard() {
     let c = Cleanup::new();
@@ -2603,9 +2519,8 @@ fn help_describes_reap_as_dry_run_by_default_and_unable_to_discard() {
 
 #[test]
 fn reap_run_from_inside_a_workspace_never_deletes_the_ground_it_stands_on() {
-    // The correctness axis on PR #876: with no --repo the repo is the cwd,
-    // and a run started inside a workspace listed itself, removed the
-    // directory it was standing in, and then reported nonsense about every
+    // With no --repo the repo is the cwd, and a run started inside a workspace must not list
+    // itself, remove the directory it was standing in, and then report nonsense about every
     // workspace after it.
     let c = Cleanup::new();
     let r = reap_repo(&c, "r39", &["112", "113"]);
@@ -2625,10 +2540,9 @@ fn reap_run_from_inside_a_workspace_never_deletes_the_ground_it_stands_on() {
 
 #[test]
 fn a_workspace_that_goes_dirty_between_the_plan_and_the_removal_is_refused_not_failed() {
-    // The spec axis on PR #876: pass 2 re-runs the guards, and a guard that
-    // refuses there is an answer — "skipped and named", exit 0 — not a
-    // failure of the run. A pre-push hook fired by the first workspace's own
-    // cleanup drops a file in the second one, which is the race in the small.
+    // Pass 2 re-runs the guards, and a guard that refuses there is an answer — "skipped and named",
+    // exit 0 — not a failure of the run. A pre-push hook fired by the first workspace's own cleanup
+    // drops a file in the second one, which is the race in the small.
     let c = Cleanup::new();
     let r = reap_repo(&c, "r40", &["114", "115"]);
     let (first, second) = (r.join(".claude/worktrees/implement-114"), r.join(".claude/worktrees/implement-115"));
@@ -2665,11 +2579,9 @@ fn reap_pointed_at_a_workspace_still_cleans_up_every_workspace() {
 
 #[test]
 fn a_branch_that_moved_to_another_worktree_since_the_plan_is_refused() {
-    // Codex pass on PR #878: the plan names a workspace, but the cleanup
-    // re-resolves the branch for itself. A branch moved in between — here by
-    // a pre-push hook the first workspace's own cleanup fires — would put a
-    // worktree the plan never listed, outside .claude/worktrees/ at that,
-    // in reach of the removal.
+    // The plan names a workspace, but the cleanup re-resolves the branch for itself. A branch moved
+    // in between — here by a pre-push hook the first workspace's own cleanup fires — would put a
+    // worktree the plan never listed, outside .claude/worktrees/ at that, in reach of the removal.
     let c = Cleanup::new();
     let r = reap_repo(&c, "r42", &["118", "119"]);
     let (first, planned) = (r.join(".claude/worktrees/implement-118"), r.join(".claude/worktrees/implement-119"));
@@ -2698,9 +2610,8 @@ fn a_branch_that_moved_to_another_worktree_since_the_plan_is_refused() {
 
 #[test]
 fn a_branch_that_moved_into_the_primary_checkout_since_the_plan_is_refused() {
-    // #881: the re-check used the linked-only lookup, so a primary checkout
-    // holding the branch read as no holder and the cleanup switched it off
-    // the branch and deleted the branch.
+    // The re-check must not use the linked-only lookup: a primary checkout holding the branch would
+    // read as no holder, and the cleanup would switch it off the branch and delete the branch.
     let c = Cleanup::new();
     let r = reap_repo(&c, "r43", &["118", "119"]);
     let (first, planned) = (r.join(".claude/worktrees/implement-118"), r.join(".claude/worktrees/implement-119"));
@@ -2729,8 +2640,8 @@ fn a_branch_that_moved_into_the_primary_checkout_since_the_plan_is_refused() {
 
 #[test]
 fn a_branch_with_no_holder_at_all_since_the_plan_still_reaps() {
-    // #881: the re-check refuses a holder that is not the planned workspace;
-    // no holder at all is the vanished-worktree case and still cleans up.
+    // The re-check refuses a holder that is not the planned workspace; no holder at all is the
+    // vanished-worktree case and still cleans up.
     let c = Cleanup::new();
     let r = reap_repo(&c, "r44", &["118", "119"]);
     let planned = r.join(".claude/worktrees/implement-119");
@@ -2748,10 +2659,10 @@ fn a_branch_with_no_holder_at_all_since_the_plan_still_reaps() {
 
 #[test]
 fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reaping() {
-    // #975: the reaper's holder lookup once used `unwrap_or_default()`,
-    // reading a `git worktree list --porcelain` that fails the same as one
+    // The reaper's holder lookup must not use `unwrap_or_default()`, which
+    // reads a `git worktree list --porcelain` that fails the same as one
     // that succeeded and found no holder, so `reap_one`'s destructive-time
-    // re-check waved the branch through instead of refusing it up front. `git
+    // re-check would wave the branch through instead of refusing it up front. `git
     // branch -d`'s own "used by worktree" check still catches this particular
     // case — that check reads the worktree's HEAD file directly, not the
     // listing — but only after the run has already skipped the
@@ -2790,7 +2701,7 @@ fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reapi
     assert!(run.ok, "{}", run.text());
     assert!(c.has_branch(&r, "implement-119"), "the branch was deleted despite a listing git could not read:\n{}", run.text());
     assert!(planned.is_dir(), "the worktree was removed despite a listing git could not read:\n{}", run.text());
-    // S10: the refusal carries git's own words, not just "failed".
+    // The refusal carries git's own words, not just "failed".
     let want = format!(
         "  {}  could not list worktrees, not removed: git worktree list failed in {}: fatal: listing refused (refused at removal)",
         planned.display(),
@@ -2802,11 +2713,9 @@ fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reapi
 
 #[test]
 fn a_workspace_whose_path_resolves_outside_the_repo_is_not_a_candidate() {
-    // The boundary the Codex pass on PR #878 asked about. git resolves a
-    // worktree's path when it registers it, so `git worktree add` through a
-    // symlink under .claude/worktrees/ records the outside path — this test
-    // states the boundary, and the containment check resolving both sides is
-    // what keeps it true if git's own spelling ever changes.
+    // git resolves a worktree's path when it registers it, so `git worktree add` through a symlink
+    // under .claude/worktrees/ records the outside path; this test states the boundary, and the
+    // containment check resolving both sides keeps it true if git's own spelling ever changes.
     let c = Cleanup::new();
     let r = reap_repo(&c, "r43", &["120"]);
     let outside = c.root().join("r43-outside");
@@ -2836,8 +2745,6 @@ fn a_workspace_whose_directory_is_already_gone_still_has_its_branch_cleaned_up()
     assert!(!c.has_branch(&r, "implement-122"), "{}", run.text());
     assert!(run.has(&format!("  {}  reaped", wt.display())), "{}", run.text());
 }
-
-// --- #1385: a script written while sibling threads fork must still exec -----
 
 #[test]
 fn a_script_written_while_sibling_threads_spawn_still_executes() {
@@ -2875,8 +2782,6 @@ fn a_script_written_while_sibling_threads_spawn_still_executes() {
     }
     assert!(failures.is_empty(), "{failures:?}");
 }
-
-// --- #1326: repo-declared discardable paths, nested registered worktrees -----
 
 /// The repo declares `line` in its AGENTS.md, and git ignores `out/`,
 /// `*.egg-info/`, `.scratch/` and `keep.log` (it overwrites `.git/info/exclude`),
@@ -3089,8 +2994,6 @@ fn a_clean_nested_worktree_in_an_untracked_directory_is_removed_with_its_parent(
     assert!(!registered_names(&c, &other).contains("timing"), "{}", registered_names(&c, &other));
 }
 
-// --- #1460: a slice merged into its spec's integration branch ----------------
-
 /// A slice of spec 900 at `implement-<n>`, held by a linked worktree under the
 /// repo's `.claude/worktrees/`, as a dispatched slice's workspace is.
 fn slice_workspace(c: &Cleanup, rel: &str, n: &str) -> (std::path::PathBuf, std::path::PathBuf) {
@@ -3234,8 +3137,6 @@ fn a_lone_tickets_open_claim_is_still_left_alone_after_a_main_merge() {
     assert!(!c.calls().contains("gh issue edit 78"), "{}", c.calls());
 }
 
-// --- #1464: a branch with no commit past its fork point has landed nothing ----
-
 /// `implement-<n>` cut from the local main, which sits behind `origin/main`:
 /// a freshly dispatched workspace whose base has since moved. No commit of its
 /// own, so its tip is an ancestor of `origin/main` without ever having landed.
@@ -3337,8 +3238,8 @@ fn with_neither_a_fork_point_key_nor_a_reflog_an_ancestor_branch_is_refused() {
 
 #[test]
 fn a_refused_fresh_branch_keeps_its_idle_workers_pane() {
-    // The harm #1464 was filed over: an idle worker waiting on a question had
-    // its pane closed by the live guard once the ancestor test read it merged.
+    // The harm: an idle worker waiting on a question had its pane closed by the live guard once the
+    // ancestor test read it merged.
     let c = Cleanup::new();
     let (r, wt) = fresh_workspace(&c, "f7", "87", true);
     c.set_agents(&format!(r#"[{{"name":"skills-87","pane_id":"w87:p1","cwd":"{}","agent_status":"idle"}}]"#, wt.display()));
@@ -3373,8 +3274,6 @@ fn the_refusal_says_which_cause_it_hit() {
     let run = c.mc(Tools::NoGh, &["--repo", s(&r), "implement-89"], &[]);
     assert!(run.stderr.contains("no fork point or tip could be read for implement-89"), "{}", run.text());
 }
-
-// --- #1470: a fast-forward sync is not a commit of the branch's own ----------
 
 /// The worker's first move: sync onto the moved base before any commit. `how`
 /// is the git command, run in the workspace; the tip leaves its fork point
@@ -3438,8 +3337,6 @@ fn a_committed_branch_whose_reflog_is_gone_is_refused() {
     assert_refused(&c, &r, &wt, "96", &run);
     assert!(run.stderr.contains("no commit entry could be read in the reflog of implement-96"), "{}", run.text());
 }
-
-// --- #1545: moot branches, .hypothesis, the Discardable hint ----------------
 
 /// `implement-<n>` cut from main at once and pushed, with `commits` commits
 /// of its own and no merged PR recorded for it.
