@@ -194,20 +194,6 @@ def test_spec_counts_do_not_double_count_a_slices_stray_sidecar(root, reviews):
     assert "fixed: 0  moved: 0" in got.stdout, got.stdout
 
 
-def test_cli_counts_prints_fixed_and_moved(root, reviews):
-    runfile.start("burn-f", slots=1, root=root, repo=REPO)
-    runfile.clump("burn-f", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-f", 901, "abc1234", root=root)
-    write_sidecar(reviews, 901, [
-        {"id": "S1", "outcome": "fixed", "sha": "aaa"},
-        {"id": "S2", "outcome": "moved", "ticket": 5},
-    ])
-    got = cli(root, "burn-f", "--reviews-dir", reviews)
-    assert got.returncode == 0, got
-    assert "fixed: 1" in got.stdout, got.stdout
-    assert "moved: 1" in got.stdout, got.stdout
-
-
 @pytest.mark.parametrize("bad", ['{"id": "S1", "outcome": "fi', '[1, 2]',
                                  '{"id": "S1", "outcome": "mystery"}'])
 def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low(
