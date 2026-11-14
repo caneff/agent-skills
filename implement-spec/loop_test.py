@@ -2100,7 +2100,9 @@ def test_origin_default_reads_the_repo_it_is_given_and_never_assumes_main(tmp):
 
 def test_a_leaked_git_dir_does_not_repoint_the_loops_git(tmp, monkeypatch):
     work = make_workspace(tmp, [], default="trunk")
+    want = run_in(work, "git", "branch", "--show-current").strip()
     other = os.path.join(tmp, "other")
     run_in(tmp, "git", "init", "-q", "-b", "elsewhere", other)
     monkeypatch.setenv("GIT_DIR", os.path.join(other, ".git"))
-    assert loop.git(["branch", "--show-current"], cwd=work).strip() == "main"
+    assert want != "elsewhere"
+    assert loop.git(["branch", "--show-current"], cwd=work).strip() == want
