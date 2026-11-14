@@ -104,7 +104,6 @@ import contextlib
 import ctypes
 import fcntl
 import os
-import json
 import re
 import resource
 import shlex
@@ -114,11 +113,12 @@ import sys
 import tempfile
 import time
 
-for _dir in ("implement-spec", "implement"):
+for _dir in ("implement-spec", "implement", "common"):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", _dir))
 
 import frontier  # noqa: E402
 import pr_settle  # noqa: E402
+import shellcmd  # noqa: E402
 from selector_check import UNDECLARED  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
@@ -187,7 +187,6 @@ LOOK_ERRORS = 5
 # for. A question the worker would put to a controller goes unanswered the same
 # way and shows as an idle worker with no PR, a failed build.
 CONTROLLER = "drain"
-_ORIGIN = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 Ctx = collections.namedtuple("Ctx", "root repo default log_dir bundle_max want")
 # What an anchor is: a ticket built by a worker, or a spec parent built by a spec run.
@@ -215,18 +214,20 @@ def one_line(text, limit=300):
     return " ".join(str(text).split())[:limit]
 
 
-def run(args, cwd=None, check=True):
-    try:
-        out = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
-    except OSError as exc:
-        raise DrainError(f"{args[0]}: {exc}") from exc
-    if check and out.returncode:
-        raise DrainError(f"{' '.join(args[:3])} failed: {(out.stderr or out.stdout).strip()}")
-    return out.stdout.strip()
-
-
 def gh(*args):
-    return run(["gh", *args])
+    """`gh <args>`'s stripped stdout; a failure is a `DrainError`."""
+    try:
+        return shellcmd.gh(list(args)).stdout.strip()
+    except shellcmd.CmdError as exc:
+        raise DrainError(str(exc)) from None
+
+
+def git(args, cwd, ok=(0,)):
+    """`git <args>` in `cwd`: its stripped stdout; an exit outside `ok` is a `DrainError`."""
+    try:
+        return shellcmd.git(args, cwd=cwd, ok=ok).stdout.strip()
+    except shellcmd.CmdError as exc:
+        raise DrainError(str(exc)) from None
 
 
 def gh_json(*args):
@@ -270,11 +271,14 @@ def _cap_session():
 
 
 def origin_slug(root):
-    url = run(["git", "config", "--get", "remote.origin.url"], cwd=root)
-    m = _ORIGIN.search(url)
-    if not m:
-        raise DrainError(f"origin {url} is not a github.com repo")
-    return f"{m.group(1)}/{m.group(2)}"
+    """`owner/name` of `root`'s origin; a remote that is not github.com is a `DrainError`."""
+    try:
+        slug = shellcmd.origin_slug(root)
+    except shellcmd.CmdError as exc:
+        raise DrainError(str(exc)) from None
+    if slug is None:
+        raise DrainError(f"origin of {root} is not a github.com repo")
+    return slug
 
 
 def read_frontier(ctx, retry=True):
@@ -530,20 +534,9 @@ def agent_info(name):
     herdr has no such agent. Any other herdr failure is a `DrainStop`: a herdr
     that cannot be asked is not a worker that is gone."""
     try:
-        out = subprocess.run(["herdr", "agent", "get", name], capture_output=True, text=True,
-                             timeout=HERDR_SECONDS)
-    except subprocess.TimeoutExpired:
-        raise DrainStop(f"herdr agent get {name} timed out after {HERDR_SECONDS:g}s") from None
-    body = {}
-    for text in (out.stdout, out.stderr):  # herdr prints a result on stdout and an error on stderr
-        with contextlib.suppress(ValueError):
-            body = json.loads(text)
-            break
-    if out.returncode == 0 and "result" in body:
-        return body["result"]["agent"]
-    if body.get("error", {}).get("code") == "agent_not_found":
-        return None
-    raise DrainStop(f"herdr agent get {name} failed: {one_line(out.stderr or out.stdout, 150)}")
+        return shellcmd.herdr_agent(name, timeout=HERDR_SECONDS)
+    except shellcmd.CmdError as exc:
+        raise DrainStop(str(exc)) from None
 
 
 def agent_status(name):
@@ -703,7 +696,7 @@ def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
     Raises `DrainError` on a conflict or a non-zero exit."""
     scratch = tempfile.mkdtemp(prefix="drain-seam-")
     try:
-        run(["git", "worktree", "add", "-q", "--detach", scratch, rev or ctx.default], cwd=ctx.root)
+        git(["worktree", "add", "-q", "--detach", scratch, rev or ctx.default], cwd=ctx.root)
         if head:
             merged = subprocess.run(["git", "merge", "--no-edit", head], cwd=scratch, capture_output=True, text=True)
             if merged.returncode:
@@ -713,7 +706,7 @@ def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
             # A bare worktree has no node_modules, so the declared
             # dependencies go in first, in the directory of every tracked
             # lockfile, not only the root's (#1445, #1502).
-            listed = run(["git", "ls-files", "-z", "--", "package-lock.json", "*/package-lock.json"], cwd=scratch)
+            listed = shellcmd.git(["ls-files", "-z", "--", "package-lock.json", "*/package-lock.json"], cwd=scratch).stdout
             for lock in sorted(x for x in listed.split("\0") if x):
                 try:
                     code, _ = run_group(["npm", "ci"], os.path.join(scratch, os.path.dirname(lock)),
@@ -726,7 +719,7 @@ def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
         if code:
             raise DrainError(f"`{cmd}` failed (output in {log})")
     finally:
-        run(["git", "worktree", "remove", "--force", scratch], cwd=ctx.root, check=False)
+        git(["worktree", "remove", "--force", scratch], cwd=ctx.root, ok=range(256))
 
 
 SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "implement", "selector_check.py")
@@ -740,7 +733,7 @@ def seam(ctx, head, log, pr):
     merged into current main in a throwaway worktree. The command's own exit
     status is what comes out, never the `selector:` comment's; a resolver
     refusal raises with its reason, before anything runs."""
-    run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+    git(["fetch", "-q", "origin"], cwd=ctx.root)
     log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
     with contextlib.suppress(FileNotFoundError):
         os.remove(log)  # a conflict writes no log, and an earlier drain's must not answer for it
@@ -885,7 +878,7 @@ def finish_closed(ctx, branch, tickets):
     One result per distinct outcome; the cleanup note rides on the first."""
     notes = cleanup_notes(ctx, branch)
     try:
-        run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+        git(["fetch", "-q", "origin"], cwd=ctx.root)
     except DrainError as exc:
         notes.append(f"fetch failed: {one_line(exc, 100)}")
     groups = {}
@@ -1218,16 +1211,16 @@ def main(argv):
     try:
         # The primary checkout, even when --repo is a linked worktree: workers,
         # their herdr agent names and `merge-cleanup` are all keyed on it.
-        common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=args.repo)
+        common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=args.repo)
         root = os.path.dirname(common)
         repo = origin_slug(root)
         login = gh("api", "user", "--jq", ".login")
         if repo.split("/")[0] != login:
             raise DrainError(f"{repo} is not owned by {login}; drain only runs on the caller's own repos")
-        default = run(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=root)
+        default = shellcmd.default_branch(root)
         log_dir = os.environ.get("DRAIN_LOG_DIR") or os.path.expanduser("~/.cache/drain")
         os.makedirs(log_dir, exist_ok=True)
-    except DrainError as exc:
+    except (DrainError, shellcmd.CmdError) as exc:
         print(f"drain.py: {exc}", file=sys.stderr)
         return 1
     limit = 1 if args.once else (args.max or sys.maxsize)

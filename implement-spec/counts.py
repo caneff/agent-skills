@@ -21,7 +21,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "research"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 import runfile  # noqa: E402
+from shellcmd import scrubbed_env  # noqa: E402
 from tally_review_axes import fold_repo  # noqa: E402
 
 
@@ -35,7 +37,7 @@ def default_reviews_dir(checkout):
     top = subprocess.run(
         ["git", "-C", checkout, "rev-parse", "--path-format=absolute",
          "--git-common-dir"], capture_output=True, text=True, check=True,
-        env=runfile.clean_git_env()).stdout.strip()
+        env=scrubbed_env()).stdout.strip()
     repo = fold_repo(os.path.basename(os.path.dirname(top)))
     return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 

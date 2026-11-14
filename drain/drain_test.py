@@ -301,7 +301,6 @@ class Sandbox:
     def __init__(self, tmp_path):
         self.tmp = tmp_path
         t = str(tmp_path)
-        self.rewrite = None
         self.home = os.path.join(t, "home")
         os.mkdir(self.home)
         write(os.path.join(self.home, ".gitconfig"), "[user]\n\tname = t\n\temail = t@example.test\n")
@@ -352,13 +351,15 @@ class Sandbox:
                               env=self.env).stdout.strip()
 
     def set_origin(self, slug, serves=None):
-        """origin reads as github.com/<slug> but fetches from the bare repo."""
-        url = f"https://github.com/{slug}.git"
-        self.git(self.repo, "remote", "set-url", "origin", url)
-        if self.rewrite:
-            self.git(self.repo, "config", "--unset-all", self.rewrite)
-        self.rewrite = f"url.{serves or self.origin}.insteadOf"
-        self.git(self.repo, "config", self.rewrite, url)
+        """origin reads as github.com/<slug> but fetches from the bare repo: its URL is a path
+        ending `github.com/<slug>.git`, a symlink to the bare repo. (`git remote get-url`, which the
+        shared helper reads, applies `insteadOf`, so a rewrite would hide the slug.)"""
+        link = os.path.join(os.path.dirname(self.origin), "hosts", "github.com", f"{slug}.git")
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        if os.path.lexists(link):
+            os.remove(link)
+        os.symlink(serves or self.origin, link)
+        self.git(self.repo, "remote", "set-url", "origin", link)
 
     def write_state(self, issues, prs=None, comments=None, login="me"):
         full = {str(n): {"title": f"ticket {n}", "state": "open", "body": "## Blocked by\n\n- None\n",
@@ -919,7 +920,7 @@ def test_a_herdr_that_cannot_be_asked_stops_the_drain(sb):
     sb.write_state({1: {}})
     r = sb.drain("--once", env={"HERDR_DOWN": "1"})
     assert r.returncode == 1
-    assert "stopped: herdr agent get repo-1 failed" in r.stdout
+    assert "stopped: herdr agent get repo-1:" in r.stdout
     assert "ready-for-human" not in sb.labels(1)
 
 
@@ -927,7 +928,7 @@ def test_a_herdr_that_hangs_stops_the_drain_naming_herdr(sb):
     sb.write_state({1: {}})
     r = sb.drain("--once", env={"HERDR_HANG": "1", "DRAIN_HERDR_SECONDS": "0.5"})
     assert r.returncode == 1, (r.stdout, r.stderr)
-    assert "stopped: herdr agent get repo-1 timed out after 0.5s" in r.stdout
+    assert "stopped: herdr agent get repo-1: timed out after 0.5s" in r.stdout
     assert "ready-for-human" not in sb.labels(1)
 
 

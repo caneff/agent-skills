@@ -18,7 +18,6 @@ The declaration grammar and the evidence: `references/closing-ticket.md`.
 import argparse
 import os
 import re
-import subprocess
 import sys
 
 # #890's fence reader, imported rather than reimplemented: a fenced region is
@@ -271,14 +270,8 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
 def default_branch(root):
     """`<default>` off the repo's `origin/HEAD` by `loop.origin_default`, the
     run's own reader, or None when git cannot say."""
-    def run(args):
-        done = subprocess.run(["git", "-C", root, *args], capture_output=True,
-                              text=True)
-        if done.returncode != 0:
-            raise LoopError(done.stderr.strip() or "git failed")
-        return done.stdout
     try:
-        ref = origin_default(run)
+        ref = origin_default(root)
     except (LoopError, OSError):
         return None
     return ref[len("origin/"):] if ref.startswith("origin/") else None
