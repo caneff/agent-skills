@@ -8,7 +8,7 @@
 mod support;
 use lane::workers::{self, WorkerRecord};
 use std::process::{Command, Output, Stdio};
-use support::{dead_pid, out_text, worker_record, Fixture, LiveProc};
+use support::{dead_pid, out_text, stdout, worker_record, Fixture, LiveProc};
 
 const AGENT: &str = "scroller-345";
 const BRANCH: &str = "implement-345";
@@ -17,7 +17,7 @@ const BRANCH: &str = "implement-345";
 fn adopter(f: &Fixture) -> (String, String) {
     let pid = std::process::id() as i32;
     f.live_session_at(pid, "controller-50", "sid-adopter");
-    (pid.to_string(), lane::proc_info::read_stat(pid).unwrap().start)
+    (pid.to_string(), f.own_proc_start())
 }
 
 fn cmd(f: &Fixture, program: &str, cwd: &str) -> Command {
@@ -39,10 +39,6 @@ fn adopt(f: &Fixture, cwd: &str, agent: &str) -> Output {
 
 fn restore(f: &Fixture, cwd: &str) -> Output {
     cmd(f, env!("CARGO_BIN_EXE_controller-restore"), cwd).output().unwrap()
-}
-
-fn stdout(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// Every record naming `AGENT`, across every sidecar, as (pid, record).

@@ -9,7 +9,7 @@
 //! `resolve_controller.rs` and `merge_cleanup.rs` test at.
 
 mod support;
-use support::{dead_pid, out_text, worker_record, Fixture, LiveProc};
+use support::{dead_pid, out_text, stdout, worker_record, Fixture, LiveProc};
 
 /// This test process stands in for the resuming controller session — the
 /// binary under test is spawned as this process's child, so
@@ -20,26 +20,8 @@ fn live_session(f: &Fixture, name: &str) {
     f.live_session_at(std::process::id() as i32, name, "sid-1");
 }
 
-/// This test process's own real `/proc/<pid>/stat` starttime — what a fresh
-/// `WorkerRecord.proc_start` must carry to survive `drop_stale`.
-fn own_start() -> String {
-    let pid = std::process::id() as i32;
-    lane::proc_info::read_stat(pid).unwrap().start
-}
-
-fn worker(branch: &str, agent: &str, proc_start: &str) -> lane::workers::WorkerRecord {
-    lane::workers::WorkerRecord {
-        agent: agent.into(),
-        tickets: vec!["1042".into()],
-        branch: branch.into(),
-        workspace: format!("/repo/.claude/worktrees/{branch}"),
-        repo: "caneff/agent-skills".into(),
-        cleanup: format!("cd /repo && merge-cleanup {branch} --repo /repo"),
-        chris_merges: false,
-        dispatched_at: "2026-09-22T00:00:00Z".into(),
-        proc_start: proc_start.into(),
-    }
-}
+/// The workspace every `implement-1042` record here names.
+const WS_1042: &str = "/repo/.claude/worktrees/implement-1042";
 
 /// Appends `record` under this test process's own session pid — the pid
 /// `find_own_pid` will resolve to.
@@ -83,10 +65,6 @@ fn run_in(f: &Fixture, cwd: &str, stdin: &str, extra_env: &[(&str, &str)]) -> st
     child.wait_with_output().unwrap()
 }
 
-fn stdout(out: &std::process::Output) -> String {
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
-}
-
 // --- silent when there is nothing to restore ---------------------------------
 
 #[test]
@@ -118,7 +96,7 @@ fn a_session_record_whose_procstart_does_not_match_is_never_resolved_as_this_ses
     )
     .unwrap();
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
     let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(
@@ -132,7 +110,7 @@ fn a_session_record_whose_procstart_does_not_match_is_never_resolved_as_this_ses
 fn a_subagents_own_session_start_is_silent_even_with_workers_present() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
     let out = run(&f, r#"{"agent_id":"sub-1"}"#, &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(stdout(&out), "", "a subagent's own SessionStart controls nothing of its own to restore");
@@ -146,7 +124,7 @@ fn the_agentid_spelling_of_the_subagent_gate_is_also_silent_through_the_real_bin
     // payload is what actually carries the `agentId` spelling.
     let f = Fixture::new();
     live_session(&f, "controller-50");
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
     let out = run(&f, r#"{"agentId":"sub-1"}"#, &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(stdout(&out), "", "the agentId spelling of the subagent gate must be silent too");
@@ -159,7 +137,7 @@ fn a_worker_with_no_pr_yet_and_a_live_agent_prints_the_restore_line() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
     let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
@@ -172,7 +150,7 @@ fn a_worker_with_no_pr_yet_and_a_live_agent_prints_the_restore_line() {
 fn a_stale_worker_record_from_a_reused_pid_is_dropped_and_reported() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", "not-this-sessions-start"));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, "not-this-sessions-start"));
     let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
@@ -187,7 +165,7 @@ fn an_open_pr_is_reported_with_the_merge_pointer() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
     f.set_pr_status("implement-1042", "152 OPEN");
     let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
@@ -210,7 +188,7 @@ fn a_merged_pr_is_reported_as_run_cleanup() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
     f.set_pr_status("implement-1042", "152 MERGED");
     let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
@@ -222,7 +200,7 @@ fn a_closed_pr_is_reported_as_such() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
     f.set_pr_status("implement-1042", "152 CLOSED");
     let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
@@ -235,7 +213,7 @@ fn a_closed_pr_is_reported_as_such() {
 fn a_failed_herdr_agent_list_reports_unknown_not_no_live_agent() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
-    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
     let out = run(&f, "{}", &[("HERDR_LIST_FAIL", "true")]);
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
