@@ -2,14 +2,14 @@
 """The include closure of a change, and the clumps it implies.
 
 A **clump** — one worker, one workspace, one PR — is one candidate: each
-candidate is its own clump, in every mode (spec #1634, ruling 1). What the
-closure is for is `loop.py dispatch`'s hold, which keeps a clump off the
-frontier while a live workspace shares a file with it. Read from each
-candidate's *declared seams* — prose typed by whoever filed the ticket — that
-file set lies. On #781 ticket #451 named each component's `update` and `validate` and nothing about skyscraper;
-its diff touched 41 files across six example families through a shared
-`#include ../_shared/line-kind.js`, and collided with a worker already
-committing to four of them.
+candidate is its own clump, in every mode. What the closure is for is
+`loop.py dispatch`'s hold, which keeps a clump off the frontier while a live
+workspace shares a file with it. Read from each candidate's *declared seams*
+— prose typed by whoever filed the ticket — that file set lies. On one
+earlier spec run a ticket named each component's `update` and `validate` and
+nothing about skyscraper; its diff touched 41 files across six example
+families through a shared `#include ../_shared/line-kind.js`, and collided
+with a worker already committing to four of them.
 
 So the file set is the **include closure** instead: the files a change
 to a candidate's target files actually regenerates. The repo declares its
@@ -32,13 +32,13 @@ import subprocess
 import sys
 import warnings
 
-# The fence rule is #890's, bug-for-bug: a declaration inside ``` or ~~~ is
-# quoted material, and a fence closes CommonMark's way. Both `declaration_section`
-# and `scanned_lines` read `visible()` rather than the bare `unfenced()`
-# (#999): an indented quotation is quoted material too — CommonMark's own
-# <=3-space fence bound means 4+ spaces or a tab is a code block, not a
-# fence — and neither reader has a filter of its own to drop it. Imported
-# rather than copied — a second parser is a second place for the
+# The fence rule is the frontier reader's, bug-for-bug: a declaration inside
+# ``` or ~~~ is quoted material, and a fence closes CommonMark's way. Both
+# `declaration_section` and `scanned_lines` read `visible()` rather than the
+# bare `unfenced()`: an indented quotation is quoted material too —
+# CommonMark's own <=3-space fence bound means 4+ spaces or a tab is a code
+# block, not a fence — and neither reader has a filter of its own to drop it.
+# Imported rather than copied — a second parser is a second place for the
 # quoted-template bug.
 from frontier import key_line, section, visible
 
@@ -48,7 +48,7 @@ from shellcmd import scrubbed_env  # noqa: E402
 _CLOSURE_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+include closure[ \t]*:?[ \t]*$",
                               re.IGNORECASE)
 # `- **Directive**: `#include <path>`` — the key line grammar is
-# `frontier.key_line`, shared with `implement-spec/closing_ticket.py` (#1000).
+# `frontier.key_line`, shared with `implement-spec/closing_ticket.py`.
 # "None", however it is dressed, as a *statement*: `None`, `- None`,
 # `None — nothing here is generated.` What follows it must end the clause, so
 # that `None of the docs are generated, but examples/ are` — a sentence
@@ -60,7 +60,7 @@ _NONE = re.compile(r"^[-*\s]*none[ \t]*([.,;:\u2014\u2013-]|$)", re.IGNORECASE)
 
 
 PATH_SLOT = "<path>"
-# The one directive that is not a template (#1478): a Python import names a
+# The one directive that is not a template: a Python import names a
 # module, not a path, so the form is read by `python_edges` instead of matched
 # by `directive_pattern`.
 PYTHON_IMPORTS = "python imports"
@@ -284,7 +284,7 @@ def read_text(path, limit=SCAN_LIMIT):
 
     Nothing is truncated. A directive past a cutoff read as absent is a
     missing edge, and a missing edge is two workers in the same files — the
-    cost #781 paid. A file past `limit` therefore fails the resolve rather
+    cost an earlier spec run paid. A file past `limit` therefore fails the resolve rather
     than being read in part and reported whole."""
     try:
         with open(path, "rb") as fh:
@@ -303,7 +303,7 @@ def read_text(path, limit=SCAN_LIMIT):
 def scanned_lines(rel, text):
     """The lines of one file a directive may be read from.
 
-    In Markdown a fenced block, or an indented one (#999: CommonMark's own
+    In Markdown a fenced block, or an indented one (CommonMark's own
     <=3-space fence bound means 4+ spaces or a tab is a code block, not a
     fence), is quotation by definition, so a doc that *shows* the repo's
     include line — `references/closure.md` does, and so will any doc
