@@ -1,4 +1,4 @@
-"""Tests for the shared page shell (#613). Two seams: the document `page()`
+"""Tests for the shared page shell. Two seams: the document `page()`
 returns, and the assets `copy_assets()` puts on disk in a tmp dir."""
 import os
 import shutil
@@ -55,8 +55,6 @@ def test_copy_assets_takes_the_component_list(tmp_path):
     pagelib.copy_assets(str(tmp_path), components=("callout", "chip"))
     assert (tmp_path / "assets" / "components" / "chip" / "chip.css").is_file()
 
-
-# --- check_mermaid: the render check a prose rule alone did not give (#1665) ---
 
 GOOD = 'flowchart LR\n  A[One] --> B[Two]'
 PAREN_LABEL = 'flowchart LR\n  A[One] -->|read_text().strip()| B[Two]'

@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""The audit sweep driver (#558): replaces run-audits.sh, should_run.py, and
-cache.py with one readable Python program.
+"""The audit sweep driver.
 
-Runs each guarded audit as its own `claude -p "/name"` process (see
-run-audits.sh's original header comment for why: several audit skills carry
-`disable-model-invocation`, so only an explicit `-p "/name"` slash invocation
-gets past the guard — a subagent fan-out would silently lose them), collects
+Runs each guarded audit as its own `claude -p "/name"` process (several audit
+skills carry `disable-model-invocation`, so only an explicit `-p "/name"` slash
+invocation gets past the guard — a subagent fan-out would silently lose them), collects
 the report folders under one `collection/` dir, and builds `index.html`.
 
 A sweep is three steps: plan (ask the staleness cache what still needs a run),
 execute (the only step that spawns audits), collect (assemble the collection
 and render the index). The `index` mode calls collect alone.
 
-Environment: `SWEEP_JOBS` (#1666) caps how many audits a sweep runs at once
+Environment: `SWEEP_JOBS` caps how many audits a sweep runs at once
 after the smoke test (a positive integer, default 4; anything else exits 2
-before any audit starts). `MUTATION_JOBS` (#1588) does the same for the
+before any audit starts). `MUTATION_JOBS` does the same for the
 modules of a `mutation` sweep (default 4).
 """
 import argparse
@@ -55,8 +53,6 @@ DEFAULT_BACKSTOP_DAYS = 30
 CLAUDE_FLAGS = ["-p", "--dangerously-skip-permissions"]
 
 
-# --- pure decision: should_run (ported from should_run.py) ------------------
-
 def should_run(audit, cache_record, git_state):
     """Return (run: bool, reason: str). Pure — no git/filesystem/clock calls.
 
@@ -92,8 +88,6 @@ def should_run(audit, cache_record, git_state):
     return False, f"unchanged: {changed} files < threshold {threshold}, clean, within backstop"
 
 
-# --- cache: repo-keyed staleness record --------------------------------------
-
 def cache_base():
     return os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "all-audits")
 
@@ -106,10 +100,8 @@ def repo_key(repo_path):
 
 
 def load_record(path):
-    """An unreadable or corrupt record is "no cached run", never a crash
-    (#558 regression fix) — matches the old bash `cache.py decide`, whose
-    subprocess crash on bad JSON printed nothing, failed the `= "SKIP"`
-    check, and let the audit run."""
+    """An unreadable or corrupt record is "no cached run", never a crash that
+    stops the sweep: the audit simply runs."""
     if not os.path.exists(path):
         return {}
     try:
@@ -143,7 +135,7 @@ def git_state(repo, last_sha):
         if result.returncode != 0:
             # A SHA `git diff` can't resolve (never a real commit, or pruned)
             # proves nothing about staleness — force dirty so should_run can
-            # never read "no diff output" as "unchanged" (#558).
+            # never read "no diff output" as "unchanged".
             return {"dirty": True, "changed_files": []}
         changed = [ln for ln in result.stdout.splitlines() if ln.strip()]
     return {"dirty": dirty, "changed_files": changed}
@@ -172,9 +164,8 @@ class CacheDecision:
 
 def decide(repo, name, ground_truth, threshold=DEFAULT_THRESHOLD, backstop=DEFAULT_BACKSTOP_DAYS, base=None,
            key=None):
-    """The cache decision as a structured result (#558) — not the old
-    tab-separated RUN/SKIP text `cache.py decide` printed. `key` names the
-    record when `repo` is a throwaway checkout (#1678); git still reads `repo`."""
+    """The cache decision as a structured result. `key` names the record when
+    `repo` is a throwaway checkout; git still reads `repo`."""
     record = load_record(_record_file(key or repo, base))
     entry = record.get(name)
     cache_record = None
@@ -204,8 +195,6 @@ def update_cache(repo, name, report_dir, base=None, key=None):
     save_record(path, record)
 
 
-# --- mutation recency: what each module's last mutation run covered (#1567) --
-
 def record_mutation(repo, module, base=None):
     """Stamp `module` as mutation-run at HEAD now, beside the audit records
     in the same per-repo cache file."""
@@ -214,8 +203,6 @@ def record_mutation(repo, module, base=None):
     mutation_run.stamp(record, module, head_sha(repo), now_iso())
     save_record(path, record)
 
-
-# --- filesystem / prompt helpers (ported from run-audits.sh) ----------------
 
 def replace_dir(src, dest):
     if os.path.exists(dest):
@@ -235,7 +222,7 @@ def manifest_instruction(manifest_path):
     )
 
 
-# The one no-open instruction (#1598): the sweep's audits and every per-module
+# The one no-open instruction: the sweep's audits and every per-module
 # mutation run carry it, so a driver run opens only its final index.
 NO_OPEN_INSTRUCTION = (
     "Do NOT open the report: skip every xdg-open/open/start step the skill would run. You are one "
@@ -302,8 +289,8 @@ def manifest_path_for(manifests_dir, name):
 
 def read_manifest(manifests_dir, name):
     """The manifest an audit wrote — {report_path, count, headline} — or
-    None when it never wrote one (#559: the driver reads this, never a
-    transcript; a missing manifest is a named failure, not a silent skip)."""
+    None when it never wrote one (the driver reads this, never a transcript; a
+    missing manifest is a named failure, not a silent skip)."""
     path = manifest_path_for(manifests_dir, name)
     if not os.path.isfile(path):
         return None
@@ -320,7 +307,7 @@ def manifest_failure(manifests_dir, name):
     """Why `name`'s manifest does not prove success, or None: "no manifest",
     or a manifest naming a missing report. What success means for an audit,
     shared by `run_one` and `collect_from_manifest`, which mutation mode
-    reaches it through (#1292)."""
+    reaches it through."""
     manifest = read_manifest(manifests_dir, name)
     if manifest is None:
         return "no manifest"
@@ -334,8 +321,7 @@ def collect_from_manifest(manifests_dir, name, collection_dir, dest_name):
     """Read `name`'s manifest and copy its report dir into
     `collection_dir/dest_name`. Returns None on success, else
     `manifest_failure`'s reason. The one seam both the audit sweep and
-    mutation mode use to find a report — never a log-grepping fallback
-    (#559, and #580 for mutation mode)."""
+    mutation mode use to find a report — never a log-grepping fallback."""
     reason = manifest_failure(manifests_dir, name)
     if reason:
         return reason
@@ -366,7 +352,7 @@ def mutation_answer_failure(manifests_dir, name):
     """Why a mutation module's manifest is no answer, or None. A module is
     measured (a `findings.jsonl` beside its report, empty for no survivors) or
     INCONCLUSIVE (an `inconclusive` key); a manifest with neither would read
-    as a clean module that never ran (#1588)."""
+    as a clean module that never ran."""
     reason = manifest_failure(manifests_dir, name)
     if reason:
         return reason
@@ -380,7 +366,7 @@ def mutation_answer_failure(manifests_dir, name):
 
 def record_inconclusive(manifests_dir, name, collection_dir):
     """A manifest carrying `inconclusive` becomes `inconclusive.txt` in the
-    module's collected dir, the file the mutation sub-index reads (#1588): a
+    module's collected dir, the file the mutation sub-index reads: a
     module that measured nothing is listed as such, never as clean."""
     data = read_manifest(manifests_dir, name)
     if "inconclusive" in data:
@@ -390,14 +376,14 @@ def record_inconclusive(manifests_dir, name, collection_dir):
 
 def clear_manifest(manifest):
     """`--out` accumulates: an earlier sweep's manifest would otherwise prove
-    this sweep succeeded (#1278)."""
+    this sweep succeeded."""
     if os.path.exists(manifest):
         os.remove(manifest)
 
 
 def audit_failure(returncode, manifest_check):
     """Why one audit's `claude` run failed, or None: a nonzero exit, else
-    what `manifest_check()` finds wrong with its manifest (#1278)."""
+    what `manifest_check()` finds wrong with its manifest."""
     return f"exit {returncode}" if returncode != 0 else manifest_check()
 
 
@@ -442,7 +428,7 @@ def collected_not_applicable(collection, name):
 def run_one(name, repo, outlogs, manifests_dir, not_applicable=None):
     """Run one audit. Returns None on success, else the failure reason —
     a nonzero `claude` exit, no manifest or a manifest naming a missing
-    report (#1278, #1292); `done` prints only on success. With
+    report; `done` prints only on success. With
     `not_applicable` (a language, from the plan) no `claude` starts."""
     print(f"[{name}] starting")
     log_path = os.path.join(outlogs, f"{name}.log")
@@ -465,8 +451,6 @@ def run_one(name, repo, outlogs, manifests_dir, not_applicable=None):
     return None
 
 
-# --- HTML index rendering -----------------------------------------------------
-
 _INDEX_CSS = """main { --vt-measure: 1080px; }
 .audit-table { width:100%; border-collapse:collapse; }
 .audit-table th, .audit-table td { border:1px solid var(--vt-rule); padding:.6rem .8rem; text-align:left; vertical-align:top; }
@@ -476,7 +460,7 @@ _INDEX_CSS = """main { --vt-measure: 1080px; }
 
 @dataclasses.dataclass
 class IndexModel:
-    """Everything the sweep index renders (#606) — one value the collect step
+    """Everything the sweep index renders — one value the collect step
     fills in, so the renderer takes a model instead of nine positionals."""
 
     collection: str
@@ -594,14 +578,12 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
         ))
 
 
-# --- the run folder -----------------------------------------------------------
-
 RUN_TTL_DAYS = 3
 
 
 @dataclasses.dataclass(frozen=True)
 class RunDir:
-    """The run folder's layout, made once for every mode (#606). One owner
+    """The run folder's layout, made once for every mode. One owner
     for: resolving `--out` or a fresh `run-<timestamp>` under the cache base,
     pruning runs past the TTL, creating the sub-folders, and pointing TMPDIR
     at the run so every audit subprocess writes inside it."""
@@ -638,12 +620,9 @@ class RunDir:
         return run
 
 
-# --- the sweep ----------------------------------------------------------------
-
-
 @dataclasses.dataclass
 class Plan:
-    """What the sweep will do before it does anything (#606): which audits
+    """What the sweep will do before it does anything: which audits
     run, which reuse a cached report, and the note the index prints for
     each skip. Deciding this spawns no audit."""
 
@@ -694,7 +673,7 @@ def _jobs_from_env(name):
 
 
 def sweep_jobs():
-    """`SWEEP_JOBS` (#1666): how many audits a sweep runs at once."""
+    """`SWEEP_JOBS`: how many audits a sweep runs at once."""
     return _jobs_from_env("SWEEP_JOBS")
 
 
@@ -834,7 +813,7 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
     report_files = [os.path.join(collection, report_link[n]) for n in AUDIT_NAMES if report_link[n]]
     synthesis = ""
     synthesis_path = os.path.join(collection, SYNTHESIS_FILE)
-    if reuse_synthesis:  # `load` (#1678): the stored synthesis as it was, no new `claude` call
+    if reuse_synthesis:  # `load`: the stored synthesis as it was, no new `claude` call
         if os.path.isfile(synthesis_path):
             synthesis = open(synthesis_path, encoding="utf-8").read()
     elif os.environ.get("AUDITS_NO_SYNTH", "0") != "1" and report_files:
@@ -846,7 +825,7 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
         )
         result = _run(["claude", *CLAUDE_FLAGS, prompt], env=claude_env())
         synthesis = result.stdout.strip()
-        if synthesis:  # the audit record (#1680) carries it as-is
+        if synthesis:  # the audit record carries it as-is
             with open(synthesis_path, "w", encoding="utf-8") as f:
                 f.write(synthesis)
 
@@ -899,8 +878,8 @@ class SweepResult:
 def run_sweep(repo, out, only, short, force, key=None, standalone=True):
     """Plan, execute and collect one sweep. Standalone, it prints its index as
     `index:` and opens it; one repo of a `multi` pass prints `repo index:`
-    and opens nothing, since the pass's own page is its `index:` (#1721).
-    Returns what happened: the audit record (#1680) is built from it."""
+    and opens nothing, since the pass's own page is its `index:`.
+    Returns what happened: the audit record is built from it."""
     repo = os.path.abspath(repo)
     selected = only if only is not None else (SHORT_SET if short else list(AUDIT_NAMES))
     jobs = sweep_jobs()  # before the run dir exists, as mutation_mode does
@@ -929,8 +908,6 @@ def rebuild_index(repo, out):
     _announce(run, repo)
     open_index(collect(run, repo, Plan()))
 
-
-# --- multi-repo mode (#1679) --------------------------------------------------
 
 @dataclasses.dataclass
 class Outcome:
@@ -1005,7 +982,7 @@ def record_model(result, sweep_id, sha, clean, stored, has_ignore_file, open_rec
 
 def aborted_model(sweep_id, sha, clean, stored, reason, logs, open_record=""):
     """The record of a sweep that stopped before collecting (a guard, a crash):
-    a failure, never a clean repo (#1678)."""
+    a failure, never a clean repo."""
     tails = [f"{f}:\n{log_tail(os.path.join(logs, f))}" for f in sorted(os.listdir(logs))] if os.path.isdir(logs) else []
     return audit_record.RecordModel(
         sweep_id=sweep_id, timestamp=now_iso(), sha=sha, clean=clean, stored_path=stored,
@@ -1359,8 +1336,6 @@ def multi_index_mode(sweep_id):
     open_index(page)
 
 
-# --- load a stored sweep for triage (#1684) ----------------------------------
-
 def load_mode(issue, repo_name):
     """`load ISSUE [REPO]`: rebuild the stored sweep's index so it can be
     triaged, with the failed and unchanged audits' notes it was swept with and
@@ -1384,8 +1359,6 @@ def load_mode(issue, repo_name):
     print(f"checkout: {rec.get('checkout', '(not recorded)')}")
     open_index(collect(run, slug, Plan(skip_note=notes), reuse_synthesis=True))
 
-
-# --- repo suggestions (#1683) -------------------------------------------------
 
 SUGGEST_DAYS = 14
 DEFAULT_ROOTS = "~/src,~/.agents"  # agent-skills lives at ~/.agents/skills, as `landed` scans it
@@ -1457,15 +1430,13 @@ def suggest_mode(roots):
             print(f"skipped: {slug} (no local checkout)")
 
 
-# --- mutation mode --------------------------------------------------------
-
 def mutation_jobs():
-    """`MUTATION_JOBS` (#1588): how many modules run at once."""
+    """`MUTATION_JOBS`: how many modules run at once."""
     return _jobs_from_env("MUTATION_JOBS")
 
 
 def mutation_cost_estimate(n, jobs=1, timeout_s=None):
-    """The line printed before a whole-repo run (#1588): the module count and
+    """The line printed before a whole-repo run: the module count and
     the worst case. `audit.py` bounds each of its commands by
     `MUTATION_AUDIT_TIMEOUT` seconds and a mutmut module runs two (`run`, then
     `results`), so a module is at most twice that; `jobs` modules overlap."""
@@ -1492,7 +1463,7 @@ def _prepass_ranker(repo):
 
 
 def mutation_mode(repo, modules, out, whole_repo=False):
-    """`whole_repo` (#1588): every candidate, no `MUTATION_MAX` cut and no
+    """`whole_repo`: every candidate, no `MUTATION_MAX` cut and no
     model prepass, so the order is the recency order alone."""
     repo = os.path.abspath(repo)
 
@@ -1529,7 +1500,7 @@ def mutation_mode(repo, modules, out, whole_repo=False):
     print(f"collecting under: {collection}\n")
 
     notest_json = os.path.join(collection, "mutation-no-tests.json")
-    # A planning failure is a real "don't know", never a silent zero (#559) —
+    # A planning failure is a real "don't know", never a silent zero —
     # the index must render this as could-not-determine, not as a repo with
     # zero testless modules.
     data = ({"error": probe_error} if planned is None
@@ -1585,7 +1556,7 @@ def _guarded_mutation_module(repo, module, run):
 def _run_mutation_module(repo, module, run):
     """Audit one module in its own worktree. Returns None on success, else
     the failure reason — a setup failure, a nonzero `claude` exit or no
-    manifest, the sweep's `run_one` rule (#1278); `done` prints only on
+    manifest, the sweep's `run_one` rule; `done` prints only on
     success."""
     slug = module_slug(module)
     collection = run.collection
@@ -1602,7 +1573,7 @@ def _run_mutation_module(repo, module, run):
     added = False
     try:
         # The one cleanup for this worktree: `scratch_worktree` removes it on
-        # every exit, an exception included (#606). mutation_mode keeps an outer
+        # every exit, an exception included. mutation_mode keeps an outer
         # sweep of `worktrees/` as the backstop for a crash mid-`add`.
         with shellcmd.scratch_worktree(repo, "HEAD", wt):
             added = True
@@ -1642,12 +1613,10 @@ def _run_mutation_module(repo, module, run):
         with _RECORD_LOCK:
             record_mutation(repo, module)
     # An INCONCLUSIVE run measured nothing: not recorded, so the recency order
-    # offers it again (#1588).
+    # offers it again.
     print(f"[mutation:{module}] done" + (f" — INCONCLUSIVE: {why}" if why is not None else ""))
     return None
 
-
-# --- CLI ----------------------------------------------------------------
 
 def _split(value):
     """A comma-separated flag value as a list — the one place the CLI splits."""

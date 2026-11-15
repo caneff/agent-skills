@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Behavioral test for auditlib's walk exclusion (#555): a fixture tree with a
+# Behavioral test for auditlib's walk exclusion: a fixture tree with a
 # vendor/ and node_modules/ dir must yield no files from either. The unit
 # test (auditlib_test.py) covers a smaller case; this exercises a
 # tree matching the ticket's own AC wording via the public CLI surface.
 #
-# The second fixture (#611) covers `walk_source`'s `skip=` predicate: passing
+# The second fixture covers `walk_source`'s `skip=` predicate: passing
 # `auditlib.is_test_or_fixture` filters out test files, `__init__.py`, and a
 # `fixtures/` dir the same way mutation-audit's `_sibling_tests` used to by
 # hand.

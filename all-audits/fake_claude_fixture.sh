@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# Test fixture (#559): a fake `claude` binary for driver_test.py's manifest
+# Test fixture: a fake `claude` binary for driver_test.py's manifest
 # tests. Reads the last argv (the audit prompt), and — only for the audit
 # named "dead-code" and for "/mutation-audit" — writes a report + the
 # manifest the prompt asked for.
 # FAKE_CLAUDE_NOOP=1 makes every audit, dead-code included, write nothing.
 # FAKE_CLAUDE_MISSING_REPORT=1 makes dead-code write a manifest whose
-# report_path names a file that does not exist (#1292).
+# report_path names a file that does not exist.
 # FAKE_CLAUDE_INCONCLUSIVE=<why> makes the mutation audit's manifest carry
-# an `inconclusive` reason, as the real skill writes on audit.py's exit 3 (#1588).
+# an `inconclusive` reason, as the real skill writes on audit.py's exit 3.
 # FAKE_CLAUDE_RENDEZVOUS / FAKE_CLAUDE_NO_FINDINGS_LOG: see the mutation branch below.
-# FAKE_CLAUDE_INFLIGHT=<dir> (#1666): every audit marks itself started in <dir>,
+# FAKE_CLAUDE_INFLIGHT=<dir>: every audit marks itself started in <dir>,
 # appends how many marks it sees to <dir>/counts, holds 0.3s, then unmarks, so a
 # test reads the most audits that were in flight at once from the counts.
 # FAKE_CLAUDE_PREPASS="a.py\nb.py" makes a prompt with no manifest request
-# (the mutation prepass) print that ranking (#1567).
-# FAKE_CLAUDE_STARTS=<file> (#1679): every start appends its prompt's first
+# (the mutation prepass) print that ranking.
+# FAKE_CLAUDE_STARTS=<file>: every start appends its prompt's first
 # line ("/<name> <repo>") to <file>, so a test reads the order audits started in.
-# FAKE_CLAUDE_FINDINGS_FILE=<file> (#1680): dead-code copies it to
+# FAKE_CLAUDE_FINDINGS_FILE=<file>: dead-code copies it to
 # findings.jsonl beside its report.
 # FAKE_CLAUDE_SUPPRESSED=<n>: dead-code's manifest carries "suppressed": <n>.
 # FAKE_CLAUDE_GUARD=1: every audit prints the model-invocation guard's
 # refusal and exits, as a rejected `-p` slash invocation does.
-# FAKE_CLAUDE_SNAPSHOT=<dir> (#1721): every start copies each multi-repo index
+# FAKE_CLAUDE_SNAPSHOT=<dir>: every start copies each multi-repo index
 # under $XDG_DATA_HOME/all-audits/multi/ to <dir>/start-<k>.html, k counting
 # starts from 1, so a test reads the page as it stood when that audit began.
 # domain-drift writes the same report and manifest as dead-code.
@@ -42,7 +42,7 @@ if [ -n "${FAKE_CLAUDE_SNAPSHOT:-}" ]; then
 fi
 
 # Record the wait-ceiling variable in this process's log, so a test can see
-# what env the driver handed it (#1278).
+# what env the driver handed it.
 echo "ceiling=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
 
 if [ -n "${FAKE_CLAUDE_INFLIGHT:-}" ]; then
@@ -54,10 +54,10 @@ fi
 
 [ -z "${FAKE_CLAUDE_GUARD:-}" ] || { echo "Skill cannot be used with Skill tool: disable-model-invocation"; exit 1; }
 
-# An audit that dies silently: exits 0, writes nothing (#1278).
+# An audit that dies silently: exits 0, writes nothing.
 [ -z "${FAKE_CLAUDE_NOOP:-}" ] || exit 0
 
-# The mutation prepass (#1567) asks for no manifest: it prints a ranking.
+# The mutation prepass asks for no manifest: it prints a ranking.
 if [ -n "${FAKE_CLAUDE_PREPASS:-}" ] && ! printf '%s' "$prompt" | grep -q 'write a manifest to'; then
   printf '%s\n' "$FAKE_CLAUDE_PREPASS"
   exit "${FAKE_CLAUDE_PREPASS_EXIT:-0}"
@@ -65,7 +65,7 @@ fi
 
 manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true)"
 [ -n "$manifest" ] || exit 0
-# The prompt itself, so a test can see what the driver asked for (#1588). After
+# The prompt itself, so a test can see what the driver asked for. After
 # the prepass branch: its candidate lines would read as a ranking.
 echo "prompt=$prompt"
 
@@ -78,7 +78,7 @@ case "$prompt" in
     [ -z "${FAKE_CLAUDE_FINDINGS_FILE:-}" ] || cp "$FAKE_CLAUDE_FINDINGS_FILE" "$dir/findings.jsonl"
     sup=""; [ -z "${FAKE_CLAUDE_SUPPRESSED:-}" ] || sup=", \"suppressed\": $FAKE_CLAUDE_SUPPRESSED"
     printf '{"report_path": "%s/report.html", "count": 1, "headline": "one finding"%s}\n' "$dir" "$sup" >"$manifest"
-    # A nonzero exit even with a manifest on disk (#1278), when a test asks.
+    # A nonzero exit even with a manifest on disk, when a test asks.
     exit "${FAKE_CLAUDE_EXIT_DEAD_CODE:-0}"
     ;;
   /mutation-audit\ *)
@@ -87,7 +87,7 @@ case "$prompt" in
     dir="$(dirname "$manifest")/report"
     mkdir -p "$dir"
     echo '<html><body>mutation report</body></html>' >"$dir/report.html"
-    # FAKE_CLAUDE_RENDEZVOUS=<dir> (#1588): mark this module started, wait up
+    # FAKE_CLAUDE_RENDEZVOUS=<dir>: mark this module started, wait up
     # to 2s for another module's mark, and write <dir>/overlap if one shows
     # up: two modules were in flight at once.
     if [ -n "${FAKE_CLAUDE_RENDEZVOUS:-}" ]; then
