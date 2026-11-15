@@ -1,5 +1,5 @@
 //! The fake's own contract: it rejects any subcommand missing from its typed
-//! allowlist, exiting non-zero (the #745 lesson — a stub that accepted a
+//! allowlist, exiting non-zero (a stub that accepted a
 //! herdr subcommand that does not exist hid a command that fails for real).
 
 use std::process::Command;

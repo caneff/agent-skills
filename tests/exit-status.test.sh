@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Regression test for #1524: when a suite exited non-zero, tests/all.sh printed
-# `FAIL <label>` and the suite's output but never its exit status, so a suite
-# that failed silently (drain's 2026-10-09 run: a bare `FAIL
-# test-audit/audit-mjs.test.sh`) left nothing to diagnose.
+# A failing suite's report carries its exit status, so a suite that fails
+# silently can still be diagnosed.
 #
 # Each case builds a throwaway repo holding the working tree's tests/all.sh and
 # one fixture suite from tests/fixtures/exit-status/, then reads the failure
@@ -30,7 +28,6 @@ gate_red() { # <fixture> -> sets $out, fails the test unless the gate exited 1
     || fail "gate never named the suite ($1)"$'\n'"$out"
 }
 
-# A silent exit 3: the report names status 3 and says the output was empty.
 gate_red silent-exit3
 printf '%s\n' "$out" | grep -qE 'exited with status 3( |$|\()' \
   || fail "silent exit 3: the report never named the exit status"$'\n'"$out"
@@ -47,7 +44,6 @@ printf '%s\n' "$out" | grep -q 'exited with status 255' \
 printf '%s\n' "$out" | grep -qi 'signal' \
   && fail "exit 255: the report named a signal no signal bears"$'\n'"$out"
 
-# A SIGKILL: status 137, the signal named, a kill told apart from an assertion.
 gate_red killed
 printf '%s\n' "$out" | grep -q 'exited with status 137, which reads as' \
   || fail "killed: the report never named status 137"$'\n'"$out"
@@ -56,7 +52,6 @@ printf '%s\n' "$out" | grep -qE 'signal 9 \(KILL\)' \
 printf '%s\n' "$out" | grep -q 'printed no output' \
   || fail "killed: the report never said the output was empty"$'\n'"$out"
 
-# A suite with output: the status is named, and it is not called output-less.
 gate_red loud-exit1
 printf '%s\n' "$out" | grep -q 'exited with status 1' \
   || fail "loud exit 1: the report never named the exit status"$'\n'"$out"

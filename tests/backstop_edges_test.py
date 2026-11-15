@@ -1,6 +1,6 @@
 """The backstop imports from common/, implement/ and implement-spec/, and a
 change confined to one of them must select `backstop/`'s suites under
-`tests/all.sh --changed` (#1592): `tests/suite-edges.py` has to see each
+`tests/all.sh --changed`: `tests/suite-edges.py` has to see each
 edge in `backstop/backstop.py`. It lives under `tests/` so it runs on every
 narrowed run, whichever side of the edge changed.
 """

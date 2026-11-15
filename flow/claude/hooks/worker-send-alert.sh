@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # PostToolUse hook on SendMessage: tell the controller's pane at once when a
-# worker's send to its controller failed (#1540). Two episodes in one week had
-# a worker whose sends all failed (a Claude Code upgrade moved the socket
-# directory) while nothing said so until the worker stopped. The Stop hook
-# worker-stop-alert.sh is that stop-time alert (its entry is unregistered by
-# design, flow/claude/OPERATIONS.md); this one fires at the failed send.
+# worker's send to its controller failed. A worker whose sends all fail (a
+# Claude Code upgrade moved the socket directory) says nothing until it stops.
+# The Stop hook worker-stop-alert.sh is that stop-time alert (its entry is
+# unregistered by design, flow/claude/OPERATIONS.md); this one fires at the
+# failed send.
 #
-# Contract: read the PostToolUse event JSON on stdin. Observed live
-# 2026-10-16 (docs/research/2026-10-16-send-time-alert-proofs.md): the event
-# carries `tool_name`, `tool_use_id`, `tool_input.to` and `tool_response`,
-# whose `success` is false on a send that did not deliver. The session is a
-# worker when its transcript opens with an `/implement` or `/implement-spec`
-# brief carrying `--controller "<name>"`; a later `Your controller is now
-# <name>` peer message replaces it. The send is to the controller when
+# Contract: read the PostToolUse event JSON on stdin. As observed in
+# docs/research/2026-10-16-send-time-alert-proofs.md, the event carries
+# `tool_name`, `tool_use_id`, `tool_input.to` and `tool_response`, whose
+# `success` is false on a send that did not deliver. The session is a worker
+# when its transcript opens with an `/implement` or `/implement-spec` brief
+# carrying `--controller "<name>"`; a later `Your controller is now <name>`
+# peer message replaces it. The send is to the controller when
 # `worker_alert_is_controller_target` says so. A response whose `success` is
 # not true is a failed send: one line goes into the controller's herdr pane
 # with `herdr agent prompt`, a hook command the auto-mode classifier never

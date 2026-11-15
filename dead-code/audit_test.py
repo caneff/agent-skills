@@ -1,4 +1,4 @@
-"""Tests for dead-code's vulture parser (#1744; was `audit.py`'s `_selfcheck`)."""
+"""Tests for dead-code's vulture parser."""
 import os
 import sys
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """`pr_settle.py <pr> --repo <owner/name> [--head <sha>] [--merge]`: wait for a
-PR to read CLEAN, then optionally squash-merge it (#1526).
+PR to read CLEAN, then optionally squash-merge it.
 
 One wait for both callers, `drain/drain.py` and `implement/SKILL.md` § The
 merge, which used to raise on UNKNOWN and "poll a few seconds" respectively.

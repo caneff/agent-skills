@@ -1,4 +1,4 @@
-"""Contract tests for flow/bin/automode-entry (#1534).
+"""Contract tests for flow/bin/automode-entry.
 
 Every test runs the command as Chris would, against a fake HOME whose
 ~/.claude/settings.json is a symlink into a throwaway git repo (with a bare

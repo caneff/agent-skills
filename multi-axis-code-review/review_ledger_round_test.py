@@ -1,4 +1,4 @@
-"""A second review round's sidecar, named `-r2` with the first round's ids continued (#1549),
+"""A second review round's sidecar, named `-r2` with the first round's ids continued,
 lands in the ledger as a round-2 row beside the round-1 row. Seam: `review_ledger.py append`
 over a throwaway cache, transcripts directory and ledger.
 """

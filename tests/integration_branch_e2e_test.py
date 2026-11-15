@@ -1,5 +1,5 @@
-"""End-to-end test for spec #1457: an integration branch per spec, with one
-review for the whole spec.
+"""End-to-end test for an integration branch per spec, with one review for
+the whole spec.
 
 One spec's life through the entry points a worker and a controller reach, in
 a throwaway repo whose `origin` is a bare clone, with a fake `gh` and the
@@ -53,8 +53,6 @@ AGENTS = """# Fixture
 
 
 class SpecLife:
-    """A throwaway repo whose `origin` is a bare clone, a fake `gh`, and the review cache under a fake HOME."""
-
     def __init__(self, tmp):
         self.tmp = str(tmp)
         home, fakebin = os.path.join(self.tmp, "home"), os.path.join(self.tmp, "bin")
@@ -175,7 +173,7 @@ def test_a_spec_lands_through_its_integration_branch(life):
             json.dumps({"id": "P1", "axis": "spec", "severity": "hard", "file": "f", "title": "t"}) + "\n"
             if axis == "spec" else "")
         Path(life.reviews, f"findings-{axis}-3.done").write_text("")
-        # A real wave appends its ledger row per axis (#1527); the gate refuses a sidecar without one.
+        # A real wave appends its ledger row per axis; the gate refuses a sidecar without one.
         code, out = life.run_tool(life.primary, "python3", LEDGER, "append", "--repo", "repo",
                                   "--ticket", "3", "--type", axis,
                                   "--transcripts", life.transcripts)

@@ -1,10 +1,10 @@
 """`lmd_driver.mjs` posts a puzzle to LMD: what a fake LMD receives, and what the driver reads back.
 
-This is #1659's end-to-end test: it drives the driver, the half of the skill that posts, through every
+This is the end-to-end test: it drives the driver, the half of the skill that posts, through every
 acceptance criterion it carries, and `bash tests/all.sh` runs it. WSL `node` runs the driver against a
 headless Chromium, as Windows `node.exe` runs it against the stream browser in real use. Chromium loads a
-fake LMD: the saved copies of the real upload and submit forms (`fixtures/`, #1660), served by a local
-HTTP server that records every request and form it gets and answers with pages carrying the ids. Each
+fake LMD: the saved copies of the real upload and submit forms (`fixtures/`), served by a local HTTP
+server that records every request and form it gets and answers with pages carrying the ids. Each
 field the driver must set starts in the fake's forms at the value it must not send, so a field the
 driver leaves alone shows in what the fake receives. Chromium is Playwright's headless shell, found in
 Playwright's browser cache under the user's home directory as `node` is found on PATH: a tool the
@@ -78,7 +78,7 @@ SAVED = "The puzzle has been saved."
 
 
 def _saved_page(link=True):
-    """What live LMD answered "Create" with (#1659's closing check, Check-In, puzzle 000VX4): it stays on
+    """What live LMD answered "Create" with (seen on live LMD for Check-In, puzzle 000VX4): it stays on
     einstellen.php, says the puzzle was saved, links its edit and puzzle pages, and shows the form again."""
     to_page = f'<a href="{PUZZLE_PATH}?id={NEW_PUZZLE_ID}">To the puzzle page</a>' if link else ""
     notice = (f'<p>{SAVED}</p><p><a href="{SUBMIT_PATH}?id={NEW_PUZZLE_ID}">Edit Puzzle '
@@ -150,8 +150,8 @@ assert len(UPLOAD_FORM.findall(UPLOAD_PAGE)) == 1
 
 def _upload_page(rows, form=True):
     """The upload fixture with `rows` (newest first, `(id, name)`) above its two made-up entries; without
-    its upload form when `form` is false, as live LMD serves /Dateien/ right after an upload (#1659's
-    closing check, Check-In: the reload showed only the file list)."""
+    its upload form when `form` is false, as live LMD serves /Dateien/ right after an upload (seen on
+    live LMD for Check-In: the reload showed only the file list)."""
     html = "".join(
         f'<tr><td><a href="/Dateien/index.php?id={i}">img</a></td><td>'
         f'<span class="upload_list_gross_name"><a href="/Dateien/index.php?id={i}">{n}</a></span><br>'

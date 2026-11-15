@@ -1,6 +1,6 @@
-"""Tests for the frontier reader (#890). Seam: `frontier(repo, label)` with
-its three fetchers injected (issues, blocker state, parent) — a list of
-GitHub issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
+"""Tests for the frontier reader. Seam: `frontier(repo, label)` with its
+three fetchers injected (issues, blocker state, parent) — a list of GitHub
+issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
 `spec`, `slice`) out. No network: every case is a ticket fixture, which is
 the point of the seam.
 """
@@ -148,8 +148,6 @@ def unresolved_count(monkeypatch, issues, dropped, states=None):
     return len(read(issues, states)["unresolved"])
 
 
-# --- Native dependencies: the canonical path -------------------------------
-
 def test_native_open_blocker_reads_as_blocked():
     got = read([issue(1, blocked_by=1, total_blocked_by=2)])
     assert numbers(got["blocked"]) == [1], got
@@ -173,12 +171,10 @@ def test_native_dependencies_beat_a_stale_blocked_by_section():
 
 def test_no_native_edges_declared_falls_through_to_the_section():
     # total_blocked_by 0 is "this tracker holds no edges for this ticket",
-    # not "this ticket is unblocked" — #781's repo looks exactly like this.
+    # not "this ticket is unblocked" — a real repo looks exactly like this.
     got = read([issue(1, blocked_by=0, total_blocked_by=0)])
     assert numbers(got["unresolved"]) == [1], got
 
-
-# --- The `## Blocked by` fallback grammar ----------------------------------
 
 def test_section_naming_an_open_ticket_reads_as_blocked():
     # A blocked entry names the blockers still open, the way the native
@@ -225,8 +221,6 @@ def test_a_blocker_whose_state_cannot_be_read_is_unresolved():
     assert numbers(got["unresolved"]) == [1], got
 
 
-# --- Silence is its own answer ---------------------------------------------
-
 def test_a_ticket_with_no_section_at_all_is_unresolved():
     got = read([issue(1, body="## TL;DR\n\nSomething.\n")])
     assert numbers(got["unresolved"]) == [1], got
@@ -250,8 +244,6 @@ def test_every_unresolved_entry_says_why():
     assert all(entry["why"] for entry in got["unresolved"]), got
 
 
-# --- Claimed tickets are off the frontier ----------------------------------
-
 def test_an_assigned_ticket_is_off_the_frontier():
     got = read([issue(1, assignees=("caneff",),
                       body="## Blocked by\n\nNone.\n")])
@@ -269,8 +261,6 @@ def test_a_pull_request_is_not_a_ticket():
     got = read([issue(1, pull_request=True, body="## Blocked by\n\nNone.\n")])
     assert got == EMPTY, got
 
-
-# --- A spec parent is its own answer ---------------------------------------
 
 def test_a_spec_parent_lands_in_its_own_bucket():
     # A spec parent is dispatchable work in a different mode, so it is not a
@@ -312,7 +302,6 @@ def test_a_spec_parent_whose_body_names_an_open_blocker_is_blocked():
 
 
 def test_a_spec_parent_whose_blockers_are_all_closed_is_dispatchable():
-    # Prerequisites checked and met, so the route is the honest answer.
     got = read([issue(1, labels=("ready-for-agent", "spec"),
                       body="## Blocked by\n\n- #7\n")], states={7: "closed"})
     assert numbers(got["spec"]) == [1], got
@@ -365,8 +354,6 @@ def test_the_rendered_report_names_the_spec_route():
     assert line.startswith("spec        885 Spec: the lane  ("), line
     assert "implement-dispatch --spec 885 --slots <k>" in line, line
 
-
-# --- Non-dispatchable tickets are off the frontier -------------------------
 
 def test_a_needs_info_ticket_is_off_the_frontier():
     # `implement-dispatch` refuses a needs-info ticket outright: it waits on
@@ -424,8 +411,6 @@ def test_a_ticket_without_a_non_dispatchable_label_is_still_classified():
     assert numbers(got["unblocked"]) == [2], got
 
 
-# --- Shape -----------------------------------------------------------------
-
 def test_buckets_are_ordered_by_number():
     issues = [issue(9, body="## Blocked by\n\nNone.\n"),
               issue(3, body="## Blocked by\n\nNone.\n")]
@@ -454,8 +439,6 @@ def test_each_blocker_state_is_read_once_per_number():
     assert numbers(got["unblocked"]) == [1, 2], got
 
 
-# --- The printed report ----------------------------------------------------
-
 def test_the_report_names_a_blocked_ticket_s_open_blockers():
     got = read([issue(1, body="## Blocked by\n\n- #7\n")], states={7: "open"})
     assert F.render(got) == "blocked     1 ticket 1  (blocked by #7)", F.render(got)
@@ -474,8 +457,6 @@ def test_the_cli_refuses_a_wrong_argument_count():
     assert r.returncode == 2, r.stdout + r.stderr
     assert "usage: frontier.py <owner/repo> <label>" in r.stderr, r.stderr
 
-
-# --- The `gh` adapters -----------------------------------------------------
 
 def test_a_label_with_odd_characters_is_encoded_into_the_url():
     # `#` in a raw URL is a fragment marker: gh drops it and answers a
@@ -511,8 +492,6 @@ def test_the_cli_reports_a_failed_gh_call_on_one_line():
     assert "frontier.py: " in r.stderr, r.stderr
     assert "Traceback" not in r.stderr, r.stderr
 
-
-# --- The two inline forms the tree also writes -----------------------------
 
 def test_an_inline_blocked_by_line_names_blockers():
     # `docs/agents/issue-tracker.md`: a `Blocked by: #<n>, #<n>` line at the
@@ -560,8 +539,6 @@ def test_an_empty_inline_line_is_unresolved():
     got = read([issue(1, body="**Blocked by:**\n\nmore prose\n")])
     assert numbers(got["unresolved"]) == [1], got
 
-
-# --- A quoted template is not a declaration -------------------------------
 
 FENCED_TEMPLATE = """The ticket template we emit:
 
@@ -616,8 +593,6 @@ def test_a_preamble_inline_line_still_declares():
     assert numbers(got["unblocked"]) == [1], got
 
 
-# --- A queue past one page -------------------------------------------------
-
 def test_every_page_of_a_paginated_queue_comes_back():
     pages = [[issue(1), issue(2)], [issue(3)]]
     got = gh_tracker(lambda args: pages).issues("l")
@@ -637,8 +612,6 @@ def test_an_answer_that_is_not_pages_of_issues_is_an_error(answer):
         gh_tracker(lambda args: answer).issues("l")
     assert "pages" in str(excinfo.value), excinfo.value
 
-
-# --- A long fence protects a fence -----------------------------------------
 
 # Four backticks are exactly what you reach for to quote content that itself
 # contains a triple-backtick fence — which is what a ticket quoting this
@@ -702,8 +675,6 @@ def test_a_longer_run_closes_a_shorter_fence():
     got = read([issue(1, body=body)], states={7: "open"})
     assert numbers(got["blocked"]) == [1], got
 
-
-# --- Two visible declarations are ambiguous (#922) -----------------------
 
 QUOTED_THEN_REAL = """Evidence, quoting the other ticket:
 
@@ -769,9 +740,9 @@ def test_an_indented_inline_line_is_a_quotation_not_a_declaration(quoted):
 
 
 def test_an_indented_section_after_a_real_one_adds_nothing_to_its_answer():
-    # Codex on #996: the indent bound kept the quoted heading from counting as
-    # a second declaration, but its lines still joined the real section's
-    # payload and its `#906` blocked the ticket.
+    # The indent bound kept the quoted heading from counting as a second
+    # declaration, but its lines still joined the real section's payload
+    # and its `#906` blocked the ticket.
     body = "## Blocked by\n\nNone\n\n    ## Blocked by\n\n    - #906\n"
     got = read([issue(1, body=body)], states={906: "open"})
     assert numbers(got["unblocked"]) == [1], got
@@ -790,8 +761,8 @@ def test_a_tab_indented_line_after_a_real_section_adds_nothing_to_its_answer():
 
 
 def test_an_indented_fence_marker_in_a_quotation_does_not_swallow_the_real_declaration():
-    # #999: CommonMark reads a four-space-indented ``` as indented code, not
-    # a fence opener. A reader that opens a fence on it anyway, with no
+    # CommonMark reads a four-space-indented ``` as indented code, not a
+    # fence opener. A reader that opens a fence on it anyway, with no
     # closer in the quoted block, discards every later line — including the
     # real, unindented declaration.
     body = "Quoting another ticket:\n\n    ```\n    some quoted code\n\n## Blocked by\n\nNone\n"
@@ -801,34 +772,32 @@ def test_an_indented_fence_marker_in_a_quotation_does_not_swallow_the_real_decla
 
 def test_a_tab_indented_fence_marker_in_a_quotation_does_not_swallow_the_real_declaration():
     # Same bug as above, tab rather than four spaces — CommonMark treats a
-    # tab the same way (#999, round-1 review: the four-space fixture alone
-    # left this half of the bound unwitnessed).
+    # tab the same way (the four-space fixture alone leaves this half of
+    # the bound unwitnessed).
     body = "Quoting another ticket:\n\n\t```\n\tsome quoted code\n\n## Blocked by\n\nNone\n"
     got = read([issue(1, body=body)])
     assert numbers(got["unblocked"]) == [1], got
 
 
 def test_an_indented_closer_does_not_end_an_unindented_fence_early():
-    # The closer half of the same bound (#999, round-1 review): CommonMark
-    # bounds a closing fence marker the same way as an opener — a
-    # 4-space-indented ``` inside a real, unindented fence is quoted content,
-    # not the closer, so the fence stays open through it and the quoted
-    # `## Blocked by` inside stays quoted.
+    # The closer half of the same bound: CommonMark bounds a closing
+    # fence marker the same way as an opener — a 4-space-indented ```
+    # inside a real, unindented fence is quoted content, not the closer,
+    # so the fence stays open through it and the quoted `## Blocked by`
+    # inside stays quoted.
     body = ("```\nquoted example:\n    ```\n\n## Blocked by\n\nNone.\n```\n\n"
             "## Blocked by\n\n- #7\n")
     got = read([issue(1, body=body)], states={7: "open"})
     assert numbers(got["blocked"]) == [1], got
 
 
-# --- A spec's slice is handed off, not dispatched (#1242) -------------------
-
 NO_BLOCKERS = "Blocked by: None"
 
 
 def spec_parent(number=483, labels=("spec",)):
     """The parent issue as `/issues/<n>/parent` answers: a full issue object.
-    Its labels omit the queried one by default, the shape burn-2026-09-27 hit:
-    the parent carried `spec` and no `ready-for-agent`."""
+    Its labels omit the queried one by default, the shape a real spec
+    parent had: it carried `spec` and no `ready-for-agent`."""
     out = issue(number, labels=labels)
     out["repository_url"] = "https://api.github.com/repos/owner/repo"
     return out
@@ -845,7 +814,7 @@ def test_a_slice_entry_names_its_parent_and_the_handoff():
     why = got["slice"][0]["why"]
     assert "#483" in why, why
     assert "implement-dispatch --spec 483 --slots" in why, why
-    assert got["slice"][0]["spec"] == 483, got["slice"][0]  # the field drain reads (#1477)
+    assert got["slice"][0]["spec"] == 483, got["slice"][0]  # the field drain reads
 
 
 def test_a_slice_under_a_parent_without_spec_is_ordinary():
@@ -960,7 +929,7 @@ def test_fetch_parent_does_not_read_a_failed_call_as_no_parent():
 
 def test_a_failure_naming_404_in_its_url_is_not_a_missing_parent():
     # gh's own message for a dropped connection carries the request URL, so a
-    # ticket #1404 matched a bare "404" and was read as having no parent.
+    # ticket 1404 matched a bare "404" and was read as having no parent.
     url_failure = T.TrackerError(
         'gh: Get "https://api.github.com/repos/o/r/issues/1404/parent": connection refused')
     run = gh_answers({"repos/owner/repo/issues/1404/parent": url_failure})
@@ -992,8 +961,8 @@ def _parent_run():
 
 
 def test_a_parent_named_by_two_slices_is_read_once():
-    # #1406 C6: slices of one spec each fall back to `Part of #483`; the
-    # parent issue is read once per frontier read, as a blocker's state is.
+    # Slices of one spec each fall back to `Part of #483`; the parent issue
+    # is read once per frontier read, as a blocker's state is.
     asked = []
     table = {"repos/owner/repo/issues/483": spec_parent(483)}
     for n in (491, 492):
@@ -1044,9 +1013,8 @@ def unreadable_parent(body):
 
 
 # A `## Parent` section that states something this reader cannot resolve is
-# a parent it could not read, never "no parent" (#1406 S1/P1, reversing
-# #1282's three cases): read as none, a slice of a spec dispatches as an
-# ordinary ticket.
+# a parent it could not read, never "no parent": read as none, a slice of a
+# spec dispatches as an ordinary ticket.
 def test_the_parent_section_ends_at_the_next_heading():
     # Read past the heading, `#483` would answer; the section's own prose
     # names nothing, so it is unreadable.
@@ -1091,8 +1059,8 @@ def test_a_parent_section_linking_another_repo_is_unreadable():
     assert "## Parent" in str(unreadable_parent(body))
 
 
-# #1406 C2: the same declaration as a bare `Part of` line, with no heading,
-# is just as unreadable; read as none, the slice dispatches.
+# The same declaration as a bare `Part of` line, with no heading, is just
+# as unreadable; read as none, the slice dispatches.
 def test_a_part_of_line_linking_another_repo_is_unreadable():
     body = "Part of [Spec](https://github.com/other/place/issues/12).\n\nBody.\n"
     assert "`Part of`" in str(unreadable_parent(body))
@@ -1121,8 +1089,6 @@ def test_a_fenced_part_of_line_is_not_a_parent_reference():
     body = "```\nPart of #483\n```\n"
     assert F.fetch_parent(gh_tracker(run), issue(491, body=body)) is None
 
-
-# --- A blocker landed on its spec's integration branch (#1466) -------------
 
 SECTION_ON_1 = "## Blocked by\n\n- #1\n"
 SPEC_483 = {"spec-483": {1}}
@@ -1280,8 +1246,6 @@ def test_fetch_native_blockers_refuses_an_answer_that_is_not_pages():
         gh_tracker(lambda a: {"message": "x"}).native_blockers(issue(2))
 
 
-# --- A slice whose spec cannot run it is stranded, not skipped (#1485) ------
-
 def foreign_spec(number=259, repo="caneff/sudokupad-art", state="open"):
     out = spec_parent(number)
     out["state"] = state
@@ -1334,8 +1298,6 @@ def test_the_rendered_report_names_a_stranded_slice():
                          parents={491: foreign_spec()})).splitlines()[0]
     assert line.startswith("stranded    491 S  ("), line
 
-
-# --- one heading rule for all three readers (#1772, spec #1734) -------------
 
 # A `#` line indented to column four is a code block in CommonMark, not a
 # heading. `visible()` drops a line opening with four spaces or a tab, but not

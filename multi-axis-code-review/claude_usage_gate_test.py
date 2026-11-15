@@ -1,5 +1,5 @@
-"""The Claude usage gate (#1436): `claude-usage-gate.py` reads the cache the
-status line writes (`flow/ccstatusline-table/helpers/claude-usage.py`); its
+"""The Claude usage gate: `claude-usage-gate.py` reads the cache the status
+line writes (`flow/ccstatusline-table/helpers/claude-usage.py`); its
 docstring defines the exit statuses.
 
 Seam: the script's command line — stdout line and exit status — against a

@@ -1,4 +1,4 @@
-"""The always-on budget gate (#1413): every session loads the global
+"""The always-on budget gate: every session loads the global
 CLAUDE.md plus its `@`-imports, and tests/check-always-on.py fails when that
 text passes its word budget or a pointer line names a path that does not
 exist. Each case runs the checker's command line and reads its exit status
@@ -35,8 +35,6 @@ def test_real_claude_md_is_within_budget():
 
 
 class Fixtures:
-    """A scratch repo with a CLAUDE.md under test and a home holding its imports."""
-
     def __init__(self, tmp):
         self.tmp = tmp
         self.home = tmp / "home"
@@ -111,7 +109,7 @@ def test_pointer_without_an_action_fails(fx):
 
 def test_real_claude_md_padded_past_budget_fails_on_budget(fx):
     # Pad by BUDGET + 1 words so the total passes BUDGET whatever the real file's
-    # headroom is (#1632); BUDGET is read from the checker's source.
+    # headroom is. BUDGET is read from the checker's source.
     budget = int(re.search(r"^BUDGET = (\d+)", CHECKER.read_text(), re.M).group(1))
     text = REAL.read_text() + "\n" + " ".join(["word"] * (budget + 1)) + "\n"
     f = fx.tmp / "CLAUDE.md"

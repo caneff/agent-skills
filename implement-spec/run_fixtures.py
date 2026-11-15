@@ -31,7 +31,7 @@ def drop_repo_field(run_id, root):
 def drop_job(run_id, root, lowest):
     """Rewrite a run file as one written before jobs existed: a clump with no
     `job` key, which reads as no record at all (a fresh registration records
-    `none`, #1311)."""
+    `none`)."""
     target = runfile.path(run_id, root)
     with open(target) as fh:
         run = json.load(fh)

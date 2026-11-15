@@ -1,4 +1,4 @@
-"""Tests for `backstop` (#1594). Seam: the command line, `backstop.py --repo
+"""Tests for `backstop`. Seam: the command line, `backstop.py --repo
 <checkout> --jobs <k> --notify <cmd>`, run as a subprocess against a real git
 repo with a bare origin whose `AGENTS.md` declares a fake seam (`sh seam.sh`,
 told by `FAKE_SEAM` what to print and exit with), a fake `gh` (a JSON state
@@ -67,7 +67,6 @@ else:
     sys.stderr.write("fake gh: unhandled %r\n" % args); sys.exit(2)
 '''
 
-# What the fake seam does is chosen per night by `FAKE_SEAM`.
 FAKE_SEAM = r'''echo "jobs=${TESTS_JOBS:-unset}" >> "$JOBS_LOG"
 case "$FAKE_SEAM" in
   green) echo "PASS a/a_test.py"; echo "PASS b/b.test.sh"; echo "2 suites passed" ;;
@@ -196,7 +195,7 @@ def test_green_advances_last_green_to_origin_tip(sb):
 
 
 def test_green_night_reports_every_suite_over_its_cpu_budget(sb):
-    """#1606: `tests/all.sh` no longer fails an overrun, so the night's report
+    """`tests/all.sh` does not fail an overrun, so the night's report
     is where one is read. The night stays green."""
     tip = sb.git(sb.repo, "rev-parse", "HEAD")
     out = sb.run("overbudget")
@@ -351,7 +350,6 @@ def listed(*suites):
 
 
 def verdict_lines(body):
-    """The failing-suite lines of a ticket body."""
     section = body.split("## Failing suites", 1)[1].split("##", 1)[0]
     return [x for x in section.splitlines() if x.startswith("- ")]
 
@@ -484,7 +482,7 @@ def test_a_backstop_that_cannot_import_its_neighbours_is_inconclusive(sb):
 
 def test_a_backstop_night_never_loads_drain(sb):
     """Run the backstop under a wrapper that reports whether `drain` ended up in `sys.modules`;
-    the night goes green and drain was never imported (#1779)."""
+    the night goes green and drain was never imported."""
     seen = os.path.join(sb.tmp, "modules.txt")
     wrapper = os.path.join(sb.tmp, "wrap.py")
     write(wrapper, "import runpy, sys\n"
@@ -646,8 +644,6 @@ def test_ci_run_list_that_fails_is_inconclusive(ci):
     (note,) = ci.notes()
     assert "inconclusive" in note and "run list" in note, note
 
-
-# --- the GitHub reads, over the issue module's in-memory adapter (#1786) -------
 
 def _ctx(tracker):
     import backstop

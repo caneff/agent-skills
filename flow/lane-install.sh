@@ -27,7 +27,7 @@ done
 cargo install --path "$crate" --root "$HOME/.local" --force "${names[@]}"
 
 # The record is bookkeeping, not part of the install: the binaries are already
-# in place by here, so nothing below may fail the whole install (#883) — not an
+# in place by here, so nothing below may fail the whole install — not an
 # unresolvable HEAD (a checkout with no commits), and not an unwritable
 # ~/.local/state. `git rev-parse HEAD` also echoes the literal "HEAD" on stdout
 # when it fails, so the sha is taken into a variable and the directory made only

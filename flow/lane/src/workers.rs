@@ -1,5 +1,5 @@
-//! Controller→worker pairs (#964): `implement-dispatch` appends one record
-//! per worker it starts, keyed to the controller's own session pid, so a
+//! Controller→worker pairs: `implement-dispatch` appends one record per
+//! worker it starts, keyed to the controller's own session pid, so a
 //! `SessionStart` hook can restore what a `/clear` wipes from context. A
 //! `/clear` kills the context, not the process — the session's pid, and this
 //! sibling file beside its `~/.claude/sessions/<pid>.json` record, survive it.
@@ -31,14 +31,14 @@ pub struct WorkerRecord {
     /// call failed — never fails the write over a clock it can't reach.
     pub dispatched_at: String,
     /// The controller session's own `/proc/<pid>/stat` starttime at dispatch
-    /// time (#964 fix round 1, Codex high): pids are small and get reused,
-    /// especially across a WSL restart, so a stale record from a dead
-    /// controller must never restore into whatever session now holds that
-    /// pid. `controller-restore` drops any record whose value here does not
-    /// match the resuming session's own starttime. `#[serde(default)]` so a
-    /// record written before this field existed decodes as empty rather than
-    /// failing to parse — empty never matches a live starttime, so such a
-    /// record is dropped as stale too, the conservative direction.
+    /// time: pids are small and get reused, especially across a WSL
+    /// restart, so a stale record from a dead controller must never restore
+    /// into whatever session now holds that pid. `controller-restore` drops
+    /// any record whose value here does not match the resuming session's
+    /// own starttime. `#[serde(default)]` so a record written before this
+    /// field existed decodes as empty rather than failing to parse — empty
+    /// never matches a live starttime, so such a record is dropped as stale
+    /// too, the conservative direction.
     #[serde(default)]
     pub proc_start: String,
 }
@@ -67,10 +67,10 @@ pub fn now_iso8601() -> String {
 ///
 /// Under the sidecar's exclusive lock (`lock`), the whole file is read, the
 /// line added, and the result published as a complete replacement
-/// (`publish`) rather than appended in place (#1101, PR #1099 Codex CX3-1):
-/// an in-place `write_all` cut off after a prefix leaves an unterminated line
-/// that the next append's record merges into, and `read` then skips both. A
-/// replacement cut off anywhere leaves the old file whole.
+/// (`publish`) rather than appended in place: an in-place `write_all` cut
+/// off after a prefix leaves an unterminated line that the next append's
+/// record merges into, and `read` then skips both. A replacement cut off
+/// anywhere leaves the old file whole.
 pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<()> {
     let path = path_for(home, pid);
     if let Some(dir) = path.parent() {
@@ -96,17 +96,17 @@ fn add_line(path: &Path, line: &str) -> std::io::Result<()> {
 /// No file at all reads as no workers, the ordinary case for a session that
 /// has never dispatched one.
 ///
-/// Takes the sidecar's lock shared before reading (#1044), so a read waits
-/// out any writer holding it exclusively. Every write now replaces the file
-/// by rename, so no reader can see a torn one either way; the lock is what
+/// Takes the sidecar's lock shared before reading, so a read waits out any
+/// writer holding it exclusively. Every write now replaces the file by
+/// rename, so no reader can see a torn one either way; the lock is what
 /// orders a read against a read-modify-publish in progress. A lock that
 /// cannot be taken falls back to reading unlocked rather than losing every
 /// worker over a lock that failed for an unrelated reason — noted on stderr
 /// rather than swallowed outright, since a silent fallback here is the same
-/// class of failure (#1044 review, S1/P1/C2) the lock exists to remove:
-/// nothing would otherwise distinguish "read while the lock could not be
-/// taken" from "no workers were ever dispatched." No lock file is created for
-/// a sidecar that does not exist.
+/// class of failure the lock exists to remove: nothing would otherwise
+/// distinguish "read while the lock could not be taken" from "no workers
+/// were ever dispatched." No lock file is created for a sidecar that does
+/// not exist.
 pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
     let path = path_for(home, pid);
     match std::fs::symlink_metadata(&path) {
@@ -137,8 +137,8 @@ pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
 /// The lock file beside a sidecar, `<pid>.workers.jsonl.lock`. The lock
 /// lives here rather than on the sidecar's own handle because `publish`
 /// swaps the sidecar's inode by rename: a lock on the old inode would not
-/// exclude a writer that opens the new one (#1101). This file is never
-/// replaced or removed, so every holder locks the same inode.
+/// exclude a writer that opens the new one. This file is never replaced or
+/// removed, so every holder locks the same inode.
 fn lock_path(sidecar: &Path) -> PathBuf {
     sibling(sidecar, "lock")
 }
@@ -158,14 +158,13 @@ fn open_lock(sidecar: &Path) -> std::io::Result<std::fs::File> {
 /// The sidecar's exclusive lock, held until the returned handle drops. Every
 /// writer — `append`, `remove_workspace` and adoption's move — holds it
 /// across its whole read-modify-publish, so no write lands between another's
-/// read and its publish and is lost to it (#964 fix round 1, Codex high).
+/// read and its publish and is lost to it.
 fn lock(sidecar: &Path) -> std::io::Result<std::fs::File> {
     let f = open_lock(sidecar)?;
     f.lock()?;
     Ok(f)
 }
 
-/// The sidecar's contents, or empty when there is no file yet.
 fn read_if_present(path: &Path) -> std::io::Result<String> {
     match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -178,7 +177,7 @@ fn non_empty_lines(raw: &str) -> Vec<&str> {
 }
 
 /// Normalizes a workspace path for storage in, or a query against, a
-/// `WorkerRecord` (#1040). `implement-dispatch` builds this path itself with
+/// `WorkerRecord`. `implement-dispatch` builds this path itself with
 /// `PathBuf::join`; `merge-cleanup` reads one back from `git worktree list`.
 /// The two are independent construction sites, and a symlinked repo root
 /// makes them spell the same directory two different ways, so
@@ -204,11 +203,11 @@ pub fn canonical_workspace_path(path: &str) -> String {
 /// a step `merge-cleanup` can fail over.
 ///
 /// Holds the sidecar's exclusive lock (`lock`) across the whole
-/// read-filter-publish (#964 fix round 1, Codex high), so an `append` cannot
-/// land between the read and the publish and be discarded by it; the lock
-/// releases at the end of each loop iteration. A file this run cannot lock,
-/// read or publish is skipped rather than erroring, matching every other
-/// best-effort failure mode here — and a failed publish leaves it whole.
+/// read-filter-publish, so an `append` cannot land between the read and
+/// the publish and be discarded by it; the lock releases at the end of
+/// each loop iteration. A file this run cannot lock, read or publish is
+/// skipped rather than erroring, matching every other best-effort failure
+/// mode here — and a failed publish leaves it whole.
 pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
     let mut removed_any = false;
     for (_, path) in sidecars(home) {
@@ -231,7 +230,7 @@ pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
 
 /// Replaces the whole of a locked sidecar with `lines`, one record each, so
 /// that a death, kill or full disk at any point leaves either the old file or
-/// the new one, never a truncated one (#1101): the new contents go to
+/// the new one, never a truncated one: the new contents go to
 /// `<sidecar>.tmp` and replace the sidecar through `atomic::replace`. The caller
 /// holds `lock`, which is what makes one fixed temp name safe; a temp file a
 /// crash left behind is truncated by the next publish.
@@ -281,14 +280,13 @@ fn sidecars(home: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// Whether the controller that wrote `record` under `pid` is gone (#1098):
-/// the pid's `/proc` entry does not exist, or it does with a starttime other
+/// Whether the controller that wrote `record` under `pid` is gone: the
+/// pid's `/proc` entry does not exist, or it does with a starttime other
 /// than the record's — a reused pid, an unrelated session. Anything short of
 /// that proof is not orphaned: a record with no `proc_start` under a live
 /// pid, a `/proc` entry that exists but cannot be read, a sidecar named by no
-/// pid at all (#1098 review S2). Two controllers for one worker is the
-/// failure adoption must never cause, so an absent answer never reads as
-/// dead.
+/// pid at all. Two controllers for one worker is the failure adoption must
+/// never cause, so an absent answer never reads as dead.
 fn is_orphaned(pid: &str, record: &WorkerRecord) -> bool {
     let Some(pid) = pid.parse::<i32>().ok().filter(|p| *p > 0) else { return false };
     match std::fs::metadata(format!("/proc/{pid}")) {
@@ -303,7 +301,7 @@ fn is_orphaned(pid: &str, record: &WorkerRecord) -> bool {
 /// A workspace already torn down has nothing left to adopt, and a worker a
 /// live controller holds is no orphan whatever stale copies say: adoption
 /// lands the record before removing the dead copy, so a crash between the
-/// two leaves both (#1098 Codex [high]).
+/// two leaves both.
 pub fn orphans(home: &Path) -> Vec<(String, WorkerRecord)> {
     let all: Vec<(String, WorkerRecord)> =
         sidecars(home).into_iter().flat_map(|(pid, _)| read(home, &pid).into_iter().map(move |r| (pid.clone(), r))).collect();
@@ -316,7 +314,6 @@ fn adopt_lock_path(home: &Path) -> PathBuf {
     home.join(".claude/sessions/.adopt.lock")
 }
 
-/// Why `adopt` moved nothing.
 #[derive(Debug, PartialEq)]
 pub enum AdoptRefusal {
     /// No record under the given tree names the agent — or another session
@@ -351,11 +348,11 @@ pub struct Adopter<'a> {
 }
 
 /// Makes the session `me` the controller of the worker `agent` whose
-/// workspace sits under `within` (#1098): moves its record out of its dead
-/// controller's sidecar into `me.pid`'s, restamped with `me.start` so `controller-restore` restores it here after a
-/// `/clear`. Refuses while the record's controller is alive — two
-/// controllers for one worker is the failure this exists to prevent — and
-/// when the workspace is gone.
+/// workspace sits under `within`: moves its record out of its dead
+/// controller's sidecar into `me.pid`'s, restamped with `me.start` so
+/// `controller-restore` restores it here after a `/clear`. Refuses while
+/// the record's controller is alive — two controllers for one worker is the
+/// failure this exists to prevent — and when the workspace is gone.
 ///
 /// Every adoption holds one lock, `.adopt.lock` beside the sidecars, from
 /// its scan for a live holder to its landing, so two sessions adopting one
@@ -363,11 +360,10 @@ pub struct Adopter<'a> {
 /// refused. The move itself also takes the exclusive lock `append` and
 /// `remove_workspace` take, on both sidecars, in path order, and publishes
 /// each sidecar whole (`publish`), so a death mid-write never leaves either
-/// one short of a record it held (#1101). The record
-/// lands in the adopter's sidecar before it leaves the dead one (#1098
-/// Codex [high]): a process death between the two leaves a duplicate the
-/// live copy outranks — `orphans` never offers it, and this refuses it —
-/// never a worker in neither file.
+/// one short of a record it held. The record lands in the adopter's sidecar
+/// before it leaves the dead one: a process death between the two leaves a
+/// duplicate the live copy outranks — `orphans` never offers it, and this
+/// refuses it — never a worker in neither file.
 pub fn adopt(home: &Path, agent: &str, within: &str, me: Adopter) -> Result<Adopted, AdoptRefusal> {
     let io = |e: std::io::Error| AdoptRefusal::Io(e.to_string());
     std::fs::create_dir_all(home.join(".claude/sessions")).map_err(io)?;
@@ -436,9 +432,9 @@ fn move_record(
         publish(from, &kept).map_err(io)?;
         false
     } else {
-        // Landing first: a failed publish leaves the source untouched
-        // (#1098 review C3), and a death after it leaves a duplicate the
-        // live copy outranks rather than a worker in neither file.
+        // Landing first: a failed publish leaves the source untouched,
+        // and a death after it leaves a duplicate the live copy outranks
+        // rather than a worker in neither file.
         add_line(&own, &line).map_err(io)?;
         abort_after_landing();
         publish(from, &kept).is_err()
@@ -471,7 +467,7 @@ mod tests {
         }
     }
 
-    /// #1040: `implement-dispatch` builds a workspace path itself
+    /// `implement-dispatch` builds a workspace path itself
     /// (`PathBuf::join`), `merge-cleanup` reads one back from `git worktree
     /// list`, and a symlinked repo root makes the two spellings differ even
     /// though they name the same directory. `canonical_workspace_path` is
@@ -498,9 +494,9 @@ mod tests {
         assert_eq!(canonical_workspace_path("/no/such/path/at/all"), "/no/such/path/at/all");
     }
 
-    /// The end-to-end case #1040 was filed over: a record stored under one
-    /// spelling of a symlinked workspace is still found and removed when
-    /// queried under the other spelling, once both sides canonicalize.
+    /// The end-to-end case: a record stored under one spelling of a
+    /// symlinked workspace is still found and removed when queried under
+    /// the other spelling, once both sides canonicalize.
     #[test]
     fn remove_workspace_matches_a_symlinked_spelling_when_canonicalized() {
         let tmp = TempDir::new().unwrap();
@@ -607,14 +603,15 @@ mod tests {
         assert!(!remove_workspace(tmp.path(), "/anything"));
     }
 
-    /// #1044: `read` takes the lock every writer holds (shared is enough), so
-    /// a read landing while a writer holds it blocks until the write is done
+    /// `read` takes the lock every writer holds (shared is enough), so a
+    /// read landing while a writer holds it blocks until the write is done
     /// rather than observing the file mid-write and returning no records —
-    /// the torn read `controller-restore` would otherwise hit. Holds the lock
-    /// across an in-place truncate, as a writer that did not publish by
-    /// rename would, spawns `read` on another thread, proves it cannot return
-    /// while the lock is held, then completes the write and checks `read`
-    /// observes the full content rather than the empty truncated file.
+    /// the torn read `controller-restore` would otherwise hit. Holds the
+    /// lock across an in-place truncate, as a writer that did not publish
+    /// by rename would, spawns `read` on another thread, proves it cannot
+    /// return while the lock is held, then completes the write and checks
+    /// `read` observes the full content rather than the empty truncated
+    /// file.
     #[test]
     fn read_waits_for_the_lock_so_it_never_observes_a_torn_truncate() {
         let tmp = TempDir::new().unwrap();
@@ -655,7 +652,8 @@ mod tests {
         assert_eq!(workspaces, vec!["/a", "/b"], "read must observe the completed rewrite, not the torn truncate");
     }
 
-    /// #1101 review C1: the lock survives a publish's rename; one on the sidecar's own inode would not.
+    /// The lock survives a publish's rename; one on the sidecar's own inode
+    /// would not.
     #[test]
     fn the_lock_still_excludes_a_writer_after_a_publish_renames_the_sidecar() {
         let tmp = TempDir::new().unwrap();
@@ -674,12 +672,12 @@ mod tests {
         appender.join().unwrap();
     }
 
-    /// #964 fix round 1 (Codex high): `remove_workspace`'s read/filter/write
-    /// and `append`'s write must serialize on the same file lock, or an
-    /// append landing between the read and the write is silently lost. Holds
-    /// an exclusive lock externally, proves neither call can finish while it
-    /// is held — that is what makes the earlier version of both unlocked —
-    /// then releases it and checks the racing append survived the rewrite.
+    /// `remove_workspace`'s read/filter/write and `append`'s write must
+    /// serialize on the same file lock, or an append landing between the
+    /// read and the write is silently lost. Holds an exclusive lock
+    /// externally, proves neither call can finish while it is held — that
+    /// is what makes the earlier version of both unlocked — then releases
+    /// it and checks the racing append survived the rewrite.
     #[test]
     fn append_and_remove_serialize_on_the_file_lock_so_a_racing_append_is_never_lost() {
         let tmp = TempDir::new().unwrap();
@@ -720,14 +718,14 @@ mod tests {
         assert!(!workspaces.contains(&"/b"), "{workspaces:?}");
     }
 
-    /// #1098: `adopt`'s check-and-move holds the source sidecar's lock, so a
+    /// `adopt`'s check-and-move holds the source sidecar's lock, so a
     /// second adopter cannot read the record between the first's check and
     /// its rewrite. Holds that lock externally and proves the move cannot
     /// finish while it is held — called on `move_record` directly, since
-    /// `adopt`'s own pre-scan `read` would block on the shared lock first and
-    /// pass this whether or not the move locks. Then releases it: the move
-    /// lands, and a second adopter finds the worker controlled by a live
-    /// session.
+    /// `adopt`'s own pre-scan `read` would block on the shared lock first
+    /// and pass this whether or not the move locks. Then releases it: the
+    /// move lands, and a second adopter finds the worker controlled by a
+    /// live session.
     #[test]
     fn adopt_moves_under_the_source_lock_and_a_second_adopter_is_refused() {
         let tmp = TempDir::new().unwrap();
@@ -760,9 +758,9 @@ mod tests {
         assert_eq!(adopt(&home, "sudokupad-art-143", &root, Adopter { pid: "1", start: "1" }).unwrap_err(), AdoptRefusal::ControllerAlive(me));
     }
 
-    /// #1098 review S2: only a pid that verifiably does not exist is a dead
-    /// controller. A sidecar whose name is no pid proves nothing about its
-    /// controller, and reading it as dead would hand its worker a second one.
+    /// Only a pid that verifiably does not exist is a dead controller. A
+    /// sidecar whose name is no pid proves nothing about its controller,
+    /// and reading it as dead would hand its worker a second one.
     #[test]
     fn only_a_pid_that_does_not_exist_is_a_dead_controller() {
         let r = record("/w");
@@ -771,9 +769,9 @@ mod tests {
         assert!(!is_orphaned("0", &r), "pid 0 is no controller's");
     }
 
-    /// #1098 review C3: a failed landing must leave the record where it was —
-    /// a worker in neither file is one nothing will ever offer or restore
-    /// again. A directory squats on the adopter's `<sidecar>.tmp` here, so the
+    /// A failed landing must leave the record where it was — a worker in
+    /// neither file is one nothing will ever offer or restore again. A
+    /// directory squats on the adopter's `<sidecar>.tmp` here, so the
     /// landing's publish cannot create its temp file and fails.
     #[test]
     fn a_failed_write_into_the_adopters_sidecar_leaves_the_record_where_it_was() {
@@ -793,10 +791,10 @@ mod tests {
         assert_eq!(read(home, &dead), vec![record(&ws)], "the record is back where it was");
     }
 
-    /// #1098 review C4: the move re-checks, under the lock, that the
-    /// controller is still gone — `adopt`'s pre-scan ran unlocked, and a
-    /// record can come alive in between (another session adopting it).
-    /// Called on `move_record` directly so the pre-scan cannot answer first.
+    /// The move re-checks, under the lock, that the controller is still
+    /// gone — `adopt`'s pre-scan ran unlocked, and a record can come alive
+    /// in between (another session adopting it). Called on `move_record`
+    /// directly so the pre-scan cannot answer first.
     #[test]
     fn the_move_refuses_a_record_whose_controller_is_alive_under_the_lock() {
         let tmp = TempDir::new().unwrap();
@@ -816,10 +814,10 @@ mod tests {
         assert!(read(home, "4242").is_empty());
     }
 
-    /// #1098 review C5: the move holds the adopter's own sidecar lock too,
-    /// so a `/clear`'s restore read or a concurrent dispatch append on the
-    /// adopter never interleaves with the landing. Holds that lock
-    /// externally and proves the move cannot finish while it is held.
+    /// The move holds the adopter's own sidecar lock too, so a `/clear`'s
+    /// restore read or a concurrent dispatch append on the adopter never
+    /// interleaves with the landing. Holds that lock externally and proves
+    /// the move cannot finish while it is held.
     #[test]
     fn the_move_waits_for_the_adopters_own_sidecar_lock() {
         let tmp = TempDir::new().unwrap();
@@ -846,7 +844,7 @@ mod tests {
         assert_eq!(read(&home, "4242").len(), 2);
     }
 
-    /// #1101 review C3: a move within one sidecar (a reused pid) still holds its lock.
+    /// A move within one sidecar (a reused pid) still holds its lock.
     #[test]
     fn a_move_within_one_sidecar_waits_for_its_lock() {
         let tmp = TempDir::new().unwrap();
@@ -865,11 +863,11 @@ mod tests {
         assert_eq!(mover.join().unwrap(), Ok(true));
     }
 
-    /// #1098 Codex [high]: every adoption runs under one lock, so the scan
-    /// for a live holder and the landing are one step across all sidecars —
-    /// two adopters taking the two stale copies a crash can leave would
-    /// otherwise each find its own copy orphaned and both win. Holds that
-    /// lock externally and proves `adopt` cannot finish while it is held.
+    /// Every adoption runs under one lock, so the scan for a live holder
+    /// and the landing are one step across all sidecars — two adopters
+    /// taking the two stale copies a crash can leave would otherwise each
+    /// find its own copy orphaned and both win. Holds that lock externally
+    /// and proves `adopt` cannot finish while it is held.
     #[test]
     fn every_adoption_waits_for_the_one_adoption_lock() {
         let tmp = TempDir::new().unwrap();

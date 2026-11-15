@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Guards #1331: mutation-audit's single-diff witness mode. One patch and one
+# mutation-audit's single-diff witness mode. One patch and one
 # covering test command go in; one outcome line (`red`, `green` or `unknown`)
 # and the suite's own message come out, from a throwaway worktree, with the
 # reviewed checkout left exactly as found.
 # BASH_SOURCE rather than `git rev-parse --show-toplevel`, and GIT_* scrubbed:
-# a caller's leaked GIT_DIR/GIT_WORK_TREE would point git at the caller's repo
-# (#620).
+# a caller's leaked GIT_DIR/GIT_WORK_TREE would point git at the caller's repo.
 set -uo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,8 +1,8 @@
-"""render-brief.py (#1216, #1329, #1400): the one source of an axis reviewer's
-brief. Seam: the CLI, run against a throwaway worktree directory. Each case
-asserts the line it is about, so a render that fails for another reason (a
-missing input, a bad path) does not pass for the one under test
-(`AGENTS.md` § Recurring defect classes, class 3).
+"""render-brief.py: the one source of an axis reviewer's brief. Seam: the
+CLI, run against a throwaway worktree directory. Each case asserts the line
+it is about, so a render that fails for another reason (a missing input, a
+bad path) does not pass for the one under test (`AGENTS.md` § Recurring
+defect classes, class 3).
 """
 import argparse
 import importlib.util
@@ -19,7 +19,7 @@ SHAPES = ("an absent or malformed answer read as a benign one",
           "a stated fallback with no mechanism behind it",
           "a test that passes for a reason other than the one it claims")
 def render_line(worktree, diff, *extra, axis="standards", explicit_spec=False, repo="skills"):
-    """Run the CLI: (exit code, stdout, stderr). On success stdout is the one dispatch line (#1548)."""
+    """Run the CLI: (exit code, stdout, stderr). On success stdout is the one dispatch line."""
     args = ["python3", RENDER, "--axis", axis, "--repo", repo, "--worktree", worktree,
             "--ticket", "1395", "--base", "origin/main", "--diff", diff,
             "--diff-command", "git -C WT diff origin/main...HEAD", "--commit", "abc1234 first commit",
@@ -93,7 +93,7 @@ def test_the_sidecar_and_marker_names_are_pinned(wt, diff):
     assert "findings-standards-1395.jsonl" in out and "findings-standards-1395.done" in out, out
 
 
-# #1329: standards sources are listed from the worktree with ls, not asserted.
+# Standards sources are listed from the worktree with ls, not asserted.
 def test_a_standards_file_present_in_the_worktree_is_listed(wt, diff):
     _, out, _ = render(wt, diff)
     assert "CODING_STANDARDS.md" in (section(out, "Standards sources") or ""), out
@@ -124,7 +124,7 @@ def test_defect_classes_present_is_listed_as_a_source_and_read_by_name(wt, diff)
     assert not any(s in dc for s in SHAPES), dc
 
 
-# #1216/#1400: rulings, the worker's choices and claims stay in their own sections.
+# Rulings, the worker's choices and claims stay in their own sections.
 @pytest.fixture
 def judged(wt, diff):
     _, out, _ = render(wt, diff, "--ruling", "RULED-X by Chris", "--choice", "CHOSE-Y by worker",
@@ -182,7 +182,6 @@ def test_a_claims_own_words_are_the_only_place_an_outcome_word_appears(wt, diff)
     assert len(re.findall(OUTCOME_WORD, claims)) == 1, claims
 
 
-# #1400: worker count and ceiling.
 def test_default_worker_count_and_wall_clock_ceiling_are_stated(wt, diff):
     _, out, _ = render(wt, diff)
     assert "at most 1 worker" in out and "600 seconds" in out, out
@@ -193,7 +192,7 @@ def test_worker_count_and_ceiling_are_taken_from_the_inputs(wt, diff):
     assert "at most 3 worker" in out and "90 seconds" in out, out
 
 
-# #1230: the rating field belongs to the correctness sidecar.
+# The rating field belongs to the correctness sidecar.
 def test_the_correctness_sidecar_schema_carries_rating_confirmed_plausible(wt, diff):
     _, out, _ = render(wt, diff, axis="correctness")
     assert '"rating": "CONFIRMED" or "PLAUSIBLE"' in out, out
@@ -204,7 +203,6 @@ def test_the_spec_sidecar_schema_carries_no_rating(wt, diff):
     assert '"rating"' not in out, out
 
 
-# Refusals name their cause and never render a half brief.
 def test_a_missing_diff_capture_is_refused_by_name(wt, tmp_path):
     code, out, err = render(wt, str(tmp_path / "nope.patch"))
     assert code == 2 and "nope.patch" in err and not out, err
@@ -246,14 +244,14 @@ def test_a_claim_with_no_finding_id_is_refused(wt, diff):
     assert code == 2 and "no colon here" in err, err
 
 
-# #1218: the capture's stat line reaches the prompt.
+# The capture's stat line reaches the prompt.
 def test_the_captures_stat_line_is_printed_under_inputs(wt, diff):
     stat = "captured: 3 files; excluded 1 generated file(s): g/x.json"
     _, out, _ = render(wt, diff, "--capture-stat", stat)
     assert stat in (section(out, "Inputs") or ""), out
 
 
-# #1325/#1324: the worker cap binds the witness check, which has its own concurrency.
+# The worker cap binds the witness check, which has its own concurrency.
 def test_the_correctness_prompt_tells_the_witness_check_its_slot_cap(wt, diff):
     _, out, _ = render(wt, diff, "--workers", "2", axis="correctness")
     assert "--slots 2" in out, out
@@ -264,7 +262,6 @@ def test_a_prompt_with_no_witness_check_carries_no_slots(wt, diff):
     assert "--slots" not in out, out
 
 
-# Each axis renders its own brief, from the one file per axis.
 @pytest.mark.parametrize("axis,needle", [("standards", "Over-engineering"), ("spec", "scope creep"),
                                          ("correctness", "witness-check.sh")])
 def test_each_axis_brief_is_included(wt, diff, axis, needle):
@@ -272,7 +269,7 @@ def test_each_axis_brief_is_included(wt, diff, axis, needle):
     assert needle in (section(out, "Brief") or ""), out
 
 
-# #1548: one ticket-numbered path, one dispatch line, never an overwritten brief.
+# One ticket-numbered path, one dispatch line, never an overwritten brief.
 def test_a_render_writes_the_brief_to_a_ticket_numbered_path_and_prints_one_line_naming_it(wt, diff, home):
     code, line, err = render_line(wt, diff)
     path = home / "skills" / "brief-1395-standards.md"
@@ -325,7 +322,7 @@ def test_a_branch_name_given_as_the_ticket_cannot_name_a_directory(wt, diff, hom
     assert (home / "skills" / "brief-feature-x-standards.md").is_file()
 
 
-# #1549: a second review round names its own files and continues the first round's finding ids.
+# A second review round names its own files and continues the first round's finding ids.
 def cache_dir(home, repo="skills"):
     path = home / repo
     path.mkdir(parents=True, exist_ok=True)

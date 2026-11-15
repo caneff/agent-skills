@@ -1,4 +1,4 @@
-"""An appended axis row records the sha256 of the findings sidecar it was appended for (#1555), so
+"""An appended axis row records the sha256 of the findings sidecar it was appended for, so
 `implement/fix_check.py` can tell this wave's row from an earlier dispatch's. Seam: `review_ledger.py
 append` over a throwaway cache, transcripts directory and ledger.
 """

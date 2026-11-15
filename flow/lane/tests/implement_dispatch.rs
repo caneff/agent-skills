@@ -1,7 +1,5 @@
 //! Contract tests for the `implement-dispatch` binary, against a scratch
-//! origin/clone and the fake `gh`/`herdr` from `lane-fake` — the same seam
-//! the bash suite it replaces used. Covers every case in
-//! `flow/bin/implement-dispatch.test.sh`.
+//! origin/clone and the fake `gh`/`herdr` from `lane-fake`.
 
 mod support;
 use support::{default_scenario, out_text, with, Fixture};
@@ -16,7 +14,7 @@ fn refused(out: &std::process::Output, calls: &str, repo: &std::path::Path, n: &
         && !std::path::Path::new(&format!("{}/.git/refs/heads/spec-{n}", repo.display())).exists()
 }
 
-/// The mods folder every worker is started with (#1368): `--plugin-dir` on the
+/// The mods folder every worker is started with: `--plugin-dir` on the
 /// agent's own command line, because `herdr agent start` has no env channel.
 fn mods(f: &Fixture) -> String {
     format!("{}/.agents/skills/flow/mods", f.home().display())
@@ -77,8 +75,8 @@ fn refuses_an_origin_that_names_no_github_owner_name() {
 
 #[test]
 fn a_git_failure_on_the_repo_is_reported_with_gits_own_words_1254() {
-    // #1209 P4: any non-zero `git worktree list` used to print "not a git
-    // repo", hiding a dubious-ownership or corrupt-repo failure behind it.
+    // Any non-zero `git worktree list` must not print "not a git repo": that
+    // would hide a dubious-ownership or corrupt-repo failure behind it.
     let f = Fixture::new();
     f.reset_home(true);
     let not_repo = f.mkfixture("plain", "main").parent().unwrap().join("outside-any-repo");
@@ -196,7 +194,6 @@ fn creates_the_workspace_and_branch_off_origin_default_with_no_origin_head() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    // no origin/HEAD in this fixture
     let head_ref = std::process::Command::new("git")
         .args(["-C", repo.to_str().unwrap(), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
         .output()
@@ -371,8 +368,6 @@ fn the_report_names_path_branch_agent_and_the_cleanup_line() {
     assert!(text.contains("agent:    sudokumaker-custom-constrain-395"), "{text}");
     assert!(text.contains(&format!("cd {} && merge-cleanup implement-395 --repo {}", repo.display(), repo.display())), "{text}");
 }
-
-// --- #819: the report also names the worker's Claude session -------------
 
 const AGENT_395: &str = "sudokumaker-custom-constrain-395";
 
@@ -698,8 +693,6 @@ fn an_empty_controller_flag_falls_back_to_the_session_registry() {
     );
 }
 
-// --- #758: a closed stdout stops the run instead of panicking ----------------
-
 #[test]
 fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
     let f = Fixture::new();
@@ -710,9 +703,6 @@ fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("Broken pipe"), "{stderr}");
 }
-
-
-// --- #787: --spec dispatches an /implement-spec run -------------------
 
 #[test]
 fn spec_mode_briefs_implement_spec_in_a_spec_workspace() {
@@ -838,8 +828,6 @@ fn help_documents_both_modes() {
     }
 }
 
-// --- #794: a ready-for-human ticket dispatches, and Chris merges it ----------
-
 #[test]
 fn a_ready_for_human_ticket_is_claimed_and_briefed_as_chris_merges() {
     let f = Fixture::new();
@@ -936,8 +924,6 @@ fn spec_mode_briefs_the_parsed_slot_count_and_honours_model() {
     );
 }
 
-// --- #889: a clump — one workspace, every ticket claimed ---------------------
-
 const SLUG: &str = "caneff/sudokumaker-custom-constraints";
 
 fn claim_line(n: &str) -> String {
@@ -976,8 +962,6 @@ fn a_clumps_brief_carries_every_ticket_in_it() {
     let tail = " --wait --until working --timeout 120000";
     assert!(f.calls().lines().any(|l| l.starts_with(prefix) && l.ends_with(tail)), "{}", f.calls());
 }
-
-// --- #901: what the clump brief tells the worker ------------------------------
 
 fn prompt_line(f: &Fixture) -> String {
     f.calls().lines().find(|l| l.starts_with("herdr agent prompt")).unwrap_or_default().to_string()
@@ -1205,8 +1189,8 @@ fn a_ticket_claimed_between_the_read_and_the_edit_is_refused_and_never_released(
     let repo = f.mkfixture("claimrace", "main");
     let claims = f.home().join("claims");
     std::fs::create_dir_all(&claims).unwrap();
-    // #602 is claimed by someone else after the refusal pass read it free:
-    // the fake hides the claim from the first view of it only.
+    // Ticket 602 is claimed by someone else after the refusal pass read it
+    // free: the fake hides the claim from the first view of it only.
     std::fs::write(claims.join("602"), "").unwrap();
     let scenario = with(
         &default_scenario(),
@@ -1270,8 +1254,8 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
     assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
 }
 
-/// #1327: a `core.hooksPath` that cannot be used is reported with its value,
-/// its scope and the command that unsets it, not as a bare permission error.
+/// A `core.hooksPath` that cannot be used is reported with its value, its
+/// scope and the command that unsets it, not as a bare permission error.
 /// Returns the refusal text; `set` installs the bad value and returns its path.
 fn dispatch_on_a_bad_hooks_path(set: impl Fn(&Fixture, &std::path::Path) -> std::path::PathBuf) -> (std::path::PathBuf, std::path::PathBuf, String) {
     let f = Fixture::new();
@@ -1393,7 +1377,7 @@ fn a_repo_already_carrying_this_builds_own_pre_commit_wrapper_is_not_displaced_o
 }
 
 /// A wrapper whose bytes still match but whose executable bit was cleared
-/// after install (#1054): git silently ignores a non-executable hook, so a
+/// after install: git silently ignores a non-executable hook, so a
 /// byte-identical wrapper must still be repaired on the next dispatch, not
 /// taken as "already ours" and left inert.
 #[test]
@@ -1418,12 +1402,11 @@ fn a_byte_identical_wrapper_that_lost_its_executable_bit_is_repaired_on_redispat
     refuses_a_foreign_email_commit(&repo, "396");
 }
 
-/// The pre-commit guard (#934) never fires on a replayed commit — a cherry-
-/// pick or rebase, exactly the gap #1006 files (its own probe: `-c
-/// user.email=... rebase` rewrote a replayed commit's email with exit 0).
-/// This is the end-to-end proof that the pre-push half installed alongside
-/// it catches what pre-commit cannot: cherry-pick a commit under a foreign
-/// committer email (never touching `git commit` at all), then push it.
+/// The pre-commit guard never fires on a replayed commit: a cherry-pick or
+/// rebase can rewrite a commit's email with exit 0. This is the end-to-end
+/// proof that the pre-push half installed alongside it catches what
+/// pre-commit cannot: cherry-pick a commit under a foreign committer email
+/// (never touching `git commit` at all), then push it.
 #[test]
 fn dispatch_installs_the_pre_push_guard_and_a_replayed_foreign_email_commit_is_refused_at_push() {
     let f = Fixture::new();
@@ -1462,11 +1445,10 @@ fn dispatch_installs_the_pre_push_guard_and_a_replayed_foreign_email_commit_is_r
     assert!(good.status.success(), "the fixed-up identity was still refused: {}", out_text(&good));
 }
 
-/// The buffered wrapper's `mktemp` file must not leak: an earlier draft
-/// `exec`'d the guard as the wrapper's last step, which replaces the shell
-/// image and skips the `trap ... EXIT` cleaning the buffer up — every
-/// successful push would leave one file behind in `$TMPDIR` (review finding
-/// on #1006, post-verification). Runs several pushes through a `$TMPDIR` of
+/// The buffered wrapper's `mktemp` file must not leak: `exec`ing the guard as
+/// the wrapper's last step would replace the shell image and skip the `trap
+/// ... EXIT` cleaning the buffer up, so every successful push would leave
+/// one file behind in `$TMPDIR`. Runs several pushes through a `$TMPDIR` of
 /// its own and asserts it holds no stray files once they're done.
 #[test]
 fn a_successful_push_leaves_no_stray_stdin_buffer_file_behind() {
@@ -1495,15 +1477,15 @@ fn a_successful_push_leaves_no_stray_stdin_buffer_file_behind() {
     assert!(leftover.is_empty(), "the pre-push wrapper's stdin buffer leaked: {leftover:?}");
 }
 
-/// The wrapper's buffering `cat >"$stdin_buf"` ignored its own exit status
-/// (Codex gate finding on #1006, PR #1068): a copy that fails partway —
-/// disk full, an I/O error — after writing one or more complete ref lines
-/// hands both the foreign hook and the guard a truncated-but-nonempty ref
-/// list, and the guard passes the cut-off ref unchecked (an empty list is a
-/// pass since #1618, so the wrapper's refusal is the only net). Simulated here with a stub `cat` ahead
-/// on PATH that writes one line then exits 1 — the wrapper must refuse
-/// before either the foreign hook or the guard ever runs, which a marker
-/// file from each proves.
+/// The wrapper's buffering `cat >"$stdin_buf"` must honour its own exit
+/// status: a copy that fails partway (disk full, an I/O error) after
+/// writing one or more complete ref lines hands both the foreign hook and
+/// the guard a truncated-but-nonempty ref list, and the guard passes the
+/// cut-off ref unchecked (an empty list is a pass, so the wrapper's refusal
+/// is the only net). Simulated here with a stub `cat` ahead on PATH that
+/// writes one line then exits 1 — the wrapper must refuse before either the
+/// foreign hook or the guard ever runs, which a marker file from each
+/// proves.
 #[test]
 fn a_failed_stdin_buffer_copy_refuses_before_either_hook_runs() {
     let f = Fixture::new();
@@ -1593,16 +1575,15 @@ fn the_pre_push_guard_override_escape_lets_a_foreign_email_push_through() {
 }
 
 /// Whatever real pre-push hook a repo already had (tests, a size check) is
-/// preserved and still runs, same guarantee #1009 gives the pre-commit slot
-/// — and, unlike a foreign hook that merely `exit 0`s without touching
+/// preserved and still runs, same guarantee as for the pre-commit slot —
+/// and, unlike a foreign hook that merely `exit 0`s without touching
 /// stdin, this one actually reads and discards the ref list the way a real
 /// pre-push hook typically does (a `while read` loop over stdin, same shape
 /// as `git`'s own `pre-push.sample`). A foreign hook that drains stdin
-/// before the guard gets a turn is exactly what starves the guard's own
-/// `while read` and lets it exit 0 having checked nothing (#1006 review
-/// finding C1/S1) — this is the regression test for the stdin-buffering fix
-/// that closes that hole, run through a real dispatch-installed wrapper
-/// rather than the guard script called directly.
+/// before the guard gets a turn starves the guard's own `while read` and
+/// lets it exit 0 having checked nothing — this is the regression test for
+/// the stdin-buffering fix that closes that hole, run through a real
+/// dispatch-installed wrapper rather than the guard script called directly.
 #[test]
 fn a_foreign_pre_push_hook_is_preserved_and_the_guard_still_refuses_a_replayed_commit() {
     let f = Fixture::new();
@@ -1651,7 +1632,7 @@ fn a_foreign_pre_push_hook_is_preserved_and_the_guard_still_refuses_a_replayed_c
 /// Commits a foreign-email change in the dispatched worktree for ticket `n`
 /// and asserts the guard still refuses it while a correctly-configured
 /// commit still succeeds — the end-to-end proof that whatever foreign hook
-/// was in place before dispatch, the guard runs regardless (#1009).
+/// was in place before dispatch, the guard runs regardless.
 fn refuses_a_foreign_email_commit(repo: &std::path::Path, n: &str) {
     let wt = repo.join(".claude/worktrees").join(format!("implement-{n}"));
     std::fs::write(wt.join("g"), "x\n").unwrap();
@@ -1668,8 +1649,8 @@ fn refuses_a_foreign_email_commit(repo: &std::path::Path, n: &str) {
     assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
 }
 
-/// A foreign hook that neither names the guard nor calls it: the pre-#1009
-/// text-match check would have refused dispatch entirely over this one.
+/// A foreign hook that neither names the guard nor calls it: a text-match
+/// ownership check would have refused dispatch entirely over this one.
 /// Taking ownership means dispatch proceeds and the guard runs anyway.
 #[test]
 fn a_foreign_hook_with_no_guard_reference_is_taken_over_and_still_refuses_a_foreign_email_commit() {
@@ -1684,8 +1665,8 @@ fn a_foreign_hook_with_no_guard_reference_is_taken_over_and_still_refuses_a_fore
 }
 
 /// A hook that echoes the guard's name on a non-comment line without ever
-/// invoking it — exactly what the old `invokes_guard` text match would have
-/// accepted as proof the guard ran.
+/// invoking it — exactly what a text-match check would accept as proof the
+/// guard ran.
 #[test]
 fn a_spoofed_hook_that_only_echoes_the_guards_name_still_refuses_a_foreign_email_commit() {
     let f = Fixture::new();
@@ -1698,9 +1679,8 @@ fn a_spoofed_hook_that_only_echoes_the_guards_name_still_refuses_a_foreign_email
     refuses_a_foreign_email_commit(&repo, "395");
 }
 
-/// A hook that does call the guard, then swallows its exit code with
-/// `|| true` — the old text match saw the call and never noticed the
-/// suppression.
+/// A hook that does call the guard, then swallows its exit code with `||
+/// true` — a text match sees the call and never notices the suppression.
 #[test]
 fn a_hook_that_calls_the_guard_then_swallows_its_failure_still_refuses() {
     let f = Fixture::new();
@@ -1714,7 +1694,7 @@ fn a_hook_that_calls_the_guard_then_swallows_its_failure_still_refuses() {
 }
 
 /// A foreign hook with no executable bit — git would never have run it at
-/// all, and the pre-#1009 accepted-hook path never checked for this either.
+/// all, and a text-match acceptance path would never check for this either.
 /// Taking ownership forces it, and the final `pre-commit`, executable.
 #[test]
 fn a_non_executable_foreign_hook_is_taken_over_and_still_refuses_a_foreign_email_commit() {
@@ -1762,7 +1742,7 @@ fn a_foreign_hook_is_moved_aside_once_then_left_alone_on_a_second_dispatch() {
 /// installs, exactly as a wrapper written by an earlier build of the lane
 /// would read. Ownership is byte-identity only, so this is foreign like any
 /// other hook: displaced to `pre-commit.foreign` and run by the fresh
-/// wrapper before the guard — harmless, since its own body is the pre-#1009
+/// wrapper before the guard — harmless, since its own body is the older
 /// two-line form (`exec .../commit-identity-guard`), not self-referential.
 /// The guard still runs and still refuses a foreign-email commit.
 #[test]
@@ -1790,9 +1770,8 @@ fn a_stale_lane_wrapper_with_different_bytes_is_displaced_like_any_foreign_hook_
 /// uses — "lane commit-identity guard wrapper" — without being byte-identical
 /// to the current wrapper, and without actually invoking the guard: the
 /// spoof a marker-based (or any other source-text) ownership check would
-/// have fallen for, skipping the takeover entirely and leaving the guard
-/// never installed (the hole #1009 exists to close; caught on the Codex gate
-/// for PR #1053). Byte-identity means this is foreign like any other hook.
+/// fall for, skipping the takeover entirely and leaving the guard never
+/// installed. Byte-identity means this is foreign like any other hook.
 #[test]
 fn a_hook_that_spoofs_the_wrapper_comment_is_still_taken_over_and_the_guard_still_runs() {
     let f = Fixture::new();
@@ -1813,9 +1792,8 @@ fn a_hook_that_spoofs_the_wrapper_comment_is_still_taken_over_and_the_guard_stil
     refuses_a_foreign_email_commit(&repo, "395");
 }
 
-/// The same spoof, but with no executable bit — the exec-bit path (#1009's
-/// third named scenario) intersecting the marker spoof (found on the same
-/// Codex gate). Must still end up guarded.
+/// The same spoof, but with no executable bit — the exec-bit path
+/// intersecting the marker spoof. Must still end up guarded.
 #[test]
 fn a_non_executable_hook_that_spoofs_the_wrapper_comment_is_still_taken_over_and_the_guard_still_runs() {
     let f = Fixture::new();
@@ -1841,7 +1819,7 @@ fn a_non_executable_hook_that_spoofs_the_wrapper_comment_is_still_taken_over_and
 /// `pre-commit.foreign` already holds a hook from an earlier takeover; a
 /// second, different hook has since been installed as `pre-commit` (husky, a
 /// setup script, a hand edit). Overwriting the slot would destroy the first
-/// preserved hook with no record (#1009 C3) — refuse instead.
+/// preserved hook with no record — refuse instead.
 #[test]
 fn a_pre_commit_foreign_already_holding_a_different_hook_refuses_dispatch() {
     let f = Fixture::new();
@@ -1939,8 +1917,6 @@ fn a_controller_record_with_no_session_id_refuses_even_when_a_named_agent_exists
     assert!(refused(&out, &f.calls(), &repo, "414", "no sessionId"), "{}", out_text(&out));
     assert!(!f.calls().contains("herdr agent prompt"), "{}", f.calls());
 }
-
-// --- #964: dispatch records the controller/worker pair for /clear to restore ---
 
 fn workers_file(f: &Fixture) -> std::path::PathBuf {
     f.home().join(".claude/sessions").join(format!("{}.workers.jsonl", std::process::id()))
@@ -2066,7 +2042,7 @@ fn a_controller_that_resolves_to_no_live_session_dispatches_with_no_record_and_n
 /// Installs a `git` on `f`'s scratch PATH, ahead of the real one, that hangs
 /// forever on `fetch` and delegates every other subcommand to the real git —
 /// so the claim lock's own git calls (rev-parse, worktree list, branch
-/// checks) still work and only the fetch stalls (#976).
+/// checks) still work and only the fetch stalls.
 fn install_hanging_fetch_git(f: &Fixture) {
     let real_git = which("git");
     let script = format!(
@@ -2095,8 +2071,9 @@ fn a_stalled_fetch_fails_fast_under_the_bound_instead_of_pinning_the_claim_lock(
 
 #[test]
 fn a_documentation_label_on_a_ticket_targeting_a_skill_body_dispatches_heavy_and_strips_it() {
-    // #969: the filer's hand-put `documentation` label sent a `SKILL.md`
-    // change out at light tier, and the worker pushed it straight to main.
+    // The filer's hand-put `documentation` label must not send a `SKILL.md`
+    // change out at light tier, where the worker would push it straight to
+    // main.
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -2123,7 +2100,7 @@ fn a_documentation_label_on_a_ticket_targeting_a_skill_body_dispatches_heavy_and
 
 #[test]
 fn a_documentation_ticket_naming_a_script_build_file_or_unlisted_path_dispatches_heavy_and_strips_it() {
-    // #1106 widened what a body's tokens call code past extensions; these are
+    // Body tokens that call something code past file extensions; these are
     // those shapes at the dispatch seam, not only at `first_code_target`.
     for (body, target) in [
         ("Tidy the usage text in `bin/implement-dispatch`.", "bin/implement-dispatch"),
@@ -2181,10 +2158,6 @@ fn an_unreadable_body_dispatches_heavy_and_keeps_the_documentation_label() {
     assert!(out_text(&out).contains("body unreadable, dispatched heavy: #403"), "{}", out_text(&out));
 }
 
-// --- #1146: a run's id reaches the brief ---------------------------------
-
-/// Writes `<dir>/<id>.json`, the run file `--run <id>` must name, under the
-/// fixture HOME's default `~/.cache/spec-run` unless `dir` is given.
 fn seed_run_file(f: &Fixture, dir: Option<&std::path::Path>, id: &str) {
     let dir = dir.map(std::path::Path::to_path_buf).unwrap_or_else(|| f.home().join(".cache/spec-run"));
     std::fs::create_dir_all(&dir).unwrap();
@@ -2294,9 +2267,8 @@ fn the_run_file_is_found_under_a_tilde_spec_run_cache_dir() {
     assert!(prompt_line(&f).contains("--run run-2026-09-23-0700"), "{}", prompt_line(&f));
 }
 
-// #849: implement-dispatch's git and gh subprocess calls previously had no
-// OS-level timeout, unlike its herdr calls (#844). These three tests are
-// the ticket's own acceptance criteria.
+// implement-dispatch's git and gh subprocess calls must carry an OS-level
+// timeout, like its herdr calls. These three tests pin that.
 
 #[test]
 fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
@@ -2313,14 +2285,11 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     // those modules also expose for another caller.
     let manifest = env!("CARGO_MANIFEST_DIR");
     let dispatch_src = std::fs::read_to_string(format!("{manifest}/src/bin/implement_dispatch.rs")).unwrap();
-    // Whitespace-insensitive (#849 correctness gate, C2/S5): rustfmt already
-    // wraps a call like `run_in(\n None,\n "git",` onto several lines in
-    // this very diff, and a patterns-on-one-line match would pass a
-    // reverted-to-unbounded call unseen the moment it got reformatted —
-    // confirmed by mutation: restoring the pre-diff multi-line
-    // `runner::run_in(\n None,\n "git",` left the single-line version of
-    // this test green. Every pattern below is written with no whitespace of
-    // its own to match a source stripped the same way.
+    // Whitespace-insensitive: rustfmt wraps a call like `run_in(\n None,\n
+    // "git",` onto several lines, and a patterns-on-one-line match would
+    // pass a reverted-to-unbounded call unseen the moment it got
+    // reformatted. Every pattern below is written with no whitespace of its
+    // own to match a source stripped the same way.
     let stripped: String = dispatch_src.chars().filter(|c| !c.is_whitespace()).collect();
 
     let unbounded_direct = [
@@ -2345,10 +2314,9 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     // merge-cleanup; implement-dispatch must call only their `_timeout`
     // siblings. Each pattern's trailing "(" is what keeps it from matching
     // its own `_timeout(`/`_bounded(` sibling as a false positive.
-    // `worktree::primary(` (#849 correctness gate, C3/spec P1): dispatch's
-    // own first git call, missed in the initial pass — bounded via
-    // `worktree::list_timeout`; `worktree::list` is controller-adopt's
-    // and merge-cleanup's, out of scope.
+    // `worktree::primary(`: dispatch's own first git call, bounded via
+    // `worktree::list_timeout`; `worktree::list` is controller-adopt's and
+    // merge-cleanup's, out of scope.
     let unbounded_shared = [
         "git_origin::default_branch(",
         "git_origin::origin_slug(",
@@ -2385,15 +2353,13 @@ fn a_show_ref_that_hangs_fails_instead_of_being_read_as_branch_absent() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    // Targets exactly the branch-existence check's own ref
-    // (`refs/heads/implement-395`), not the bare substring "show-ref"
-    // (#849 correctness gate, C1): this fixture's clone has no
-    // `origin/HEAD`, so `default_branch_timeout` makes its own show-ref
-    // call to probe for "main" — a broader pattern hangs that call too,
-    // and the "timed out" text this test asserts on can come from there
-    // instead of from the branch-existence check it means to witness.
-    // Confirmed by mutation: with the broader pattern, neutralising only
-    // the branch-existence check's own `.map_err(die)?` left this test green.
+    // Targets exactly the branch-existence check's ref
+    // (`refs/heads/implement-395`), not the bare substring "show-ref": this
+    // fixture's clone has no `origin/HEAD`, so `default_branch_timeout` makes
+    // its own show-ref call to probe for "main" — a broader pattern hangs
+    // that call too, and the "timed out" text this test asserts on can come
+    // from there instead of from the branch-existence check it means to
+    // witness.
     let scenario = with(&default_scenario(), &[("LANE_GIT_QUERY_TIMEOUT_MS", "200")]);
     let start = std::time::Instant::now();
     let out = f.dispatch_with_git_hang(&["--repo", repo.to_str().unwrap(), "395"], &scenario, "refs/heads/implement-395");
@@ -2409,14 +2375,11 @@ fn a_show_ref_that_hangs_fails_instead_of_being_read_as_branch_absent() {
     assert!(!f.calls().contains("issue edit"), "{}", f.calls());
 }
 
-// --- #1458: a spec's integration branch, and slices built on it ------------
-
 fn git_out(dir: &std::path::Path, args: &[&str]) -> String {
     let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-/// The scratch origin `mkfixture` made for `name`.
 fn origin_of(f: &Fixture, name: &str) -> std::path::PathBuf {
     f.tmp.path().join("github.com/caneff").join(format!("{name}.git"))
 }
@@ -2463,7 +2426,6 @@ fn spec_mode_reuses_an_existing_integration_branch_without_moving_it() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(git_out(&origin_of(&f, name), &["rev-parse", "refs/heads/spec-395"]), landed, "the integration branch moved");
-    // The spec run's own workspace sees the slices already landed.
     assert_eq!(git_out(&repo.join(".claude/worktrees/spec-395"), &["rev-parse", "HEAD"]), landed);
     assert!(out_text(&out).contains("integration branch: spec-395 (reused)"), "{}", out_text(&out));
 }
@@ -2506,8 +2468,8 @@ fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
     let prompt = prompt_line(&f);
     assert!(prompt.contains("/implement 395 --tier heavy --controller \"skills-ctl\" -- Slice of spec #500"), "{prompt}");
     assert!(prompt.contains("gh pr create --base spec-500"), "no PR base in the brief: {prompt}");
-    // #1590, absorbed by #1592: a slice runs the resolver's per-change
-    // command like any ticket, never a hard-coded `--changed` narrowing.
+    // A slice runs the resolver's per-change command like any ticket, never a
+    // hard-coded `--changed` narrowing.
     assert!(prompt.contains("selector_check.py command --root ."), "no per-change command in the brief: {prompt}");
     assert!(!prompt.contains("--changed"), "the brief hard-codes a narrowing: {prompt}");
     assert!(prompt.contains("merge origin/spec-500 in"), "no merge-in base in the brief: {prompt}");
@@ -2517,8 +2479,8 @@ fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
 
 #[test]
 fn a_slice_is_heavy_even_when_it_carries_the_documentation_label() {
-    // #1542 (a): light tier pushes to the default branch with no PR, the
-    // wrong shape for a slice whatever its label says.
+    // Light tier pushes to the default branch with no PR, the wrong shape
+    // for a slice whatever its label says.
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -2613,7 +2575,7 @@ fn spec_mode_refuses_a_spec_with_no_linked_slices() {
     let scenario = with(&default_scenario(), &[("GH_LABELS", SPEC), ("GH_SUBISSUES_395", "0")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "395", "#395 has no sub-issues"), "{}", out_text(&out));
-    // The refusal names the missing step, not only the link command (#1532).
+    // The refusal names the missing step, not only the link command.
     assert!(out_text(&out).contains("/to-tickets"), "{}", out_text(&out));
 }
 
@@ -2689,8 +2651,6 @@ fn the_integration_branch_push_never_overwrites_one_pushed_since_the_fetch() {
     assert!(text.contains("pushing the integration branch failed"), "{text}");
     assert_eq!(git_out(&origin, &["rev-parse", "refs/heads/spec-395"]), theirs, "the push overwrote another session's spec-395");
 }
-
-// --- #1464: the fork point is recorded at dispatch ----------------------------
 
 #[test]
 fn dispatch_records_the_sha_a_lone_ticket_branched_from_as_its_fork_point() {

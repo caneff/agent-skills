@@ -25,7 +25,7 @@ context() {
   local hook=$1 session=$2 cmd=$3 out rc
   # The hook reads a file, never a pipe: an error-path hook exits without
   # reading stdin, and a writer left on a closed pipe dies of SIGPIPE, which
-  # pipefail reports as 141 in place of the hook's answer (#1456).
+  # pipefail reports as 141 in place of the hook's answer.
   printf '%s' "$cmd" \
     | jq -Rs --arg s "$session" --arg cwd "${RUN_CWD:-$tmp}" --arg a "${RUN_AGENT:-}" \
         '{session_id:$s,cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:.}}

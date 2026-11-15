@@ -1,4 +1,3 @@
-/* code block */
 .vt-code {
   border: 1px solid var(--vt-rule);
   border-radius: 10px;
@@ -137,7 +136,6 @@ code.vt-pcode {
   border-radius: 4px;
 }
 
-/* io — paired input→output code block */
 .vt-io {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

@@ -76,8 +76,8 @@ fn held<'a>(entries: &'a [Worktree], branch: &str) -> Option<&'a str> {
 
 /// The worktrees of the repo at `repo`. `Err` says why there is no listing: a
 /// `git worktree list` that failed (its own message included) is a different
-/// answer from one that succeeded and named no worktree (#1209), and neither
-/// is ever read as an empty listing (#1762).
+/// answer from one that succeeded and named no worktree, and neither is
+/// ever read as an empty listing (#1762).
 pub fn list(repo: &str) -> Result<Worktrees, String> {
     let out = run("git", &["-C", repo, "worktree", "list", "--porcelain"])
         .map_err(|e| format!("git worktree list could not run in {repo}: {e}"))?;
@@ -87,10 +87,9 @@ pub fn list(repo: &str) -> Result<Worktrees, String> {
     named(repo, &out.combined)
 }
 
-/// `list`, bounded (#849): `implement-dispatch` calls it first, before it has
-/// even resolved the origin slug, so a hang or any git failure here fails
-/// loud, with git's own words, rather than reading as "not a git repo"
-/// (#1254).
+/// `list`, bounded: `implement-dispatch` calls it first, before it has even
+/// resolved the origin slug, so a hang or any git failure here fails loud,
+/// with git's own words, rather than reading as "not a git repo".
 pub fn list_timeout(repo: &str, timeout: Duration) -> Result<Worktrees, String> {
     named(repo, &stdout_bounded("git", &["-C", repo, "worktree", "list", "--porcelain"], timeout)?)
 }

@@ -1,8 +1,7 @@
 //! The `gh issue view` read both `merge_cleanup`'s `clear_ticket_if_closed`
 //! and `implement_dispatch`'s claim-refusal check need: an issue's state,
-//! labels and assignees, in one shell-out, with one parse. Filed from the
-//! Standards review of #821 (over-engineering lens, yagni) — a change to
-//! the gh contract or the parse now lands once.
+//! labels and assignees, in one shell-out, with one parse, so a change to
+//! the gh contract or the parse lands once.
 
 use crate::runner::{quiet_stdout, quiet_stdout_bounded};
 use std::time::Duration;
@@ -15,7 +14,6 @@ pub struct IssueState {
 }
 
 impl IssueState {
-    /// Whether `label` is one of this issue's labels.
     pub fn has_label(&self, label: &str) -> bool {
         self.labels_csv.split(',').any(|l| l == label)
     }
@@ -68,7 +66,7 @@ pub fn body(slug: &str, n: &str) -> Option<String> {
     quiet_stdout("gh", &["issue", "view", n, "--repo", slug, "--json", "body", "-q", ".body"])
 }
 
-/// `read`, bounded (#849): `implement-dispatch` is the only caller of this
+/// `read`, bounded: `implement-dispatch` is the only caller of this
 /// variant. `Ok(None)` is `gh`'s own real "no such issue"/call-failed
 /// answer, which a caller may still read as "not an open issue"; `Err`
 /// names the command and must never be read as "no labels" or any other
@@ -79,8 +77,8 @@ pub fn read_timeout(slug: &str, n: &str, timeout: Duration) -> Result<Option<Iss
     Ok(out.map(|s| parse(&s)))
 }
 
-/// `body`, bounded (#849) — see [`read_timeout`]. A timed-out read must
-/// never be read as "empty body" the way a real call failure already is.
+/// `body`, bounded — see [`read_timeout`]. A timed-out read must never be
+/// read as "empty body" the way a real call failure already is.
 pub fn body_timeout(slug: &str, n: &str, timeout: Duration) -> Result<Option<String>, String> {
     quiet_stdout_bounded("gh", &["issue", "view", n, "--repo", slug, "--json", "body", "-q", ".body"], timeout)
 }

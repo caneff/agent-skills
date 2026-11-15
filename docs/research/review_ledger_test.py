@@ -1,7 +1,6 @@
-"""Tests for review_ledger.py (#1265). Every test runs a subcommand's command
-line on a fixture tree and reads what comes out: ledger rows, the review file,
-or the report. Nothing here calls the module's functions, and every run points
-HOME at a temp dir so no default path can reach the real ~/.cache."""
+"""Tests for review_ledger.py. Every test runs a subcommand's command line on a fixture tree and reads what
+comes out: ledger rows, the review file, or the report. Nothing here calls the module's functions, and every run
+points HOME at a temp dir so no default path can reach the real ~/.cache."""
 import json
 
 import pytest
@@ -120,7 +119,7 @@ class TestHarvest:
         assert row["type"] == "verification"
         # not-fixed with neither a reason nor a text is not readable as leftover or disputed.
         assert row["findings"][0]["outcome"] == "unknown"
-        # The file-name mapping is the row's own, not only the review file's (P4, #1406).
+        # The file-name mapping is the row's own, not only the review file's.
         assert {"from": "verify", "to": "verification (axis in filename)"} in row["status"]["mappings"]
 
     def test_alias_repo_folds_onto_skills(self, env):
@@ -192,8 +191,8 @@ class TestHarvest:
 
 
 class TestMappingLabel:
-    """A drifted label is data: one holding the review file's own ` -> ` separator
-    (#1276) is listed whole, not split at the wrong arrow."""
+    """A drifted label is data: one holding the review file's own ` -> ` separator is listed whole, not split at
+    the wrong arrow."""
 
     def test_label_containing_an_arrow_is_listed_whole(self, env):
         cache = env.tmp / "cache"
@@ -206,8 +205,7 @@ class TestMappingLabel:
 
 
 class TestVerificationOverlap:
-    """Ruling 8 (P6 on PR #1275): the verification pass never counts toward
-    overlap for a round-1 finding it re-checks."""
+    """The verification pass never counts toward overlap for a round-1 finding it re-checks."""
 
     @pytest.fixture
     def env(self, env):
@@ -611,8 +609,8 @@ class TestReport:
         assert types["standards"]["leftover_rate"] == 1.0
 
     def test_a_moved_finding_carries_value_like_a_filed_one(self, env):
-        # #1401: `moved` is a valid finding that went onto an open ticket, the
-        # successor of `filed` for a finding that needs its own design.
+        # `moved` is a valid finding that went onto an open ticket, the successor of `filed` for a finding that
+        # needs its own design.
         moved = [dict(report_rows()[0], findings=[
             {"id": "m", "severity": "hard", "outcome": "moved", "partial": False,
              "overlap": "unique", "k": 1}])]

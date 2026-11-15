@@ -1,8 +1,8 @@
 //! Which paths a ticket body names, and whether one of them is code.
 //!
 //! `implement-dispatch` reads a ticket's tier off its `documentation` label,
-//! and a label a filer put on by hand is not evidence about the diff (#969:
-//! a `SKILL.md` change went out light and landed on main with no reviewer).
+//! and a label a filer put on by hand is not evidence about the diff (a
+//! `SKILL.md` change can go out light and land on main with no reviewer).
 //! So the body's own targets are read too. `flow/claude/WORKFLOW.md` § Gate 2
 //! names what is code; this is the dispatcher's reading of it. A wrong heavy
 //! tier costs one review and a wrong light tier lands code unreviewed, so it
@@ -43,7 +43,6 @@ const CODE_BASENAMES: &[&str] = &["skill.md", "makefile", "dockerfile", "justfil
 /// trailing sentence punctuation is dropped. It is code by extension, by
 /// filename, or as an extensionless entry under a script directory.
 pub fn first_code_target(body: &str) -> Option<String> {
-    // A Windows path separator is a path separator.
     body.replace('\\', "/")
         .split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
         .map(|t| t.trim_end_matches('.'))

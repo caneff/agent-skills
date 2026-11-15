@@ -2,8 +2,8 @@
 """Agent counting: how many agents the box is running, and whether it has
 room for more. The process, herdr and session-file counts, and `box_check`
 and the caps it holds, live here so a reader of the box (`loop.py`, `drain`,
-the backstop) imports them without the dispatch loop (#1770). `loop.py box`
-is the CLI over them.
+the backstop) imports them without the dispatch loop. `loop.py box` is the
+CLI over them.
 
 Why each rule reads the way it does: `references/loop.md`.
 """
@@ -30,7 +30,7 @@ PROCESS_CAP = 28
 # `/multi-axis-code-review` runs at once, plus one for the Codex pass that
 # runs beside them.
 # A slot charged at 1 while it peaks at 5 is how three slots put 20 processes
-# on a box the check had read as 15 (#933). The one place the multiplier is
+# on a box the check had read as 15. The one place the multiplier is
 # stated: `box_check` and the status line both read it here.
 SLOT_PEAK_PROCESSES = 5
 VM_BUDGET_GB = 24
@@ -123,8 +123,8 @@ def _session_pids(sessions_dir=None, proc_start=None):
     claim the live process's pid, dropping it out of
     `count_working_herdr_agents`'s `unlisted` bucket while the record's
     own (often idle) status added nothing for it — a live process
-    silently uncounted (Codex gate finding on 9391bd8). A record whose
-    `procStart` does not match is not a match; its pid stays unresolved.
+    silently uncounted. A record whose `procStart` does not match is not
+    a match; its pid stays unresolved.
 
     Read fresh on every call — a pane's session can end between ticks —
     and skipped rather than raised on a directory or file this run cannot
@@ -165,14 +165,13 @@ def count_working_herdr_agents(ps=None, herdr=None, sessions=None):
     their own. `working` is every listed pane whose `agent_status` is
     not `idle` or `done` — those two are the only statuses read as not
     working; a missing, null or unrecognised status fails closed as
-    working rather than vanishing from the count (Codex gate finding on
-    7a6bedd) — plus every listed pane whose session cannot be resolved to
-    a pid (a resolution failure fails closed the same way, counted as
-    working rather than dropped). `unlisted` is every `claude` pid `ps`
-    shows that no listed pane resolved to — a subagent or headless run
-    herdr does not pane-list, which still burns a core and fails closed
-    the same way (#1075 controller ruling, correcting the ticket's
-    original premise that herdr lists a subagent as its own agent).
+    working rather than vanishing from the count — plus every listed pane
+    whose session cannot be resolved to a pid (a resolution failure fails
+    closed the same way, counted as working rather than dropped).
+    `unlisted` is every `claude` pid `ps` shows that no listed pane
+    resolved to — a subagent or headless run herdr does not pane-list,
+    which still burns a core and fails closed the same way; measurement
+    showed herdr does not list a subagent as its own agent.
 
     `ps`/`herdr` take a command and return (status, stdout), the contract
     `count_agent_processes` uses; `sessions` takes nothing and returns
@@ -243,7 +242,7 @@ def count_working_herdr_agents(ps=None, herdr=None, sessions=None):
         # the same fail-closed reading an unresolved pane already gets;
         # equality against "working" alone let a wedged or unclassified
         # pane read as neither working nor unlisted and vanish from the
-        # count (Codex gate finding, 7a6bedd).
+        # count.
         if agent.get("agent_status") not in ("idle", "done"):
             working += 1
 
@@ -326,14 +325,13 @@ def live_count(text):
 
 
 def agent_count(args, herdr=None, ps=None, sessions=None):
-    """(count, counter label, working, unlisted): the override when one
-    was passed, else herdr's (working panes + unlisted claude pids) —
-    see `count_working_herdr_agents`, which a #1075 controller ruling
-    corrected from a plain working-panes count once measurement showed
-    herdr does not list a subagent as its own agent. `working`/`unlisted`
-    are `None` when `count` did not come from that split — an override, or
-    the process-count fallback — so the peak line prints a flat number
-    rather than a fabricated one.
+    """(count, counter label, working, unlisted): the override when one was
+    passed, else herdr's (working panes + unlisted claude pids) — see
+    `count_working_herdr_agents`, which corrected a plain working-panes
+    count once measurement showed herdr does not list a subagent as its own
+    agent. `working`/`unlisted` are `None` when `count` did not come from
+    that split — an override, or the process-count fallback — so the peak
+    line prints a flat number rather than a fabricated one.
 
     A herdr or `ps`-pid failure falls back to the plain process count (all
     `claude` on the box, idle included) for `count` — an unmeasured box is
@@ -371,9 +369,9 @@ def render_peak(count, live, room, working=None, unlisted=None):
     """The peak arithmetic as a controller's status line carries it: the
     measured count, what each live worker may still add, and the workers
     the box can take at their peak. `working`/`unlisted` print the split
-    beside it, when both are given, so a controller can see how many of
-    the count are herdr-listed working panes versus unlisted claude pids
-    (a subagent or headless run herdr does not pane-list) (#1075)."""
+    beside it, when both are given, so a controller can see how many of the
+    count are herdr-listed working panes versus unlisted claude pids (a
+    subagent or headless run herdr does not pane-list)."""
     reserve, projected = projected_processes(count, room, live)
     split = (f" ({working} working, {unlisted} unlisted)"
             if working is not None and unlisted is not None else "")

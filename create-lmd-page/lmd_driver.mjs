@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Posts one puzzle to Logic Masters Deutschland through a Chrome it drives over CDP (#1659, #1661).
+// Posts one puzzle to Logic Masters Deutschland through a Chrome it drives over CDP.
 //
 //   node lmd_driver.mjs --endpoint http://127.0.0.1:9334 --png <board.png> --template <page.html> \
 //     --values <values.json> [--image-id <id>] [--base-url https://logic-masters.de] [--timeout-ms 30000]
@@ -300,7 +300,7 @@ async function uploadImage(tab, base, png, name) {
   })()`, "the image upload");
   // The id is read from a fresh copy of the list; the POST's answer is kept for the error report, as it
   // carries LMD's reason for a refused upload. Right after an upload LMD serves /Dateien/ with the file list
-  // and no upload form (#1659's closing check), so the reload needs the list, not the form.
+  // and no upload form, so the reload needs the list, not the form.
   const answer = await pageReport(tab);
   await tab.navigate(page);
   await requirePage(tab, "table.upload_list_gross", "upload list");
@@ -340,9 +340,9 @@ async function submitPuzzle(tab, base, form, html) {
   posted.submitted = true;
   await tab.submit("document.querySelector('input[name=einstellen]').click()", "the puzzle submit");
   // Live LMD answers "Create" on einstellen.php itself: "The puzzle has been saved. Edit Puzzle <id> To the
-  // puzzle page", with the form shown again, emptied (#1659's closing check). The id is read from the
-  // "To the puzzle page" link (the site menu's own zeigen.php link has no id); a page without the notice, or
-  // without exactly one such id, is a refusal.
+  // puzzle page", with the form shown again, emptied. The id is read from the "To the puzzle page" link (the
+  // site menu's own zeigen.php link has no id); a page without the notice, or without exactly one such id,
+  // is a refusal.
   const { saved, ids } = await tab.evaluate(`({
     saved: (document.body?.innerText ?? '').includes(${JSON.stringify(SAVED_NOTICE)}),
     ids: [...new Set([...document.querySelectorAll('a[href]')].map((a) => new URL(a.href))

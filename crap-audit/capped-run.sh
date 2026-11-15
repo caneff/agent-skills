@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run a command in a transient systemd user unit with a hard memory cap and no
 # swap, so a runaway instrumented test suite is reported as an OOM kill of that
-# unit instead of taking the WSL VM down (#1667).
+# unit instead of taking the WSL VM down.
 # Usage: capped-run.sh <cap, e.g. 6G> -- <command> [args...]
 set -u
 if [ "$#" -lt 3 ] || [ "$2" != "--" ]; then

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Contract test for bin/backstop-nightly (#1595): it runs the backstop once per
-# repo in the list file, and a missing, unreadable or empty list fails loudly
-# instead of running zero repos. backstop.py is a recording stub.
+# Contract test for bin/backstop-nightly: it runs the backstop once per repo in
+# the list file, and a missing, unreadable or empty list fails loudly instead
+# of running zero repos. backstop.py is a recording stub.
 # Run: bash flow/bin/backstop-nightly.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,7 +64,6 @@ if [ "$rc" -ne 0 ] && [ ! -s "$log" ] && printf '%s' "$out" | grep -q 'cannot re
   pass "an unreadable list file fails, refused as unreadable"
 else fail "unreadable list (rc=$rc): $out"; fi
 
-# One repo failing must not skip the rest, and the job still ends non-zero.
 : > "$log"
 out=$(STUB_FAIL_ON="$tmp/a" HOME="$tmp/home" "$tool" "$tmp/list" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] && [ "$(wc -l < "$log")" = 3 ]; then
@@ -73,7 +72,6 @@ else
   fail "failing first repo (rc=$rc, calls $(wc -l < "$log")): $out"
 fi
 
-# A workflow= field passes --workflow to that repo's run only.
 printf '%s workflow=gate.yml\n%s\n' "$tmp/w" "$tmp/x" > "$tmp/wlist"
 : > "$log"
 "$tool" "$tmp/wlist" >/dev/null 2>&1; rc=$?
@@ -84,7 +82,6 @@ else
   fail "workflow field (rc=$rc): $(cat "$log")"
 fi
 
-# A list that cannot be used notifies, and the exit stays non-zero.
 : > "$nlog"
 "$tool" "$tmp/absent" >/dev/null 2>&1; rc=$?
 if [ "$rc" -ne 0 ] && grep -q "could not run | .*absent" "$nlog"; then pass "a missing list notifies"

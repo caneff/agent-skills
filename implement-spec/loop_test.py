@@ -1,6 +1,6 @@
-"""Tests for the dispatch loop (#893). The seams the ticket names: a fixture run
-over a stub tracker and a stub agent list. The loop's prose — its step list,
-its refusals, its stated consequences — has no test: there is no harness that
+"""Tests for the dispatch loop. The seams: a fixture run over a stub
+tracker and a stub agent list. The loop's prose — its step list, its
+refusals, its stated consequences — has no test: there is no harness that
 runs a skill's own text.
 """
 import json
@@ -68,7 +68,7 @@ def test_seat_refuses_a_worktree_and_says_why():
 
 
 def test_seat_accepts_a_spec_run_worktree_and_says_so():
-    # #1312: `implement-dispatch --spec <n>` starts the spec run in
+    # `implement-dispatch --spec <n>` starts the spec run in
     # `.claude/worktrees/spec-<n>`, a linked worktree on branch `spec-<n>`.
     run = git_stub(branch="spec-1262",
                    git_dir="/repo/.git/worktrees/spec-1262")
@@ -107,13 +107,14 @@ def test_seat_refuses_a_detached_head():
     assert "detached" in str(exc.value)
 
 
-# The #781 fixture, as the run actually stood after `#453` landed: `#452`,
-# `#457` and `#458` all include `examples/_shared/line-kind.js`, the same file
-# parked `#455` holds open in its workspace; `#501` is outside `examples/`
-# entirely. Closures as `closure.py` resolves them — the candidates' own files
-# plus every file that includes one of them, one hop.
-# What the run file holds for a worker that declared it launched no parallel
-# job — the explicit answer, which is not the same as no record at all.
+# The fixture, as the run actually stood once the earlier ticket landed:
+# `#452`, `#457` and `#458` all include `examples/_shared/line-kind.js`,
+# the same file parked `#455` holds open in its workspace; `#501` is
+# outside `examples/` entirely. Closures as `closure.py` resolves them —
+# the candidates' own files plus every file that includes one of them, one
+# hop. What the run file holds for a worker that declared it launched no
+# parallel job — the explicit answer, which is not the same as no record at
+# all.
 NO_JOB = {"state": "none", "cores": 0}
 
 HOT = "examples/_shared/line-kind.js"
@@ -167,7 +168,7 @@ def test_picks_fills_every_free_slot_widest_first_ticket_ties():
 
 
 def test_picks_names_a_same_tick_collision_and_its_picked_blocker():
-    # #970's own evidence: `closure.py --json` piped a hub family (452, 457,
+    # The evidence: `closure.py --json` piped a hub family (452, 457,
     # 458) and one independent ticket (501) into `dispatch --free 4` with
     # nothing in flight. #452 is picked first and takes the hub file; #457
     # and #458 collide with it this same tick and must not vanish silently.
@@ -182,10 +183,10 @@ def test_picks_names_a_same_tick_collision_and_its_picked_blocker():
 
 
 def test_picks_names_a_same_tick_collision_past_the_free_slot_cut():
-    # #1049: at --free 1 the walk stopped at #452 and never examined #457 or
-    # #458, so a controller saw one pick and no held line. Both collide with
-    # the pick and must be named; #501 collides with nothing, so it is
-    # simply out of slots, not held.
+    # At --free 1 the walk stopped at #452 and never examined #457 or #458,
+    # so a controller saw one pick and no held line. Both collide with the
+    # pick and must be named; #501 collides with nothing, so it is simply
+    # out of slots, not held.
     picked, held = loop.picks(loop.frontier(candidates_781(), []), 1)
     assert [c["tickets"] for c in picked] == [[452]]
     by_ticket = {tuple(h["clump"]["tickets"]): h for h in held}
@@ -195,8 +196,8 @@ def test_picks_names_a_same_tick_collision_past_the_free_slot_cut():
 
 
 def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
-    # #1342: #1337 and #1338 named disjoint files in one directory and both
-    # diffs reached `implement-spec/loop.py`. A body under-names its targets, so
+    # Two tickets named disjoint files in one directory and both diffs
+    # reached `implement-spec/loop.py`. A body under-names its targets, so
     # two clumps whose lists share a directory are not picked in one tick.
     candidates = [
         {"tickets": [1311], "files": ["implement-spec/runfile.py", "implement-spec/SKILL.md"]},
@@ -246,8 +247,8 @@ def test_the_cli_names_a_same_tick_directory_hold_as_a_held_line(tmp):
 
 
 def test_a_live_workspace_holds_a_clump_naming_its_directory():
-    # spec-649-smcc (#1406 C1): #666 listed the directory `examples/hit-counts`
-    # and was dispatched beside live #655, which was editing
+    # #666 listed the directory `examples/hit-counts` and was dispatched
+    # beside live #655, which was editing
     # `examples/hit-counts/build_size.py`. The live hold reads directories as
     # the same-tick guard does, so the directory hold outlasts its tick.
     candidates = [{"tickets": [666], "files": ["examples/hit-counts"]},
@@ -262,9 +263,9 @@ def test_a_live_workspace_holds_a_clump_naming_its_directory():
 
 
 def test_picks_takes_the_widest_closure_first():
-    # #1026: two free slots, three independent candidates (no collisions)
-    # with closure sizes 1, 4 and 2 in ticket order — the widest goes out
-    # first, then the next-widest, ahead of ticket order.
+    # Two free slots, three independent candidates (no collisions) with
+    # closure sizes 1, 4 and 2 in ticket order — the widest goes out first,
+    # then the next-widest, ahead of ticket order.
     candidates = [
         {"tickets": [10], "closure": ["a.js"]},
         {"tickets": [20], "closure": ["b.js", "c.js", "d.js", "e.js"]},
@@ -276,11 +277,11 @@ def test_picks_takes_the_widest_closure_first():
 
 
 def test_a_wide_clump_held_by_a_live_workspace_stays_off_the_frontier():
-    # #1026 review, P2: the widest-first sort runs inside `picks`, on what
-    # `frontier` already filtered — a regression that moved the sort above
-    # the frontier's exclusion would dispatch #20 straight into #455's
-    # collision. #20 is the widest candidate here and still held; #30, the
-    # narrower one, is what goes out.
+    # The widest-first sort runs inside `picks`, on what `frontier` already
+    # filtered — a regression that moved the sort above the frontier's
+    # exclusion would dispatch #20 straight into #455's collision. #20 is
+    # the widest candidate here and still held; #30, the narrower one, is
+    # what goes out.
     candidates = [
         {"tickets": [20], "closure": ["b.js", "c.js", "d.js", HOT]},
         {"tickets": [30], "closure": ["f.js", "g.js"]},
@@ -309,11 +310,11 @@ def test_the_cli_dispatch_names_the_widest_clump_first(tmp):
 
 
 def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run(tmp):
-    # A run's --run on every plain dispatch was prose only (#1173 S1, P2,
-    # C2, codex-second-1): the command the controller runs is printed here,
-    # with the run id dispatch was itself given. It also carries the run's
-    # recorded target checkout, not the cwd's (#1190): `implement-dispatch`
-    # resolves issue numbers against a checkout, and the cwd may be another repo.
+    # A run's --run on every plain dispatch was prose only: the command the
+    # controller runs is printed here, with the run id dispatch was itself
+    # given. It also carries the run's recorded target checkout, not the
+    # cwd's: `implement-dispatch` resolves issue numbers against a
+    # checkout, and the cwd may be another repo.
     target = os.path.realpath(os.path.join(tmp, "target"))
     os.makedirs(target)
     subprocess.run(["git", "init", "-q", target], check=True)
@@ -554,8 +555,8 @@ def fixture_run(cache, in_flight_path):
                 runfile.job("fixture", lowest, job["state"],
                             job.get("cores", 0), root=cache)
             else:
-                # A registration records `none` (#1311); the fixture's
-                # "no job" is the legacy no-record state.
+                # A registration records `none`; the fixture's "no job" is
+                # the legacy no-record state.
                 drop_job("fixture", cache, lowest)
         except (KeyError, TypeError, ValueError, AttributeError,
                 runfile.RunFileError):
@@ -984,7 +985,7 @@ HERDR_GONE = {"id": "cli:agent:get",
 
 def live_clumps():
     # skills-2 has sent "PR up", so an `idle` answer for it passes through as
-    # herdr's word rather than reading `stalled` (#1148).
+    # herdr's word rather than reading `stalled`.
     return [
         {"tickets": [1], "workspace": "/w/1", "agent": "skills-1"},
         {"tickets": [2], "workspace": "/w/2", "agent": "skills-2",
@@ -1071,8 +1072,8 @@ def test_the_sweep_names_the_vanished_worker_distinctly_when_rendered():
 
 
 def test_a_finished_pane_with_no_pr_up_is_stalled_and_says_read_the_pane():
-    """#1095: the worker ended its turn mid-lane with a summary to no one,
-    herdr showed `done`, and the sweep had no verdict for it. A finished pane
+    """The worker ended its turn mid-lane with a summary to no one, herdr
+    showed `done`, and the sweep had no verdict for it. A finished pane
     (`done`, or `idle` once someone focused it) on an unsettled clump whose "PR
     up" is not on record is `stalled`, and its line says to read the pane,
     since a worker waiting on the controller's answer reads the same. With
@@ -1148,7 +1149,7 @@ def test_the_cli_holds_the_slot_and_says_so_in_its_status_line(tmp):
 def test_the_cli_dispatch_treats_a_landed_clumps_null_job_as_a_freed_slot(tmp):
     # A run file sets `landed` without ever clearing `job`; charging that
     # entry's absent job record before filtering it out refuses the whole
-    # tick with "live with no job record" (#1003).
+    # tick with "live with no job record".
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -1168,8 +1169,7 @@ def test_the_cli_dispatch_frontier_ignores_a_landed_clumps_own_closure(tmp):
     # next worker branches from main — so it holds nothing. `frontier` must
     # be fed the same `unsettled` collection core_room and the peak count
     # use, or a candidate sharing a file with the landed clump's closure
-    # reads as blocked by a workspace that no longer exists (Codex gate on
-    # PR #1050).
+    # reads as blocked by a workspace that no longer exists.
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -1186,9 +1186,9 @@ def test_the_cli_dispatch_frontier_ignores_a_landed_clumps_own_closure(tmp):
 
 
 def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live(tmp):
-    # #1310: a clump closed with no landing (already fixed on main, or a
-    # nested spec run) is still listed in --in-flight, with no job on record
-    # and a closure the candidate shares. The run file's `closed` is what
+    # A clump closed with no landing (already fixed on main, or a nested
+    # spec run) is still listed in --in-flight, with no job on record and
+    # a closure the candidate shares. The run file's `closed` is what
     # frees its slot and its files — nothing in --in-flight says so.
     cache = os.path.join(tmp, "cache")
     runfile.start("run-close", 5, None, root=cache, repo=REPO)
@@ -1211,7 +1211,7 @@ def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live(tmp):
 
 
 def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed(tmp, empty_live):
-    # #1313: the candidates file is the frozen set and the run file is the
+    # The candidates file is the frozen set and the run file is the
     # progress, so a landed or closed clump is not offered again.
     cache = os.path.join(tmp, "cache")
     runfile.start("run-skip", 5, None, root=cache, repo=REPO)
@@ -1366,7 +1366,7 @@ def test_the_cli_sweep_probes_each_live_slot_once_through_herdr(tmp):
 
 def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id(tmp):
     # `--run` loads the run file through runfile.load(), so the controller
-    # no longer extracts `.clumps` by hand (#1173 codex-third-1).
+    # no longer extracts `.clumps` by hand.
     bindir = os.path.join(tmp, "bin")
     os.mkdir(bindir)
     stub = os.path.join(bindir, "herdr")
@@ -1456,8 +1456,8 @@ def test_the_cli_says_the_declared_job_holds_the_slot_and_not_the_box(tmp):
 
 
 def test_the_cli_dispatch_measures_before_it_says_a_declared_job_holds_the_slot(tmp):
-    # The early "nothing to dispatch" return used to run before the
-    # measurement, so a broken `ps` hid behind a healthy exit 0.
+    # A "nothing to dispatch" early return must not run before the
+    # measurement, or a broken `ps` hides behind a healthy exit 0.
     cand, live = dispatch_files(tmp, {"state": "running", "cores": 8})
     nobin = os.path.join(tmp, "empty-path")
     os.mkdir(nobin)
@@ -1476,9 +1476,9 @@ sleep 30
 
 
 def test_a_probe_that_never_answers_is_given_up_on(tmp, monkeypatch):
-    """C3's witness: the sweep is bounded on the wall clock too, because a
-    controller waiting on a hung herdr is inside a tool call, where no worker
-    can reach it."""
+    """The sweep is bounded on the wall clock too, because a controller
+    waiting on a hung herdr is inside a tool call, where no worker can
+    reach it."""
     bindir = os.path.join(tmp, "bin")
     os.mkdir(bindir)
     stub = os.path.join(bindir, "herdr")
@@ -1509,7 +1509,7 @@ def test_a_held_clump_is_still_named_when_declared_jobs_hold_every_slot(tmp):
 def test_the_whole_sweep_is_bounded_by_one_deadline_not_one_per_probe():
     """N hung panes must not hold the controller for N timeouts: the worst
     case is a constant, because a controller inside a tool call hears no
-    worker at all (#778)."""
+    worker at all."""
     ticks = iter([0.0, 0.0, 10.0, 10.0, 10.0])
     calls = []
 
@@ -1564,7 +1564,7 @@ def test_the_cli_sweep_of_several_hung_panes_returns_within_one_deadline(tmp):
 
 
 def test_dispatch_without_an_in_flight_snapshot_is_refused(tmp):
-    # An omitted snapshot must not read as "no worker is live" (#933).
+    # An omitted snapshot must not read as "no worker is live".
     cand = os.path.join(tmp, "candidates.json")
     with open(cand, "w") as fh:
         json.dump(candidates_781(), fh)
@@ -1650,7 +1650,7 @@ def test_a_tick_between_the_workers_own_write_and_the_controllers_turn_holds_the
     # Registration records `none`, so a tick before any declaration dispatches
     # into the free slot. The worker then records its own 8-core job with the
     # CLI, in its own process, and no controller turn follows: the next tick
-    # must read that record and hold the slots (#1339, owner ruling (b)).
+    # must read that record and hold the slots.
     cand, live, env = run_file_dispatch(tmp, ("none",))
     tick = ("dispatch", "--candidates", cand, "--in-flight", live,
             "--run", "run-t", "--free", "1", "--processes", "4",
@@ -1705,7 +1705,7 @@ def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126(tmp):
 def test_dispatch_names_the_overlap_when_an_unregistered_key_shares_tickets(tmp):
     # In-flight [300, 351] against a registered [351]: `runfile.py clump
     # --tickets 300,351` refuses on "already in clump #351", so the refusal
-    # names the overlap instead of prescribing it (#1173 C1).
+    # names the overlap instead of prescribing it.
     cand, live, env = run_file_dispatch(tmp, ("none",))
     with open(live) as fh:
         clumps = json.load(fh)
@@ -1723,7 +1723,7 @@ def test_dispatch_names_the_overlap_when_an_unregistered_key_shares_tickets(tmp)
 
 def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107(tmp):
     # The refusal must come from the run file's silence: an in-flight `job`
-    # that would charge cleanly is ignored once --run is given (review C1).
+    # that would charge cleanly is ignored once --run is given.
     cand, live, env = run_file_dispatch(tmp, None)
     with open(live) as fh:
         clumps = json.load(fh)
@@ -1738,8 +1738,8 @@ def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107(tmp)
 
 
 def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107(tmp):
-    # Review C2: the run file, not a stale in-flight `job`, is the charge, and
-    # the clump is found by min(tickets) whatever order its tickets are listed.
+    # The run file, not a stale in-flight `job`, is the charge, and the
+    # clump is found by min(tickets) whatever order its tickets are listed.
     import runfile
     cache = os.path.join(tmp, "cache")
     os.makedirs(cache)
@@ -1794,7 +1794,7 @@ def test_a_job_field_in_the_in_flight_file_is_never_charged_1107(tmp):
 
 
 def test_load_run_reads_a_run_file_and_wraps_its_refusal_as_a_loop_error(tmp):
-    # One loader behind `with_run_jobs` and `sweep --run` (#1209 S2).
+    # One loader behind `with_run_jobs` and `sweep --run`.
     runfile.start("run-loader", slots=2, root=tmp, repo=REPO)
     runfile.clump("run-loader", [7], "/w/7", "skills-7", root=tmp)
     run = loop.load_run("run-loader", tmp)
@@ -1805,7 +1805,7 @@ def test_load_run_reads_a_run_file_and_wraps_its_refusal_as_a_loop_error(tmp):
 
 
 def test_a_workspaces_real_diff_joins_its_in_flight_closure():
-    # #1212: the closure resolved from the ticket's named files misses what the
+    # The closure resolved from the ticket's named files misses what the
     # worker's diff really reaches; the diff is unioned in at every dispatch.
     live = [{"tickets": [431], "workspace": "/w/431", "closure": ["rig.mjs"]}]
     got = loop.with_workspace_diffs(
@@ -1880,8 +1880,7 @@ def make_workspace(tmp, changed, default="main"):
 
 def test_workspace_diff_lists_files_changed_against_the_origin_default(tmp):
     # A default that is not `main` and two commits on the branch: a diff
-    # against a hard-coded `origin/main`, or against `HEAD~1`, reads wrong
-    # (#1212 C6).
+    # against a hard-coded `origin/main`, or against `HEAD~1`, reads wrong.
     work = make_workspace(tmp, ["b.txt", "c.txt"], default="trunk")
     assert sorted(loop.workspace_diff(work)) == ["b.txt", "c.txt"]
     with pytest.raises(loop.LoopError):
@@ -1927,8 +1926,8 @@ def test_workspace_diff_of_a_branch_with_no_recorded_base_is_against_default(tmp
 
 
 def test_workspace_diff_of_a_slice_that_merged_an_advanced_integration_branch_1486(tmp):
-    # The ticket's first criterion: spec-9 moved on after the slice was cut and
-    # the slice merged it in; the other slice's file is still not its own.
+    # spec-9 moved on after the slice was cut and the slice merged it in;
+    # the other slice's file is still not its own.
     work = make_slice_workspace(tmp, own=["own.txt"], landed=[])
     run_in(work, "git", "checkout", "-q", "spec-9")
     with open(os.path.join(work, "later.txt"), "w") as fh:
@@ -1959,8 +1958,8 @@ def test_workspace_diff_of_a_slice_whose_integration_branch_is_gone_names_the_ke
 
 
 def test_workspace_diff_includes_uncommitted_and_untracked_edits_1254(tmp):
-    # #1212 P2: a worker that has not committed yet has still reached its
-    # files; the committed history alone reads it as touching nothing.
+    # A worker that has not committed yet has still reached its files; the
+    # committed history alone reads it as touching nothing.
     work = make_workspace(tmp, ["b.txt"])
     with open(os.path.join(work, "a.txt"), "w") as fh:
         fh.write("edited, unstaged")
@@ -1974,7 +1973,7 @@ def test_workspace_diff_includes_uncommitted_and_untracked_edits_1254(tmp):
 
 
 def test_workspace_diff_names_both_sides_of_a_rename(tmp):
-    # #1212 C1: a candidate naming the old path collides with the rename.
+    # A candidate naming the old path collides with the rename.
     work = make_workspace(tmp, [])
     run_in(work, "git", "mv", "a.txt", "renamed.txt")
     run_in(work, "git", "commit", "-qm", "rename")
@@ -1982,14 +1981,14 @@ def test_workspace_diff_names_both_sides_of_a_rename(tmp):
 
 
 def test_workspace_diff_returns_a_non_ascii_path_unquoted(tmp):
-    # #1212 C2: git's default output quotes it, so it never matches a raw path.
+    # git's default output quotes it, so it never matches a raw path.
     work = make_workspace(tmp, ["caf\u00e9.md"])
     assert loop.workspace_diff(work) == ["caf\u00e9.md"]
 
 
 def test_workspace_diff_refuses_a_directory_that_is_not_its_own_checkout(tmp):
-    # #1212 C3: a workspace path with its `.git` gone resolves to the checkout
-    # around it and would read as a branch that changed nothing.
+    # A workspace path with its `.git` gone resolves to the checkout around
+    # it and would read as a branch that changed nothing.
     work = make_workspace(tmp, ["b.txt"])
     inner = os.path.join(work, "gone")
     os.mkdir(inner)

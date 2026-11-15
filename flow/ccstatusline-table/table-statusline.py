@@ -23,7 +23,6 @@ from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-# Dracula palette
 PURPLE, CYAN, GREEN, PINK = "BD93F9", "8BE9FD", "50FA7B", "FF79C6"
 ORANGE, YELLOW, FG = "FFB86C", "F1FA8C", "F8F8F2"
 RED = "FF5555"
@@ -187,7 +186,7 @@ def table(rows: list[list[tuple[str, str]]], frame: str) -> str:
 
 
 def write_usage_cache(data: object) -> None:
-    """Keep the `rate_limits` block for `multi-axis-code-review/claude-usage-gate.py` (#1436)."""
+    """Keep the `rate_limits` block for `multi-axis-code-review/claude-usage-gate.py`."""
     try:
         spec = importlib.util.spec_from_file_location("claude_usage", CFG / "claude-usage.py")
         mod = importlib.util.module_from_spec(spec)

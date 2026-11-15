@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Codex audit range (#1361): the merged PRs that skipped the Codex gate since the last audit,
-as one diff range for a single Codex run.
+"""Codex audit range: the merged PRs that skipped the Codex gate since the last audit, as one diff
+range for a single Codex run.
 
     codex-audit-range.py --ledger PATH --repo R --mark SHA|DATE [--base REF]
 
@@ -44,7 +44,7 @@ from shellcmd import CmdError, default_branch, git  # noqa: E402  (#1782)
 from review_ledger import read_ledger  # noqa: E402
 from review_cache import fold_repo  # noqa: E402
 
-# `unmeasured`: the gate answered exit 30 (size or usage unread), so the PR may have been large (#1405).
+# `unmeasured`: the gate answered exit 30 (size or usage unread), so the PR may have been large.
 AUDITED_REASONS = ("size", "ceiling", "unmeasured")
 OK, ERROR, EMPTY = 0, 2, 3
 _PR_SUBJECT_RE = re.compile(r"\(#(\d+)\)$")

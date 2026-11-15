@@ -37,7 +37,6 @@ _gh_runner = _default_gh_runner
 
 
 def set_gh_runner(fn):
-    """Install a replacement gh runner; returns the previous one."""
     global _gh_runner
     prev = _gh_runner
     _gh_runner = fn

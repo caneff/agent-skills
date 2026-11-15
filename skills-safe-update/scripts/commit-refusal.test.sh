@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Runs safe-update.sh's main() end to end against a fixture buffer with a fake
-# `npx`, to prove a refused commit is never read as "nothing to commit"
-# (#1450). The script used to force `-c user.email=skills@local`, which the
-# checkout's commit-identity guard refuses; it then swallowed the refusal
-# twice (the snapshot commit ended in `|| true`, the upstream commit's failure
-# printed "no upstream changes." and exited 0).
+# `npx`, to prove a refused commit is never read as "nothing to commit":
+# the script forcing an identity the checkout's commit-identity guard refuses
+# must fail loudly, not end in `|| true` or print "no upstream changes." and
+# exit 0.
 # No network. Every repo, TMPDIR and HOME is under $WORK, and this repo's HEAD
 # and status are asserted unchanged at the end (the protect.test.sh tripwire).
 set -uo pipefail
@@ -100,7 +99,7 @@ run "$d" none
 check "nothing to commit exits 0" 0 "$RC"
 has "nothing to commit says so" "$OUT" "no upstream changes."
 
-# 5. the script no longer overrides the identity: commits carry the checkout's
+# 5. commits carry the checkout's identity, never one the script forces
 d=$(fixture identity); echo edit > "$d/a/SKILL.md"
 run "$d" none
 check "the run with a pending edit exits 0" 0 "$RC"

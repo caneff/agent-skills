@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# The permission rules `flow/claude/settings.json` must hold, by name.
 # Run: bash flow/settings-rules.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,23 +9,23 @@ has() { # has <list: allow|ask> <rule>
   then echo "PASS: permissions.$1 holds $2"
   else echo "FAIL: permissions.$1 has no $2"; fails=1; fi
 }
-lacks() { # lacks <list> <rule>
+lacks() { # lacks <list: allow|ask> <rule>
   if jq -e --arg l "$1" --arg r "$2" '.permissions[$l] | index($r)' "$settings" >/dev/null 2>&1
   then echo "FAIL: permissions.$1 still holds $2"; fails=1
   else echo "PASS: permissions.$1 dropped $2"; fi
 }
 
-# The live e2e lock (#1392), narrowed by Chris's ruling 2026-11-09
-# (twitch-rules-scroller #1131): only an e2e.sh run carrying --main-monitor is
-# an `ask` rule, since that run takes over Chris's monitor; a virtual-monitor
-# run needs no go. Anchored at the start of a subcommand (#1725): a leading `*`
-# matched `e2e.sh` and `--main-monitor` anywhere in a command, so a heredoc
-# quoting a repo's AGENTS.md was denied in a `-p` run. Asserted by behaviour:
-# samples are matched against permissions.ask the way the harness matches a
-# Bash rule (code.claude.com/docs/en/permissions: `*` = any text, the rule must
-# match the whole subcommand). This models one subcommand; it does not split
-# compound commands on `&&`, `;`, `|` or newlines as the harness does first,
-# so a sample is one already-split subcommand (the heredoc is one command).
+# The live e2e lock, narrowed by Chris's ruling: only an e2e.sh run carrying
+# --main-monitor is an `ask` rule, since that run takes over Chris's monitor;
+# a virtual-monitor run needs no go. Anchored at the start of a subcommand: a
+# leading `*` matched `e2e.sh` and `--main-monitor` anywhere in a command, so
+# a heredoc quoting a repo's AGENTS.md was denied in a `-p` run. Asserted by
+# behaviour: samples are matched against permissions.ask the way the harness
+# matches a Bash rule (code.claude.com/docs/en/permissions: `*` = any text,
+# the rule must match the whole subcommand). This models one subcommand; it
+# does not split compound commands on `&&`, `;`, `|` or newlines as the
+# harness does first, so a sample is one already-split subcommand (the heredoc
+# is one command).
 e2e_check=$(jq -c '.permissions.ask' "$settings" 2>&1 | python3 -c '
 import fnmatch, json, sys
 ask = json.loads(sys.stdin.read())
@@ -61,7 +60,7 @@ if [ "$e2e_check" = "rc=0" ]
 then echo "PASS: ask rules match every e2e.sh --main-monitor start form and nothing else, none starts with *"
 else echo "FAIL: e2e ask rules:"; echo "$e2e_check"; fails=1; fi
 
-# Compute pre-authorization, ruled by Chris 2026-09-28 (#1225): `uv run` and
+# Compute pre-authorization, ruled by Chris: `uv run` and
 # `job-run`, with the narrower `uv run` paths it makes redundant gone.
 has allow 'Bash(uv run:*)'
 has allow 'Bash(job-run:*)'
@@ -71,7 +70,7 @@ for rule in 'Bash(uv run finders/*)' \
   lacks allow "$rule"
 done
 
-# The install check runs at every session start (#1397): a settings.json that
+# The install check runs at every session start: a settings.json that
 # stopped being the link drifted for 30 minutes unseen, long after install.sh.
 if jq -e '[.hooks.SessionStart[].hooks[].command] | any(test("install-check\\.sh --quiet"))' "$settings" >/dev/null 2>&1
 then echo "PASS: SessionStart runs install-check.sh --quiet"

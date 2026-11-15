@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`drain.py [--repo <path>] [--once] [--max <n>] [--bundle-max <k>]
 [--anchor <n>]`: work the `ready-for-agent` queue unattended, serially, one PR
-at a time (#1403).
+at a time.
 
 The **anchor** is the oldest unblocked ready ticket (`implement-spec/frontier.py`)
 or clear spec parent, whichever has the lower number, or, for the first bundle
@@ -760,7 +760,7 @@ def repo_slug(ctx):
 
 def verify_pr(ctx, branch, anchor, kind):
     """The PR's settled view: not draft and CLEAN, waited for rather than
-    refused on UNKNOWN or a check still running (#1526; `pr_settle.py` has the
+    refused on UNKNOWN or a check still running (`pr_settle.py` has the
     limits), then its closures and the seam."""
     try:
         view = pr_settle.settle(pr_settle.gh_reader(branch, ctx.repo, "number,url,closingIssuesReferences",
@@ -1028,7 +1028,7 @@ class Progress:
         self.merged, self.closed, self.handed = [], [], []
         self.failures, self.done, self.want = 0, 0, want
         self.started = []  # the tickets of a bundle whose start line is out and whose end line is not
-        self.told = set()  # stranded slices already named this drain (#1485)
+        self.told = set()  # stranded slices already named this drain
         self.ended = set()  # the anchors this drain has taken up: added before `work()`, so none is taken twice
         self.cause, self.seen = None, None  # the cause the drain ended on, and the last queue read `(queue, waiting, passed)`
 

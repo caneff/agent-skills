@@ -70,10 +70,10 @@ else
   echo "FAIL the vscode redirect did not take effect as expected: $(cat "$restore/fake-vscode/settings.json")"; fails=1
 fi
 
-# --commit must still pick up a harness write to claude/settings.json (#1031
-# P1): install.sh symlinks it, so the harness now writes straight into the
-# repo file, and nothing else backs that write up once it is out of the
-# copy-based manifest — --commit has to stage and commit it directly.
+# --commit must still pick up a harness write to claude/settings.json:
+# install.sh symlinks it, so the harness writes straight into the repo file,
+# and nothing else backs that write up once it is out of the copy-based
+# manifest — --commit has to stage and commit it directly.
 commit="$tmp/commit"; scratch_repo "$commit"
 printf '{"env":{"CHANGED":true}}\n' > "$commit/claude/settings.json"
 before_sha=$(git -C "$commit" rev-parse HEAD)
@@ -86,7 +86,6 @@ else
   echo "FAIL --commit did not commit the settings.json change (rc=$rc, before=$before_sha, after=$after_sha): $out"; fails=1
 fi
 
-# An unchanged settings.json must not force an empty commit.
 noop="$tmp/noop"; scratch_repo "$noop"
 before_sha=$(git -C "$noop" rev-parse HEAD)
 HOME="$tmp/noop-home" bash "$noop/backup-sync.sh" --commit >/dev/null 2>&1

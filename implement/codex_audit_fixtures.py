@@ -1,6 +1,5 @@
-"""Fixtures shared by the Codex audit's test files (#1405 S5): the git
-identity, the ledger skip row as `review_ledger.py append --skip-reason`
-writes it, the fabricated-repo helpers, and `AuditEnv`, the whole
+"""Fixtures shared by the Codex audit's test files: the git identity, the ledger skip row as
+`review_ledger.py append --skip-reason` writes it, the fabricated-repo helpers, and `AuditEnv`, the whole
 `codex-audit.py` test environment, so the skip-row shape lives in one test
 place. Not a suite: `tests/all.sh` discovers only `*_test.py`."""
 import json

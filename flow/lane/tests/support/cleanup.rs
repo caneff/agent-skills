@@ -1,8 +1,7 @@
-//! Fixture for the merge-cleanup integration tests, ported from
-//! `flow/bin/merge-cleanup.test.sh`: scratch origins and clones under a temp
-//! dir, a temp HOME, and PATHs holding the fake `gh`/`herdr` plus only the
-//! real tools the binary shells out to — so the gh- and herdr-absent branches
-//! are reachable and nothing live is touched.
+//! Fixture for the merge-cleanup integration tests: scratch origins and
+//! clones under a temp dir, a temp HOME, and PATHs holding the fake
+//! `gh`/`herdr` plus only the real tools the binary shells out to — so the
+//! gh- and herdr-absent branches are reachable and nothing live is touched.
 
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
@@ -25,7 +24,6 @@ pub fn spawn(cmd: &mut Command) -> std::io::Result<std::process::Child> {
     cmd.spawn()
 }
 
-/// `Command::output`, through `spawn`.
 pub fn output(cmd: &mut Command) -> std::io::Result<Output> {
     spawn(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))?.wait_with_output()
 }
@@ -38,7 +36,6 @@ pub fn write_executable(path: &Path, body: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// Which fake tools a run's PATH holds.
 #[derive(Clone, Copy)]
 pub enum Tools {
     Full,
@@ -105,11 +102,9 @@ impl Cleanup {
         std::fs::write(self.call_log(), "").unwrap();
     }
 
-    /// `herdr agent list`'s agents array, as JSON.
     pub fn set_agents(&self, agents: &str) {
         std::fs::write(self.root().join("agents.json"), format!(r#"{{"result":{{"agents":{agents}}}}}"#)).unwrap();
     }
-    /// `herdr workspace list`: one workspace per `(id, checkout path)`.
     pub fn set_workspaces_at(&self, ws: &[(&str, &Path)]) {
         let items: Vec<String> = ws
             .iter()
@@ -121,7 +116,6 @@ impl Cleanup {
         std::fs::write(self.root().join("workspaces.json"), format!(r#"{{"result":{{"workspaces":{ws}}}}}"#)).unwrap();
     }
 
-    /// A registry file `<name>.json` in the scratch HOME.
     pub fn session(&self, name: &str, body: &str) {
         std::fs::write(self.home().join(".claude/sessions").join(format!("{name}.json")), body).unwrap();
     }
@@ -163,8 +157,6 @@ impl Cleanup {
         self.git_ok(&["-C", d, "commit", "-qam", msg]);
     }
 
-    /// A bare origin at `<rel>.origin.git` and a clone of it at `<rel>` on
-    /// main, with a commit identity set.
     fn clone_origin(&self, rel: &str) -> PathBuf {
         let dir = self.root().join(rel);
         std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
@@ -178,12 +170,12 @@ impl Cleanup {
         dir
     }
 
-    /// The bash suite's `mkfixture`: a scratch origin plus a clone where
-    /// caneff/merged-one is squash-merged (a merged PR at its tip),
-    /// caneff/merged-then-more had a PR merged then kept going,
-    /// caneff/ff-merged is a real fast-forward merge, caneff/local-only was
-    /// never pushed, caneff/open-one is open — and origin/main sits one
-    /// commit ahead of the local main, so the fast-forward has work.
+    /// A scratch origin plus a clone where caneff/merged-one is
+    /// squash-merged (a merged PR at its tip), caneff/merged-then-more had
+    /// a PR merged then kept going, caneff/ff-merged is a real
+    /// fast-forward merge, caneff/local-only was never pushed,
+    /// caneff/open-one is open — and origin/main sits one commit ahead of
+    /// the local main, so the fast-forward has work.
     pub fn mkfixture(&self, rel: &str) -> PathBuf {
         let dir = self.clone_origin(rel);
         let d = dir.to_str().unwrap();
@@ -233,12 +225,11 @@ impl Cleanup {
         std::fs::write(self.pr_heads().join(branch.replace('/', "__")), lines.join("\n")).unwrap();
     }
 
-    /// Records that a merged PR's head for `branch` is `rev` in `repo`.
     pub fn record_pr_head(&self, repo: &Path, branch: &str, rev: &str) {
         std::fs::write(self.pr_heads().join(branch.replace('/', "__")), self.rev(repo, rev)).unwrap();
     }
 
-    /// A merged `implement-<n>` branch in `repo`, for the #821 ticket-clearing
+    /// A merged `implement-<n>` branch in `repo`, for the ticket-clearing
     /// tests: pushed, its tip recorded as a merged PR's head, main left
     /// checked out.
     pub fn mk_implement_branch(&self, repo: &Path, n: &str) {
@@ -251,10 +242,10 @@ impl Cleanup {
         self.record_pr_head(repo, &b, &b);
     }
 
-    /// A slice of spec `p` (#1460), as `implement-dispatch` leaves one:
-    /// `spec-<p>` pushed off main, `implement-<n>` cut from it with one
-    /// commit and pushed, and `branch.implement-<n>.base` set to `spec-<p>`.
-    /// Nothing is merged: each test lands it where its case needs.
+    /// A slice of spec `p`, as `implement-dispatch` leaves one: `spec-<p>`
+    /// pushed off main, `implement-<n>` cut from it with one commit and
+    /// pushed, and `branch.implement-<n>.base` set to `spec-<p>`. Nothing
+    /// is merged: each test lands it where its case needs.
     pub fn mk_slice_branch(&self, repo: &Path, n: &str, p: &str) {
         let d = repo.to_str().unwrap();
         let (spec, b) = (format!("spec-{p}"), format!("implement-{n}"));
@@ -282,8 +273,8 @@ impl Cleanup {
         std::fs::write(self.pr_heads().join(branch.replace('/', "__")), format!("7 {tip} {base}")).unwrap();
     }
 
-    /// The bash suite's `mk_lane_repo`: caneff/trivial is merged into main,
-    /// and origin/main is one commit ahead that touches flow/lane or not.
+    /// caneff/trivial is merged into main, and origin/main is one commit
+    /// ahead that touches flow/lane or not.
     pub fn mk_lane_repo(&self, rel: &str, touch_lane: bool) -> PathBuf {
         let dir = self.clone_origin(rel);
         let d = dir.to_str().unwrap();
@@ -337,7 +328,6 @@ impl Cleanup {
         cmd
     }
 
-    /// Runs merge-cleanup with stdin closed.
     pub fn mc(&self, tools: Tools, args: &[&str], env: &[(&str, &str)]) -> Run {
         let out = output(&mut self.command(tools, args, env)).unwrap();
         Run::from(out)
@@ -351,8 +341,8 @@ impl Cleanup {
     }
 
     /// Runs merge-cleanup with its stdout read one line then closed, the way
-    /// `| head -n1` or quitting `less` early leaves it — for #758's broken
-    /// pipe. Returns the exit code (`None` if killed by a signal) and
+    /// `| head -n1` or quitting `less` early leaves it — the broken-pipe
+    /// case. Returns the exit code (`None` if killed by a signal) and
     /// stderr.
     pub fn mc_broken_pipe(&self, tools: Tools, args: &[&str]) -> (Option<i32>, String) {
         use std::io::Read;
@@ -368,7 +358,6 @@ impl Cleanup {
         (status.code(), stderr)
     }
 
-    /// Runs merge-cleanup with `input` piped to its stdin.
     pub fn mc_piped(&self, tools: Tools, args: &[&str], input: &str) -> Run {
         use std::io::Write;
         let mut child =
@@ -380,12 +369,11 @@ impl Cleanup {
 
 /// A run whose stdin is a real terminal (a pty from util-linux `script`),
 /// with stdout piped through `cat` into a file — the `| tee` / `| less`
-/// shape #733 is about.
+/// shape.
 pub struct TtyRun {
     pub ok: bool,
     /// What the terminal showed: stderr, and the typed answer's echo.
     pub terminal: String,
-    /// What reached the pipe.
     pub stdout: String,
 }
 
@@ -445,7 +433,7 @@ impl Run {
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         }
     }
-    /// stdout then stderr, for the assertions the bash suite made on `2>&1`.
+    /// stdout then stderr, as `2>&1` would show them.
     pub fn text(&self) -> String {
         format!("{}{}", self.stdout, self.stderr)
     }
@@ -467,7 +455,6 @@ impl Run {
         }
         out
     }
-    /// The line index of the first line containing `s`, in stdout.
     pub fn line_of(&self, s: &str) -> Option<usize> {
         self.stdout.lines().position(|l| l.contains(s))
     }

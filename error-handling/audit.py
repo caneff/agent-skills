@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pass one of error-handling: parse ruff + bandit JSON into findings rows.
 
-Both tools are JSON-native (spec #365's R1 recon) — `uvx ruff check --select
+Both tools are JSON-native — `uvx ruff check --select
 BLE,TRY,B904,SIM105 --output-format json <scope>` gives an array of objects
 (`filename`, `location.row`, `code`, `message`); `uvx bandit -r <scope> -f
 json -t B110,B112` gives `.results[]` (`filename`, `line_number`, `test_id`,

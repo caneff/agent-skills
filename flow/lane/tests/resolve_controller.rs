@@ -1,4 +1,4 @@
-//! Contract tests for `resolve-controller` (#923): a herdr agent name is
+//! Contract tests for `resolve-controller`: a herdr agent name is
 //! resolved to the live Claude session name at send time, through the fake
 //! `herdr agent list` and a scratch `~/.claude/sessions`.
 
@@ -12,7 +12,7 @@ fn resolve(f: &Fixture, arg: &str) -> std::process::Output {
 
 /// The one place that builds the `resolve-controller` `Command`: every test
 /// that needs an extra environment variable (`HERDR_LIST_FAIL`, say) adds it
-/// here instead of re-inlining the base environment (#1011 V1).
+/// here instead of re-inlining the base environment.
 fn resolve_with_env(f: &Fixture, arg: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_resolve-controller"));
     cmd.arg(arg)
@@ -122,7 +122,7 @@ fn a_controller_whose_socket_accepts_connections_resolves_and_is_sent_nothing() 
     let out = resolve(&f, "skills-ctl");
     assert!(out.status.success(), "{}", out_text(&out));
     // The check connected, and wrote nothing before closing: a ping would cost
-    // the controller a turn (#1540).
+    // the controller a turn.
     inbox.set_nonblocking(true).unwrap();
     let (mut conn, _) = inbox.accept().expect("resolve-controller never connected to the socket");
     conn.set_nonblocking(false).unwrap();

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render one parallel sub-worker's brief (#1550).
+"""Render one parallel sub-worker's brief.
 
     fanout-brief.py --repo <name> --worktree <path> --ticket <n> --for <worker>
                     --test-command <cmd> --assign <worker>=<file>[,<file>...] ...
@@ -16,8 +16,8 @@ exclusively, so a second render of the same ticket and worker takes `-2`,
 `-3`, never another dispatch's file. `<repo>` goes through the ledger's
 `fold_repo`, the one key every cache file uses.
 
-`--finding` and `--ruled` (#1620) hand a fix-round worker its task: one finding
-by id, for the worker it names, listed only in that worker's brief. `--ruled`
+`--finding` and `--ruled` hand a fix-round worker its task: one finding by
+id, for the worker it names, listed only in that worker's brief. `--ruled`
 marks a finding the controller has ruled on, flag-if-you-disagree. An id given
 twice, a finding for an unassigned worker, and (once any finding is given) a
 worker left with none are refused, so a typed finding is never dropped by a

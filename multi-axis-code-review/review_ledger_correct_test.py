@@ -1,4 +1,4 @@
-"""`review_ledger.py correct` (#1658): an append-only correction of a mutation row's outcome.
+"""`review_ledger.py correct`: an append-only correction of a mutation row's outcome.
 Seams: the command line over a throwaway ledger, then every reader (`report`, `escapes` input
 via `read_ledger`) over the same ledger. HOME is a temp dir."""
 import json

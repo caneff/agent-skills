@@ -1,6 +1,6 @@
 """`implement/selector_check.py`: `command` prints the repo's per-change
-command (#1593), and at merge one `selector:` comment on the PR records the
-suites the narrowed command selected, judging nothing (#1537, #1593).
+command, and at merge one `selector:` comment on the PR records the suites
+the narrowed command selected, judging nothing.
 
 Seam: the real script as a subprocess against a throwaway repo whose
 `AGENTS.md` declares a `Narrowed` line, a fake `tests/all.sh` standing in for
@@ -206,9 +206,6 @@ def test_a_repo_with_no_line_leaves_no_state_even_when_an_earlier_run_wrote_one(
     assert not os.path.exists(w.state)
 
 
-# --- `command`: the repo's per-change command (#1593) ---
-
-
 def resolve(tmp_path, agents):
     root = tmp_path / "repo"
     root.mkdir()
@@ -265,7 +262,7 @@ def based_repo(tmp_path):
 
 
 def test_command_at_a_rev_reads_that_revs_section_not_the_working_tree(tmp_path):
-    # A PR that edits its own seam section must not choose the command that gates it (C8).
+    # A PR that edits its own seam section must not choose the command that gates it.
     root = based_repo(tmp_path)
     r = subprocess.run([sys.executable, SCRIPT, "command", "--root", str(root), "--rev", "HEAD~1"],
                        capture_output=True, text=True)
@@ -295,9 +292,6 @@ def test_the_resolvers_refusal_prefix_is_the_one_drain_reads(tmp_path):
     sys.path.insert(0, HERE)
     from selector_check import UNDECLARED
     assert resolve(tmp_path, None).stderr.startswith(UNDECLARED)
-
-
-# --- `failing_suites`: the seam log's failed suites, which the backstop reads ---
 
 
 def test_failing_suites_reads_whole_unindented_fail_lines_once_each(tmp_path):

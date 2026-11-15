@@ -10,12 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
 
 # commit_staged <message> — commit what is staged, with the checkout's own
-# identity (no `-c user.*` override: the commit-identity guard refuses one,
-# #1450). Returns 0 when it committed, NOTHING_STAGED when nothing was staged,
-# and git's own status when git refused, with its stderr left visible. A
-# refusal must never read as "nothing to commit". An unborn HEAD (a refused
-# baseline commit) is compared against the empty tree, so the next run can
-# still make the root commit.
+# identity (no `-c user.*` override: the commit-identity guard refuses one).
+# Returns 0 when it committed, NOTHING_STAGED when nothing was staged, and
+# git's own status when git refused, with its stderr left visible. A refusal
+# must never read as "nothing to commit". An unborn HEAD (a refused baseline
+# commit) is compared against the empty tree, so the next run can still make
+# the root commit.
 NOTHING_STAGED=3
 commit_staged(){
   local rc=0 ref=HEAD
@@ -24,8 +24,6 @@ commit_staged(){
   case $rc in 0) return "$NOTHING_STAGED" ;; 1) ;; *) return "$rc" ;; esac
   git commit -qm "$1" >/dev/null
 }
-
-# ---------------------------------------------------------- three-way merge
 
 # resolve_base_tree <tree-sha> — print the merge base, or fail.
 # The base is the upstream version you HAD installed, and the lock's
@@ -41,7 +39,6 @@ resolve_base_tree(){
 # oid <tree-ish>:<path> — blob SHA, or empty when the path is absent.
 oid(){ git rev-parse -q --verify "$1" 2>/dev/null || true; }
 
-# entry_mode <tree-ish> <path-in-tree> — the 6-digit mode git records for it.
 entry_mode(){ git ls-tree "$1" -- "$2" | awk '{print $1}'; }
 
 # put <tree-ish> <path-in-tree> <dest> — write that blob out, mode included.
@@ -164,8 +161,6 @@ merge_skill(){ (
   exit "$conflicted"
 ) }
 
-# ---------------------------------------------------------------- protection
-
 # protect_skills <pre> <post> <prelock-file>
 # Detect which skills you edited, merge each against the version you had
 # installed, and commit the result — but ONLY when nothing is left conflicted.
@@ -188,9 +183,9 @@ protect_skills(){
   if [ -s "$prelock" ]; then
     while IFS=$'\t' read -r name hash; do
       [ -z "$name" ] && continue
-      cur=$(git rev-parse "$PRE:$name" 2>/dev/null) || continue   # tree SHA of your pre-update version
+      cur=$(git rev-parse "$PRE:$name" 2>/dev/null) || continue
       BASEHASH[$name]=$hash
-      [ "$cur" != "$hash" ] && PROT[$name]=1                       # diverged from installed upstream => you edited it
+      [ "$cur" != "$hash" ] && PROT[$name]=1
     done < "$prelock"
   fi
   if [ -f .protected-skills ]; then
@@ -210,7 +205,7 @@ protect_skills(){
       fi
       continue
     fi
-    if git diff --quiet "$PRE" "$POST" -- "$s"; then continue; fi   # upstream left it alone
+    if git diff --quiet "$PRE" "$POST" -- "$s"; then continue; fi
     if [ -z "${MANUAL[$s]:-}" ] && base=$(resolve_base_tree "${BASEHASH[$s]:-}"); then
       rc=0; out=$(merge_skill "$s" "$base" "$PRE" "$POST") || rc=$?
       if [ "$rc" -gt 1 ]; then
@@ -219,7 +214,7 @@ protect_skills(){
         git checkout "$PRE" -- "$s"; nobase+=("$s"); continue
       fi
       if [ "$rc" -eq 0 ]; then merged+=("$s"); else conflicted+=("$s"); fi
-      if [ -n "$out" ]; then                       # nothing to say when no file needed a decision
+      if [ -n "$out" ]; then
         report+="$s  (base ${base:0:9})"$'\n'
         report+=$(printf '%s\n' "$out" | awk -F'\t' 'NF>=2{printf "  %-9s %s%s\n", $1, $2, ($3 == "" ? "" : "   <- " $3)}')$'\n'
       fi
@@ -242,8 +237,6 @@ protect_skills(){
   fi
 }
 
-# ------------------------------------------------------------------- update
-
 main(){
 cd "$SKILLS"
 
@@ -260,7 +253,7 @@ fi
 LOCK="${SKILL_LOCK:-$(dirname "$SKILLS")/.skill-lock.json}"
 snap_lock(){ [ -f "$LOCK" ] && cp "$LOCK" "$SKILLS/.skill-lock.json"; }
 
-# 2. snapshot current state (so PRE holds your edits)
+# snapshot current state, so PRE holds your edits
 snap_lock
 git add -A
 rc=0; commit_staged "pre-update snapshot $(date +%F)" || rc=$?
@@ -291,7 +284,7 @@ if [ -f "$EXTRA" ]; then
   python3 "$SCRIPT_DIR/upstream.py" sync-extras --extras "$EXTRA"
 fi
 
-# 4. record upstream result (npx rewrote the live lock — mirror the new one in)
+# record upstream result: npx rewrote the live lock, so mirror the new one in
 snap_lock
 git add -A
 rc=0; commit_staged "upstream: skills update $(date +%F)" || rc=$?
@@ -302,7 +295,6 @@ case $rc in
 esac
 POST=$(git rev-parse HEAD)
 
-# 5. protect locally-edited skills: merge YOUR version with upstream's.
 protect_skills "$PRE" "$POST" "$PRELOCK"
 rm -f "$PRELOCK"
 

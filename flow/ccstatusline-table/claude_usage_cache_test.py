@@ -1,4 +1,4 @@
-"""The status line writes Claude's usage cache (#1436): each render of
+"""The status line writes Claude's usage cache: each render of
 `table-statusline.py` stores the session JSON's `rate_limits` block where
 `multi-axis-code-review/claude-usage-gate.py` reads it.
 
@@ -40,7 +40,6 @@ def limits(resets):
 
 @pytest.fixture
 def seeded(tmp_path, limits):
-    """A home whose cache already holds `limits`."""
     render(tmp_path, {"rate_limits": limits})
     return tmp_path
 

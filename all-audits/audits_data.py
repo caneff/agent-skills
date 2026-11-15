@@ -1,6 +1,6 @@
-"""The audit set (#558): name, gated flag, short-set membership,
-ground-truth override paths for the two gated (staleness-cached) audits, and
-whether the audit reads only Python (#1751: all-audits/SKILL.md § Not applicable).
+"""The audit set: name, gated flag, short-set membership, ground-truth
+override paths for the two gated (staleness-cached) audits, and whether the
+audit reads only Python (#1751: all-audits/SKILL.md § Not applicable).
 Adding an audit is one entry here — no other file needs to change.
 """
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract test for worker-send-alert.sh (#1540): a synthetic PostToolUse event
+# Contract test for worker-send-alert.sh: a synthetic PostToolUse event
 # for a SendMessage on stdin, a synthetic transcript, a scratch HOME holding
 # the sessions registry, and a stubbed `herdr` on PATH -> exactly one `herdr
 # agent prompt` to the controller's pane when the send to the controller came
@@ -99,7 +99,7 @@ expect_none "a tool other than SendMessage does not alert"
 reset_log
 run "drain controller" "$drain" "$(send_event tu-7 drain "$failed")"
 # Not just no alert: the guard exits before any log line, where the no-pane
-# fallback would also send nothing and log "not-sent" (#1540 C1).
+# fallback would also send nothing and log "not-sent".
 if [ -z "$pane" ] && [ ! -s "$log" ]; then pass "the controller named drain is no session: no alert and no log line"; else fail "drain — log: $(cat "$log" 2>/dev/null)"; fi
 
 reset_log

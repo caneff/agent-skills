@@ -1,5 +1,4 @@
-/* base — the always-linked stylesheet spine (tokens, page shell, recap, metabar, difficulty level, objectives, mission, sources, print).
-   Component CSS (callout, table, chip/pill/badge/level/kbd, checklist, quiz,
+/* Component CSS (callout, table, chip/pill/badge/level/kbd, checklist, quiz,
    code block, Prism tokens, diagram, math, teacher-box) lives in its own file —
    every Component is self-contained so it can be copied on its own. */
 
@@ -7,28 +6,27 @@
    per token instead of a separate dark palette block. Theme control lives in
    color-scheme alone (see below). */
 :root {
-  color-scheme: light dark; /* follow OS; [data-theme] forces a side */
-  --vt-ink: light-dark(#1a1f2b, #e6e9ee); /* body text */
-  --vt-muted: light-dark(#5b6472, #97a2b2); /* secondary text */
+  color-scheme: light dark;
+  --vt-ink: light-dark(#1a1f2b, #e6e9ee);
+  --vt-muted: light-dark(#5b6472, #97a2b2);
   --vt-accent: light-dark(
     #1a73e8,
     #5b9dff
   ); /* links, kicker, h2 rule, primary */
-  --vt-accent-fg: light-dark(#ffffff, #0b1220); /* text on accent fill */
-  --vt-rule: light-dark(#e3e6ea, #2b313b); /* borders, dividers */
-  --vt-paper: light-dark(#ffffff, #13171d); /* page / card background */
+  --vt-accent-fg: light-dark(#ffffff, #0b1220);
+  --vt-rule: light-dark(#e3e6ea, #2b313b);
+  --vt-paper: light-dark(#ffffff, #13171d);
   --vt-good: light-dark(#0d7d4d, #3ecf8e); /* quiz correct, checklist done */
-  --vt-bad: light-dark(#c5221f, #ff6b6b); /* quiz wrong */
-  --vt-warn: light-dark(#f9ab00, #f5c451); /* caution callout */
+  --vt-bad: light-dark(#c5221f, #ff6b6b);
+  --vt-warn: light-dark(#f9ab00, #f5c451);
   --vt-warn-fg: #000; /* text on warn fill (dark for contrast on amber) */
   --vt-warn-dk: #9a6b00; /* dark amber for outline/foreground warn uses */
   --vt-ui-font:
     "Helvetica Neue", Arial, sans-serif; /* sans UI chrome: kickers, labels, metabar, component text (body stays Georgia serif) */
   --vt-mono-font:
-    ui-monospace, "Cascadia Code", Menlo, monospace; /* code, kbd, sandbox input — every monospace use shares this stack */
+    ui-monospace, "Cascadia Code", Menlo, monospace;
 }
 
-/* derived tints */
 :root {
   /* neutral tints mix in srgb: the source (--vt-ink) is near-grey, so srgb
      yields a flat clean grey — oklch would preserve ink's faint blue and tint them. */
@@ -51,8 +49,6 @@
   );
 }
 
-/* Theme = which side of every light-dark() token resolves. Default follows the
-   OS; [data-theme] forces a side. Derived tints + masked icons follow the tokens. */
 :root[data-theme="dark"] {
   color-scheme: dark;
 }
@@ -86,7 +82,6 @@ main {
 main > * {
   grid-column: 2;
 }
-/* left-anchored breakout: left edge stays with prose, extends right into gutter */
 main > .vt-wide {
   grid-column: 2 / -1;
 }
@@ -96,7 +91,6 @@ main > .vt-code.vt-wide {
   width: max-content;
   max-width: 100%;
 }
-/* diagrams fill their track */
 main > .vt-diagram.vt-wide {
   width: 100%;
   min-width: 0; /* grid items default to min-width:auto = SVG intrinsic width; 0 lets overflow-x:auto clip */
@@ -106,7 +100,6 @@ main > .vt-diagram.vt-wide svg {
   max-width: none;
 }
 
-/* page shell */
 .vt-kicker {
   font-family: var(--vt-ui-font);
   font-size: 0.8rem;
@@ -119,7 +112,7 @@ h1 {
   line-height: 1.2;
   margin: 0.3rem 0 0.5rem;
   letter-spacing: -0.01em;
-  text-wrap: balance; /* even multi-line headings */
+  text-wrap: balance;
 }
 .vt-lede {
   font-size: 1.1rem;
@@ -172,14 +165,13 @@ code {
   background: var(--vt-soft);
   padding: 0.1em 0.35em;
   border-radius: 4px;
-  white-space: nowrap; /* inline code stays on one line — never break mid-token */
+  white-space: nowrap;
 }
 a code {
   background: none;
   padding-inline: 0.1em;
 }
 
-/* recap + next-CTA */
 .vt-recap {
   border-radius: 12px;
   border-left: 4px solid var(--vt-good);
@@ -203,7 +195,6 @@ a code {
   color: var(--vt-ink);
 }
 
-/* shell — meta bar: time / prereqs / difficulty / lesson position */
 .vt-metabar {
   display: flex;
   flex-wrap: wrap;
@@ -268,7 +259,6 @@ a code {
   }
 }
 
-/* shell — intro card (objectives, why-it-matters, hook — author's call) */
 .vt-objectives {
   border-left: 3px solid var(--vt-accent);
   border-radius: 0 8px 8px 0;
@@ -298,7 +288,6 @@ a code {
   color: var(--vt-accent-dk);
 }
 
-/* mission — accent-bordered "do this first" callout */
 .vt-mission {
   border-left: 3px solid var(--vt-accent);
   border-radius: 0 8px 8px 0;
@@ -311,7 +300,6 @@ a code {
   color: var(--vt-accent-dk);
 }
 
-/* footer / sources (source-type icons, companion slot, verified-date) */
 .vt-sources {
   margin-top: 3rem;
   border-top: 1px solid var(--vt-rule);
@@ -386,7 +374,6 @@ a code {
   color: var(--vt-muted);
 }
 
-/* ====== print ====== */
 @media print {
   /* Force the light side of every light-dark() token — dark backgrounds are
      near-black on paper and waste ink. color-scheme: light also reverts the

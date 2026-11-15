@@ -1,5 +1,5 @@
-"""End-to-end test for spec #1357 (ration the Codex pass by PR size, with a weekly audit of the
-PRs that skipped it), closing ticket #1386.
+"""End-to-end test for rationing the Codex pass by PR size, with a weekly audit of the PRs that
+skipped it.
 
 One repo's week, driven through every command the spec's slices built, in the order a controller
 uses them. Each step reads what the step before it wrote; every expected number is worked by hand
@@ -70,8 +70,6 @@ def lines(n, tag):
 
 
 class Week(AuditEnv):
-    """The audit environment plus this week's drivers: open, gate and merge a PR; run a CLI."""
-
     def pr(self, pr, ticket, files, labels=(), day=1):
         """Open PR `pr` for `ticket` on its own branch with `files` ({path: line count}), run the merge
         gate on it from there as § The merge step 3 does, then squash-merge it onto main.
@@ -111,7 +109,6 @@ def week(tmp_path):
 
 def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(week):
     w = week
-    # 1. The merge gate, one PR at a time.
     status, line, _ = w.pr(101, 11, {"lib/a.py": 120, "lib/a_test.py": 200, "tests/t.sh": 200,
                                      "docs/a.md": 200})
     assert (status, line) == (40, "under size threshold (120 < 300)")
@@ -146,14 +143,13 @@ def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(week):
     w.git("checkout", "-q", "main")
     w.git("branch", "-q", "-D", "pr-105")
 
-    # 2. The second pass is final: no third-pass row can be written, a second-pass one can.
     r = w.append("--ticket", 12, "--type", "codex-third", "--skip-reason", "x")
     assert r.returncode != 0
     assert "retired" in r.stderr
     r = w.append("--ticket", 12, "--type", "codex-second", "--skip-reason", "ceiling")
     assert r.returncode == 0, r.stderr
 
-    # 3. The weekly audit, still at 75%: the ceiling is lifted for it, and it reviews exactly the
+    # The weekly audit, still at 75%: the ceiling is lifted for it, and it reviews exactly the
     # three PRs that skipped their gate.
     out = w.tmp / "findings.out"
     out.write_text(FINDINGS_OUT.replace("(a:3-9)", "(lib/c.py:3-9)"))
@@ -173,7 +169,6 @@ def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(week):
     for pr, ticket, reason in ((101, 11, "size"), (103, 13, "ceiling"), (104, 14, "ceiling")):
         assert f"- PR #{pr} (ticket #{ticket}, skipped for {reason})" in brief
 
-    # 4. The mark moves to the newest audited merge; the next run has nothing to audit.
     r = w.run_cli(AUDIT, "mark", "--sha", m104, "--date", "2026-09-25", "--trial", w.trial)
     assert r.returncode == 0, r.stderr
     assert f"- skills: 2026-09-25 {m104}" in w.trial.read_text()
@@ -189,7 +184,6 @@ def test_a_week_of_rationed_gates_then_the_audit_of_what_they_skipped(week):
     assert "codex usage 100% — capped" in r.stdout
     assert "codex usage 100% — capped" in w.rows("codex-audit")[2]["skip_reason"]
 
-    # 5. The report counts the week.
     r = w.run_cli(LEDGER_CLI, "report", "--ledger", w.ledger, "--format", "json")
     assert r.returncode == 0, r.stderr
     by_type = {t["type"]: t for t in json.loads(r.stdout)["types"]}

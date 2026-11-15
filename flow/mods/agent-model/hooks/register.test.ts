@@ -1,6 +1,3 @@
-// Ported from the shell hook this mod replaced, case for case, except that
-// Explore without a usable model is now a rewrite to sonnet, not a deny. Added
-// cases: an agent file's own model, `inherit`, an empty key, precedence.
 import { test, expect, mock } from 'claude-code/testing'
 
 const AGENTS = '/home/test/.claude/agents'

@@ -1,4 +1,4 @@
-"""Tests for duplication's jscpd parser (#1744; was `audit.py`'s `_selfcheck`)."""
+"""Tests for duplication's jscpd parser."""
 import json
 import os
 import sys
