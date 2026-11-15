@@ -1,4 +1,4 @@
-/* callout + tones (themeable SVG tone icons; ::before is decorative, aria-hidden by nature) */
+/* ::before tone icons are decorative: a pseudo-element is aria-hidden by nature. */
 .vt-callout {
   position: relative;
   background: var(--vt-warn-soft);

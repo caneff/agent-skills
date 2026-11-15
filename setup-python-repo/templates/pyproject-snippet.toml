@@ -44,7 +44,6 @@ deprecated = "ignore"  # tests exercise deprecated APIs on purpose
 addopts = "-ra --strict-markers --strict-config"
 xfail_strict = true
 
-# --- coverage (soft — reported, not a hard wall) ---
 [tool.coverage.run]
 branch = true
 

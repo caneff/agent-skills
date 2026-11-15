@@ -1,4 +1,3 @@
-/* pill — base (accent fill) */
 .vt-pill {
   display: inline-block;
   padding: 0.05rem 0.5rem;
@@ -10,7 +9,6 @@
   vertical-align: middle;
 }
 
-/* pill — semantic fills */
 .vt-pill.neutral {
   background: var(--vt-neutral-soft);
   color: var(--vt-muted);
@@ -28,7 +26,6 @@
   color: var(--vt-warn-fg);
 }
 
-/* pill — outline */
 .vt-pill.outline {
   background: transparent;
   color: var(--vt-accent);
@@ -51,13 +48,11 @@
   border-color: var(--vt-warn);
 }
 
-/* pill — size */
 .vt-pill.sm {
   font-size: 0.68rem;
   padding: 0.02rem 0.4rem;
 }
 
-/* pill — status dot */
 .vt-pill.dot::before {
   content: "●";
   margin-right: 0.35em;
@@ -66,7 +61,6 @@
   color: currentColor;
 }
 
-/* pill — leading icon */
 .vt-pill.ic-check::before {
   content: "✓";
   margin-right: 0.3em;
@@ -76,7 +70,6 @@
   margin-right: 0.3em;
 }
 
-/* count / step badge */
 .vt-badge {
   display: inline-flex;
   align-items: center;
@@ -96,7 +89,6 @@
   font-size: 0.7rem;
 }
 
-/* keyboard keycap */
 .vt-kbd {
   font-family: var(--vt-mono-font);
   font-size: 0.8rem;

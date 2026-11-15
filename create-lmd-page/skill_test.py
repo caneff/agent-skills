@@ -1,9 +1,9 @@
-"""Structure test for the create-lmd-page flow (#1662): the checks SKILL.md runs around the
+"""Structure test for the create-lmd-page flow: the checks SKILL.md runs around the
 driver, the template's `<p>` measure, and the scripts it calls (extractor `solution`,
 board_png with Pillow and the renderer faked).
 
 Runs nothing from ~/src/sudokupad-art or ~/src/twitch-rules-scroller. Blind to: whether a
-model follows the prose, the `lmd_archive` command itself (sudokupad-art #261, #262, #287),
+model follows the prose, the `lmd_archive` command itself (sudokupad-art's),
 the rig's stream gate and stream-browser launch, the driver (lmd_driver_test.py), and a
 real render or a real OBS.
 """
@@ -29,8 +29,6 @@ def section(name):
     return m.group(1)
 
 
-# ---- the extractor's `solution` ----
-
 def test_extractor_outputs_solution_from_a_sudokumaker_blob():
     blob = json.dumps({"metadata": {"title": "T", "author": "A", "rules": "R", "solution": "123456789"}})
     assert extract_puzzle.parse_blob(blob)["solution"] == "123456789"
@@ -47,8 +45,6 @@ def test_extractor_solution_is_null_without_one():
 def test_extractor_solution_from_a_legacy_blob():
     assert extract_puzzle.parse_blob("{t:'T',rules:'R',solution:'4321'}")["solution"] == "4321"
 
-
-# ---- board_png, with Pillow and sudokupad-art's renderer faked ----
 
 class FakeImage:
     """The slice of a PIL image fit() touches. `thumbnail` shrinks in place keeping the aspect
@@ -124,7 +120,7 @@ def renderer(monkeypatch):
     ("https://sudokupad.app/x?setting-nogrid=false", True),
 ])
 def test_the_grid_follows_the_links_nogrid_setting(renderer, monkeypatch, tmp_path, link, grid):
-    # Check-In's ?setting-nogrid=true link rendered with SudokuPad's grid over its frame (#1659's closing check).
+    # Check-In's ?setting-nogrid=true link rendered with SudokuPad's grid over its frame (seen on live LMD).
     monkeypatch.setattr(board_png, "fit", lambda png: (1, 1))
     board_png.render(link, tmp_path / "board.png")
     assert renderer.grid is grid
@@ -157,8 +153,6 @@ def test_render_deletes_the_png_when_the_fit_fails(renderer, monkeypatch, tmp_pa
         board_png.render("x", out)
     assert not out.exists()
 
-
-# ---- the driver.json checks around the driver call ----
 
 def output_command(marker):
     """The one SKILL.md command line containing `marker`, as a shell command."""
@@ -231,7 +225,7 @@ def test_driver_output_check_fails_on_a_missing_or_empty_key(tmp_path, text, mis
     assert r.returncode != 0 and r.stderr.strip() == f"driver.json lacks {missing}", r.stderr
 
 
-# ---- LMD's base.css caps `p, li` at 35em (#1712) ----
+# LMD's base.css caps `p, li` at 35em, so every <p> the template emits must carry max-width: none.
 
 TEMPLATE = (HERE / "reference" / "template.md").read_text()
 

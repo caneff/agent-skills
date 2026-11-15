@@ -1,6 +1,5 @@
 // WebFetch goes to crawl4ai first and, when crawl4ai has no markdown to give,
-// hands the call to the built-in fetch with `next(e)` instead of throwing
-// (#1543).
+// hands the call to the built-in fetch with `next(e)` instead of throwing.
 //
 // The handler is called directly rather than through the engine: the engine
 // skips a hook that throws and runs the built-in fetch anyway, so an
@@ -14,7 +13,6 @@ const URL = 'https://example.com/page'
 const EVENT = { url: URL, prompt: 'summarize' }
 const NEXT_RESULT = { result: 'built-in fetch result' }
 
-// The WebFetch handler `register` installs, picked out by its tool filter.
 const webFetchHandler = (): any => {
   const handlers: Record<string, any> = {}
   ;(register as any)((_event: string, filter: any, fn: any) => { handlers[filter.tool] = fn }, {})

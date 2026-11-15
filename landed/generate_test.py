@@ -1,4 +1,4 @@
-"""Tests for the landed page generator (#612) — builds a tmp git repo with a
+"""Tests for the landed page generator — builds a tmp git repo with a
 couple of commits and checks the rendered page, not by running the CLI
 against the real ~/src workspace.
 """
@@ -13,7 +13,7 @@ import generate  # noqa: E402
 
 
 # A caller's leaked GIT_DIR/GIT_WORK_TREE would redirect every call below at
-# that repo instead of the tmp one (#622); scrub them out of the subprocess env.
+# that repo instead of the tmp one; scrub them out of the subprocess env.
 _GIT_ENV_LEAKS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
                   "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
 
@@ -82,7 +82,7 @@ def test_page_has_one_h2_per_day(tmp_path, monkeypatch):
         monkeypatch.setenv("GIT_AUTHOR_DATE", when)
         monkeypatch.setenv("GIT_COMMITTER_DATE", when)
         _git(repo, "commit", "-q", "-m", f"commit {i}")
-    # landed reads only origin/HEAD's branch and never guesses one (#1780).
+    # landed reads only origin/HEAD's branch and never guesses one.
     _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     out = str(tmp_path / "landed.html")
@@ -92,7 +92,7 @@ def test_page_has_one_h2_per_day(tmp_path, monkeypatch):
 
 
 def test_page_links_the_shell_assets_and_writes_them_beside_it(repo, tmp_path):
-    """#613: the page comes from the harness shell, which links assets/ —
+    """The page comes from the harness shell, which links assets/ —
     so the generator delivers those files next to the page it wrote."""
     out = str(tmp_path / "landed.html")
     generate.main(["--roots", repo, "--out", out, "100"])

@@ -1,4 +1,3 @@
-# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -6,20 +5,16 @@ __pycache__/
 build/
 dist/
 
-# venv / uv
 .venv/
 
-# tooling caches
 .ruff_cache/
 .pytest_cache/
 .ty_cache/
 .coverage
 htmlcov/
 
-# editors / OS
 .vscode/
 .idea/
 .DS_Store
 
-# marimo
 __marimo__/
