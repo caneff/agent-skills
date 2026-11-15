@@ -1,4 +1,4 @@
-// One-off read of LMD's upload and submit forms in the stream browser (#1660).
+// One-off read of LMD's upload and submit forms in the stream browser.
 // Opens one new tab, navigates, reads, closes the tab. Submits nothing.
 import { writeFileSync } from "node:fs";
 import path from "node:path";

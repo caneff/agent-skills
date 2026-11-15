@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Count auto-mode denials per settings-edit window (#1538).
+"""Count auto-mode denials per settings-edit window.
 
 Reads every `~/.claude/projects/**/*.jsonl` transcript, subagents included,
 and counts three denial kinds against tool calls:

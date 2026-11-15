@@ -1,4 +1,4 @@
-"""Tests for the ledger's escape measure (#1401, ADR 0005): a bug fixed on the
+"""Tests for the ledger's escape measure (ADR 0005): a bug fixed on the
 default branch within 14 days whose diff touches lines a reviewed PR changed is
 an escape of that PR, attributed to the review components its ledger rows show
 were skipped. `append --type <axis> --skip-reason` writes the skip row the
@@ -174,7 +174,7 @@ class TestEscape:
         assert got["landed"] == 2
 
     def test_a_file_name_with_a_space_or_non_ascii_letters_is_attributed_not_fatal(self, repo):
-        # #1401 C3: names come from `--name-only -z`, not from a patch header.
+        # Names come from `--name-only -z`, not from a patch header.
         repo.land({"Sticker Final é.json": "x1\nx2\nx3\n"}, "c: add the sticker (#33)", 3, "Closes #13")
         repo.skip(13, "spec", "ablation")
         repo.land({"Sticker Final é.json": "x1\nFIX\nx3\n"}, "fix: sticker", 4)
