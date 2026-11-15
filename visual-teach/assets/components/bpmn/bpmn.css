@@ -1,9 +1,7 @@
-/* ====== bpmn vocabulary — hand-built SVG, true BPMN notation ======
-   No JS: each diagram is static SVG authored per lesson. Classes style the
+/* No JS: each diagram is static SVG authored per lesson. Classes style the
    SVG parts; the vt- prefix is load-bearing per the component convention
    even though no JS scans for it here. */
 
-/* scroll wrap — wide diagrams scroll instead of shrinking to mush */
 .vt-bpmn {
   display: flex;
   align-items: flex-start;
@@ -58,7 +56,6 @@
   fill: var(--vt-accent-faint);
 }
 
-/* start/end event — thin circle by default, thick (.end) marks the end event */
 .vt-bpmn-svg .vt-bpmn-event {
   fill: var(--vt-paper);
 }
