@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """List every place the tracked tree still spells something the branch
-renamed or deleted (#1252; implement/SKILL.md § Before the PR runs it).
+renamed or deleted (implement/SKILL.md § Before the PR runs it).
 
     stale_refs.py [--repo <worktree>] [--base <ref>]
 

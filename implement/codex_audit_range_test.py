@@ -1,4 +1,4 @@
-"""Tests for `codex-audit-range.py` (#1361): which merged PRs skipped the Codex
+"""Tests for `codex-audit-range.py`: which merged PRs skipped the Codex
 gate for size or the reserve ceiling since the last audit mark, and the one
 range a Codex audit reviews. Every test runs the command line against a
 fabricated repo and ledger; nothing reaches the real ~/.cache."""
@@ -100,7 +100,7 @@ def test_the_audits_own_skip_row_is_not_a_skipped_pr(skipped):
 
 
 def test_a_pr_the_gate_could_not_measure_is_audited_like_a_size_skip(skipped):
-    # An exit-30 size check leaves a PR of unknown size unreviewed, so the audit takes it (#1405 C2).
+    # An exit-30 size check leaves a PR of unknown size unreviewed, so the audit takes it.
     skipped.write_ledger([skip_row(12, "unmeasured")])
     r = skipped.run_script(skipped.mark)
     assert r.returncode == 0, r.stderr
