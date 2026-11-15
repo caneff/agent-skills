@@ -1,4 +1,4 @@
-"""`implement/pr_settle.py`: wait for a PR to read CLEAN, then merge it (#1526).
+"""`implement/pr_settle.py`: wait for a PR to read CLEAN, then merge it.
 
 Seam: `settle` and `merge` in-process with a fake clock (the 60 s and 15 min
 limits have no real-time witness), and the command line against a fake `gh`
@@ -180,8 +180,6 @@ def test_the_error_carries_the_last_view():
     assert exc.view["mergeStateStatus"] == "UNKNOWN" and exc.view["headRefOid"] == SHA
 
 
-# -- merge -----------------------------------------------------------------
-
 def merge_with(outcomes, views=None):
     """`merge` where the n-th `gh pr merge` returns `outcomes[n]` as (code, text)."""
     clock, calls = Clock(), []
@@ -270,8 +268,6 @@ def test_the_ownership_check_refuses_when_the_login_cannot_be_read():
     with pytest.raises(pr_settle.SettleError, match="could not read the gh login"):
         pr_settle.require_own_repo("o/r", tracker=tracker.MemoryTracker(broken={"viewer_login": "no auth"}))
 
-
-# -- the command line ------------------------------------------------------
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys

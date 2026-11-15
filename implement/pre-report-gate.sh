@@ -2,12 +2,12 @@
 # The pre-report gate: run from the worktree before reporting a sha.
 # Fails unless the tree is clean, <sha> is an ancestor of <tip>, the
 # workspace's .scratch/ is empty, and — on an implement-<n> branch, or a spec
-# run's spec-<n> keyed on the spec number (#1461) — the merge check
-# (fix-check.sh, #1401) passes: every review finding has one disposition, a
+# run's spec-<n> keyed on the spec number — the merge check
+# (fix-check.sh) passes: every review finding has one disposition, a
 # `fixed` sha is a commit on the branch, a `moved` ticket is open: the ways a
 # "done" report has described work that was not on the branch, left cleanup
 # for later, or dropped a finding. A slice of a spec run, its base recorded as
-# spec-<p>, has no review to dispose of, and fix-check.sh says so (#1459);
+# spec-<p>, has no review to dispose of, and fix-check.sh says so;
 # every other check here still runs.
 # A non-empty .scratch/ the worker cannot commit and must keep is named in
 # the PR-up report by setting PRE_REPORT_KEEP_SCRATCH="<why>", which passes
@@ -61,7 +61,7 @@ fi
 
 # The merge check: on an implement-<n> branch every review finding of ticket
 # <n> is disposed (fix-check.sh), and on a spec run's spec-<n> every finding
-# of the spec review, keyed on the spec number (#1461). Off those branches
+# of the spec review, keyed on the spec number. Off those branches
 # there is no ticket to look up, and the pass line says so.
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$branch" =~ ^(implement|spec)-([0-9]+)$ ]]; then

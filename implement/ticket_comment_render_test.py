@@ -1,4 +1,4 @@
-"""Runs implement/SKILL.md's own ticket renderer against fixture issues (#877).
+"""Runs implement/SKILL.md's own ticket renderer against fixture issues.
 
 This file
 extracts the jq program those snippets carry and executes it, so the rendering

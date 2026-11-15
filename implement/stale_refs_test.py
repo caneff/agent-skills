@@ -1,4 +1,4 @@
-"""Tests for the stale-reference check (#1252; implement/SKILL.md § Before the
+"""Tests for the stale-reference check (implement/SKILL.md § Before the
 PR runs it). Seam: the command line — a repo and a base in, one line per
 stale reference and an exit status out.
 
@@ -19,7 +19,7 @@ CHECK = os.path.join(HERE, "stale_refs.py")
 @pytest.fixture(autouse=True)
 def _no_leaked_git_env(monkeypatch):
     # A caller's leaked GIT_DIR and kin would point every fixture git call, and the
-    # check itself, at the caller's repo instead of the fixture (#620).
+    # check itself, at the caller's repo instead of the fixture.
     for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
         monkeypatch.delenv(var, raising=False)

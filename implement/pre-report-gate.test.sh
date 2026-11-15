@@ -6,7 +6,7 @@
 set -uo pipefail
 # A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
 # GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point the repo
-# init below at that caller's repo instead of $tmp (#620) — and this test must
+# init below at that caller's repo instead of $tmp — and this test must
 # never touch the real skills checkout.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,7 +30,6 @@ offbranch=$(git -C "$repo" rev-parse HEAD)
 git -C "$repo" checkout -q main
 
 fails=0
-# run <name> <expected-exit> <sha> [<substring the output must contain>]
 run() {
   local name=$1 want=$2 sha=$3 needle=${4:-}
   local out rc
@@ -131,7 +130,7 @@ else
   echo "SKIP: unreadable .scratch/ case (running as root)"
 fi
 
-# The merge check (#1401): on an implement-<n> branch the gate runs
+# The merge check: on an implement-<n> branch the gate runs
 # fix-check.sh, so a finding with no disposition, or a `fixed` sha off
 # the branch, stops the worker before "PR up". The check itself has its own
 # suite (fix_check_test.py); what is pinned here is that the gate runs it, from a
@@ -146,9 +145,9 @@ git -C "$repo" worktree add -q -b implement-7 "$tmp/implement-7" main
 echo fix > "$tmp/implement-7/fix.txt"; git -C "$tmp/implement-7" add -A; git -C "$tmp/implement-7" commit -qm fix
 wt_tip=$(git -C "$tmp/implement-7" rev-parse HEAD)
 wt() { (cd "$tmp/implement-7" && HOME="$cache_home" "$@" bash "$gate" "$wt_tip" 2>&1); }
-# fix-check also wants the row `review_ledger.py append` writes for each review that ran (#1527),
-# carrying the sha256 of the sidecar as it is now (#1555): call this after the sidecars are final.
-ran_rows() { # <ticket>
+# fix-check also wants the row `review_ledger.py append` writes for each review that ran,
+# carrying the sha256 of the sidecar as it is now: call this after the sidecars are final.
+ran_rows() {
   for a in standards spec correctness; do
     printf '{"repo": "repo", "ticket": %s, "tickets": [%s], "type": "%s", "sidecar_sha256": "%s", "status": {"fields": {"findings": {"status": "known"}}}}\n' \
       "$1" "$1" "$a" "$(sha256sum <"$reviews/findings-$a-$1.jsonl" | cut -d' ' -f1)"
@@ -205,7 +204,7 @@ else
 fi
 git -C "$repo" worktree remove --force "$tmp/implement-7"
 
-# A slice of a spec run (#1459): dispatch recorded its base as spec-<p>, so
+# A slice of a spec run: dispatch recorded its base as spec-<p>, so
 # the gate passes with no review files at all, and every other check still
 # holds. A branch with no recorded base and no dispositions still fails.
 git -C "$repo" worktree add -q -b implement-8 "$tmp/implement-8" main
@@ -259,7 +258,7 @@ else
 fi
 git -C "$repo" worktree remove --force "$tmp/implement-9"
 
-# The fix round of a spec run (#1461) happens on spec-<n>, its integration
+# The fix round of a spec run happens on spec-<n>, its integration
 # branch, and its review is keyed on the spec number: the gate runs the merge
 # check there too, against spec-<n> itself.
 git -C "$repo" worktree add -q -b spec-6 "$tmp/spec-6" main
@@ -294,7 +293,6 @@ else
   echo "FAIL: non-implement branch — want exit 0 + 'not implement-<n>', got $rc: $out"; fails=1
 fi
 
-# Wrong usage is a usage error, not a pass.
 out=$(cd "$repo" && bash "$gate" 2>&1); rc=$?
 if [ "$rc" = 2 ] && [[ "$out" == *"usage"* ]]; then
   echo "PASS: no sha argument is a usage error"

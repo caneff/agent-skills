@@ -1,4 +1,4 @@
-"""The Codex usage preflight (#1204): `codex-usage-gate.py` reads the usage
+"""The Codex usage preflight: `codex-usage-gate.py` reads the usage
 cache and answers with an exit status a controller can branch on — 0 proceed,
 20 capped (skip, no run), 30 unknown (skip, no run), 40 under the size threshold.
 
@@ -46,7 +46,6 @@ print(json.dumps({{"labels": [{{"name": x}} for x in names]}}))
 
 @pytest.fixture
 def newdir(tmp_path_factory):
-    """A factory of fresh, empty directories under pytest's temp dir."""
     return lambda: tmp_path_factory.mktemp("d")
 
 
@@ -99,14 +98,11 @@ def assert_gate(got, want_status, want_text=None):
         assert want_text in out, f"{want_text!r} not in {out!r}"
 
 
-# --- the usage read ---------------------------------------------------------
-
-
 def test_headroom(newdir):
     assert_gate(run(newdir, cache(44)), 0, "44%")
 
 
-# The reserve ceiling (#1359): a launch stops at 70%, so the weekly audit keeps the rest.
+# The reserve ceiling: a launch stops at 70%, so the weekly audit keeps the rest.
 def test_one_below_the_ceiling(newdir):
     assert_gate(run(newdir, cache(69)), 0, "69%")
 
@@ -135,7 +131,7 @@ def test_capped(newdir):
     status, out = run(newdir, cache(100, resets=time.time() + 5 * DAY))
     assert_gate((status, out), 20, "100%")
     # A PR gated at the cap answers the ceiling line, never a line of its own: the audit reads only
-    # `ceiling` skip rows, so a cap-worded line would leave that PR out of the audit for good (#1405 C1).
+    # `ceiling` skip rows, so a cap-worded line would leave that PR out of the audit for good.
     assert "reserve ceiling 70%" in out and "capped" not in out, out
     assert "resets" in out and time.strftime("%Y-%m-%d", time.localtime(time.time() + 5 * DAY)) in out, out
 
@@ -144,7 +140,6 @@ def test_over_100(newdir):
     assert_gate(run(newdir, cache(103)), 20, "reserve ceiling 70%")
 
 
-# The worst window governs.
 def test_secondary_governs(newdir):
     assert_gate(run(newdir, cache(10, secondary={"usedPercent": 100, "resetsAt": time.time() + DAY})), 20)
 
@@ -191,8 +186,7 @@ def test_refresh_returns_nothing(newdir):
     assert after == stale, f"a failed refresh must leave the cache alone: {after}"
 
 
-# --- --percent ---------------------------------------------------------------
-# `--percent` (#1269) prints the worst window's percentage and reset time from a live read,
+# `--percent` prints the worst window's percentage and reset time from a live read,
 # never the cache: a cached 10% must not stand in for the 12% the pass just spent.
 
 
@@ -239,8 +233,7 @@ def test_percent_names_the_cause_on_stderr_and_keeps_stdout(newdir):
     assert "codex usage unknown: FileNotFoundError:" in p.stderr, p.stderr
 
 
-# --- the kill switch ---------------------------------------------------------
-# The kill switch (#1354): `~/.config/agent-skills/codex-reviews-off`, any content, turns the
+# The kill switch: `~/.config/agent-skills/codex-reviews-off`, any content, turns the
 # gate to CAPPED before any cache read or live fetch.
 
 
@@ -294,8 +287,7 @@ def test_switch_reads_no_usage(newdir):
     assert not os.path.exists(os.path.join(env["HOME"], "codex-called")), "the switch still read usage"
 
 
-# --- the size check ----------------------------------------------------------
-# The size check (#1358): `--base <ref> --tickets <n>...` makes the gate measure the PR branch's
+# The size check: `--base <ref> --tickets <n>...` makes the gate measure the PR branch's
 # churn against <ref> (added plus deleted lines outside tests and Markdown) and answer 40 when it
 # is under SIZE_THRESHOLD, before any usage read. A `needs-codex` label on any ticket bypasses it.
 
@@ -367,7 +359,7 @@ def test_size_at_threshold(newdir):
     assert_gate(run_size(newdir, {"a.py": 300}), 0, "5%")
 
 
-# A proceed says why it proceeded (#1405 P1): the churn that passed the threshold, or the label
+# A proceed says why it proceeded: the churn that passed the threshold, or the label
 # that forced a small PR on, with the churn it overrode.
 def test_proceed_names_churn(newdir):
     assert_gate(run_size(newdir, {"a.py": 300}), 0, "churn 300 >= 300")
@@ -413,7 +405,6 @@ def test_label_forces(newdir):
     assert_gate(run_size(newdir, {"a.py": 5}, tickets=("7", "8"), labels={"8": ["needs-codex"]}), 0, "5%")
 
 
-# The label never bypasses the reserve ceiling.
 def test_ceiling_beats_label(newdir):
     assert_gate(run_size(newdir, {"a.py": 5}, labels={"1": ["needs-codex"]}, pct=70), 20,
           "usage 70% at or above reserve ceiling 70%")
@@ -427,7 +418,6 @@ def test_other_labels_do_not_force(newdir):
     assert run_size(newdir, {"a.py": 5}, labels={"1": ["ready-for-agent", "codex"]})[0] == 40
 
 
-# The label bypasses the size check only: the kill switch still wins.
 def test_switch_beats_label(newdir):
     assert_gate(run_size(newdir, {"a.py": 5}, labels={"1": ["needs-codex"]}, switch=True), 20, "codex reviews off")
 
@@ -499,7 +489,7 @@ def test_malformed_size_arguments_are_unknown_with_usage(newdir, bad):
     assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (bad, status, out)
 
 
-# Flag order is free (#1405 OE1): the same arguments, tickets first.
+# Flag order is free: the same arguments, tickets first.
 def test_flag_order_is_free(newdir):
     cwd, env = fake_repo(newdir, {"a.py": 5000})
     p = subprocess.run([sys.executable, GATE, "--tickets", "1", "2", "--base", "main"],
@@ -507,7 +497,7 @@ def test_flag_order_is_free(newdir):
     assert (p.returncode, "5%" in p.stdout) == (0, True), (p.returncode, p.stdout)
 
 
-# A usage refusal names its cause, after the usage line (#1405 S1).
+# A usage refusal names its cause, after the usage line.
 def test_usage_refusal_names_its_cause(newdir):
     status, out = run(newdir, cache(5), "--base", "main", "--tickets", "#1")
     assert status == 30 and "not a ticket number: '#1'" in out, (status, out)

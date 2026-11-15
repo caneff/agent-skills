@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The merge check (#1401): did the worker dispose of every review finding?
+"""The merge check: did the worker dispose of every review finding?
 
     python3 implement/fix_check.py <ticket> [<branch, default implement-<ticket>>]
 
@@ -131,7 +131,7 @@ def tracker():
 
 
 def slice_prs(n):
-    """`(number, base)` of each open PR from `implement-<n>`, as GitHub holds it (#1460's S4): a
+    """`(number, base)` of each open PR from `implement-<n>`, as GitHub holds it: a
     slice runs no review, so a slice PR into anything but its integration branch would land
     unreviewed.
     None open is the worker's gate before `gh pr create`; the controller's merge has one."""
@@ -172,7 +172,7 @@ def json_object(line):
 def ledger_types(reviews, n):
     """What the ledger holds for ticket `n` of this repo: `(ran, skipped)`. `ran` maps each review
     `(type, round)` with a row that ran to the set of `sidecar_sha256` its rows carry (a row written
-    before #1555 carries none, so adds none; a row with no `round` is round 1, one with a
+    before the digest field carries none, so adds none; a row with no `round` is round 1, one with a
     malformed `round` counts for none); `skipped` is the types it records as not run, which
     excuses round 1 only. A skip row is no evidence a review ran."""
     repo = review_cache.fold_repo(os.path.basename(reviews))
