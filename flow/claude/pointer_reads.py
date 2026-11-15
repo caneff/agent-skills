@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Pointer-doc read count: do sessions read the docs under
-flow/claude/ when they run the commands those docs are for?
+"""Pointer-doc read count: do sessions read the docs under flow/claude/ when
+they run the commands those docs are for?
 
     pointer_reads.py count --end <iso> [--start <iso>] [--projects <dir>]
     pointer_reads.py recount [--today <iso>] [--root <repo>] [--projects <dir>]
@@ -16,12 +16,12 @@ replayable: a transcript is in the window when its mtime or any top-level
 of a skill since retired, which now read as not covered.
 
 `recount` is the one-shot cron job Chris ruled on 2026-10-04 (option a). It
-asks `gh` for the tracking ticket's closedAt and exits silently while the ticket is open or
-until 14 days after it closed. On or after that day it counts the 14 days
-after closedAt, appends the dated result to the note in a throwaway worktree
-of origin/main, commits and pushes it, and removes its own crontab line. A
-closedAt it cannot read is an error, never a quiet "not yet". `install-cron`
-adds that crontab line once.
+asks `gh` for the tracking ticket's closedAt and exits silently while the
+ticket is open or until 14 days after it closed. On or after that day it
+counts the 14 days after closedAt, appends the dated result to the note in a
+throwaway worktree of origin/main, commits and pushes it, and removes its
+own crontab line. A closedAt it cannot read is an error, never a quiet "not
+yet". `install-cron` adds that crontab line once.
 
 Pure grep: no model call.
 """
@@ -59,8 +59,9 @@ def cron_line() -> str:
             f">> {Path.home()}/.cache/pointer-reads-recount.log 2>&1  {CRON_TAG}")
 
 # (doc, trigger regex, skills that already carry the procedure): the
-# 2026-10-04 note's rows, in its order, less a skill since retired. `implement`
-# also matches `implement-spec`: the pattern ends on a word boundary.
+# 2026-10-04 note's rows, in its order, less a skill since retired.
+# `implement` also matches `implement-spec`: the pattern ends on a word
+# boundary.
 DOCS = [
     ("OPERATIONS", "gh pr merge|implement-dispatch|merge-cleanup", "implement"),
     ("WORKFLOW", "gh issue create|gh issue edit",

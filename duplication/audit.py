@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Pass one of duplication: parse jscpd's JSON output into findings rows.
 
-jscpd is JSON-native — `jscpd --reporters json
---output <dir> <scope>` writes `<dir>/jscpd-report.json` with a
-`.duplicates[]` array. `parse_jscpd` extracts one findings row per duplicate
-pair; it never judges consolidate vs keep — that's the judgment pass
-(SKILL.md) reading these rows and re-bucketing them.
+jscpd is JSON-native — `jscpd --reporters json --output <dir> <scope>` writes
+`<dir>/jscpd-report.json` with a `.duplicates[]` array. `parse_jscpd`
+extracts one findings row per duplicate pair; it never judges consolidate vs
+keep — that's the judgment pass (SKILL.md) reading these rows and
+re-bucketing them.
 """
 import json
 import os

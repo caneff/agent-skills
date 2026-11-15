@@ -130,11 +130,11 @@ else
   echo "SKIP: unreadable .scratch/ case (running as root)"
 fi
 
-# The merge check: on an implement-<n> branch the gate runs
-# fix-check.sh, so a finding with no disposition, or a `fixed` sha off
-# the branch, stops the worker before "PR up". The check itself has its own
-# suite (fix_check_test.py); what is pinned here is that the gate runs it, from a
-# linked worktree, and quotes its answer.
+# The merge check: on an implement-<n> branch the gate runs fix-check.sh,
+# so a finding with no disposition, or a `fixed` sha off the branch,
+# stops the worker before "PR up". The check itself has its own suite
+# (fix_check_test.py); what is pinned here is that the gate runs it, from
+# a linked worktree, and quotes its answer.
 git -C "$repo" remote add origin "$repo"
 git -C "$repo" fetch -q origin
 git -C "$repo" remote set-head origin main
@@ -145,8 +145,9 @@ git -C "$repo" worktree add -q -b implement-7 "$tmp/implement-7" main
 echo fix > "$tmp/implement-7/fix.txt"; git -C "$tmp/implement-7" add -A; git -C "$tmp/implement-7" commit -qm fix
 wt_tip=$(git -C "$tmp/implement-7" rev-parse HEAD)
 wt() { (cd "$tmp/implement-7" && HOME="$cache_home" "$@" bash "$gate" "$wt_tip" 2>&1); }
-# fix-check also wants the row `review_ledger.py append` writes for each review that ran,
-# carrying the sha256 of the sidecar as it is now: call this after the sidecars are final.
+# fix-check also wants the row `review_ledger.py append` writes for each
+# review that ran, carrying the sha256 of the sidecar as it is now: call
+# this after the sidecars are final.
 ran_rows() {
   for a in standards spec correctness; do
     printf '{"repo": "repo", "ticket": %s, "tickets": [%s], "type": "%s", "sidecar_sha256": "%s", "status": {"fields": {"findings": {"status": "known"}}}}\n' \
@@ -204,8 +205,8 @@ else
 fi
 git -C "$repo" worktree remove --force "$tmp/implement-7"
 
-# A slice of a spec run: dispatch recorded its base as spec-<p>, so
-# the gate passes with no review files at all, and every other check still
+# A slice of a spec run: dispatch recorded its base as spec-<p>, so the
+# gate passes with no review files at all, and every other check still
 # holds. A branch with no recorded base and no dispositions still fails.
 git -C "$repo" worktree add -q -b implement-8 "$tmp/implement-8" main
 git -C "$repo" config branch.implement-8.base spec-2

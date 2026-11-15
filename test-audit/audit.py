@@ -134,9 +134,9 @@ def is_tautology(func):
 
     ponytail: covers the literal self-comparison (`assert x == x`), including
     the case where both sides are the identical call expression (e.g.
-    `assert f(x) == f(x)`). The broader form — the test body
-    re-implements the function under test with different code and compares —
-    needs reading what the implementation actually does, which isn't
+    `assert f(x) == f(x)`). The broader form — the test body re-implements
+    the function under test with different code and compares — needs
+    reading what the implementation actually does, which isn't
     syntactically detectable; that's judgment-pass territory, not this pass.
     """
     for n in ast.walk(func):
@@ -794,9 +794,9 @@ def main(argv):
     # The same lie by a different errno: a root that exists but cannot be read
     # walks to zero files, which is indistinguishable from a clean tree. Only
     # the root is checked here -- an unreadable directory deeper in the tree is
-    # still swallowed by `os.walk`.
-    # A directory needs X_OK as well: R_OK alone lists it, but opening the
-    # files inside it still fails, so the walk yields nothing.
+    # still swallowed by `os.walk`. A directory needs X_OK as well: R_OK
+    # alone lists it, but opening the files inside it still fails, so the
+    # walk yields nothing.
     needed = os.R_OK | os.X_OK if os.path.isdir(root) else os.R_OK
     if not os.access(root, needed):
         print(f"test-audit: cannot read {root} -- nothing was scanned.", file=sys.stderr)

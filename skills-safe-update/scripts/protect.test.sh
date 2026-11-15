@@ -72,9 +72,10 @@ fixture(){
     git checkout -q "$BASE_C" -- "$skill"
     sed -i "$(echo "$spec" | cut -d: -f3)" "$skill/SKILL.md"
   done
-  # --allow-empty: a case whose upstream change IS the file mode (the mode-only case) applies its
-  # real delta after fixture() returns, so this commit legitimately holds nothing
-  # — without the flag git refuses it and prints "nothing to commit" into the run.
+  # --allow-empty: a case whose upstream change IS the file mode (the
+  # mode-only case) applies its real delta after fixture() returns, so this
+  # commit legitimately holds nothing — without the flag git refuses it and
+  # prints "nothing to commit" into the run.
   git add -A; git commit -q --allow-empty -m upstream
   POST=$(git rev-parse HEAD)
   PRELOCK=$dir/prelock

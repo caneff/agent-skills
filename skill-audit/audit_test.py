@@ -57,8 +57,6 @@ def test_skill_make_staleness(model_invocable, last_used, age, stale):
     assert (skill.age_days, skill.stale) == (age, stale)
 
 
-# --- CLI over a temp skills dir ---------------------------------------------
-
 def _make_skill(skills_dir, name, *, slash_only=False, frontmatter_name=True):
     d = skills_dir / name
     d.mkdir()

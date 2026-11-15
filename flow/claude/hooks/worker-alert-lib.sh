@@ -20,24 +20,23 @@ worker_alert_read_brief() { # <transcript> -> "n\tcontroller" on stdout, or empt
 # Live registry records naming `sid` (mode "sid") or `nm` (mode "name") —
 # one line per record: its session id, current name (possibly empty) and
 # socket. `sid` mode prints every live match; `name` mode only the first.
-# `sid` mode
-# matches on `.sessionId` alone, with no requirement that `.name` be
-# non-empty: a Claude session with no name yet is still live, still sends
-# and receives cross-session messages (every one carries `from="uds:<its
-# socket>"`, and a reply copies that address), and a report it delivered to
-# its own socket is real even though it has nothing to match by name.
-# Requiring a non-empty name would drop exactly this socket. `name`
-# mode still only matches a non-empty `.name` because it matches ON that
-# field. Joined and split on `\x1f` (ASCII unit separator), not a tab: tab
-# is one of bash's default IFS-whitespace characters, so `read` collapses
-# runs of it and strips a leading/trailing one regardless of field order —
-# an empty `.sessionId`, `.name` or `.messagingSocketPath` in the middle
-# silently shifted every field after it into the wrong variable.
-# `\x1f` is not IFS-whitespace, so a
-# run of it never collapses and an empty field never disappears, whatever
-# position it's in. Live means the pid's /proc starttime (field 22, after
-# the `(comm)` field) equals the record's procStart — a stale record whose
-# pid was reused has another, as in flow/lane's sessions reader.
+# `sid` mode matches on `.sessionId` alone, with no requirement that
+# `.name` be non-empty: a Claude session with no name yet is still live,
+# still sends and receives cross-session messages (every one carries
+# `from="uds:<its socket>"`, and a reply copies that address), and a report
+# it delivered to its own socket is real even though it has nothing to
+# match by name. Requiring a non-empty name would drop exactly this socket.
+# `name` mode still only matches a non-empty `.name` because it matches ON
+# that field. Joined and split on `\x1f` (ASCII unit separator), not a tab:
+# tab is one of bash's default IFS-whitespace characters, so `read`
+# collapses runs of it and strips a leading/trailing one regardless of
+# field order — an empty `.sessionId`, `.name` or `.messagingSocketPath` in
+# the middle silently shifted every field after it into the wrong variable.
+# `\x1f` is not IFS-whitespace, so a run of it never collapses and an empty
+# field never disappears, whatever position it's in. Live means the pid's
+# /proc starttime (field 22, after the `(comm)` field) equals the record's
+# procStart — a stale record whose pid was reused has another, as in
+# flow/lane's sessions reader.
 worker_alert_resolve_session() { # <mode: sid|name> <val> -> "sid\x1fname\x1fsock" per line on stdout (sid mode: every live match), 0; else 1
   local mode="$1" val="$2" f pid start sid nm sock stat fields found=1
   for f in "$HOME"/.claude/sessions/*.json; do
@@ -89,8 +88,8 @@ worker_alert_controller_pane() { # <ctl_session> -> pane_id or empty
 # Resolves the brief's controller to the live records that stand for it, the
 # two hops `resolve-controller` makes: herdr agent name -> `agent_session`
 # id -> live records sharing it, falling back to a live session bearing the
-# brief's literal as its name (then widened to its session id). Sets
-# four globals for the caller: `herdr_sid` (the herdr hop's session id, or
+# brief's literal as its name (then widened to its session id). Sets four
+# globals for the caller: `herdr_sid` (the herdr hop's session id, or
 # empty), `ctl_session` (the controller's session id, for the pane lookup),
 # and the arrays `names` (every live session name) and `sockets` (every
 # `uds:` address) a report to the controller could carry. A worktree without
@@ -153,11 +152,11 @@ worker_alert_prompt_pane() { # <pane> <alert> <deadline in $SECONDS> -> sets pro
   return 1
 }
 
-# The tail both hooks end in: find the controller's pane from the
-# global `ctl_session` that `worker_alert_resolve_controller` set, submit
-# `alert` into it, and log the outcome under `key` — `not-sent` with the alert
-# text when the controller has no pane. Sets `prompt_status` and `prompt_msg`
-# as `worker_alert_prompt_pane` does.
+# The tail both hooks end in: find the controller's pane from the global
+# `ctl_session` that `worker_alert_resolve_controller` set, submit `alert`
+# into it, and log the outcome under `key` — `not-sent` with the alert text
+# when the controller has no pane. Sets `prompt_status` and `prompt_msg` as
+# `worker_alert_prompt_pane` does.
 worker_alert_deliver() { # <log> <key> <controller> <alert> <deadline in $SECONDS>
   local log="$1" key="$2" controller="$3" alert="$4" deadline="$5" pane
   pane="$(worker_alert_controller_pane "${ctl_session:-}")"
@@ -174,9 +173,9 @@ worker_alert_deliver() { # <log> <key> <controller> <alert> <deadline in $SECOND
 
 # The controller a worker reports to now: the name in the latest `Your
 # controller is now <name>` peer message (what `controller-adopt` tells a
-# worker when its dispatcher's process exited), else the brief's
-# literal. Only a peer-origin entry counts, so text a ticket or a web page
-# carried into the transcript cannot name a controller.
+# worker when its dispatcher's process exited), else the brief's literal.
+# Only a peer-origin entry counts, so text a ticket or a web page carried
+# into the transcript cannot name a controller.
 worker_alert_current_controller() { # <transcript> <brief controller> -> name on stdout
   local adopted
   adopted="$(jq -nc '[inputs | fromjson? | objects]' -R "$1" 2>/dev/null | jq -r '

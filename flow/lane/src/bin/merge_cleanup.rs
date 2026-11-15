@@ -1,7 +1,6 @@
-//! The tail the controller runs after
-//! squash-merging a worker's PR: tear the workspace down, delete the branch
-//! local and remote, fast-forward the primary checkout. The contract is
-//! `--help` below.
+//! The tail the controller runs after squash-merging a worker's PR: tear
+//! the workspace down, delete the branch local and remote, fast-forward the
+//! primary checkout. The contract is `--help` below.
 
 use lane::git_origin::{default_branch, origin_slug};
 use lane::herdr::{self, Agent};
@@ -158,8 +157,8 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
     ExitCode::FAILURE
 }
 
-/// `--quiet`: set once in `main`, read by `skip`, which the
-/// free functions call as well as `Cleanup`.
+/// `--quiet`: set once in `main`, read by `skip`, which the free functions
+/// call as well as `Cleanup`.
 static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn quiet() -> bool {
@@ -251,9 +250,9 @@ fn head_of(path: &str) -> Option<String> {
 
 /// What proved a branch merged: the sha it is landed up to, the proof, and
 /// the merged PR's number when a PR is what proved it. The number matters
-/// past the display string: a branch name can carry several merged
-/// PRs over its life, and only the one whose head is this tip says which
-/// tickets this landing closed.
+/// past the display string: a branch name can carry several merged PRs over
+/// its life, and only the one whose head is this tip says which tickets
+/// this landing closed.
 struct Merged {
     at: String,
     by: String,
@@ -281,12 +280,12 @@ struct Cleanup {
     /// this itself at the start of every call, so a caller doing more than
     /// one branch reads it right after each call with no reset of its own.
     claim_clear_failed: bool,
-    /// Same shape as `claim_clear_failed`, for a
-    /// denied or failed `git push origin --delete`. The local branch and
-    /// worktree are still gone by the time this can be true, so it does not
-    /// make `cleanup_branch` return false either — it only fails the exit
-    /// code and, via `clear_ticket_if_closed`'s wording, stops that
-    /// function from calling git cleanup complete when it wasn't.
+    /// Same shape as `claim_clear_failed`, for a denied or failed `git push
+    /// origin --delete`. The local branch and worktree are still gone by
+    /// the time this can be true, so it does not make `cleanup_branch`
+    /// return false either — it only fails the exit code and, via
+    /// `clear_ticket_if_closed`'s wording, stops that function from calling
+    /// git cleanup complete when it wasn't.
     remote_delete_failed: bool,
 }
 
@@ -363,8 +362,8 @@ fn refuse_live(wt: &str, items: &[String], suffix: &str) {
 }
 
 impl Cleanup {
-    /// On a dry run, say what would run;
-    /// otherwise announce it and run it with its output passed through.
+    /// On a dry run, say what would run; otherwise announce it and run it
+    /// with its output passed through.
     fn step(&self, what: &str, program: &str, args: &[&str]) -> bool {
         if self.dry {
             safe_println!("would {what}: {program} {}", args.join(" "));
@@ -383,12 +382,12 @@ impl Cleanup {
         self.step(what, program, args)
     }
 
-    /// `--dry-run`'s blocker lines: everything that would stop
-    /// `b`'s workspace being removed, by category, through the same reads
-    /// the guards make. Printed ahead of the merged check, so a worker can
-    /// name them at PR-up while the branch is unmerged; `blockers: none`
-    /// when there are none, so a run that printed nothing is never read as
-    /// a clean one.
+    /// `--dry-run`'s blocker lines: everything that would stop `b`'s
+    /// workspace being removed, by category, through the same reads the
+    /// guards make. Printed ahead of the merged check, so a worker can name
+    /// them at PR-up while the branch is unmerged; `blockers: none` when
+    /// there are none, so a run that printed nothing is never read as a
+    /// clean one.
     fn report_blockers(&self, listing: Result<&Worktrees, &String>, b: &str) {
         let mut lines = Vec::new();
         // A listing git could not produce is a blocker, not "no workspace".
@@ -439,8 +438,8 @@ impl Cleanup {
 
     /// What is alive in `wt`, classified once for both the guard and the
     /// stale report, so a worktree is listed as stale exactly when the guard
-    /// would clear it. Two sources: a sessions registry file whose cwd
-    /// is in the workspace and whose pid is alive is unresolved — unless its
+    /// would clear it. Two sources: a sessions registry file whose cwd is
+    /// in the workspace and whose pid is alive is unresolved — unless its
     /// sessionId equals a herdr agent's agent_session.value for that same
     /// worktree, in which case that session is the worker's own pane and the
     /// herdr agent's status decides it instead.
@@ -514,8 +513,8 @@ impl Cleanup {
         Some(agents.iter().map(|a| (a.pane().to_string(), a.session().to_string())).collect())
     }
 
-    /// The guards' read, taken again with no step between it and the
-    /// forced removal, since `--force` also turns off git's own last
+    /// The guards' read, taken again with no step between it and the forced
+    /// removal, since `--force` also turns off git's own last
     /// dirty-worktree check. Anything that appeared after the guards passed
     /// refuses the way the guards do, named — a modified, untracked or
     /// non-cache ignored file (`--discard` covered only what `guard_files`
@@ -551,14 +550,14 @@ impl Cleanup {
         true
     }
 
-    /// The uncommitted-files guard. `git worktree remove --force`
-    /// discards everything git does not hold, so modified, untracked or
-    /// ignored files refuse the removal unless --discard — `.scratch/`
-    /// included. Caches (`is_cache`) never refuse; their count and
-    /// first names are printed as "cache file(s)", since they go too — a
-    /// label distinct from the non-cache "ignored file(s)" refusal above,
-    /// so a name approved for loss in one line is never misread as
-    /// belonging to the other's.
+    /// The uncommitted-files guard. `git worktree remove --force` discards
+    /// everything git does not hold, so modified, untracked or ignored
+    /// files refuse the removal unless --discard — `.scratch/` included.
+    /// Caches (`is_cache`) never refuse; their count and first names are
+    /// printed as "cache file(s)", since they go too — a label distinct
+    /// from the non-cache "ignored file(s)" refusal above, so a name
+    /// approved for loss in one line is never misread as belonging to the
+    /// other's.
     ///
     /// An ignored directory holding no file anywhere beneath it is not among
     /// them. An earlier ruling went the other way, and its reasoning was
@@ -569,12 +568,12 @@ impl Cleanup {
     /// beat that was not a preference but a cost nobody had counted: agents
     /// are denied --discard, so every such refusal spends one of Chris's
     /// hands, and `e2e-artifacts/` — recreated by every `npm test` run —
-    /// spent six in a row. A guard that cries wolf on the case
-    /// with nothing to lose is not stricter, it is noisier, and the noise is
-    /// paid for in the attention the real refusals need. So the posture is
-    /// narrowed, not abandoned: only a directory proved file-free by a walk
-    /// is exempt, an unreadable one still refuses, and everything the
-    /// earlier ruling worried about for a directory with contents still holds.
+    /// spent six in a row. A guard that cries wolf on the case with nothing
+    /// to lose is not stricter, it is noisier, and the noise is paid for in
+    /// the attention the real refusals need. So the posture is narrowed,
+    /// not abandoned: only a directory proved file-free by a walk is
+    /// exempt, an unreadable one still refuses, and everything the earlier
+    /// ruling worried about for a directory with contents still holds.
     ///
     /// `None` refuses. Otherwise what it read, which is what it approved:
     /// `recheck` compares against it, and its empty ignored directories are
@@ -684,12 +683,12 @@ impl Cleanup {
         }
     }
 
-    /// Compare against a recorded build sha, not this
-    /// run's own pre-pull HEAD — a pull elsewhere can already have landed the
-    /// tip before this run starts. `flow/lane-install.sh` records the sha it
-    /// installed from on every successful install, run by hand or from here,
-    /// so a missing record is untrusted rather than a fallback to this run's
-    /// own HEAD: it rebuilds once regardless of whether this run's pull moved
+    /// Compare against a recorded build sha, not this run's own pre-pull
+    /// HEAD — a pull elsewhere can already have landed the tip before this
+    /// run starts. `flow/lane-install.sh` records the sha it installed from
+    /// on every successful install, run by hand or from here, so a missing
+    /// record is untrusted rather than a fallback to this run's own HEAD:
+    /// it rebuilds once regardless of whether this run's pull moved
     /// anything, the same failure shape the old old_head/new_head check
     /// missed.
     fn fast_forward_and_rebuild(&self, primary: &str, default: &str) {
@@ -729,8 +728,8 @@ impl Cleanup {
         let root_dir = root.trim_end_matches('/');
         let mut repos = Vec::new();
         let mut plan = Vec::new();
-        // The plan: every merged branch, with its distance past its
-        // merge proof, before anything is touched.
+        // The plan: every merged branch, with its distance past its merge
+        // proof, before anything is touched.
         for d in subdirs(root_dir) {
             let d = format!("{root}/{}/", d.rsplit('/').next().unwrap_or(""));
             if !quiet_ok("git", &["-C", &d, "rev-parse", "--git-dir"]) {
@@ -826,9 +825,9 @@ impl Cleanup {
         rc
     }
 
-    /// `--reap`: one repo's own `implement-*` workspaces, each torn
-    /// down by the single-branch path above, unchanged. Dry run by default —
-    /// the opposite of the other two forms — because it acts on workspaces
+    /// `--reap`: one repo's own `implement-*` workspaces, each torn down by
+    /// the single-branch path above, unchanged. Dry run by default — the
+    /// opposite of the other two forms — because it acts on workspaces
     /// nobody named. It never discards and never forces: a workspace the
     /// single-branch guards would refuse is named and skipped, which is the
     /// safety property, not an obstacle.
@@ -837,8 +836,9 @@ impl Cleanup {
         // the run was pointed at: with no --repo that path is the cwd, and a
         // run started inside a workspace would `git -C` its way into the
         // directory it had just removed — reaping one workspace and then
-        // calling every workspace after it unmerged (found in review). A repo whose primary checkout git cannot name stops the
-        // run: a failed listing is not "nothing to reap".
+        // calling every workspace after it unmerged. A repo whose primary
+        // checkout git cannot name stops the run: a failed listing is not
+        // "nothing to reap".
         let listing = match worktree::list(repo) {
             Ok(w) => w,
             Err(e) => return die(e),
@@ -855,8 +855,8 @@ impl Cleanup {
         let act = yes && !self.dry;
         let header = if act { "reap plan" } else { "reap plan (dry run)" };
         safe_println!("{header}: {} implement-* workspace(s) under {root}", candidates.len());
-        // The plan: every workspace and its disposition, before any
-        // of them is touched, so a removal never runs ahead of its own report.
+        // The plan: every workspace and its disposition, before any of them
+        // is touched, so a removal never runs ahead of its own report.
         let mut plan = Vec::new();
         for (wt, branch) in candidates {
             let held = self.reap_hold(&anchor, &wt, &branch);
@@ -932,15 +932,15 @@ impl Cleanup {
         // branch for itself. A branch moved between the two would put a
         // worktree the plan never listed — one outside .claude/worktrees/
         // included — in reach of the removal, so the scope is proved again
-        // here, at the destructive call, and not only at enumeration (a
-        // review caught it). A branch whose worktree simply went away
-        // still cleans up: there is nothing left to remove out of scope. The
-        // primary checkout counts as a holder: it is not a removal
-        // target, but a branch moved into it is still not the branch the plan
-        // named, and `cleanup_branch` would switch it off and delete it. A
-        // listing `git worktree list` could not produce is not "no holder"
-        // either: read that way, it reaped a branch this re-check
-        // could no longer actually vouch for, so it refuses instead.
+        // here, at the destructive call, and not only at enumeration. A
+        // branch whose worktree simply went away still cleans up: there is
+        // nothing left to remove out of scope. The primary checkout counts
+        // as a holder: it is not a removal target, but a branch moved into
+        // it is still not the branch the plan named, and `cleanup_branch`
+        // would switch it off and delete it. A listing `git worktree list`
+        // could not produce is not "no holder" either: read that way, it
+        // reaped a branch this re-check could no longer actually vouch for,
+        // so it refuses instead.
         let listing = match worktree::list(anchor) {
             Ok(w) => w,
             Err(e) => return Reaped::Refused(format!("could not list worktrees, not removed: {e}")),
@@ -993,14 +993,14 @@ impl Cleanup {
     /// default branch, so an ancestor test alone would call every squashed
     /// branch unmerged. But a merged PR proves only the sha it merged at: a
     /// branch that kept going after its PR is merged up to that head and
-    /// unlanded past it, so the tip must equal a merged PR's head.
-    /// (A sweep once took "a PR from this branch once merged" as
-    /// merged and deleted 87 unlanded commits.) Without gh, fall back to the
-    /// ancestor test — fetching first, since it reads origin/<default> and a
-    /// stale ref there deletes a branch that is not merged.
+    /// unlanded past it, so the tip must equal a merged PR's head. (A sweep
+    /// once took "a PR from this branch once merged" as merged and deleted
+    /// 87 unlanded commits.) Without gh, fall back to the ancestor test —
+    /// fetching first, since it reads origin/<default> and a stale ref
+    /// there deletes a branch that is not merged.
     ///
-    /// A slice lands on its spec's integration branch first: the
-    /// base `implement-dispatch` recorded, `spec-<p>`, counts as a landing
+    /// A slice lands on its spec's integration branch first: the base
+    /// `implement-dispatch` recorded, `spec-<p>`, counts as a landing
     /// alongside the default branch. Only those two do — a PR into any
     /// other base, or a lone ticket's PR into some `spec-*`, is not this
     /// branch's landing.
@@ -1038,8 +1038,8 @@ impl Cleanup {
         }
         quiet_ok("git", &["-C", path, "fetch", "-q", "origin"]);
         // A tip still at its fork point has landed nothing: it is an ancestor
-        // of a base that moved on without it. A fork point or tip
-        // that cannot be read is the same answer, never "merged".
+        // of a base that moved on without it. A fork point or tip that
+        // cannot be read is the same answer, never "merged".
         let tip = quiet_stdout("git", &["-C", path, "rev-parse", "--verify", "-q", &format!("refs/heads/{b}")]).unwrap_or_default();
         match fork_point(path, b) {
             Some(fork) if !tip.is_empty() && tip != fork => {}
@@ -1069,9 +1069,9 @@ impl Cleanup {
         None
     }
 
-    /// A branch `is_merged` refused that has nothing to lose: its
-    /// ticket, `implement-<n>`'s, is closed, and neither `refs/heads/<b>` nor
-    /// a fetched `origin/<b>` holds a commit past `origin/<base>`, the
+    /// A branch `is_merged` refused that has nothing to lose: its ticket,
+    /// `implement-<n>`'s, is closed, and neither `refs/heads/<b>` nor a
+    /// fetched `origin/<b>` holds a commit past `origin/<base>`, the
     /// recorded spec base else the default branch. The remote tip counts
     /// because step 5 deletes it and only the local tip is recorded under
     /// `refs/deleted`. The sentence naming those facts, or `None` when any
@@ -1135,10 +1135,10 @@ impl Cleanup {
         run_status("git", &["-C", path, "branch", "-D", b])
     }
 
-    /// Steps 3-6 for one branch. `listing` is the caller's one read of
-    /// `git worktree list` for this cleanup (a listing git could not
-    /// produce has already stopped the caller, so nothing here guesses which
-    /// checkout holds what).
+    /// Steps 3-6 for one branch. `listing` is the caller's one read of `git
+    /// worktree list` for this cleanup (a listing git could not produce has
+    /// already stopped the caller, so nothing here guesses which checkout
+    /// holds what).
     fn cleanup_branch(&mut self, path: &str, b: &str, listing: &Worktrees) -> bool {
         // Reset here, not by each caller: every path through this function
         // that reaches step 5 or 7 can set either flag, and a caller doing
@@ -1161,8 +1161,8 @@ impl Cleanup {
         } else {
             match self.is_merged(path, b) {
                 None => match self.moot_without_commits(path, b) {
-                    // Nothing on the branch to lose; the file guards
-                    // below still run.
+                    // Nothing on the branch to lose; the file guards below
+                    // still run.
                     Some(why) => {
                         safe_println!("{why}: deleting it unasked");
                         None
@@ -1180,11 +1180,11 @@ impl Cleanup {
         // `git branch -d` fail with "used by worktree", so it goes first, by
         // the path git itself reports — but never while a session is alive.
         if let Some(wt) = listing.linked_holding(b).map(str::to_string) {
-            // Canonicalized here, before removal, while the
-            // directory still exists to resolve — `remove_workspace`
-            // compares this against `implement-dispatch`'s own
-            // canonicalized spelling, and after `git worktree remove` below
-            // there is nothing left on disk to canonicalize against.
+            // Canonicalized here, before removal, while the directory still
+            // exists to resolve — `remove_workspace` compares this against
+            // `implement-dispatch`'s own canonicalized spelling, and after
+            // `git worktree remove` below there is nothing left on disk to
+            // canonicalize against.
             let wt_canonical = lane::workers::canonical_workspace_path(&wt);
             // Before the live-session guard, which closes idle panes: a
             // removal refused for its files must not have touched herdr.
@@ -1205,8 +1205,8 @@ impl Cleanup {
                 return false;
             }
             // Inner first: `remove --force` on the parent deletes a nested
-            // worktree's files but leaves it registered. Each is
-            // removed against its own repo, which may not be this one.
+            // worktree's files but leaves it registered. Each is removed
+            // against its own repo, which may not be this one.
             for n in approved.nested.iter().rev() {
                 let git_dir = format!("--git-dir={}", n.common_dir);
                 // A locked worktree needs --force twice; only --discard says
@@ -1276,9 +1276,9 @@ impl Cleanup {
                 }
             }
             RemoteBranch::Absent => skip("the remote branch delete", &format!("origin has no {b}")),
-            // A lookup that never answered is not "origin has no
-            // branch" — read as one, the run exited 0 with the branch still
-            // on origin. Same partial failure as a denied delete.
+            // A lookup that never answered is not "origin has no branch" —
+            // read as one, the run exited 0 with the branch still on
+            // origin. Same partial failure as a denied delete.
             RemoteBranch::Unknown => {
                 self.remote_delete_failed = true;
                 eprintln!("merge-cleanup: could not look up remote branch {b} on origin; re-run: git -C {path} push origin --delete {b}");
@@ -1293,43 +1293,42 @@ impl Cleanup {
             skip("the fast-forward", &format!("{primary} is not on {default}"));
         }
 
-        // Step 7 — the ticket. `merge-cleanup` was the only place in
-        // the lane that never cleared a landed claim, so a closed ticket kept
+        // Step 7 — the ticket. `merge-cleanup` was the only place in the
+        // lane that never cleared a landed claim, so a closed ticket kept
         // showing in-progress and assigned. An open issue (part of a bigger
         // ticket, or reopened) is left alone. Still runs on a failed step 5:
-        // the PR merged either way, so the claim clears
-        // regardless of whether the remote branch did. A failed clear
-        // does not make this call return false — the git cleanup above it
-        // already succeeded (or, per step 5, mostly did), and `false` here
-        // means "the branch and worktree are still there" to both callers
-        // (the sweep table's "cleaned" word, and `main`'s gate on
-        // `report_stale`). It sets `claim_clear_failed` instead, for the
-        // caller to fold into its own exit code, same as `remote_delete_failed`.
+        // the PR merged either way, so the claim clears regardless of
+        // whether the remote branch did. A failed clear does not make this
+        // call return false — the git cleanup above it already succeeded
+        // (or, per step 5, mostly did), and `false` here means "the branch
+        // and worktree are still there" to both callers (the sweep table's
+        // "cleaned" word, and `main`'s gate on `report_stale`). It sets
+        // `claim_clear_failed` instead, for the caller to fold into its own
+        // exit code, same as `remote_delete_failed`.
         let (pr, slice) = merged.as_ref().map_or((None, false), |m| (m.pr.as_deref(), m.slice));
         self.claim_clear_failed = !self.clear_landed_claims(path, b, pr, slice);
         true
     }
 
-    /// Clear `in-progress` and the
-    /// assignee from every ticket this branch's merge landed. A clump is
-    /// one worker, one branch, one PR closing several tickets, so the PR's
-    /// `closingIssuesReferences` is the list — the branch's own ticket
-    /// alone left the rest of a clump showing a stale claim, hand-cleared
-    /// six times on one trial clump. The branch must still be a plain
-    /// `implement-<n>`: a branch the lane did not cut is not a claim this
-    /// command owns. No gh or no origin: nothing to do, and `true`. A
-    /// failed edit is different: git
-    /// cleanup already succeeded by then, so this returns
-    /// `false` — `cleanup_branch` reads that into `self.claim_clear_failed`,
-    /// which is what actually fails the run's exit code — with the exact
-    /// re-run command on stderr, since that command is the only record of
-    /// the edit that still needs to happen.
+    /// Clear `in-progress` and the assignee from every ticket this branch's
+    /// merge landed. A clump is one worker, one branch, one PR closing
+    /// several tickets, so the PR's `closingIssuesReferences` is the list —
+    /// the branch's own ticket alone left the rest of a clump showing a
+    /// stale claim, hand-cleared six times on one trial clump. The branch
+    /// must still be a plain `implement-<n>`: a branch the lane did not cut
+    /// is not a claim this command owns. No gh or no origin: nothing to do,
+    /// and `true`. A failed edit is different: git cleanup already
+    /// succeeded by then, so this returns `false` — `cleanup_branch` reads
+    /// that into `self.claim_clear_failed`, which is what actually fails
+    /// the run's exit code — with the exact re-run command on stderr, since
+    /// that command is the only record of the edit that still needs to
+    /// happen.
     ///
-    /// A slice landing on its spec's integration branch (`slice`)
-    /// clears the branch's own ticket while it is still open: the
-    /// integration PR into the default branch closes it later, and GitHub
-    /// fills `closingIssuesReferences` only for a PR into the default
-    /// branch, so the ticket stays open until then.
+    /// A slice landing on its spec's integration branch (`slice`) clears
+    /// the branch's own ticket while it is still open: the integration PR
+    /// into the default branch closes it later, and GitHub fills
+    /// `closingIssuesReferences` only for a PR into the default branch, so
+    /// the ticket stays open until then.
     fn clear_landed_claims(&self, path: &str, b: &str, pr: Option<&str>, slice: bool) -> bool {
         let Some(n) = ticket_number(b) else { return true };
         let what = format!("clearing #{n}'s in-progress label and assignee");
@@ -1346,20 +1345,20 @@ impl Cleanup {
         // the clump's list and needs no bookkeeping of its own; keeping the
         // branch's ticket in the set whatever the PR says is what makes a PR
         // whose closing keyword never registered, and a --force run with no
-        // merged PR to read, clear exactly what they cleared before clumps existed.
-        // Sorted by length then text rather than by parsed number: these are
-        // digit strings straight from a branch name, and a number too long
-        // for u64 must not silently drop out of the set.
+        // merged PR to read, clear exactly what they cleared before clumps
+        // existed. Sorted by length then text rather than by parsed number:
+        // these are digit strings straight from a branch name, and a number
+        // too long for u64 must not silently drop out of the set.
         let mut tickets: Vec<String> = vec![n.to_string()];
         let mut ok = true;
         match pr_closed_tickets(&slug, pr) {
             Ok(closed) => tickets.extend(closed.iter().map(u64::to_string)),
             // A lookup that failed is not a PR that closed nothing. Read as
             // one, it clears the branch's ticket, prints success and leaves
-            // the rest of the clump claimed — the exact stale state clump clearing
-            // exists to end. So the run fails, and the message names the
-            // read to redo, because by now the branch is gone and re-running
-            // merge-cleanup cannot repeat it.
+            // the rest of the clump claimed — the exact stale state clump
+            // clearing exists to end. So the run fails, and the message
+            // names the read to redo, because by now the branch is gone and
+            // re-running merge-cleanup cannot repeat it.
             Err(why) => {
                 ok = false;
                 let pr = pr.unwrap_or("?");
@@ -1392,9 +1391,10 @@ impl Cleanup {
 
     /// One ticket's claim. A `gh issue view` that fails is reported, not
     /// treated as an open issue — an outage must not silently reproduce the
-    /// stale claim this command exists to clear — but is still `Nothing`, since there
-    /// was never a known edit to lose. `open_ok` clears an open issue too:
-    /// a slice's own ticket, which its integration PR closes later.
+    /// stale claim this command exists to clear — but is still `Nothing`,
+    /// since there was never a known edit to lose. `open_ok` clears an open
+    /// issue too: a slice's own ticket, which its integration PR closes
+    /// later.
     fn clear_one(&self, slug: &str, n: &str, open_ok: bool) -> Cleared {
         let what = format!("clearing #{n}'s in-progress label and assignee");
         let Some(issue) = lane::issue_state::read(slug, n) else {
@@ -1410,9 +1410,9 @@ impl Cleanup {
             edit.push(&issue.assignees_csv);
         }
         if !self.step(&what, "gh", &edit) {
-            // "git cleanup completed" is only true when
-            // step 5 also succeeded — said unconditionally, it would tell an
-            // operator the branch was gone from origin when it wasn't.
+            // "git cleanup completed" is only true when step 5 also
+            // succeeded — said unconditionally, it would tell an operator
+            // the branch was gone from origin when it wasn't.
             let cleanup_status =
                 if self.remote_delete_failed { "git cleanup did not fully complete (the remote branch delete also failed)" } else { "git cleanup completed" };
             eprintln!(
@@ -1452,8 +1452,9 @@ struct PlanRow {
 /// ignored counts of the linked worktree holding `b`, and a hold when it has
 /// work a removal would lose — or when git cannot say whether it does. Row
 /// only, never a removal target: a `listing` git could not produce (`None`)
-/// prints an unheld row rather than an accurate "could not tell" one — misleading, not destructive, since nothing
-/// downstream of this row removes anything.
+/// prints an unheld row rather than an accurate "could not tell" one —
+/// misleading, not destructive, since nothing downstream of this row
+/// removes anything.
 fn worktree_plan(listing: Option<&Worktrees>, b: &str) -> (Option<String>, Option<&'static str>) {
     let Some((wt, primary)) = listing.and_then(|w| Some((w.linked_holding(b)?, w.primary()))) else { return (None, None) };
     match WorktreeFiles::read(wt, primary) {
@@ -1478,8 +1479,8 @@ fn unlanded_text(n: &str, by: &str) -> String {
     format!("{n} commit{plural} past {by}")
 }
 
-/// Each column padded to its
-/// widest cell, two spaces between columns, the last column unpadded.
+/// Each column padded to its widest cell, two spaces between columns, the
+/// last column unpadded.
 fn print_table(rows: &[[String; 4]]) {
     let mut widths = [0usize; 4];
     for row in rows {
@@ -1580,9 +1581,9 @@ fn fork_point(path: &str, b: &str) -> Option<String> {
     }
 }
 
-/// Whether `b`'s own reflog holds a commit entry: `commit:`,
-/// `commit (amend):`, `commit (merge):`, `commit (initial):`. A fast-forward
-/// or rebase sync writes `merge`/`rebase` entries, never `commit`. `false`
+/// Whether `b`'s own reflog holds a commit entry: `commit:`, `commit
+/// (amend):`, `commit (merge):`, `commit (initial):`. A fast-forward or
+/// rebase sync writes `merge`/`rebase` entries, never `commit`. `false`
 /// when the reflog cannot be read.
 fn has_own_commit(path: &str, b: &str) -> bool {
     quiet_stdout("git", &["-C", path, "reflog", "show", "--format=%gs", &format!("refs/heads/{b}")]).is_some_and(|log| log.lines().any(|l| l.starts_with("commit")))
@@ -1608,11 +1609,10 @@ enum Reaped {
 
 /// The word for a branch whose git cleanup succeeded — the branch and
 /// worktree are gone — but whose remote delete or claim clear did not
-/// `verb` being the caller's own past
-/// tense for the cleanup. Shared by --sweep and --reap so a half-done
-/// cleanup can never be called one thing in one form's table and another in
-/// the other's, and so neither ever reads like the branch survived; the
-/// exit code fails the run either way.
+/// `verb` being the caller's own past tense for the cleanup. Shared by
+/// --sweep and --reap so a half-done cleanup can never be called one thing
+/// in one form's table and another in the other's, and so neither ever
+/// reads like the branch survived; the exit code fails the run either way.
 fn partly_done(verb: &str, remote_failed: bool, claim_failed: bool) -> String {
     match (remote_failed, claim_failed) {
         (true, true) => format!("{verb}, remote branch and claim not cleared"),
@@ -1732,10 +1732,10 @@ fn holds_only_worktrees(dir: &str) -> bool {
 
 /// A step's command with its output passed through, but under `--quiet`
 /// its stdout is dropped: its stderr, where a failure is reported, still
-/// passes through. Bounded: a step is a `git` or `gh` mutation, a
-/// worktree removal or a push among them, so the bound is generous headroom
-/// for a large tree or a slow remote, not an expected latency. Past it the
-/// step is killed, says so, and counts as failed.
+/// passes through. Bounded: a step is a `git` or `gh` mutation, a worktree
+/// removal or a push among them, so the bound is generous headroom for a
+/// large tree or a slow remote, not an expected latency. Past it the step
+/// is killed, says so, and counts as failed.
 fn run_status(program: &str, args: &[&str]) -> bool {
     status_bounded(program, args, quiet(), env_ms_or("LANE_STEP_TIMEOUT_MS", 300_000)).unwrap_or_else(|e| {
         eprintln!("merge-cleanup: {e}");
@@ -1848,26 +1848,26 @@ fn main() -> ExitCode {
     if branch.is_empty() {
         return die("name a branch, a PR number or URL, or pass --sweep");
     }
-    // The one listing this cleanup reads: the dry run's blockers and
-    // every step after them ask it, rather than each listing for itself.
+    // The one listing this cleanup reads: the dry run's blockers and every
+    // step after them ask it, rather than each listing for itself.
     let listing = worktree::list(&repo);
     if a.dry {
         c.report_blockers(listing.as_ref(), &branch);
     }
     let ok = match &listing {
         Ok(listing) => c.cleanup_branch(&repo, &branch, listing),
-        // A listing git cannot produce stops the run: with no
-        // primary to anchor on, nothing knows which checkout holds what.
+        // A listing git cannot produce stops the run: with no primary to
+        // anchor on, nothing knows which checkout holds what.
         Err(e) => {
             eprintln!("merge-cleanup: {e}");
             false
         }
     };
     if let (true, Ok(listing)) = (ok, &listing) {
-        // report_stale is about this repo's other worktrees,
-        // not whether the ticket's claim or its remote branch got cleared —
-        // it still runs when git cleanup succeeded, even if
-        // claim_clear_failed or remote_delete_failed will fail the exit.
+        // report_stale is about this repo's other worktrees, not whether
+        // the ticket's claim or its remote branch got cleared — it still
+        // runs when git cleanup succeeded, even if claim_clear_failed or
+        // remote_delete_failed will fail the exit.
         c.report_stale(&[(repo, listing.primary().to_string())]);
     }
     c.close_removed_herdr_workspaces();

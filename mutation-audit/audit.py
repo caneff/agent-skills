@@ -3,8 +3,8 @@
 StrykerJS JSON report (`.mjs`/`.js`) into candidate rows, and suggest target
 modules when none is given.
 
-mutmut 3.x has no clean structured export — `mutmut
-results --all true` text is the stable contract: one line per mutant,
+mutmut 3.x has no clean structured export — `mutmut results --all true` text
+is the stable contract: one line per mutant,
 `    <module>.x_<func>__mutmut_<N>: <status>`. `parse_mutmut_results`
 extracts every non-killed mutant mechanically into candidate rows — a
 `survived` mutant as a `rewrite`, a `no tests` mutant as a `no-coverage`. A
@@ -275,10 +275,10 @@ def _sibling_tests(p):
     """The test paths for a mutation-worthy source module `p` (beside it, or
     under a root `tests/` tree, see below), or `None` when `p` is not a worthy
     source module at all — an `__init__.py`, a test file, or anything under a
-    skip/fixture dir (the shared `auditlib.is_test_or_fixture` check).
-    The single predicate both `suggest_candidates` (keep when a test exists)
-    and `no_test_modules` (keep when none does) share, so the two can never
-    drift apart.
+    skip/fixture dir (the shared `auditlib.is_test_or_fixture` check). The
+    single predicate both `suggest_candidates` (keep when a test exists) and
+    `no_test_modules` (keep when none does) share, so the two can never drift
+    apart.
     """
     if auditlib.is_test_or_fixture(p):
         return None

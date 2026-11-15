@@ -211,8 +211,8 @@ def test_scan_path_flags_prose_tests_by_language():
 
 
 def test_scan_path_prunes_dot_dirs():
-    """scan_path walks via auditlib.walk_source, so .tox is pruned
-    like every other audit."""
+    """scan_path walks via auditlib.walk_source, so .tox is pruned like every
+    other audit."""
     tmp = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(tmp, ".tox"))
@@ -449,11 +449,11 @@ def test_gate_fails_assertion_free_never_a_fixture_and_refuses_a_missing_root():
 
         # A root that does not exist was not checked, so the gate must not
         # report success: EXIT_UNABLE, distinct from both 0 (clean) and 1
-        # (hollow tests found), so a typo in a repo's wiring reads
-        # differently from a real finding.
-        # Each guard is witnessed by its own message: `os.access` also rejects
-        # a missing path, so a status-only assertion would leave the existence
-        # branch passing with its constraint stripped.
+        # (hollow tests found), so a typo in a repo's wiring reads differently
+        # from a real finding. Each guard is witnessed by its own message:
+        # `os.access` also rejects a missing path, so a status-only assertion
+        # would leave the existence branch passing with its constraint
+        # stripped.
         missing = os.path.join(tmp, "no-such-dir")
         code, err = _main_stderr(["audit.py", "--gate", missing])
         assert code == EXIT_UNABLE, (code, err)

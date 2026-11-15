@@ -170,12 +170,12 @@ impl Cleanup {
         dir
     }
 
-    /// A scratch origin plus a clone where
-    /// caneff/merged-one is squash-merged (a merged PR at its tip),
-    /// caneff/merged-then-more had a PR merged then kept going,
-    /// caneff/ff-merged is a real fast-forward merge, caneff/local-only was
-    /// never pushed, caneff/open-one is open — and origin/main sits one
-    /// commit ahead of the local main, so the fast-forward has work.
+    /// A scratch origin plus a clone where caneff/merged-one is
+    /// squash-merged (a merged PR at its tip), caneff/merged-then-more had
+    /// a PR merged then kept going, caneff/ff-merged is a real
+    /// fast-forward merge, caneff/local-only was never pushed,
+    /// caneff/open-one is open — and origin/main sits one commit ahead of
+    /// the local main, so the fast-forward has work.
     pub fn mkfixture(&self, rel: &str) -> PathBuf {
         let dir = self.clone_origin(rel);
         let d = dir.to_str().unwrap();
@@ -242,10 +242,10 @@ impl Cleanup {
         self.record_pr_head(repo, &b, &b);
     }
 
-    /// A slice of spec `p`, as `implement-dispatch` leaves one:
-    /// `spec-<p>` pushed off main, `implement-<n>` cut from it with one
-    /// commit and pushed, and `branch.implement-<n>.base` set to `spec-<p>`.
-    /// Nothing is merged: each test lands it where its case needs.
+    /// A slice of spec `p`, as `implement-dispatch` leaves one: `spec-<p>`
+    /// pushed off main, `implement-<n>` cut from it with one commit and
+    /// pushed, and `branch.implement-<n>.base` set to `spec-<p>`. Nothing
+    /// is merged: each test lands it where its case needs.
     pub fn mk_slice_branch(&self, repo: &Path, n: &str, p: &str) {
         let d = repo.to_str().unwrap();
         let (spec, b) = (format!("spec-{p}"), format!("implement-{n}"));

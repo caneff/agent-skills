@@ -66,13 +66,13 @@ launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"t
 # teammate_id carries.
 teammate_launch() { local id=$1 name=${2:-$1}; printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Spawned successfully."}]},"toolUseResult":{"status":"teammate_spawned","agent_id":"%s","name":"%s"}}\n' "$id" "$id" "$name"; }
 handback() { printf '{"type":"user","origin":{"kind":"peer","from":"%s","senderTaskId":"%s","handback":true},"message":{"role":"user","content":"[Subagent hand-back] report"}}\n' "$1" "$1"; }
-# teammate_report <bare-id> : a named teammate's actual return shape —
-# a plain-text message with no `origin` field at all, carrying a
+# teammate_report <bare-id> : a named teammate's actual return shape — a
+# plain-text message with no `origin` field at all, carrying a
 # `<teammate-message teammate_id="...">` wrapper around an idle_notification.
 teammate_report() { printf '{"type":"user","message":{"role":"user","content":"Another Claude session sent a message:\\n<teammate-message teammate_id=\\"%s\\" color=\\"blue\\">\\n{\\"type\\":\\"idle_notification\\",\\"from\\":\\"%s\\",\\"idleReason\\":\\"available\\",\\"result\\":\\"ok\\"}\\n</teammate-message>"}}\n' "$1" "$1"; }
 # bg_launch <task-id> : a Bash with run_in_background:true — an assistant
-# tool_use plus the result whose toolUseResult carries `backgroundTaskId`
-# It is resolved by a `<task-id>` notification carrying a `<status>`.
+# tool_use plus the result whose toolUseResult carries `backgroundTaskId` It
+# is resolved by a `<task-id>` notification carrying a `<status>`.
 bg_launch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-%s","name":"Bash","input":{"command":"just check-full","run_in_background":true}}]}}\n' "$1"
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-%s","content":"Command running in background with ID: %s"}]},"toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"%s"}}\n' "$1" "$1" "$1"; }
 # monitor_launch <task-id> : the Monitor tool's launch result.
@@ -90,8 +90,8 @@ monitor_event() { printf '{"type":"user","origin":{"kind":"task-notification"},"
 monitor_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: \\"placeholder wait\\"</summary>\\n<event>[Monitor timed out \\u2014 re-arm if needed.]</event>\\n</task-notification>"}}\n' "$1"; }
 # monitor_event_mentioning_timeout <task-id> : a real, live Monitor tick
 # whose own tailed text merely mentions the timeout phrase — must not be
-# misread as the monitor's own timeout (the match has to be the exact
-# marker inside `<event>`, not a bare substring test).
+# misread as the monitor's own timeout (the match has to be the exact marker
+# inside `<event>`, not a bare substring test).
 monitor_event_mentioning_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: job progress</summary>\\n<event>13:45:43 note: the other Monitor timed out, re-armed it</event>\\n</task-notification>"}}\n' "$1"; }
 # task_stop <task-id> : the worker stopping a monitor itself.
 task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ts-%s","name":"TaskStop","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
@@ -145,7 +145,7 @@ expect_none() {
 # expect_none — no prompt AND no `not-sent` log line. A `silent` verdict
 # whose pane lookup happens to fail also leaves no prompt, so expect_none
 # alone cannot tell a real report from a report the matching missed and the
-# missing pane then hid (a hollow witness).
+# missing pane then hid.
 expect_reported() {
   local name=$1
   if [ -z "$pane" ] && ! grep -q 'not-sent' "$log" 2>/dev/null; then
@@ -300,9 +300,8 @@ expect_none "a stop while a background shell is out does not alert"
 run "background shell done" "$t"
 expect_alert "once the background shell completes, a stop without a report alerts"
 
-# A Monitor task is out. Its event notifications
-# carry a `<task-id>` and no `<status>`: the monitor is still running, so an
-# event is not its return.
+# A Monitor task is out. Its event notifications carry a `<task-id>` and no
+# `<status>`: the monitor is still running, so an event is not its return.
 reset_log
 t="$tmp/monitor.jsonl"
 { human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
@@ -365,10 +364,9 @@ expect_none "a stop while a Monitor task is out does not alert"
 run "monitor event mentioning the timeout phrase in free text, not the exact marker" "$t"
 expect_none "a live monitor's own text merely mentioning the timeout phrase does not read as the monitor's own end"
 
-# Already reported, then answered a message that needed no reply (the
-# false alert a diligent controller manufactures for itself by closing its
-# own loops). Nothing was done since the report, so
-# the report still stands.
+# Already reported, then answered a message that needed no reply (the false
+# alert a diligent controller manufactures for itself by closing its own
+# loops). Nothing was done since the report, so the report still stands.
 reset_log
 t="$tmp/loop-closed.jsonl"
 { human "$brief"; send s1 "skills-b6"; ok s1; peer "merged, sha 1a2b3c — nothing needed"; assistant_text "noted"; } > "$t"
@@ -494,12 +492,12 @@ t="$tmp/torn.jsonl"
 run "torn last line" "$t"
 expect_alert "a half-written last line and a non-string recipient still alert"
 
-# The brief carries the controller's herdr agent name, which a
-# compliant worker resolves to a live session name before sending: the two
-# differ, so matching the brief's literal directly would miss a delivered
-# report and, when an alert is owed, find no session for the pane lookup.
-# Resolve through `herdr agent list` (agent name -> agent_session
-# id) and the live registry (session id -> current name) first.
+# The brief carries the controller's herdr agent name, which a compliant
+# worker resolves to a live session name before sending: the two differ, so
+# matching the brief's literal directly would miss a delivered report and,
+# when an alert is owed, find no session for the pane lookup. Resolve
+# through `herdr agent list` (agent name -> agent_session id) and the live
+# registry (session id -> current name) first.
 reset_log
 printf '{"pid":%s,"procStart":"%s","sessionId":"sess-hctl99","name":"skills-c7"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 printf '%s\n' '{"result":{"agents":[{"name":"hctl-99","pane_id":"w9:p1","agent_session":{"value":"sess-hctl99"}}]}}' > "$tmp/agent-list.json"
@@ -511,8 +509,8 @@ expect_reported "a report addressed to the resolved session name counts as repor
 # A report addressed to the brief's own literal herdr name (never resolved)
 # also counts: nothing requires a worker to resolve before sending, and
 # resolve-controller itself refuses a live session with no name, so a
-# session this can't name is one a compliant worker couldn't have
-# addressed either.
+# session this can't name is one a compliant worker couldn't have addressed
+# either.
 reset_log
 t="$tmp/herdr-name-literal.jsonl"
 { human "$herdr_brief"; send s1 "hctl-99"; ok s1; assistant_text "PR up sent"; } > "$t"
@@ -529,9 +527,9 @@ printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
 # `resolve_session`'s fields are joined on `\x1f`, not a tab, precisely so a
 # `.sessionId`-less record doesn't shift `.name`/`.messagingSocketPath` into
-# each other's variables — a live session
-# can genuinely lack a sessionId (`flow/lane/src/sessions.rs` defaults it to
-# `""`). Witnessed by resolving through the socket alone.
+# each other's variables — a live session can genuinely lack a sessionId
+# (`flow/lane/src/sessions.rs` defaults it to `""`). Witnessed by resolving
+# through the socket alone.
 reset_log
 printf '{"pid":%s,"procStart":"%s","name":"skills-nosid","messagingSocketPath":"/run/nosid.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 nosid_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"skills-nosid\"</command-args>'
@@ -561,8 +559,8 @@ printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 # still sends and receives cross-session messages (every one carries
 # `from="uds:<its socket>"`, and a reply copies that address), so a report
 # it delivers to that socket is real even though nothing can match it by
-# name. `resolve_session` must not require a non-empty `.name` to return
-# the socket, or this report reads as silent.
+# name. `resolve_session` must not require a non-empty `.name` to return the
+# socket, or this report reads as silent.
 reset_log
 printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nosockname","messagingSocketPath":"/run/nosockname.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 printf '%s\n' '{"result":{"agents":[{"name":"hctl-nosockname","pane_id":"w9:p1","agent_session":{"value":"sess-nosockname"}}]}}' > "$tmp/agent-list.json"
@@ -589,9 +587,9 @@ t="$tmp/race-reported.jsonl"
 { human "$race_brief"; send s1 "skills-race"; ok s1; assistant_text "PR up sent"; } > "$t"
 run "two live records share the controller sessionId, first nameless" "$t"
 expect_reported "a report to the later named record's session name counts even though a nameless record sorts first"
-# The mirror: matching the named record must not drop its nameless
-# twin's socket, so a report the worker delivered to `uds:<nameless socket>`
-# — the address a reply from that record copies — counts too.
+# The mirror: matching the named record must not drop its nameless twin's
+# socket, so a report the worker delivered to `uds:<nameless socket>` — the
+# address a reply from that record copies — counts too.
 reset_log
 t="$tmp/race-nameless-socket.jsonl"
 { human "$race_brief"; send s1 "uds:/run/race-nameless.sock"; ok s1; assistant_text "PR up sent"; } > "$t"
@@ -680,11 +678,10 @@ else
   echo "FAIL: missing controller pane not logged"; echo "  pane: $pane"; fails=1
 fi
 
-# A deployment missing the sibling lib (install.sh
-# once linked the hook but not worker-alert-lib.sh) must fail loud, not join
-# the "not a worker transcript" exit 0 via a bare command-not-found on
-# stderr — that would be defect class 1 one layer up from the bug this hook
-# exists to catch.
+# A deployment missing the sibling lib (install.sh once linked the hook but
+# not worker-alert-lib.sh) must fail loud, not join the "not a worker
+# transcript" exit 0 via a bare command-not-found on stderr — that would be
+# defect class 1 one layer up from the bug this hook exists to catch.
 reset_log
 nolib="$tmp/nolib"; mkdir -p "$nolib"; cp "$hook" "$nolib/"
 out=$(jq -n --arg t "$t" '{hook_event_name:"Stop",session_id:"w",transcript_path:$t,stop_hook_active:false}' \
@@ -711,8 +708,8 @@ else
   echo "FAIL: incomplete lib — rc $rc, log: $(cat "$log" 2>/dev/null), out: $out"; fails=1
 fi
 
-# The shared delivery step: a lib without worker_alert_deliver is named
-# as the missing symbol, so the hook's symbol list covers it.
+# The shared delivery step: a lib without worker_alert_deliver is named as
+# the missing symbol, so the hook's symbol list covers it.
 reset_log
 partial="$tmp/partial-deliver"; mkdir -p "$partial"; cp "$hook" "$partial/"
 sed '/^worker_alert_deliver() {/,/^}/d' "$here/worker-alert-lib.sh" > "$partial/worker-alert-lib.sh"

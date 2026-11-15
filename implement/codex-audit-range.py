@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Codex audit range: the merged PRs that skipped the Codex gate since the last audit,
-as one diff range for a single Codex run.
+"""Codex audit range: the merged PRs that skipped the Codex gate since the last audit, as one diff
+range for a single Codex run.
 
     codex-audit-range.py --ledger PATH --repo R --mark SHA|DATE [--base REF]
 

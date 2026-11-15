@@ -1,7 +1,8 @@
-"""Tests for the audit sweep driver: the hermetic index test (parses the index
-rather than grepping it, per the family's plain-assert pytest convention — see
-crap-audit/audit_test.py), plus a cache-decision test against a real temporary
-git repo, including the bad-last-run-SHA case, which must mean RUN.
+"""Tests for the audit sweep driver: the hermetic index test (parses the
+index rather than grepping it, per the family's plain-assert pytest
+convention — see crap-audit/audit_test.py), plus a cache-decision test
+against a real temporary git repo, including the bad-last-run-SHA case,
+which must mean RUN.
 """
 import contextlib
 import json
@@ -87,8 +88,8 @@ def test_index_rerun_replaces_assets_without_nesting(tmp_path):
 
 
 def test_index_over_an_empty_collection_still_links_to_real_assets(tmp_path):
-    """Assets come from pagelib.copy_assets, not hoisted out of the
-    first report folder — so an index whose audits all skipped still links to
+    """Assets come from pagelib.copy_assets, not hoisted out of the first
+    report folder — so an index whose audits all skipped still links to
     files that exist."""
     tmp = str(tmp_path)
     os.makedirs(os.path.join(tmp, "collection"))
@@ -106,9 +107,9 @@ def test_index_over_an_empty_collection_still_links_to_real_assets(tmp_path):
 
 
 def test_index_over_an_old_run_dir_does_not_prune_it(tmp_path):
-    """`index --out <run older than the TTL>` must index that
-    run, not delete it — pruning happens after `--out` is resolved and skips
-    the resolved dir."""
+    """`index --out <run older than the TTL>` must index that run, not
+    delete it — pruning happens after `--out` is resolved and skips the
+    resolved dir."""
     cache_dir = str(tmp_path)
     base = os.path.join(cache_dir, "all-audits")
     old_run = os.path.join(base, "run-20200101-000000")
@@ -128,8 +129,8 @@ def test_index_over_an_old_run_dir_does_not_prune_it(tmp_path):
 
 
 def test_collect_from_manifest_mutation_style(tmp_path):
-    """Mutation mode finds its report the same way the sweep does
-    — through a manifest, never by grepping a log for a stray .html path."""
+    """Mutation mode finds its report the same way the sweep does —
+    through a manifest, never by grepping a log for a stray .html path."""
     manifests_dir, collection, reportdir = _mkdirs(tmp_path, "manifests_dir", "collection", "reportdir")
     report = os.path.join(reportdir, "report.html")
     with open(report, "w") as f:
@@ -300,7 +301,8 @@ def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, extra_args=(), **extr
     ambient = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "SWEEP_JOBS")}
     env = {
         **ambient, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
-        # Never the machine's stored sweeps or its real `gh`: the sweep prunes closed records.
+        # Never the machine's stored sweeps or its real `gh`: the sweep prunes
+        # closed records.
         "XDG_DATA_HOME": os.path.join(tmp, "data"),
         "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env,
     }
@@ -349,8 +351,9 @@ def test_sweep_jobs_must_be_a_positive_integer(tmp_path):
 
 
 def test_audit_claude_gets_the_unlimited_bg_wait_ceiling(tmp_path):
-    """`claude -p` kills itself after 600 s of background tasks unless
-    the ceiling variable is 0; the audit's own log records what it received."""
+    """`claude -p` kills itself after 600 s of background tasks unless the
+    ceiling variable is 0; the audit's own log records what it
+    received."""
     tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -359,8 +362,8 @@ def test_audit_claude_gets_the_unlimited_bg_wait_ceiling(tmp_path):
 
 
 def test_audit_exiting_nonzero_fails_the_sweep_even_with_a_manifest(tmp_path):
-    """A nonzero `claude` exit is a failure line and a nonzero sweep
-    exit, never `done`, whatever is on disk."""
+    """A nonzero `claude` exit is a failure line and a nonzero sweep exit,
+    never `done`, whatever is on disk."""
     tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", FAKE_CLAUDE_EXIT_DEAD_CODE="3")
     assert r.returncode != 0, r.stdout + r.stderr
@@ -371,8 +374,8 @@ def test_audit_exiting_nonzero_fails_the_sweep_even_with_a_manifest(tmp_path):
 
 
 def test_manifest_naming_a_missing_report_fails_the_sweep(tmp_path):
-    """Success in `run_one` is what `collect_from_manifest` means —
-    the manifest's report file exists. The console and exit code must agree
+    """Success in `run_one` is what `collect_from_manifest` means — the
+    manifest's report file exists. The console and exit code must agree
     with the index's failure row."""
     tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", FAKE_CLAUDE_MISSING_REPORT="1")
@@ -382,8 +385,8 @@ def test_manifest_naming_a_missing_report_fails_the_sweep(tmp_path):
 
 
 def test_stale_manifest_from_an_earlier_run_does_not_count_as_success(tmp_path):
-    """`--out` accumulates, so a rerun into the same dir (the issue's
-    own recovery command) finds the last run's manifest. An audit that writes
+    """`--out` accumulates, so a rerun into the same dir (the issue's own
+    recovery command) finds the last run's manifest. An audit that writes
     nothing this time must still fail, not inherit the old manifest."""
     tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     _git_init_tracking(tmp)  # out/ later holds untracked .js assets, which must not make the repo read as JavaScript
@@ -425,8 +428,8 @@ def _init_git_repo(path):
 
 
 def test_init_git_repo_ignores_leaked_git_dir(tmp_path):
-    """_init_git_repo must write only inside its own temp dir even
-    when the caller's shell leaked GIT_DIR/GIT_WORK_TREE pointing at a real
+    """_init_git_repo must write only inside its own temp dir even when
+    the caller's shell leaked GIT_DIR/GIT_WORK_TREE pointing at a real
     repo — regression witness for the 2026-09-07 incident, where a leaked
     GIT_DIR made `git init` on a /tmp path silently reinitialize that other
     repo instead and rewrite its .git/config."""
@@ -452,9 +455,9 @@ def test_init_git_repo_ignores_leaked_git_dir(tmp_path):
 
 
 def test_decide_and_head_sha_ignore_leaked_git_dir(tmp_path):
-    """The driver's own git calls must read the repo they were
-    handed. Under a leaked GIT_DIR pointing at a dirty repo, decide() on a
-    clean, freshly-cached repo returned run=True "dirty working tree" and
+    """The driver's own git calls must read the repo they were handed.
+    Under a leaked GIT_DIR pointing at a dirty repo, decide() on a clean,
+    freshly-cached repo returned run=True "dirty working tree" and
     head_sha() returned the other repo's SHA."""
     victim, repo, cache_dir = _mkdirs(tmp_path, "victim", "repo", "cache_dir")
     _init_git_repo(victim)
@@ -480,9 +483,9 @@ def test_decide_and_head_sha_ignore_leaked_git_dir(tmp_path):
 
 
 def test_mutation_worktree_add_ignores_leaked_git_dir(tmp_path):
-    """The mutation worktree is the one git call that bypasses
-    _run — under a leaked GIT_DIR it registered its worktree in the caller's
-    repo instead of the audited one."""
+    """The mutation worktree is the one git call that bypasses _run —
+    under a leaked GIT_DIR it registered its worktree in the caller's repo
+    instead of the audited one."""
     victim, repo, tmp = _mkdirs(tmp_path, "victim", "repo", "tmp")
     # the victim has no commit, so a `worktree add HEAD` aimed at it by a
     # leak fails outright while the same call on `repo` succeeds
@@ -533,8 +536,8 @@ def test_cache_decision_clean_recent_repo_skips(tmp_path):
 
 
 def test_corrupt_cache_record_forces_run(tmp_path):
-    """A truncated/corrupt record file must read as "no cached run",
-    never crash the sweep — matches the old bash cache.py, whose crashing
+    """A truncated/corrupt record file must read as "no cached run", never
+    crash the sweep — matches the old bash cache.py, whose crashing
     subprocess printed nothing, failed the `= "SKIP"` check, and let the
     audit run."""
     repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
@@ -609,8 +612,8 @@ def test_crashed_no_tests_probe_renders_could_not_determine_not_zero(tmp_path):
 
 
 def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees(tmp_path):
-    """Mutation mode resolves its run folder through the same `RunDir`
-    as the sweep, so it inherits the 3-day prune of old `run-*` dirs that it
+    """Mutation mode resolves its run folder through the same `RunDir` as
+    the sweep, so it inherits the 3-day prune of old `run-*` dirs that it
     used to skip. No `claude` is needed: naming the module skips the prepass,
     and a module with no env manifest fails setup before any audit runs."""
     repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
@@ -639,8 +642,8 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees(tmp_path):
     for sub in ("logs", "collection", "manifests", "worktrees"):
         assert os.path.isdir(os.path.join(run_dir, sub)), sub
     assert os.listdir(os.path.join(run_dir, "worktrees")) == [], "the worktree must be cleaned up on the setup-failure path"
-    # The setup-failure page links ../assets/, so mutation mode
-    # delivers the shell's assets into the collection like the sweep does.
+    # The setup-failure page links ../assets/, so mutation mode delivers
+    # the shell's assets into the collection like the sweep does.
     failure_page = open(os.path.join(run_dir, "collection", "solver.py", "report.html")).read()
     assert '../assets/base/base.css' in failure_page
     assert os.path.isfile(os.path.join(run_dir, "collection", "assets", "base", "base.css"))
@@ -727,8 +730,8 @@ def _seed_run_dir(tmp, worktrees=False):
 
 
 def test_plan_reuses_the_cached_report_and_runs_the_rest(tmp_path):
-    """The plan step decides alone — cache in, lists out. No audit
-    process is spawned, so it needs a tmp dir and no fake `claude`."""
+    """The plan step decides alone — cache in, lists out. No audit process
+    is spawned, so it needs a tmp dir and no fake `claude`."""
     repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
     _init_git_repo(repo)
     report_dir = os.path.join(cache_dir, "domain-drift-report")
@@ -746,8 +749,8 @@ def test_plan_reuses_the_cached_report_and_runs_the_rest(tmp_path):
 
 
 def test_collect_copies_both_report_kinds_and_returns_the_index(tmp_path):
-    """The collect step assembles the collection from what is already
-    on disk — a manifest for what ran, the cache dir for what was reused —
+    """The collect step assembles the collection from what is already on
+    disk — a manifest for what ran, the cache dir for what was reused —
     and renders. Also needs only a tmp dir and no fake `claude`."""
     tmp, srcdir = _mkdirs(tmp_path, "tmp", "srcdir")
     run = _seed_run_dir(tmp)
@@ -820,8 +823,8 @@ EVERY_FLAG = sorted({f for flags in MODE_FLAGS.values() for f in flags})
 
 
 def test_top_level_help_prints_the_docstring_and_names_every_mode(capsys, monkeypatch):
-    """The module docstring is the help text, so the reference has
-    one home, and the modes are subcommands it lists."""
+    """The module docstring is the help text, so the reference has one
+    home, and the modes are subcommands it lists."""
     _stub_every_entry(monkeypatch, lambda name, a, k: pytest.fail(f"{name} ran on --help"))
     code, out, _ = _main_exit(["--help"], capsys)
     assert code == 0 and out.startswith("usage:"), out
@@ -1121,8 +1124,8 @@ def test_a_failed_prepass_is_named_and_the_run_orders_by_recency_alone(tmp_path)
 
 
 def test_mutation_estimate_names_count_jobs_and_worst_case():
-    """The whole-repo run prints the module count and a cost estimate
-    before it starts. A module is at most two bounded commands (mutmut run and
+    """The whole-repo run prints the module count and a cost estimate before
+    it starts. A module is at most two bounded commands (mutmut run and
     results) and `jobs` modules overlap."""
     line = driver.mutation_cost_estimate(4, jobs=2, timeout_s=3600)
     assert "4 modules" in line and "2 at a time" in line and "up to 4h" in line, line
@@ -1309,8 +1312,8 @@ def test_mutation_all_stale_inconclusive_from_an_earlier_run_does_not_label_a_fa
 
 
 def test_mutation_modules_run_at_once_up_to_mutation_jobs(tmp_path):
-    """Two modules in flight together under MUTATION_JOBS=2, one at a
-    time under MUTATION_JOBS=1. The fake audit waits for another to start."""
+    """Two modules in flight together under MUTATION_JOBS=2, one at a time
+    under MUTATION_JOBS=1. The fake audit waits for another to start."""
     repo, tmp = _mkdirs(tmp_path, "repo", "tmp")
     _repo_with_two_tested_modules(repo)
     for jobs, overlapped in (("2", True), ("1", False)):

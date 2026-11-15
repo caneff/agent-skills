@@ -2,10 +2,10 @@
 //! helpers (`restore_line`, `describe_pr`, `parse_pr_status`, `is_subagent`,
 //! `agent_status`) leave `main()` itself, the `is_subagent` stdin-JSON gate,
 //! `find_own_pid` resolution, and the real `herdr`/`gh` subprocess
-//! invocations unexercised. These tests run
-//! the real binary as a subprocess against the fake `gh`/`herdr` from
-//! `lane-fake` and a scratch `~/.claude/sessions`, the same seam
-//! `resolve_controller.rs` and `merge_cleanup.rs` test at.
+//! invocations unexercised. These tests run the real binary as a subprocess
+//! against the fake `gh`/`herdr` from `lane-fake` and a scratch
+//! `~/.claude/sessions`, the same seam `resolve_controller.rs` and
+//! `merge_cleanup.rs` test at.
 
 mod support;
 use support::{dead_pid, out_text, stdout, worker_record, Fixture, LiveProc};
@@ -30,12 +30,12 @@ fn append_worker(f: &Fixture, record: &lane::workers::WorkerRecord) {
 }
 
 /// Runs the real binary with `stdin` on its stdin and `extra_env` layered
-/// over a base env that always carries `GH_PR_STATUS`:
-/// every test goes through the new `gh pr list --json number,state` fake by
-/// default, not only the three that used to opt in — the no-PR tests below
-/// exercise its missing-file branch precisely because nothing wrote into
-/// `pr_status_dir()` for their branch (this is what makes "no PR yet"
-/// mean the new fake's own "nothing recorded" case, not a fallback to a
+/// over a base env that always carries `GH_PR_STATUS`: every test goes
+/// through the new `gh pr list --json number,state` fake by default, not
+/// only the three that used to opt in — the no-PR tests below exercise its
+/// missing-file branch precisely because nothing wrote into
+/// `pr_status_dir()` for their branch (this is what makes "no PR yet" mean
+/// the new fake's own "nothing recorded" case, not a fallback to a
 /// different fake entirely).
 fn run(f: &Fixture, stdin: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
     run_in(f, &f.tmp.path().display().to_string(), stdin, extra_env)
@@ -73,15 +73,15 @@ fn no_session_start_hook_json_and_no_workers_file_is_silent() {
 
 #[test]
 fn a_session_record_whose_procstart_does_not_match_is_never_resolved_as_this_sessions_own() {
-    // The test above is silent
-    // whether or not `find_own_pid`'s ancestor walk ever succeeds — a
-    // session that never dispatched a worker and a session `find_own_pid`
-    // fails to resolve both print nothing, so that test alone cannot tell
-    // the two apart, and stripping the match check would leave it green
-    // (defect-classes class 1). This one plants a worker record under this
-    // pid, then a session record for the same pid whose `procStart` does
-    // not match — a mismatch that must make `find_own_pid` fail to resolve
-    // it, so the record's existence must never leak into the printed line.
+    // The test above is silent whether or not `find_own_pid`'s ancestor
+    // walk ever succeeds — a session that never dispatched a worker and a
+    // session `find_own_pid` fails to resolve both print nothing, so that
+    // test alone cannot tell the two apart, and stripping the match check
+    // would leave it green (defect-classes class 1). This one plants a
+    // worker record under this pid, then a session record for the same pid
+    // whose `procStart` does not match — a mismatch that must make
+    // `find_own_pid` fail to resolve it, so the record's existence must
+    // never leak into the printed line.
     let f = Fixture::new();
     let pid = std::process::id() as i32;
     std::fs::create_dir_all(f.home().join(".claude/sessions")).unwrap();
@@ -113,10 +113,10 @@ fn a_subagents_own_session_start_is_silent_even_with_workers_present() {
 
 #[test]
 fn the_agentid_spelling_of_the_subagent_gate_is_also_silent_through_the_real_binary() {
-    // is_subagent's own unit tests cover
-    // both `agent_id` and `agentId`, but only `agent_id` reached main()
-    // through the real binary above — worth its own case since a transcript
-    // payload is what actually carries the `agentId` spelling.
+    // is_subagent's own unit tests cover both `agent_id` and `agentId`, but
+    // only `agent_id` reached main() through the real binary above — worth
+    // its own case since a transcript payload is what actually carries the
+    // `agentId` spelling.
     let f = Fixture::new();
     live_session(&f, "controller-50");
     append_worker(&f, &worker_record("sudokupad-art-1042", "implement-1042", WS_1042, &f.own_proc_start()));
@@ -162,10 +162,9 @@ fn an_open_pr_is_reported_with_the_merge_pointer() {
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
     assert!(line.contains("PR #152 open, not merged — follow implement/SKILL.md \u{a7} The merge"), "{line}");
-    // The output assertion above can't tell a right
-    // answer from a lucky one if the invocation itself drifts — check the
-    // actual argv the real gh/herdr calls carried, not only what they
-    // printed back.
+    // The output assertion above can't tell a right answer from a lucky one
+    // if the invocation itself drifts — check the actual argv the real
+    // gh/herdr calls carried, not only what they printed back.
     let calls = f.calls();
     assert!(calls.contains("herdr agent list"), "{calls}");
     assert!(
@@ -276,9 +275,9 @@ fn an_orphan_outside_this_sessions_cwd_is_not_offered() {
 
 #[test]
 fn a_worker_session_in_its_own_orphaned_workspace_is_not_told_to_adopt_itself() {
-    // The hook runs in every session, workers included,
-    // and a worker's cwd is its own workspace. Adoption belongs to a session
-    // above it — the primary checkout — never to the orphan itself.
+    // The hook runs in every session, workers included, and a worker's cwd
+    // is its own workspace. Adoption belongs to a session above it — the
+    // primary checkout — never to the orphan itself.
     let f = Fixture::new();
     live_session(&f, "scroller-345");
     let (_, ws) = f.repo_with_workspace("scroller", "implement-345");
@@ -290,9 +289,9 @@ fn a_worker_session_in_its_own_orphaned_workspace_is_not_told_to_adopt_itself() 
 
 #[test]
 fn a_dead_copy_of_a_worker_a_live_controller_holds_is_not_offered() {
-    // Adoption lands the record before removing the
-    // dead copy, so a crash between leaves both. The live copy is the
-    // worker's controller; the dead one must never be offered as an orphan.
+    // Adoption lands the record before removing the dead copy, so a crash
+    // between leaves both. The live copy is the worker's controller; the
+    // dead one must never be offered as an orphan.
     let f = Fixture::new();
     live_session(&f, "controller-50");
     let (primary, ws) = f.repo_with_workspace("scroller", "implement-345");

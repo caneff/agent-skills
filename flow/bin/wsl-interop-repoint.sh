@@ -1,6 +1,6 @@
-# Sourced, never run: moves WSL_INTEROP off a dead socket. A process
-# tree outliving its Windows session keeps a WSL_INTEROP whose socket is gone,
-# and every Windows call from it then lands in session 0 with no error: nothing
+# Sourced, never run: moves WSL_INTEROP off a dead socket. A process tree
+# outliving its Windows session keeps a WSL_INTEROP whose socket is gone, and
+# every Windows call from it then lands in session 0 with no error: nothing
 # appears on the desktop and the clipboard reads empty.
 #
 # Two carriers: `env.BASH_ENV` in claude/settings.json reaches a Claude Code

@@ -144,13 +144,12 @@ pub fn find_live_by_name(home: &Path, name: &str) -> Option<LiveSession> {
 /// The live, named registry session carrying Claude sessionId `id`, the second
 /// hop of a herdr agent name's resolution. `None` when no live record carries
 /// that id or the record has no name. Deliberately not built on
-/// `find_live_by_session_id`: that returns the first
-/// live record matching `id` regardless of whether it has a name, so if two
-/// live records ever shared a sessionId — a race between an old record not
-/// yet cleaned up and a new one — composing through it could return `None`
-/// on an unnamed first match while a later match with the same id has a real
-/// name. This scans for the first record that is both a match and named, in
-/// one pass.
+/// `find_live_by_session_id`: that returns the first live record matching
+/// `id` regardless of whether it has a name, so if two live records ever
+/// shared a sessionId — a race between an old record not yet cleaned up and
+/// a new one — composing through it could return `None` on an unnamed first
+/// match while a later match with the same id has a real name. This scans
+/// for the first record that is both a match and named, in one pass.
 pub fn named_session_of(home: &Path, id: &str) -> Option<LiveSession> {
     if id.is_empty() {
         return None;

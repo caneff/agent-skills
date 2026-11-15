@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Pass one of dead-code: parse vulture's text output into findings rows.
 
-vulture has no JSON output — its text format is the
-stable contract: `path/to/file.py:LINE: unused <kind> '<name>' (<NN>%
-confidence)`. `parse_vulture` extracts file/line/category/confidence
-mechanically; it never decides dead vs dynamically-reached — that's the
-judgment pass (SKILL.md) reading these rows and re-bucketing them.
+vulture has no JSON output — its text format is the stable contract:
+`path/to/file.py:LINE: unused <kind> '<name>' (<NN>% confidence)`.
+`parse_vulture` extracts file/line/category/confidence mechanically; it never
+decides dead vs dynamically-reached — that's the judgment pass (SKILL.md)
+reading these rows and re-bucketing them.
 
 ponytail: only the `unused <kind> '<name>' (<NN>% confidence)` line shape is
 parsed — vulture's other line shape (`unreachable code after 'return' (100%
-confidence)`, no quoted name) isn't in the stable-format contract and
-is out of scope here.
+confidence)`, no quoted name) isn't in the stable-format contract and is out
+of scope here.
 """
 import os
 import re

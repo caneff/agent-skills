@@ -1189,8 +1189,8 @@ fn a_ticket_claimed_between_the_read_and_the_edit_is_refused_and_never_released(
     let repo = f.mkfixture("claimrace", "main");
     let claims = f.home().join("claims");
     std::fs::create_dir_all(&claims).unwrap();
-    // Ticket 602 is claimed by someone else after the refusal pass read it free:
-    // the fake hides the claim from the first view of it only.
+    // Ticket 602 is claimed by someone else after the refusal pass read it
+    // free: the fake hides the claim from the first view of it only.
     std::fs::write(claims.join("602"), "").unwrap();
     let scenario = with(
         &default_scenario(),
@@ -1254,8 +1254,8 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
     assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
 }
 
-/// A `core.hooksPath` that cannot be used is reported with its value,
-/// its scope and the command that unsets it, not as a bare permission error.
+/// A `core.hooksPath` that cannot be used is reported with its value, its
+/// scope and the command that unsets it, not as a bare permission error.
 /// Returns the refusal text; `set` installs the bad value and returns its path.
 fn dispatch_on_a_bad_hooks_path(set: impl Fn(&Fixture, &std::path::Path) -> std::path::PathBuf) -> (std::path::PathBuf, std::path::PathBuf, String) {
     let f = Fixture::new();
@@ -1446,10 +1446,10 @@ fn dispatch_installs_the_pre_push_guard_and_a_replayed_foreign_email_commit_is_r
 }
 
 /// The buffered wrapper's `mktemp` file must not leak: `exec`ing the guard as
-/// the wrapper's last step would replace the shell image and skip the
-/// `trap ... EXIT` cleaning the buffer up, so every successful push would
-/// leave one file behind in `$TMPDIR`. Runs several pushes through a
-/// `$TMPDIR` of its own and asserts it holds no stray files once they're done.
+/// the wrapper's last step would replace the shell image and skip the `trap
+/// ... EXIT` cleaning the buffer up, so every successful push would leave
+/// one file behind in `$TMPDIR`. Runs several pushes through a `$TMPDIR` of
+/// its own and asserts it holds no stray files once they're done.
 #[test]
 fn a_successful_push_leaves_no_stray_stdin_buffer_file_behind() {
     let f = Fixture::new();
@@ -1477,14 +1477,15 @@ fn a_successful_push_leaves_no_stray_stdin_buffer_file_behind() {
     assert!(leftover.is_empty(), "the pre-push wrapper's stdin buffer leaked: {leftover:?}");
 }
 
-/// The wrapper's buffering `cat >"$stdin_buf"` must honour its own exit status:
-/// a copy that fails partway (disk full, an I/O error) after writing one or
-/// more complete ref lines hands both the foreign hook and the guard a
-/// truncated-but-nonempty ref list, and the guard passes the cut-off ref
-/// unchecked (an empty list is a pass, so the wrapper's refusal is the only
-/// net). Simulated here with a stub `cat` ahead on PATH that writes one line
-/// then exits 1 — the wrapper must refuse before either the foreign hook or
-/// the guard ever runs, which a marker file from each proves.
+/// The wrapper's buffering `cat >"$stdin_buf"` must honour its own exit
+/// status: a copy that fails partway (disk full, an I/O error) after
+/// writing one or more complete ref lines hands both the foreign hook and
+/// the guard a truncated-but-nonempty ref list, and the guard passes the
+/// cut-off ref unchecked (an empty list is a pass, so the wrapper's refusal
+/// is the only net). Simulated here with a stub `cat` ahead on PATH that
+/// writes one line then exits 1 — the wrapper must refuse before either the
+/// foreign hook or the guard ever runs, which a marker file from each
+/// proves.
 #[test]
 fn a_failed_stdin_buffer_copy_refuses_before_either_hook_runs() {
     let f = Fixture::new();
@@ -1574,8 +1575,8 @@ fn the_pre_push_guard_override_escape_lets_a_foreign_email_push_through() {
 }
 
 /// Whatever real pre-push hook a repo already had (tests, a size check) is
-/// preserved and still runs, same guarantee as for the pre-commit slot
-/// — and, unlike a foreign hook that merely `exit 0`s without touching
+/// preserved and still runs, same guarantee as for the pre-commit slot —
+/// and, unlike a foreign hook that merely `exit 0`s without touching
 /// stdin, this one actually reads and discards the ref list the way a real
 /// pre-push hook typically does (a `while read` loop over stdin, same shape
 /// as `git`'s own `pre-push.sample`). A foreign hook that drains stdin
@@ -1678,9 +1679,8 @@ fn a_spoofed_hook_that_only_echoes_the_guards_name_still_refuses_a_foreign_email
     refuses_a_foreign_email_commit(&repo, "395");
 }
 
-/// A hook that does call the guard, then swallows its exit code with
-/// `|| true` — a text match sees the call and never notices the
-/// suppression.
+/// A hook that does call the guard, then swallows its exit code with `||
+/// true` — a text match sees the call and never notices the suppression.
 #[test]
 fn a_hook_that_calls_the_guard_then_swallows_its_failure_still_refuses() {
     let f = Fixture::new();
@@ -2072,7 +2072,8 @@ fn a_stalled_fetch_fails_fast_under_the_bound_instead_of_pinning_the_claim_lock(
 #[test]
 fn a_documentation_label_on_a_ticket_targeting_a_skill_body_dispatches_heavy_and_strips_it() {
     // The filer's hand-put `documentation` label must not send a `SKILL.md`
-    // change out at light tier, where the worker would push it straight to main.
+    // change out at light tier, where the worker would push it straight to
+    // main.
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -2284,11 +2285,11 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     // those modules also expose for another caller.
     let manifest = env!("CARGO_MANIFEST_DIR");
     let dispatch_src = std::fs::read_to_string(format!("{manifest}/src/bin/implement_dispatch.rs")).unwrap();
-    // Whitespace-insensitive: rustfmt wraps a call like `run_in(\n None,\n "git",`
-    // onto several lines, and a patterns-on-one-line match would pass a
-    // reverted-to-unbounded call unseen the moment it got reformatted.
-    // Every pattern below is written with no whitespace of its own to match
-    // a source stripped the same way.
+    // Whitespace-insensitive: rustfmt wraps a call like `run_in(\n None,\n
+    // "git",` onto several lines, and a patterns-on-one-line match would
+    // pass a reverted-to-unbounded call unseen the moment it got
+    // reformatted. Every pattern below is written with no whitespace of its
+    // own to match a source stripped the same way.
     let stripped: String = dispatch_src.chars().filter(|c| !c.is_whitespace()).collect();
 
     let unbounded_direct = [
@@ -2478,8 +2479,8 @@ fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
 
 #[test]
 fn a_slice_is_heavy_even_when_it_carries_the_documentation_label() {
-    // Light tier pushes to the default branch with no PR, the
-    // wrong shape for a slice whatever its label says.
+    // Light tier pushes to the default branch with no PR, the wrong shape
+    // for a slice whatever its label says.
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");

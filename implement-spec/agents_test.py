@@ -46,8 +46,8 @@ def test_box_check_refuses_at_the_process_cap_boundary():
 
 
 def test_a_live_worker_keeps_its_fan_out_headroom_against_the_cap():
-    # A live worker is one process now and five at its review peak, so
-    # 2 live workers on a box measured at 12 project 12+8+5=25 and fit; a
+    # A live worker is one process now and five at its review peak, so 2
+    # live workers on a box measured at 12 project 12+8+5=25 and fit; a
     # 3rd live worker projects 29 against the cap of 28 and is refused.
     assert agents.box_check(12, 0, live=2)["ok"] is True
     got = agents.box_check(12, 0, live=3)

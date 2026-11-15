@@ -77,8 +77,8 @@ pub fn read_timeout(slug: &str, n: &str, timeout: Duration) -> Result<Option<Iss
     Ok(out.map(|s| parse(&s)))
 }
 
-/// `body`, bounded — see [`read_timeout`]. A timed-out read must
-/// never be read as "empty body" the way a real call failure already is.
+/// `body`, bounded — see [`read_timeout`]. A timed-out read must never be
+/// read as "empty body" the way a real call failure already is.
 pub fn body_timeout(slug: &str, n: &str, timeout: Duration) -> Result<Option<String>, String> {
     quiet_stdout_bounded("gh", &["issue", "view", n, "--repo", slug, "--json", "body", "-q", ".body"], timeout)
 }

@@ -180,12 +180,12 @@ test('suite aliases, config calls and in-body annotations are not test calls (#6
     "a file whose only test.<method> calls are hooks plus expect does not count as a suite via the gate",
   );
   // The gate's evidence predicate covers SUITE_ROOTS (describe/it/test), not
-  // just TEST_ROOTS: describe.only/describe.each are still suite evidence, and
-  // the widened denylist still excludes a describe.<hook>/describe.<config>
-  // combination.
-  // No bare `it`/`test`/`describe` call anywhere in these two -- only the
-  // modifier member call itself can supply suite evidence, isolating the
-  // regression from a nested real test masking it.
+  // just TEST_ROOTS: describe.only/describe.each are still suite evidence,
+  // and the widened denylist still excludes a
+  // describe.<hook>/describe.<config> combination. No bare
+  // `it`/`test`/`describe` call anywhere in these two -- only the modifier
+  // member call itself can supply suite evidence, isolating the regression
+  // from a nested real test masking it.
   assert(
     isVitestFile(
       parseSource("describe.only('g', () => { hand('x', () => { expect(a).toBe(b); }); });", "s.test.js"),
@@ -252,8 +252,8 @@ test('recognize-or-skip gate: runner imports identify a test file (#685)', () =>
     !isVitestFile(parseSource(nodeTestSrc, "s.test.js")),
     "gate: node:test file is not vitest",
   );
-  // An import of the runner is what identifies the
-  // harness, so an all-hollow node:test file is audited rather than skipped.
+  // An import of the runner is what identifies the harness, so an
+  // all-hollow node:test file is audited rather than skipped.
   assert(
     isNodeTestFile(
       parseSource("import { test } from 'node:test';\ntest('x', () => { doStuff(a, b); });\n", "s.test.js"),
@@ -266,8 +266,9 @@ test('recognize-or-skip gate: runner imports identify a test file (#685)', () =>
     isVitestFile(parseSource("import { it } from 'vitest';\nit('x', () => { compute(); });\n", "s.test.js")),
     "a vitest import identifies the file even with no expect call",
   );
-  // The older assertion-vocabulary guard still holds: a homegrown harness imports neither runner, so it stays skipped
-  // whether or not it imports something of its own.
+  // The older assertion-vocabulary guard still holds: a homegrown harness
+  // imports neither runner, so it stays skipped whether or not it imports
+  // something of its own.
   const homegrown = parseSource(
     "import { ok, eq } from './harness.mjs';\ntest('x', () => { ok(compute()); });\n",
     "s.test.mjs",

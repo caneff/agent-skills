@@ -1,6 +1,6 @@
 """The merge check and the closing counts must agree on where a ticket's
-dispositions sidecar lives. `fix_check.py` (behind
-`fix-check.sh` and `pre-report-gate.sh`) and `counts.py` each derive
+dispositions sidecar lives. `fix_check.py` (behind `fix-check.sh` and
+`pre-report-gate.sh`) and `counts.py` each derive
 `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`; a rename in either
 would otherwise turn the merge check into "no sidecar" for a worker whose
 sidecar is where the skill says, or the closing counts into a refusal.

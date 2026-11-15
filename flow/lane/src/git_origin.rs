@@ -31,8 +31,8 @@ fn slug_of_url(url: &str) -> Option<String> {
     Some(url.to_string())
 }
 
-/// The branch `origin/HEAD` names, else `main` or `master` whichever origin
-/// has, else `main`.
+/// The branch `origin/HEAD` names, else `main` or `master` whichever
+/// origin has, else `main`.
 pub fn default_branch(repo: &Path) -> String {
     let repo_s = repo.to_string_lossy();
     if let Some(d) = quiet_stdout("git", &["-C", &repo_s, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]) {
@@ -54,9 +54,9 @@ pub fn origin_slug(repo: &Path) -> Option<String> {
     slug_of_url(&quiet_stdout("git", &["-C", &repo_s, "remote", "get-url", "origin"])?)
 }
 
-/// `default_branch`, bounded: `implement-dispatch` is the only
-/// caller of this variant, so a hang on any of the underlying `git` calls
-/// fails loud — naming the command — rather than falling through to
+/// `default_branch`, bounded: `implement-dispatch` is the only caller of
+/// this variant, so a hang on any of the underlying `git` calls fails
+/// loud — naming the command — rather than falling through to
 /// `default_branch`'s own "main"/"master" guess, which is a legitimate
 /// answer only when the calls that produced it actually ran.
 pub fn default_branch_timeout(repo: &Path, timeout: Duration) -> Result<String, String> {

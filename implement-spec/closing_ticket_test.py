@@ -2,10 +2,11 @@
 
 One seam, named on the ticket: `body(...)` — the closing-check section's
 generated body, asserted against a fixture repo that declares an end-to-end
-seam and what that seam is blind to. On an earlier spec run the then-separate
-closing ticket named no seam at all and the closing worker stopped and asked;
-the seam that existed had already diverged from the live editor inside that
-same spec, so naming it is necessary and not sufficient.
+seam and what that seam is blind to. On an earlier spec run the
+then-separate closing ticket named no seam at all and the closing worker
+stopped and asked; the seam that existed had already diverged from the
+live editor inside that same spec, so naming it is necessary and not
+sufficient.
 """
 import os
 import re
@@ -105,7 +106,8 @@ def test_main_is_merged_in_never_rebased(repo):
 
 def test_the_landed_slices_are_brought_in_before_main(repo):
     # The slices merge into origin/spec-366 on GitHub; the spec run's own
-    # spec-366 stays where dispatch cut it until it takes them in, or the review reads none of them.
+    # spec-366 stays where dispatch cut it until it takes them in, or
+    # the review reads none of them.
     got = body(repo(), spec=366, surfaces=[])
     block = got.split("```\n", 2)[1]
     assert block.index("git merge --ff-only origin/spec-366") < block.index(
@@ -132,9 +134,9 @@ def test_the_default_branch_is_the_one_named(repo):
 
 
 def test_a_one_slice_spec_gets_the_seam_in_its_slice_and_no_spec_review(repo):
-    # A one-slice spec has no integration branch: its
-    # slice lands on main with its own review wave, so the section goes in
-    # that slice's body and names no spec-level review.
+    # A one-slice spec has no integration branch: its slice lands on
+    # main with its own review wave, so the section goes in that slice's
+    # body and names no spec-level review.
     got = body(repo(), spec=366, surfaces=[], one_slice=True)
     assert "grid rendering at 4x4 and 6x6" in got, got
     assert "`Closes #366`" in got, got
@@ -214,7 +216,8 @@ def test_the_exploration_pass_can_supply_a_seam_the_repo_does_not_declare(repo):
 
 def test_a_seam_with_no_blind_spot_is_refused(repo):
     # Naming the seam is necessary and not sufficient: the seam that existed
-    # on an earlier spec had diverged from the live editor inside that same spec.
+    # on an earlier spec had diverged from the live editor inside that
+    # same spec.
     with pytest.raises(T.SeamError) as exc:
         body(repo(agents="""# Fixture repo
 
@@ -278,10 +281,11 @@ def test_the_cli_fails_loud_when_no_seam_is_declared(repo):
 
 
 def test_a_fenced_example_is_not_a_declaration(repo):
-    # The fence rule, as `implement-spec/references/closure.md` states it for the
-    # include declaration: a grammar shown inside a fence is an example.
-    # `references/closing-ticket.md` shows this very grammar in a fence, so
-    # the first repo that pastes the doc would otherwise declare the sample.
+    # The fence rule, as `implement-spec/references/closure.md` states
+    # it for the include declaration: a grammar shown inside a fence is
+    # an example. `references/closing-ticket.md` shows this very grammar
+    # in a fence, so the first repo that pastes the doc would otherwise
+    # declare the sample.
     fenced = """# Fixture repo
 
 ## End-to-end seam
@@ -348,9 +352,9 @@ def test_a_colon_inside_the_emphasis_needs_no_space_before_a_code_span(repo):
     "- **Seam**:**"])
 def test_both_readers_parse_a_key_line_as_frontier_does(line):
     # One key-line parser, in `frontier`: a second copy is the drift
-    # that was already fixed once. Run the same awkward lines through each reader
-    # and compare with `frontier.key_line`, so a copy under any name that parses
-    # them differently fails.
+    # that was already fixed once. Run the same awkward lines through
+    # each reader and compare with `frontier.key_line`, so a copy under
+    # any name that parses them differently fails.
     pair = frontier.key_line(line)
     got = T.declaration("## End-to-end seam\n" + line + "\n")
     assert got == ({pair[0]: pair[1]} if pair else {}), (line, got, pair)
@@ -385,9 +389,9 @@ def test_an_agents_file_that_is_not_utf8_is_reported_not_raised(repo):
 
 
 def test_the_surfaces_question_must_be_answered(repo):
-    # Not "no surfaces by default": the failure this guards was a surface nobody
-    # asked about. An unanswered question is refused, an explicit none is
-    # fine.
+    # Not "no surfaces by default": the failure this guards was a
+    # surface nobody asked about. An unanswered question is refused, an
+    # explicit none is fine.
     with pytest.raises(T.SeamError) as exc:
         body(repo(), spec=366)
     assert "surface" in str(exc.value), exc.value

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Review ledger: one JSONL row per review run, and a
-per-review-type value table.
+"""Review ledger: one JSONL row per review run, and a per-review-type value table.
 
     review_ledger.py harvest [--cache DIR] [--transcripts DIR] [--ledger PATH] [--review-file PATH]
     review_ledger.py append  --repo R --ticket N --type standards|spec|correctness|verification
@@ -388,7 +387,8 @@ def _merge_cost(runs: list[dict]) -> tuple[dict, str | None]:
 
 def sidecar_digest(path: Path | str) -> str:
     """The sha256 of a findings sidecar's bytes: what an appended axis row records as
-    `sidecar_sha256`, and what `implement/fix_check.py` matches against the file on disk."""
+    `sidecar_sha256`, and what `implement/fix_check.py` matches against the file on
+    disk."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
@@ -564,12 +564,12 @@ class MatchSide(NamedTuple):
 
 
 def mark_overlap(rows: list[dict], matches: list[dict], restatements: list[dict]) -> None:
-    """Set overlap/k on every finding; append each cross-reviewer match to `matches`.
-    Findings group by (repo, ticket), because harvested rows carry no PR number.
-    The verification pass is not a reviewer here (a ruling): it never shares a
-    round-1 finding's credit. A verification finding that matches a finding of another
-    reviewer is a restatement (`overlap: restated`, no credit, listed in `restatements`)
-    and leaves the round-1 finding unique; one it raises new is unique."""
+    """Set overlap/k on every finding; append each cross-reviewer match to `matches`. Findings
+    group by (repo, ticket), because harvested rows carry no PR number. The verification pass is
+    not a reviewer here: it never shares a round-1 finding's credit. A verification finding that
+    matches a finding of another reviewer is a restatement (`overlap: restated`, no credit,
+    listed in `restatements`) and leaves the round-1 finding unique; one it raises new is
+    unique."""
     by_ticket: dict[tuple, list[tuple[dict, dict]]] = {}
     for row in rows:
         for f in row["findings"]:
@@ -982,8 +982,8 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
     what `append` does, so its rows are the ones a full harvest writes. `held` maps each
     transcript an appended row already counts to that row's id: no other row is costed from it
-    Three passes per cache directory: dispositions, findings files, Codex records;
-    then the transcripts cost the rows."""
+    Three passes per cache directory: dispositions, findings files, Codex records; then the
+    transcripts cost the rows."""
     pairs = _select_pairs(cache, only)
     by_repo: dict[str, list[str]] = {}
     for repo_dir, name in pairs:
@@ -1105,8 +1105,8 @@ def check_correctable(target: dict | None, row_id: str) -> None:
 
 
 def fold_corrections(rows: list[dict]) -> list[dict]:
-    """The ledger as every reader sees it: each `correction` row supersedes the mutation
-    row it names by id, the highest-numbered correction of a row winning. The superseded row's
+    """The ledger as every reader sees it: each `correction` row supersedes the mutation row
+    it names by id, the highest-numbered correction of a row winning. The superseded row's
     outcome is replaced and the row keeps a `corrected` note; the correction rows themselves are
     not returned. A correction applies only to the row as it stood when it was written
     (`target_sha256`): a mutation re-run under the same id replaces that row, and a correction
@@ -1213,8 +1213,8 @@ def _keep_known(old: dict, new: dict) -> dict:
 
 
 def merge_harvest(ledger: dict, rows: list[dict]) -> tuple[int, list[dict]]:
-    """Replace every earlier harvest row with `rows`, never losing a row `append` wrote:
-    the review cache is pruned after 14 days, so a later harvest may have nothing to rebuild it
+    """Replace every earlier harvest row with `rows`, never losing a row `append` wrote: the
+    review cache is pruned after 14 days, so a later harvest may have nothing to rebuild it
     from. A rebuilt appended row stays `append`, so that later harvest keeps it, re-splitting only
     its overlap credit. Returns (rows written, the overlap matches of every ticket an appended row is on)."""
     for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
@@ -1290,10 +1290,10 @@ _MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 def _unknown_cost_why(row: dict) -> str | None:
     """Why a row cannot be appended: the cost source it was read from is missing or unreadable.
-    A review axis is appended anyway with that cost `unknown` and its reason: the
-    review ran, and `report` counts it beside the known costs, never as zero; dropping the
-    row would hide the review. (An over-engineering row's cost is always inside its
-    standards row's, so it is never unknown.)"""
+    A review axis is appended anyway with that cost `unknown` and its reason: the review ran,
+    and `report` counts it beside the known costs, never as zero; dropping the row would hide
+    the review. (An over-engineering row's cost is always inside its standards row's, so it
+    is never unknown.)"""
     if row["type"] in AXIS_TYPES:
         return None
     for field in ("tokens", "wall_clock"):
@@ -1547,10 +1547,10 @@ def _stamp_appended_rows(cache: Path, mine: list[dict]) -> str | None:
 def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
-    findings sidecar being absent is a refusal. An unattributable cost is a refusal for
-    a verification row; for an axis row it is an `unknown` cost with its reason,
-    never zero. An axis review ends before its dispositions exist, so its findings'
-    outcomes are `unknown` until `harvest` joins them from the dispositions sidecar. (Before the worker wrote every disposition a verification pass's
+    findings sidecar being absent is a refusal. An unattributable cost is a refusal for a
+    verification row; for an axis row it is an `unknown` cost with its reason, never zero. An
+    axis review ends before its dispositions exist, so its findings' outcomes are `unknown` until
+    `harvest` joins them from the dispositions sidecar. (In a legacy run a verification pass's
     own `append --type verification` refilled them; the type is still accepted, for that
     history.)"""
     if args.type in RETIRED_CODEX_TYPES:
@@ -1587,9 +1587,9 @@ def cmd_append(args) -> int:
 
 
 def cmd_correct(args) -> int:
-    """Append a `correction` row that supersedes one mutation row's outcome. Nothing is
-    rewritten or deleted: the false row stays, and `read_ledger` serves the correction in its
-    place. The named row must exist, belong to `--repo` and `--ticket`, and be a mutation row."""
+    """Append a `correction` row that supersedes one mutation row's outcome. Nothing is rewritten
+    or deleted: the false row stays, and `read_ledger` serves the correction in its place. The
+    named row must exist, belong to `--repo` and `--ticket`, and be a mutation row."""
     if not args.reason.strip():
         print("review_ledger correct: --reason must say why the row was wrong", file=sys.stderr)
         return 2

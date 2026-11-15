@@ -47,8 +47,8 @@ pub struct NestedWorktree {
 }
 
 /// One `!!` or `??` porcelain entry, decoded once at the boundary in
-/// `WorktreeFiles::read`: the path git means, with the trailing `/`
-/// git appends to a directory taken off and recorded as `is_dir`. Nothing
+/// `WorktreeFiles::read`: the path git means, with the trailing `/` git
+/// appends to a directory taken off and recorded as `is_dir`. Nothing
 /// downstream re-derives either from the shape of a string — a quoted
 /// directory ends in `"` on the wire, so a slash test on the raw text
 /// misread it as a file.
@@ -76,8 +76,8 @@ impl IgnoredEntry {
 pub const NAMES_SHOWN: usize = 5;
 
 /// The ignored directory names a removal may discard unasked. Deny by
-/// default: an unknown ignored name is kept, because a wrongly kept
-/// cache costs a --discard and a wrongly discarded note cannot be undone.
+/// default: an unknown ignored name is kept, because a wrongly kept cache
+/// costs a --discard and a wrongly discarded note cannot be undone.
 pub const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".hypothesis", ".pants.d"];
 
 /// An ignored entry in worktree `wt` is a cache when its own name is in
@@ -105,8 +105,8 @@ fn is_cache(wt: &str, entry: &IgnoredEntry) -> bool {
 /// means rather than its transport encoding. Bytes that are not UTF-8 decode
 /// lossily: the replacement character names no file on disk, so the walk
 /// cannot open it and the entry stays `ignored` — fail closed, the same
-/// answer deny-by-default wants for any directory we cannot read. A string git did not
-/// quote is returned untouched.
+/// answer deny-by-default wants for any directory we cannot read. A string
+/// git did not quote is returned untouched.
 fn unquote(entry: &str) -> String {
     let Some(inner) = entry.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
         return entry.to_string();
@@ -255,8 +255,8 @@ impl WorktreeFiles {
     /// the repo's AGENTS.md list), a nested worktree, work or empty. A directory entry
     /// stands for whatever is inside it:
     /// `--ignored=matching` collapses it to one line whether it holds nothing
-    /// or hundreds of files, and counting entries was wrong both ways
-    /// — an empty directory forced a needless `--discard`, and a full one
+    /// or hundreds of files, and counting entries was wrong both ways —
+    /// an empty directory forced a needless `--discard`, and a full one
     /// reported "1 file(s) would be lost" against hundreds, so `--discard`
     /// was approved against a count that understated the loss. Classify by
     /// contents, not by the entry: zero files is `empty` and not work; one or
@@ -355,9 +355,9 @@ impl WorktreeFiles {
     }
 
     /// The standing fix for a regenerable ignored name that stopped the run:
-    /// declare it on the repo's `**Discardable**:` line. Empty when
-    /// nothing ignored sits outside `.scratch/`, which is evidence and is
-    /// never offered for declaring.
+    /// declare it on the repo's `**Discardable**:` line. Empty when nothing
+    /// ignored sits outside `.scratch/`, which is evidence and is never
+    /// offered for declaring.
     pub fn declare_hint(&self) -> &'static str {
         if self.ignored.iter().any(|n| n.split('/').next() != Some(".scratch")) {
             "; if it is regenerable, a `**Discardable**:` line in the repo's AGENTS.md naming it stops this for good"
@@ -369,8 +369,8 @@ impl WorktreeFiles {
     /// "1 modified, 2 untracked file(s) would be lost: f, a, b" — the kinds
     /// that are present, then their first names. Ignored names are never
     /// capped, and lead the list: `--discard` destroys them unseen, so none
-    /// may fall into `first_names`' "and N more" (including the
-    /// six-or-more case). Modified and untracked are capped.
+    /// may fall into `first_names`' "and N more" (including the six-or-more
+    /// case). Modified and untracked are capped.
     pub fn dirty_text(&self) -> String {
         let kinds: Vec<String> = [("modified", &self.modified), ("untracked", &self.untracked), ("ignored", &self.ignored)]
             .iter()

@@ -645,8 +645,6 @@ def test_ci_run_list_that_fails_is_inconclusive(ci):
     assert "inconclusive" in note and "run list" in note, note
 
 
-# --- the GitHub reads, over the issue module's in-memory adapter -------
-
 def _ctx(tracker):
     import backstop
     return backstop, backstop.Ctx("/x", "o/r", "origin/main", "/x", tracker)

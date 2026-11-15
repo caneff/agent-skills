@@ -134,8 +134,8 @@ def directories(clump):
 
 
 def _nested(a, b):
-    """The directories two clumps share, one inside the other counting;
-    the repo root is left out (`directories`)."""
+    """The directories two clumps share, one inside the other counting; the
+    repo root is left out (`directories`)."""
     return sorted({min(x, y, key=len) for x in directories(a)
                    for y in directories(b) if x.startswith(y) or y.startswith(x)})
 
@@ -192,10 +192,9 @@ def picks(state, free):
     already read — widest closure first, ties broken by lowest ticket, every
     free slot at once — and every clump the same-tick guard skipped, each
     naming the earlier pick it `overlap`s. The walk goes past the free
-    slots, so a clump beyond the cut that collides with a pick is
-    held too; one that collides with nothing is in neither list. Sorted
-    before the guard runs:
-    why widest-first, and what it costs: `references/loop.md`.
+    slots, so a clump beyond the cut that collides with a pick is held too;
+    one that collides with nothing is in neither list. Sorted before the
+    guard runs: why widest-first, and what it costs: `references/loop.md`.
 
     A caller reads the frontier once and passes it here, so the picks and
     what is holding the rest come from one read: two reads of one question
@@ -225,8 +224,8 @@ def picks(state, free):
                         "over": overlap(clump, blocker), "same_tick": True})
             continue
         # Past the free-slot cut the walk goes on so a collision with a pick
-        # is still named; a clump that collides with nothing is only
-        # out of slots, not held.
+        # is still named; a clump that collides with nothing is only out
+        # of slots, not held.
         if len(picked) < free:
             picked.append(clump)
     return picked, held
@@ -267,9 +266,9 @@ def job_cores(key, record):
 
     `None` is not zero. A worker nobody recorded and a worker that declared it
     launched nothing read alike from here, and charging the first as the
-    second is a dispatch into a box already at 25.8 load — so the
-    absent record is refused by name, one layer under the skill's own rule
-    that silence is not zero.
+    second is a dispatch into a box already at 25.8 load — so the absent
+    record is refused by name, one layer under the skill's own rule that
+    silence is not zero.
     """
     if record is None:
         raise LoopError(
@@ -356,12 +355,12 @@ def landing_steps(clump, outstanding=()):
     worker question, then **merge**, then **cleanup**.
 
     Cleanup is the last act because cleanup is what closes the worker's
-    pane. A controller once merged, ran `merge-cleanup`, and then
-    sent the ruling its worker had asked for in good faith — to an agent
-    that no longer existed. Answering before the *merge* is not the rule and
-    would write the same bug in a new place: a question answered between
-    merge and cleanup is answered, and one answered after cleanup is lost.
-    Why, with the rest of the merge tail: `references/merge-tail.md`.
+    pane. A controller once merged, ran `merge-cleanup`, and then sent the
+    ruling its worker had asked for in good faith — to an agent that no
+    longer existed. Answering before the *merge* is not the rule and would
+    write the same bug in a new place: a question answered between merge
+    and cleanup is answered, and one answered after cleanup is lost. Why,
+    with the rest of the merge tail: `references/merge-tail.md`.
     """
     return [{"step": "answer", "agent": clump["agent"], "question": q}
             for q in questions(clump, outstanding)] + [
@@ -388,8 +387,8 @@ def cleanup_ready(clump, outstanding=()):
 
 # One deadline for the **whole** sweep, not one per probe. A per-probe bound
 # composes: N hung panes would hold the controller inside one tool call for N
-# timeouts, and a controller in a tool call hears no worker at all. So
-# the worst case is this constant, whatever the wave size; a slot the deadline
+# timeouts, and a controller in a tool call hears no worker at all. So the
+# worst case is this constant, whatever the wave size; a slot the deadline
 # did not reach is read on the next wake, which costs nothing because the
 # sweep only ever runs on a wake the controller already had.
 SWEEP_BUDGET = 10.0
@@ -412,12 +411,13 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
     A vanished pane — herdr has no agent by that name — is the one failure
     only this sweep can find, and it is reported as its own verdict rather
     than as an idle worker. What the sweep cannot see is the other shape: a
-    pane that is present and busy looks `working` whatever it is busy with. A finished pane on a clump with no "PR up" on record (`pr_up`,
-    the run file's) is `stalled`, a line that says read the pane.
-    Nothing about one clump ends the sweep: a probe that fails, and a
-    clump the run file left with no agent name, are each that one worker's
-    verdict, so a herdr that answers for two workers and not the third still
-    tells the controller about two.
+    pane that is present and busy looks `working` whatever it is busy with.
+    A finished pane on a clump with no "PR up" on record (`pr_up`, the run
+    file's) is `stalled`, a line that says read the pane. Nothing about one
+    clump ends the sweep: a probe that fails, and a clump the run file left
+    with no agent name, are each that one worker's verdict, so a herdr that
+    answers for two workers and not the third still tells the controller
+    about two.
     """
     workers = [c for c in clumps if not runfile.settled(c)]
     started = clock()
@@ -449,8 +449,8 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
             verdict, detail = agents.verdict(answer)
             # A finished turn with no "PR up" on record ended mid-lane, or on
             # a question the controller still owes: either way, read the pane
-            # `idle` counts as well as `done`, since focusing a pane
-            # turns one into the other. Only a PR number is on record: a
+            # `idle` counts as well as `done`, since focusing a pane turns
+            # one into the other. Only a PR number is on record: a
             # hand-built workers file can carry 0 or "x".
             pr = clump.get("pr_up")
             on_record = (isinstance(pr, int) and not isinstance(pr, bool)
@@ -542,12 +542,12 @@ def load_run(run_id, root=None):
 
 def slice_base(run):
     """`origin/spec-<p>` when the checkout's branch is a slice, one whose
-    dispatch recorded `branch.<name>.base` as `spec-<p>`; else None.
-    The branch already holds every slice landed on `spec-<p>`, so those files
-    are not its own. A recorded base that is not a `spec-<n>` branch is no
-    slice, as `implement/fix_check.py` reads it. A detached HEAD has no
-    branch to record one on. A slice whose `origin/spec-<p>` is gone is
-    refused: the over-held diff it would fall back to is what this removes."""
+    dispatch recorded `branch.<name>.base` as `spec-<p>`; else None. The
+    branch already holds every slice landed on `spec-<p>`, so those files are
+    not its own. A recorded base that is not a `spec-<n>` branch is no slice,
+    as `implement/fix_check.py` reads it. A detached HEAD has no branch to
+    record one on. A slice whose `origin/spec-<p>` is gone is refused: the
+    over-held diff it would fall back to is what this removes."""
     branch = run(["branch", "--show-current"]).strip()
     if not branch:
         return None
@@ -571,10 +571,10 @@ def slice_base(run):
 def workspace_diff(workspace):
     """The files a workspace's branch really changes against its origin's
     default branch: `git diff --name-only origin/<default>...HEAD` run inside
-    it, plus its uncommitted and untracked files. A slice branch is
-    diffed against `origin/spec-<p>` instead (`slice_base`). Refuses when git
-    cannot answer — a workspace whose diff could not be read is not one that
-    changed nothing.
+    it, plus its uncommitted and untracked files. A slice branch is diffed
+    against `origin/spec-<p>` instead (`slice_base`). Refuses when git cannot
+    answer — a workspace whose diff could not be read is not one that changed
+    nothing.
     """
     def in_workspace(args):
         try:
@@ -613,11 +613,11 @@ def run_target(run):
 
 def with_workspace_diffs(in_flight, diff=workspace_diff):
     """The in-flight clumps with each live workspace's real diff unioned into
-    the files it owns. A closure resolved from the ticket's named
-    files is frozen at what the controller wrote by hand; the worker's diff
-    is what it actually reached, so the exclusion reads both. A landed or
-    closed clump is skipped: its change is on the default branch, or there is
-    none, and its workspace holds nothing.
+    the files it owns. A closure resolved from the ticket's named files is
+    frozen at what the controller wrote by hand; the worker's diff is what it
+    actually reached, so the exclusion reads both. A landed or closed clump
+    is skipped: its change is on the default branch, or there is none, and
+    its workspace holds nothing.
 
     `diff(workspace) -> [path]`; its `LoopError` is re-raised naming the
     workspace. The clumps passed in are not mutated.
@@ -637,8 +637,8 @@ def with_workspace_diffs(in_flight, diff=workspace_diff):
 
 
 def with_run_jobs(in_flight, run):
-    """The in-flight clumps with each `job`, and `closed`, read from
-    the run file, matched by the clump's lowest ticket. `closure.py --json`
+    """The in-flight clumps with each `job`, and `closed`, read from the
+    run file, matched by the clump's lowest ticket. `closure.py --json`
     carries neither, so the records `runfile.py job` and `runfile.py close`
     wrote are the only source; a clump the run file
     holds no record for is refused here by name, `runfile.py clump` being the
@@ -743,14 +743,13 @@ def cmd_dispatch(args):
     # refuse here too, not hide behind "nothing to dispatch".
     count, counter, working, unlisted = agents.agent_count(args)
     # A landed clump awaiting cleanup, or one closed with no landing,
-    # is not a live worker: it is
-    # filtered out before the core accounting, the peak live count,
-    # and the frontier all see it, so a run file that sets `landed`
-    # without ever clearing `job` reads as a freed slot instead of
-    # refusing the whole tick on a job record that will never be
-    # recorded — and its dead workspace (the change is on
-    # `main`; the next worker branches from there) never blocks a
-    # candidate sharing its closure.
+    # is not a live worker: it is filtered out before the core
+    # accounting, the peak live count, and the frontier all see it,
+    # so a run file that sets `landed` without ever clearing `job`
+    # reads as a freed slot instead of refusing the whole tick on a
+    # job record that will never be recorded — and its dead workspace
+    # (the change is on `main`; the next worker branches from there)
+    # never blocks a candidate sharing its closure.
     unsettled = [c for c in in_flight if not runfile.settled(c)]
     cores = core_room(free, unsettled)
     cores_line = render_cores(cores, free)

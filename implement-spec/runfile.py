@@ -68,20 +68,20 @@ _TICKET = re.compile(r"[0-9]+\Z")
 _KEYS = ("run_id", "slots", "controller", "clumps")
 _CLUMP_KEYS = ("tickets", "workspace", "agent", "landed")
 # A clump's parallel-job state. `None` is "nothing on record" — only a file
-# written before jobs were recorded has it, since registration records `none` — which is not
-# the same fact as "no job": a worker that never declared and a worker that
-# declared none read alike to a controller charging cores, and silence read
-# as zero is a dispatch into a box already at 25.8 load. Absent from
-# a pre-jobs file, so it is filled in on load rather than demanded.
+# written before jobs were recorded has it, since registration records `none`
+# — which is not the same fact as "no job": a worker that never declared and
+# a worker that declared none read alike to a controller charging cores, and
+# silence read as zero is a dispatch into a box already at 25.8 load. Absent
+# from a pre-jobs file, so it is filled in on load rather than demanded.
 _JOB_STATES = ("running", "none", "done")
 # What a clump registered for the first time records: its worker has launched
 # nothing yet.
 NEW_CLUMP_JOB = {"state": "none", "cores": 0}
 # The outcomes `implement/SKILL.md` § Review's dispositions sidecar can carry;
-# why any other is refused, not skipped: `references/run-file.md`. The LEGACY
-# ones are what workers wrote before the review changed: `counts.py` still reads them, so a run
-# that was running when the review changed can close, and the merge check never
-# accepts them.
+# why any other is refused, not skipped: `references/run-file.md`. The
+# LEGACY_OUTCOMES are what workers wrote before this set: `counts.py` still
+# reads them, so a run that was running when the set changed can close, and
+# the merge check never accepts them.
 SIDECAR_OUTCOMES = ("fixed", "moved", "disputed")
 LEGACY_OUTCOMES = ("filed", "handed-back", "leftover")
 
@@ -416,11 +416,11 @@ def read_dispositions(sidecar_path, legacy=False):
     """Every line of a dispositions sidecar (`implement/SKILL.md` § Review),
     in order, as `(line number, object)`. A line that is not a JSON object
     with one of the three sidecar outcomes is refused by file and line, and
-    so is a second line carrying an id an earlier line already used:
-    every reader joins on the id, and one of the two would be dropped or
-    counted twice. Why a bad line is refused and not skipped:
+    so is a second line carrying an id an earlier line already used: every
+    reader joins on the id, and one of the two would be dropped or counted
+    twice. Why a bad line is refused and not skipped:
     `references/run-file.md` § Dispositions and counts. `legacy` also accepts
-    the pre-change outcomes, for `counts.py`."""
+    `LEGACY_OUTCOMES`, for `counts.py`."""
     try:
         with open(sidecar_path) as fh:
             raw_lines = fh.readlines()
@@ -510,8 +510,8 @@ def clump(run_id, tickets, workspace, agent, root=None):
     Registering the same lowest ticket again moves the workspace and the agent
     and keeps the landing sha — a clump redispatched after a park is the same
     clump — and reopens a closed one, which now has a worker again. A new clump
-    records job `none`: its worker has launched nothing yet. A ticket
-    that already sits in another clump is refused: one ticket in two clumps is
+    records job `none`: its worker has launched nothing yet. A ticket that
+    already sits in another clump is refused: one ticket in two clumps is
     two workers in the same files."""
     tickets = ticket_numbers(tickets)
     workspace = named(workspace, "workspace path")
@@ -586,10 +586,10 @@ def close_reason(reason):
 
 def close(run_id, lowest, reason, root=None):
     """Record that a clump closed with no landing of its own — its ticket
-    found already fixed on the default branch. A landed clump is
-    refused; closing again with the same reason is a no-op, with another
-    reason is refused. Why a close and not a `land` at `main`'s tip, and the
-    hand recovery when one was recorded anyway: `references/run-file.md`."""
+    found already fixed on the default branch. A landed clump is refused;
+    closing again with the same reason is a no-op, with another reason is
+    refused. Why a close and not a `land` at `main`'s tip, and the hand
+    recovery when one was recorded anyway: `references/run-file.md`."""
     reason = close_reason(reason)
     with locked(run_id, root):
         run = load(run_id, root)

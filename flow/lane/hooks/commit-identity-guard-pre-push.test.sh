@@ -2,8 +2,9 @@
 # Test for the commit-identity pre-push guard: the pre-commit guard only
 # fires on `git commit`, so a rebase or cherry-pick that replays a commit
 # under a different identity slips past it entirely and is only caught at
-# GitHub's email-privacy edge — after the lane's mandated rebase-then-push. This hook re-checks every commit about to be pushed.
-# Runs the real hook under a real `git push` to a local bare remote.
+# GitHub's email-privacy edge — after the lane's mandated rebase-then-push.
+# This hook re-checks every commit about to be pushed. Runs the real hook
+# under a real `git push` to a local bare remote.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 hook="$here/commit-identity-guard-pre-push.sh"
@@ -72,8 +73,8 @@ push main; check "no configured user.email is refused" 1 $?
 grep -q "no user.email is configured" "$tmp/out"; check "the no-configured-email refusal names itself" 0 $?
 git -C "$repo" config user.email t@example.com
 
-# zero ref updates on stdin: the guard passes an empty push and says
-# why (rationale: the hook's own comment), rather than failing the lane step.
+# zero ref updates on stdin: the guard passes an empty push and says why
+# (rationale: the hook's own comment), rather than failing the lane step.
 : | "$here/commit-identity-guard-pre-push.sh" origin "$remote" >"$tmp/out" 2>&1
 check "zero ref updates on stdin passes" 0 $?
 grep -q "nothing to push" "$tmp/out"; check "the empty-push pass names itself" 0 $?

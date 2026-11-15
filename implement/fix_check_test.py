@@ -1,7 +1,7 @@
-"""The merge check: `fix-check.sh <n>` verifies mechanically
-that every review finding of ticket <n> has exactly one disposition, that a
-`fixed` sha is a commit on the PR branch, that a `moved` ticket is open, and
-that an empty findings sidecar carries its reviewer's completion marker.
+"""The merge check: `fix-check.sh <n>` verifies mechanically that every
+review finding of ticket <n> has exactly one disposition, that a `fixed` sha
+is a commit on the PR branch, that a `moved` ticket is open, and that an
+empty findings sidecar carries its reviewer's completion marker.
 
 Seam: the real script, run from a linked worktree of a throwaway repo whose
 `origin` is a bare clone, with a fake `gh` on PATH and the review cache under
@@ -138,9 +138,10 @@ class World:
 
     def ledger_ran(self, rtype, ticket=None, repo=None, digest="on-disk", round=1, suffix=None):
         """A row for review `rtype` that ran (what `append --type <axis>` writes): it carries the
-        sha256 of the sidecar as it is on disk now, or `digest` when given, None for none.
-        `round` 2 or more is `append --round K`: the row's `round` and the sidecar's `-rK` name;
-        `round=None` writes a row with no `round` key, as before the field."""
+        sha256 of the sidecar as it is on disk now, or `digest` when given,
+        None for none. `round` 2 or more is `append --round K`: the row's
+        `round` and the sidecar's `-rK` name; `round=None` writes a row with
+        no `round` key, as before the field."""
         if digest == "on-disk":
             if suffix is None:
                 suffix = f"-r{round}" if round and round > 1 else ""
@@ -228,8 +229,9 @@ def clean(world):
 
 @pytest.fixture
 def rebased(make_world):
-    """A rebase after the review wave moves every committer date past the sidecars, and
-    the sidecars must still read as this dispatch's: the branch is dated by author time."""
+    """A rebase after the review wave moves every committer date past the
+    sidecars, and the sidecars must still read as this dispatch's: the branch
+    is dated by author time."""
     w = make_world(author_date=time.time() - 3600)
     w.findings(standards=["S1"])
     written = time.time() - 1800  # after the commits were authored, before the rebase
@@ -331,10 +333,10 @@ def test_the_controllers_origin_implement_5_reads_the_same_recorded_base(slice_w
     assert_fix_check(slice_world, 0, "slice of spec-3", slice_world.primary, "origin/implement-5")
 
 
-# The spec is reviewed once on its integration branch `spec-<p>`, and the merge check
-# is keyed on the spec number: one disposition per finding of that review, every `fixed` sha
-# on `spec-<p>` past main. The branch holds a landed slice that closes #4, as a slice's squash
-# merge into `spec-3` does.
+# The spec is reviewed once on its integration branch `spec-<p>`, and the
+# merge check is keyed on the spec number: one disposition per finding of
+# that review, every `fixed` sha on `spec-<p>` past main. The branch holds a
+# landed slice that closes #4, as a slice's squash merge into `spec-3` does.
 @pytest.fixture
 def spec_world(make_world):
     w = make_world(ticket=3, branch="spec-3")
@@ -590,8 +592,9 @@ def test_a_ledger_row_of_another_ticket_is_no_row_for_this_one(make_world):
     assert_fix_check(w, 1, "no ledger row for the standards review")
 
 
-# The row must date to this wave. Rows carry the sha256 of the sidecar `append` read, and the
-# gate wants one matching the sidecar on disk, so an earlier dispatch's row cannot satisfy it.
+# The row must date to this wave. Rows carry the sha256 of the sidecar
+# `append` read, and the gate wants one matching the sidecar on disk, so an
+# earlier dispatch's row cannot satisfy it.
 def second_wave(w):
     """A world whose first wave appended its rows, then rewrote the spec sidecar with one finding."""
     w.findings()

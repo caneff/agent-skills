@@ -77,9 +77,9 @@ impl Fixture {
         std::fs::create_dir_all(self.pr_status_dir()).unwrap();
         std::fs::write(self.pr_status_dir().join(branch.replace('/', "__")), format!("{line}\n")).unwrap();
     }
-    /// `herdr agent list`'s agents array, as JSON — what the session
-    /// lookup reads to find the sessionId herdr attached to the agent it
-    /// just started.
+    /// `herdr agent list`'s agents array, as JSON — what the session lookup
+    /// reads to find the sessionId herdr attached to the agent it just
+    /// started.
     pub fn set_agents(&self, agents: &str) {
         std::fs::write(self.agents_file(), format!(r#"{{"result":{{"agents":{agents}}}}}"#)).unwrap();
     }
@@ -158,14 +158,13 @@ impl Fixture {
         cmd.output().unwrap()
     }
 
-    /// `dispatch`, with `git` itself faked: a passthrough proxy to
-    /// the real binary (`real_git_path`) placed on its own PATH entry ahead
-    /// of `path_env()`'s, except that a call whose args contain `hang`
-    /// never returns — standing in for a hung `git` subprocess so a test
-    /// can prove an OS-level bound actually fires rather than assuming it.
-    /// Kept off the plain `dispatch`'s PATH entirely: every other test's
-    /// `git` calls hit the real binary directly, exactly as before this
-    /// method existed.
+    /// `dispatch`, with `git` itself faked: a passthrough proxy to the real
+    /// binary (`real_git_path`) placed on its own PATH entry ahead of
+    /// `path_env()`'s, except that a call whose args contain `hang` never
+    /// returns — standing in for a hung `git` subprocess so a test can prove
+    /// an OS-level bound actually fires rather than assuming it. Kept off
+    /// the plain `dispatch`'s PATH entirely: every other test's `git` calls
+    /// hit the real binary directly, exactly as before this method existed.
     pub fn dispatch_with_git_hang(&self, args: &[&str], scenario: &[(&str, &str)], hang: &str) -> Output {
         let git_bin = self.tmp.path().join("git-bin");
         std::fs::create_dir_all(&git_bin).unwrap();
@@ -193,8 +192,7 @@ impl Fixture {
     /// gets to write anything — the limit of `| head -n1` closing early.
     /// Dropping the read end right after spawn reliably beats dispatch's first
     /// `println!`: all its real work (git, the fake gh/herdr) happens before
-    /// it. Returns the exit code
-    /// (`None` if killed by a signal) and stderr.
+    /// it. Returns the exit code (`None` if killed by a signal) and stderr.
     pub fn dispatch_broken_pipe(&self, args: &[&str], scenario: &[(&str, &str)]) -> (Option<i32>, String) {
         use std::io::Read;
         let mut cmd = Command::new(bin_path());

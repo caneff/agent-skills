@@ -1,7 +1,7 @@
 """Fixture builders and command runners shared by the review_ledger and
-tally_review_axes suites. Every suite runs a subcommand's command
-line on a fixture tree and reads what comes out; every run points HOME at a temp
-dir so no default path can reach the real ~/.cache or ~/.claude."""
+tally_review_axes suites. Every suite runs a subcommand's command line on a
+fixture tree and reads what comes out; every run points HOME at a temp dir so no
+default path can reach the real ~/.cache or ~/.claude."""
 import json
 import os
 import subprocess

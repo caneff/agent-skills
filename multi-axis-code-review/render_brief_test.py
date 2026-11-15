@@ -1,8 +1,8 @@
-"""render-brief.py: the one source of an axis reviewer's
-brief. Seam: the CLI, run against a throwaway worktree directory. Each case
-asserts the line it is about, so a render that fails for another reason (a
-missing input, a bad path) does not pass for the one under test
-(`AGENTS.md` § Recurring defect classes, class 3).
+"""render-brief.py: the one source of an axis reviewer's brief. Seam: the
+CLI, run against a throwaway worktree directory. Each case asserts the line
+it is about, so a render that fails for another reason (a missing input, a
+bad path) does not pass for the one under test (`AGENTS.md` § Recurring
+defect classes, class 3).
 """
 import argparse
 import importlib.util

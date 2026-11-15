@@ -81,8 +81,8 @@ fresh; echo "# touched" >>"$shadow/repo/tests/all.sh"; git -C "$shadow/repo" com
 out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1); rc=$?
 check "a --changed run that widened to the full suite prints the plain line" "$([ "$rc" = 0 ] && grep -qxF '3 suites passed' <<<"$out"; echo $?)"
 
-# Cross-directory edges: a change to the directory a suite loads from
-# keeps that suite's directory.
+# Cross-directory edges: a change to the directory a suite loads from keeps
+# that suite's directory.
 edge() { # <file> <line>: commit a tracked file whose line reaches another directory
   mkdir -p "$(dirname "$shadow/repo/$1")"; printf '%s\n' "$2" >"$shadow/repo/$1"
   git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm "edge $1"; base=$(git -C "$shadow/repo" rev-parse HEAD)

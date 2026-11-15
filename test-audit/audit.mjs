@@ -99,8 +99,9 @@ const SUITE_ROOTS = new Set(["describe", "it", "test"]);
 // right -- a lifecycle hook or config call as an assertion-free/empty/skipped
 // test, a suite alias as a duplicate of every finding inside it. A
 // denylist, not an allowlist: a missed entry is a visible false positive, an
-// allowlist's missed entry silently drops a real test. An unlisted runner variant (`concurrent`, `failing`,
-// `sequential`) stays collected, and so does `it.skip`/`test.todo`.
+// allowlist's missed entry silently drops a real test. An unlisted runner
+// variant (`concurrent`, `failing`, `sequential`) stays collected, and so
+// does `it.skip`/`test.todo`.
 const HOOK_METHODS = new Set(["after", "before", "beforeEach", "afterEach", "beforeAll", "afterAll"]);
 // `describe`/`suite` are real evidence a file organizes tests this way (kept
 // in the suite gate below) but are not themselves a test -- their nested
@@ -139,12 +140,12 @@ function isTestFrameworkMember(mem, roots = TEST_ROOTS) {
 // argument is always its callback, inline or a named reference
 // (`it.skip('t', fn)`, `it.skip(computedTitle, sharedFn)`); the bare
 // annotation's last argument is always its trailing reason string, whatever
-// the condition looks like (`test.skip(cond, 'why')`,
-// `test.skip(fnCond, 'why')`). Checking the *last* argument, not the
-// first, is what keeps a computed/non-literal title (`it.skip(c.name, fn)`)
-// from being mistaken for the annotation shape. A single argument
-// (`test.skip(cond)`, `it.skip('title')`) stays ambiguous either way and is
-// left as a test, matching prior behavior.
+// the condition looks like (`test.skip(cond, 'why')`, `test.skip(fnCond,
+// 'why')`). Checking the *last* argument, not the first, is what keeps a
+// computed/non-literal title (`it.skip(c.name, fn)`) from being mistaken
+// for the annotation shape. A single argument (`test.skip(cond)`,
+// `it.skip('title')`) stays ambiguous either way and is left as a test,
+// matching prior behavior.
 const MODIFIER_METHODS = new Set(["skip"]);
 
 function isReasonArg(node) {
@@ -193,13 +194,12 @@ function testCalls(tree) {
 // scope (vitest and node:test) -- see SKILL.md § JS/TS reach for the rule
 // and its remaining blind spot.
 //
-// Importing the runner is the signal that matters. The older
-// guard was the assertion vocabulary alone, which costs exactly
-// the file the gate most wants to catch: one whose every test is
-// assertion-free has no assertion anywhere to be recognized by. The import
-// does not reopen that floodgate, because it is the stronger evidence of
-// the two -- a homegrown harness imports its own `ok()`/`eq()`, never `vitest`
-// or `node:test`.
+// Importing the runner is the signal that matters. The older guard was the
+// assertion vocabulary alone, which costs exactly the file the gate most
+// wants to catch: one whose every test is assertion-free has no assertion
+// anywhere to be recognized by. The import does not reopen that floodgate,
+// because it is the stronger evidence of the two -- a homegrown harness
+// imports its own `ok()`/`eq()`, never `vitest` or `node:test`.
 //
 // It does raise the cost of an assertion the vocabulary cannot see, from a
 // skipped file to a build-blocking false finding. `assertBindings` below is
@@ -222,8 +222,8 @@ function isVitestFile(tree) {
     const bare = calleeName(n);
     const mem = memberCallee(n);
     // A hook or config call carries no evidence the file names tests this
-    // way -- the shared predicate, not a raw root
-    // match, is what keeps this gate and isTestCall from disagreeing.
+    // way -- the shared predicate, not a raw root match, is what keeps this
+    // gate and isTestCall from disagreeing.
     if ((bare && SUITE_ROOTS.has(bare)) || isTestFrameworkMember(mem, SUITE_ROOTS)) hasSuite = true;
     if (bare === "expect") hasExpect = true;
   });

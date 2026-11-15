@@ -1,6 +1,6 @@
-"""End-to-end test for deterministic disclosure levels: every rule
-sits at one level, and each level has a loader that does not depend on the
-model choosing to read.
+"""End-to-end test for deterministic disclosure levels: every rule sits at
+one level, and each level has a loader that does not depend on the model
+choosing to read.
 
 What it drives, through the same entry points a session reaches:
 - Teaching hooks: each PreToolUse command wired in flow/claude/settings.json,

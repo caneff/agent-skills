@@ -340,9 +340,9 @@ async function submitPuzzle(tab, base, form, html) {
   posted.submitted = true;
   await tab.submit("document.querySelector('input[name=einstellen]').click()", "the puzzle submit");
   // Live LMD answers "Create" on einstellen.php itself: "The puzzle has been saved. Edit Puzzle <id> To the
-  // puzzle page", with the form shown again, emptied. The id is read from the
-  // "To the puzzle page" link (the site menu's own zeigen.php link has no id); a page without the notice, or
-  // without exactly one such id, is a refusal.
+  // puzzle page", with the form shown again, emptied. The id is read from the "To the puzzle page" link (the
+  // site menu's own zeigen.php link has no id); a page without the notice, or without exactly one such id,
+  // is a refusal.
   const { saved, ids } = await tab.evaluate(`({
     saved: (document.body?.innerText ?? '').includes(${JSON.stringify(SAVED_NOTICE)}),
     ids: [...new Set([...document.querySelectorAll('a[href]')].map((a) => new URL(a.href))

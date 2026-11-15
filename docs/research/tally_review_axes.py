@@ -48,9 +48,9 @@ _ROUND1_RE = re.compile(rf"^review-({AXIS_ALTS})-(\d+)\.md$")
 # report covering all three axes (two names for the same round).
 _COMBINED_VERIFY_RE = re.compile(r"^review-(?:verify|verification)-(\d+)\.md$")
 # review-<axis>(-<axis>)*-<n>-verify.md — an axis-specific or multi-axis
-# verify report: one axis or two named axes in one file.
-# A single axis is just the zero-repetition case of this same pattern, so
-# there is exactly one regex for both shapes.
+# verify report: one axis or two named axes in one file. A single axis is
+# just the zero-repetition case of this same pattern, so there is exactly
+# one regex for both shapes.
 _AXIS_VERIFY_RE = re.compile(
     rf"^review-((?:{AXIS_ALTS})(?:-(?:{AXIS_ALTS}))*)-(\d+)-verify\.md$"
 )
@@ -61,14 +61,15 @@ _BRANCH_ISSUE_RE = re.compile(r"(?:implement|issue)-(\d+)\b")
 # findings-<axis>-<n>.jsonl — one round-1 axis's sidecar.
 _FINDING_SIDECAR_RE = re.compile(rf"^findings-({AXIS_ALTS})-(\d+)\.jsonl$")
 # dispositions-<n>.jsonl — the worker's sidecar, one per issue (the verification
-# pass's before the worker took over), joining the review's findings across all axes by id.
+# pass's, in a legacy sidecar), joining the review's findings across all
+# axes by id.
 _DISPOSITION_SIDECAR_RE = re.compile(r"^dispositions-(\d+)\.jsonl$")
 
 _VALID_SEVERITIES = {"hard", "judgement"}
 # outcome -> the field on that outcome's line that carries its detail
 # (the fixing commit sha / the dispute reason / the ticket a finding was
-# moved onto). `filed`, `handed-back` and `leftover` are outcomes of the
-# older workers, still read so their sidecars tally.
+# moved onto). `filed`, `handed-back` and `leftover` are the legacy
+# outcomes, still read so their sidecars tally.
 OUTCOME_DETAIL_FIELD = {
     "fixed": "sha", "disputed": "reason", "moved": "ticket", "filed": "ticket",
     "handed-back": "command", "leftover": "text",
@@ -78,8 +79,8 @@ OUTCOME_DETAIL_FIELD = {
 # it and `moved`'s are int; every other detail is prose and must be a non-empty str.
 # A str/dict/list slipping through as a "ticket" or a non-str slipping
 # through as a `command`/`sha`/`reason` still tallied under Codex's gate
-# finding — `str(detail)` on a list or dict "worked" and
-# hid the malformed line as if it had parsed cleanly.
+# finding — `str(detail)` on a list or dict "worked" and hid the malformed
+# line as if it had parsed cleanly.
 _OUTCOME_DETAIL_TYPE = {
     "fixed": str, "disputed": str, "moved": int, "filed": int, "handed-back": str, "leftover": str,
 }
@@ -104,7 +105,8 @@ class Finding:
 @dataclass(frozen=True)
 class Disposition:
     id: str
-    # "fixed" | "disputed" | "moved", or an older "filed" | "handed-back" | "leftover"
+    # "fixed" | "disputed" | "moved", or a legacy "filed" | "handed-back" |
+    # "leftover"
     outcome: str
     detail: str  # the outcome's field per OUTCOME_DETAIL_FIELD, always as str
 
@@ -228,20 +230,22 @@ def find_sidecar_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
 def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     """Roll every findings-<axis>-<n>.jsonl and dispositions-<n>.jsonl
     sidecar under `root` into a per-repo, per-axis table of raised vs
-    fixed/disputed/moved (and the older filed/handed-back/leftover)/undisposed.
-    Findings are keyed by (repo, issue, id), so a disposition only
-    ever resolves the finding it names — never a same-id finding filed under a different issue or repo.
+    fixed/disputed/moved (and the legacy
+    filed/handed-back/leftover)/undisposed. Findings are keyed by
+    (repo, issue, id), so a disposition only ever resolves the finding
+    it names — never a same-id finding filed under a different issue
+    or repo.
 
-    Two conflicts are surfaced rather than silently absorbed: a duplicate id within one (repo,
-    issue) — including one reached only after the agent-skills/skills
-    alias fold — raises ValueError instead of one finding quietly
-    overwriting the other; a line's own `axis` field that disagrees with
-    the filename it came from is corrected to the filename's axis (which
-    axis wrote the file is the authoritative signal) with a stderr
-    warning, instead of silently tallying under the wrong axis. A
-    disposition whose id matches no known finding
-    is similarly not just dropped — it's a stderr warning, so a
-    mismatched id doesn't vanish with no trace."""
+    Two conflicts are surfaced rather than silently absorbed: a
+    duplicate id within one (repo, issue) — including one reached only
+    after the agent-skills/skills alias fold — raises ValueError
+    instead of one finding quietly overwriting the other; a line's own
+    `axis` field that disagrees with the filename it came from is
+    corrected to the filename's axis (which axis wrote the file is the
+    authoritative signal) with a stderr warning, instead of silently
+    tallying under the wrong axis. A disposition whose id matches no
+    known finding is similarly not just dropped — it's a stderr
+    warning, so a mismatched id doesn't vanish with no trace."""
     findings_by_key: dict[tuple[str, int, str], Finding] = {}
     finding_sources: dict[tuple[str, int, str], tuple[str, str]] = {}
     dispositions_by_key: dict[tuple[str, int, str], Disposition] = {}
@@ -280,8 +284,8 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
         counts = table.setdefault(
             (repo, finding.axis),
             # OUTCOME_DETAIL_FIELD is the one place that owns which outcomes
-            # exist — a future outcome needs only that one entry,
-            # not this seed too.
+            # exist — a future outcome needs only that one entry, not
+            # this seed too.
             {"raised": 0, "undisposed": 0, **{o: 0 for o in OUTCOME_DETAIL_FIELD}},
         )
         counts["raised"] += 1
@@ -315,8 +319,8 @@ def _walk_cache_layout(root: Path, patterns: tuple[str, ...]) -> list[tuple[str,
     `patterns` one level under `root`, skipping any scratch*-prefixed dir
     (not real reports). Raises FileNotFoundError if `root` doesn't exist,
     rather than silently reporting zero files. Shared by find_report_files,
-    find_sidecar_files and find_codex_records —
-    one statement of the cache layout rule, not copies drifting apart."""
+    find_sidecar_files and find_codex_records — one statement of the
+    cache layout rule, not copies drifting apart."""
     if not root.is_dir():
         raise FileNotFoundError(f"reviews cache not found: {root}")
 

@@ -37,10 +37,10 @@ link bin/job-run                "$HOME/.local/bin/job-run"
 link bin/drain                  "$HOME/.local/bin/drain"
 link bin/backstop-nightly       "$HOME/.local/bin/backstop-nightly"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
-# Symlinked, not copy-only: a probed harness write rewrote the live
-# file through the link without breaking it (`claude plugin disable --scope
-# user`); backup-sync.sh --commit still backs it up, straight off this link.
-# That is the only write path probed. A `/config` change and an "always allow"
+# Symlinked, not copy-only: a probed harness write rewrote the live file
+# through the link without breaking it (`claude plugin disable --scope user`);
+# backup-sync.sh --commit still backs it up, straight off this link. That is
+# the only write path probed. A `/config` change and an "always allow"
 # permission write are unprobed: either may yet replace the link with a
 # regular file.
 link claude/settings.json       "$HOME/.claude/settings.json"
@@ -56,8 +56,8 @@ for a in "$here/claude/agents"/*.md; do
   [ -e "$a" ] || continue
   link "claude/agents/$(basename "$a")" "$HOME/.claude/agents/$(basename "$a")"
 done
-# Path-scoped rules: a `paths:` rule in ~/.claude/rules/ fires in every
-# repo, globbed against the session's cwd, and a per-file symlink loads
+# Path-scoped rules: a `paths:` rule in ~/.claude/rules/ fires in every repo,
+# globbed against the session's cwd, and a per-file symlink loads
 # (docs/research/2026-10-04-user-path-rules-probe.md).
 for r in "$here/claude/rules"/*.md; do
   [ -e "$r" ] || continue
@@ -69,8 +69,8 @@ if [ -L "$HOME/.claude/hooks/sync-primary-main.sh" ]; then
   rm -f "$HOME/.claude/hooks/sync-primary-main.sh"
 fi
 
-# require-agent-model.sh became the agent-model mod (flow/mods/): drop
-# the stale symlink it leaves behind.
+# require-agent-model.sh became the agent-model mod (flow/mods/): drop the
+# stale symlink it leaves behind.
 if [ -L "$HOME/.claude/hooks/require-agent-model.sh" ]; then
   rm -f "$HOME/.claude/hooks/require-agent-model.sh"
 fi
@@ -92,10 +92,10 @@ if ! grep -qxF "$repoint_line" "$HOME/.bashrc" 2>/dev/null; then
   echo "added the interop repoint to $HOME/.bashrc"
 fi
 
-# The pre-push hook that ran tests/all.sh is retired: a push is not the
-# gate, the merge is (`git config land.testcmd`), and the hook's own GIT_DIR
-# leaked into the suite. Drop the symlink an earlier install left. Hooks are
-# shared across worktrees, so resolve the common git dir rather than ".git".
+# The pre-push hook that ran tests/all.sh is retired: a push is not the gate,
+# the merge is (`git config land.testcmd`), and the hook's own GIT_DIR leaked
+# into the suite. Drop the symlink an earlier install left. Hooks are shared
+# across worktrees, so resolve the common git dir rather than ".git".
 git_common_dir="$(git -C "$here/.." rev-parse --path-format=absolute --git-common-dir)"
 if [ -L "$git_common_dir/hooks/pre-push" ]; then
   rm -f "$git_common_dir/hooks/pre-push"
@@ -128,14 +128,13 @@ if ! toast_out=$(bash "$here/bin/herdr-toast-install" 2>&1); then
   fi
 fi
 
-# implement-dispatch and merge-cleanup are Rust binaries:
-# cargo install replaces each in place, rather than a symlink into the repo,
-# and replaces the symlink an earlier install left for either. Runs last,
-# after every symlink above is in place, so a missing cargo or a compile
-# error never leaves the rest of the install half-done — the install is
-# not gated on a toolchain. Never installs
-# the test-only fake — lane-install.sh only names implement-dispatch and
-# merge-cleanup.
+# implement-dispatch and merge-cleanup are Rust binaries: cargo install
+# replaces each in place, rather than a symlink into the repo, and replaces
+# the symlink an earlier install left for either. Runs last, after every
+# symlink above is in place, so a missing cargo or a compile error never
+# leaves the rest of the install half-done — the install is not gated on a
+# toolchain. Never installs the test-only fake — lane-install.sh only names
+# implement-dispatch and merge-cleanup.
 mkdir -p "$HOME/.local/bin"
 bash "$here/lane-install.sh"
 

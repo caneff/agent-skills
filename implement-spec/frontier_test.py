@@ -1,6 +1,6 @@
-"""Tests for the frontier reader. Seam: `frontier(repo, label)` with
-its three fetchers injected (issues, blocker state, parent) — a list of
-GitHub issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
+"""Tests for the frontier reader. Seam: `frontier(repo, label)` with its
+three fetchers injected (issues, blocker state, parent) — a list of GitHub
+issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
 `spec`, `slice`) out. No network: every case is a ticket fixture, which is
 the point of the seam.
 """
@@ -741,8 +741,8 @@ def test_an_indented_inline_line_is_a_quotation_not_a_declaration(quoted):
 
 def test_an_indented_section_after_a_real_one_adds_nothing_to_its_answer():
     # The indent bound kept the quoted heading from counting as a second
-    # declaration, but its lines still joined the real section's payload and
-    # its `#906` blocked the ticket.
+    # declaration, but its lines still joined the real section's payload
+    # and its `#906` blocked the ticket.
     body = "## Blocked by\n\nNone\n\n    ## Blocked by\n\n    - #906\n"
     got = read([issue(1, body=body)], states={906: "open"})
     assert numbers(got["unblocked"]) == [1], got
@@ -761,8 +761,8 @@ def test_a_tab_indented_line_after_a_real_section_adds_nothing_to_its_answer():
 
 
 def test_an_indented_fence_marker_in_a_quotation_does_not_swallow_the_real_declaration():
-    # CommonMark reads a four-space-indented ``` as indented code, not
-    # a fence opener. A reader that opens a fence on it anyway, with no
+    # CommonMark reads a four-space-indented ``` as indented code, not a
+    # fence opener. A reader that opens a fence on it anyway, with no
     # closer in the quoted block, discards every later line — including the
     # real, unindented declaration.
     body = "Quoting another ticket:\n\n    ```\n    some quoted code\n\n## Blocked by\n\nNone\n"
@@ -772,19 +772,19 @@ def test_an_indented_fence_marker_in_a_quotation_does_not_swallow_the_real_decla
 
 def test_a_tab_indented_fence_marker_in_a_quotation_does_not_swallow_the_real_declaration():
     # Same bug as above, tab rather than four spaces — CommonMark treats a
-    # tab the same way (the four-space fixture alone
-    # leaves this half of the bound unwitnessed).
+    # tab the same way (the four-space fixture alone leaves this half of
+    # the bound unwitnessed).
     body = "Quoting another ticket:\n\n\t```\n\tsome quoted code\n\n## Blocked by\n\nNone\n"
     got = read([issue(1, body=body)])
     assert numbers(got["unblocked"]) == [1], got
 
 
 def test_an_indented_closer_does_not_end_an_unindented_fence_early():
-    # The closer half of the same bound: CommonMark
-    # bounds a closing fence marker the same way as an opener — a
-    # 4-space-indented ``` inside a real, unindented fence is quoted content,
-    # not the closer, so the fence stays open through it and the quoted
-    # `## Blocked by` inside stays quoted.
+    # The closer half of the same bound: CommonMark bounds a closing
+    # fence marker the same way as an opener — a 4-space-indented ```
+    # inside a real, unindented fence is quoted content, not the closer,
+    # so the fence stays open through it and the quoted `## Blocked by`
+    # inside stays quoted.
     body = ("```\nquoted example:\n    ```\n\n## Blocked by\n\nNone.\n```\n\n"
             "## Blocked by\n\n- #7\n")
     got = read([issue(1, body=body)], states={7: "open"})
@@ -796,8 +796,8 @@ NO_BLOCKERS = "Blocked by: None"
 
 def spec_parent(number=483, labels=("spec",)):
     """The parent issue as `/issues/<n>/parent` answers: a full issue object.
-    Its labels omit the queried one by default, the shape a real spec parent had:
-    it carried `spec` and no `ready-for-agent`."""
+    Its labels omit the queried one by default, the shape a real spec
+    parent had: it carried `spec` and no `ready-for-agent`."""
     out = issue(number, labels=labels)
     out["repository_url"] = "https://api.github.com/repos/owner/repo"
     return out
@@ -961,8 +961,8 @@ def _parent_run():
 
 
 def test_a_parent_named_by_two_slices_is_read_once():
-    # Slices of one spec each fall back to `Part of #483`; the
-    # parent issue is read once per frontier read, as a blocker's state is.
+    # Slices of one spec each fall back to `Part of #483`; the parent issue
+    # is read once per frontier read, as a blocker's state is.
     asked = []
     table = {"repos/owner/repo/issues/483": spec_parent(483)}
     for n in (491, 492):
@@ -1013,8 +1013,8 @@ def unreadable_parent(body):
 
 
 # A `## Parent` section that states something this reader cannot resolve is
-# a parent it could not read, never "no parent": read as none, a slice of a spec dispatches as an
-# ordinary ticket.
+# a parent it could not read, never "no parent": read as none, a slice of a
+# spec dispatches as an ordinary ticket.
 def test_the_parent_section_ends_at_the_next_heading():
     # Read past the heading, `#483` would answer; the section's own prose
     # names nothing, so it is unreadable.
@@ -1059,8 +1059,8 @@ def test_a_parent_section_linking_another_repo_is_unreadable():
     assert "## Parent" in str(unreadable_parent(body))
 
 
-# The same declaration as a bare `Part of` line, with no heading,
-# is just as unreadable; read as none, the slice dispatches.
+# The same declaration as a bare `Part of` line, with no heading, is just
+# as unreadable; read as none, the slice dispatches.
 def test_a_part_of_line_linking_another_repo_is_unreadable():
     body = "Part of [Spec](https://github.com/other/place/issues/12).\n\nBody.\n"
     assert "`Part of`" in str(unreadable_parent(body))

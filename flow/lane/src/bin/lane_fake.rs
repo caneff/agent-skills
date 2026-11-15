@@ -13,13 +13,13 @@
 //! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup;
 //! GH_PR_STATUS for controller-restore's `--json number,state` PR lookup;
 //! GH_SUBISSUES_<n>, GH_PARENT_<n> and the `git` role's GIT_BEFORE_PUSH for a
-//! spec's integration branch.
-//! A third role, `git`, is a passthrough proxy to the real binary (`REAL_GIT`,
-//! an absolute path) rather than a scenario stub, since replicating real git
-//! is not this fake's job; `GIT_HANG`/`GH_HANG` make it or `gh` hang
-//! forever on a call whose args contain the given substring, standing in for
-//! a hung subprocess so a test can prove an OS-level bound actually fires.
-//! Never installed — see install.sh.
+//! spec's integration branch. A third role, `git`, is a passthrough proxy
+//! to the real binary (`REAL_GIT`, an absolute path) rather than a
+//! scenario stub, since replicating real git is not this fake's job;
+//! `GIT_HANG`/`GH_HANG` make it or `gh` hang forever on a call whose args
+//! contain the given substring, standing in for a hung subprocess so a
+//! test can prove an OS-level bound actually fires. Never installed — see
+//! install.sh.
 
 use std::env;
 use std::fs::OpenOptions;
@@ -112,8 +112,8 @@ fn env_flag(name: &str) -> bool {
 /// (the actual critical section: the read the lock-vs-no-lock race is about).
 /// Waiting at the first read leaves both dispatches free to run unsynchronized
 /// all the way to that reread, so a witness built on it is timing-dependent,
-/// not deterministic. This barrier instead holds each dispatch (keyed
-/// by its parent pid) at its *second* view of a given ticket — the reread —
+/// not deterministic. This barrier instead holds each dispatch (keyed by
+/// its parent pid) at its *second* view of a given ticket — the reread —
 /// until two dispatches have reached theirs, or 3s; the first view of any
 /// ticket passes straight through. Independent of any lock the dispatches
 /// take, so a test can make two runs reach the reread within microseconds of
@@ -153,15 +153,16 @@ fn view_barrier(n: &str) {
     // The two dispatches must be released within microseconds of each other,
     // or the first one released can read, decide and complete its edit
     // before the second even rereads — the same false "only one claimed"
-    // outcome a coarse poll produces. A busy spin for the first ~50ms
-    // gets that; past it, the lock-held path (where the second run never
+    // outcome a coarse poll produces. A busy spin for the first ~50ms gets
+    // that; past it, the lock-held path (where the second run never
     // arrives) falls back to a short sleep so the ordinary passing run does
     // not peg a core issuing read_dir syscalls for the whole 3s deadline.
     let suffix = format!(".{n}.reread");
     let is_reread_marker = |e: &std::fs::DirEntry| e.file_name().to_string_lossy().ends_with(&suffix);
     // A failed `read_dir`, or a failed read of one of its entries, must not
     // read as "count 0, keep waiting" — that is the same fail-open shape as
-    // the count file above, just timing out instead of racing. Only the deadline is a legitimate reason to stop waiting.
+    // the count file above, just timing out instead of racing. Only the
+    // deadline is a legitimate reason to stop waiting.
     let count = || {
         std::fs::read_dir(&dir)
             .unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not read_dir {dir:?}: {e}"))
@@ -181,10 +182,10 @@ fn view_barrier(n: &str) {
 
 /// `GIT_HANG`/`GH_HANG`: when set to a non-empty substring found in this
 /// call's joined args, sleeps forever instead of answering — standing in
-/// for a hung `git`/`gh` subprocess. The caller's own OS-level
-/// timeout is what ends the wait by killing this process's group; nothing
-/// here ever returns on its own once triggered, so a test that fails to
-/// wire an actual bound would simply hang instead of getting a false pass.
+/// for a hung `git`/`gh` subprocess. The caller's own OS-level timeout is
+/// what ends the wait by killing this process's group; nothing here ever
+/// returns on its own once triggered, so a test that fails to wire an
+/// actual bound would simply hang instead of getting a false pass.
 fn hangs_on(var: &str, args: &[String]) -> bool {
     match env::var(var) {
         Ok(pat) if !pat.is_empty() => args.join(" ").contains(&pat),
@@ -209,19 +210,18 @@ fn run_git(args: &[String]) -> ExitCode {
     if hangs_on("GIT_HANG", args) {
         hang_forever();
     }
-    // No silent "git" fallback:
-    // this proxy sits ahead of the real git on PATH, so resolving "git" by
-    // name here would just re-invoke this same binary, forever, rather
-    // than reaching the real thing. A caller that shadows "git" with this
-    // proxy owes it REAL_GIT; refuse loudly instead of hanging on the
-    // caller's behalf.
+    // No silent "git" fallback: this proxy sits ahead of the real git on
+    // PATH, so resolving "git" by name here would just re-invoke this same
+    // binary, forever, rather than reaching the real thing. A caller that
+    // shadows "git" with this proxy owes it REAL_GIT; refuse loudly
+    // instead of hanging on the caller's behalf.
     let Ok(real) = env::var("REAL_GIT") else {
         eprintln!("lane-fake: invoked as git with no REAL_GIT set; refusing rather than re-entering this proxy");
         return ExitCode::FAILURE;
     };
-    // `GIT_BEFORE_PUSH`: a shell command run just before a `push`
-    // reaches the real git, standing in for another session pushing between
-    // this run's fetch and its push.
+    // `GIT_BEFORE_PUSH`: a shell command run just before a `push` reaches
+    // the real git, standing in for another session pushing between this
+    // run's fetch and its push.
     if args.iter().any(|a| a == "push") {
         if let Ok(cmd) = env::var("GIT_BEFORE_PUSH") {
             let _ = std::process::Command::new("sh").args(["-c", &cmd]).status();
@@ -320,9 +320,9 @@ fn run_gh(args: &[String]) -> ExitCode {
         // label or login can hold a space but never a tab.
         println!("{row}");
     }
-    // `api repos/<o>/<r>/issues/<n>/parent`: GH_PARENT_<n> is the
-    // parent's number; unset is gh's own 404 for a ticket with no parent,
-    // and GH_PARENT_FAIL_<n> any other failure.
+    // `api repos/<o>/<r>/issues/<n>/parent`: GH_PARENT_<n> is the parent's
+    // number; unset is gh's own 404 for a ticket with no parent, and
+    // GH_PARENT_FAIL_<n> any other failure.
     let parent_of = if a0 == "api" { a1.strip_suffix("/parent").and_then(|p| p.rsplit('/').next()) } else { None };
     if let Some(n) = parent_of {
         if env::var(format!("GH_PARENT_FAIL_{n}")).is_ok() {
@@ -426,12 +426,11 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
 
 /// Whether `--json`'s field list is exactly `controller-restore`'s
 /// `number,state` shape — not merely a list that happens to mention
-/// `state`: a future
-/// `--json number,headRefOid,state` would otherwise route here by accident
-/// and get the wrong fake's answer instead of failing loud. Test-only code:
-/// panic rather than silently fall through to `gh_pr_list`'s own
-/// `GH_PR_HEADS` shape, which would answer a `state`-bearing request with
-/// `headRefOid` data no caller asked for.
+/// `state`: a future `--json number,headRefOid,state` would otherwise
+/// route here by accident and get the wrong fake's answer instead of
+/// failing loud. Test-only code: panic rather than silently fall through
+/// to `gh_pr_list`'s own `GH_PR_HEADS` shape, which would answer a
+/// `state`-bearing request with `headRefOid` data no caller asked for.
 fn is_status_json_shape(json_fields: &str) -> bool {
     if json_fields == "number,state" {
         return true;
@@ -470,12 +469,11 @@ fn gh_pr_list_status(head: &str, jq: bool) -> ExitCode {
 }
 
 /// Parses one `$GH_PR_STATUS` fixture line as exactly `<number> <STATE>`.
-/// Test-only code: panics rather than swallowing a malformed line
-/// — a one-field line silently read as "no PR"
-/// (defect-classes class 1) instead of failing the fixture that wrote it —
-/// and panics on a third field too: a
-/// row like `152 OPEN extra` must fail the fixture that wrote it, not
-/// silently drop the extra field.
+/// Test-only code: panics rather than swallowing a malformed line — a
+/// one-field line silently read as "no PR" (defect-classes class 1)
+/// instead of failing the fixture that wrote it — and panics on a third
+/// field too: a row like `152 OPEN extra` must fail the fixture that wrote
+/// it, not silently drop the extra field.
 fn parse_status_row(line: &str, head: &str) -> (String, String) {
     let mut fields = line.split_whitespace();
     let number = fields.next().unwrap_or_else(|| panic!("GH_PR_STATUS: {line:?} for {head:?} has no number field"));

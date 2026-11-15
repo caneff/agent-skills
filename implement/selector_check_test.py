@@ -1,6 +1,6 @@
 """`implement/selector_check.py`: `command` prints the repo's per-change
-command, and at merge one `selector:` comment on the PR records the
-suites the narrowed command selected, judging nothing.
+command, and at merge one `selector:` comment on the PR records the suites
+the narrowed command selected, judging nothing.
 
 Seam: the real script as a subprocess against a throwaway repo whose
 `AGENTS.md` declares a `Narrowed` line, a fake `tests/all.sh` standing in for

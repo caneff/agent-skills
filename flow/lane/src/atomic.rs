@@ -1,6 +1,6 @@
 //! Replace a file so a reader, or a process that dies partway, sees the old
-//! contents or the new ones and never a mix. One writer for the
-//! worker sidecar, the trust seed and the installed hooks.
+//! contents or the new ones and never a mix. One writer for the worker
+//! sidecar, the trust seed and the installed hooks.
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;

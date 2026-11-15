@@ -1,7 +1,7 @@
-//! What the dispatcher runs for the
-//! `/implement` lane: turn a ticket number into a worker running in its own
-//! workspace inside herdr, report, and stop. It never waits on the worker.
-//! The contract is `--help` below.
+//! What the dispatcher runs for the `/implement` lane: turn a ticket
+//! number into a worker running in its own workspace inside herdr,
+//! report, and stop. It never waits on the worker. The contract is
+//! `--help` below.
 
 use lane::herdr::{AgentNameError, HERDR_QUERY_TIMEOUT};
 use lane::runner::{
@@ -294,12 +294,12 @@ fn claim_lock_wait() -> std::time::Duration {
     std::time::Duration::from_millis(ms)
 }
 
-/// OS-level bound for the `git fetch` inside the claim lock: unlike
-/// the plain git calls around it — rev-parse, worktree list, branch checks,
-/// all local and fast — fetch hits the network, and a stalled remote pinned
-/// the claim lock for this run's whole life, refusing every other dispatch
-/// of the repo past the 30s lock wait. `LANE_FETCH_TIMEOUT_MS` shortens it
-/// for tests.
+/// OS-level bound for the `git fetch` inside the claim lock: unlike the
+/// plain git calls around it — rev-parse, worktree list, branch checks, all
+/// local and fast — fetch hits the network, and a stalled remote pinned the
+/// claim lock for this run's whole life, refusing every other dispatch of
+/// the repo past the 30s lock wait. `LANE_FETCH_TIMEOUT_MS` shortens it for
+/// tests.
 fn fetch_timeout() -> std::time::Duration {
     let ms = env::var("LANE_FETCH_TIMEOUT_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(120_000);
     std::time::Duration::from_millis(ms)
@@ -468,29 +468,29 @@ const PUSH_GUARD_NAME: &str = "commit-identity-guard-pre-push";
 const PRE_PUSH_FOREIGN: &str = "pre-push.foreign";
 
 /// What the lane installs as a hook slot (`pre-commit`, `pre-push`). Never a
-/// substring or a text match on the *foreign* hook it replaces (a
-/// hook that only echoed the guard's name, called it on an unreachable
-/// branch, or suppressed its exit with `|| true` all read as "invokes the
-/// guard" under a substring check). The wrapper runs whatever it
-/// displaced first — preserving that hook's own behavior — then always runs
-/// the guard itself, outside the displaced hook's own text, so nothing in
-/// that text can suppress the guard's exit code. Ownership of the slot is
-/// byte-identity with this exact text — never a marker or any other text
-/// match on the *current* file either: a marker-based check reopens that very hole,
-/// since a foreign hook that merely carries the marker phrase
-/// in a comment would then read as "ours" and skip the takeover — the guard
-/// installs nowhere and never runs. A stale prior version of this text (from
-/// an earlier build of the lane) is therefore foreign too and gets displaced
+/// substring or a text match on the *foreign* hook it replaces (a hook that
+/// only echoed the guard's name, called it on an unreachable branch, or
+/// suppressed its exit with `|| true` all read as "invokes the guard" under
+/// a substring check). The wrapper runs whatever it displaced first —
+/// preserving that hook's own behavior — then always runs the guard itself,
+/// outside the displaced hook's own text, so nothing in that text can
+/// suppress the guard's exit code. Ownership of the slot is byte-identity
+/// with this exact text — never a marker or any other text match on the
+/// *current* file either: a marker-based check reopens that very hole,
+/// since a foreign hook that merely carries the marker phrase in a comment
+/// would then read as "ours" and skip the takeover — the guard installs
+/// nowhere and never runs. A stale prior version of this text (from an
+/// earlier build of the lane) is therefore foreign too and gets displaced
 /// like any other hook; running it via the wrapper is harmless, since the
-/// earlier pre-commit wrapper's only body was `exec ".../commit-identity-guard"`.
-/// Both hook slots share this one wrapper shape — the guard name and
-/// the foreign-displacement name are its only per-slot parameters, plus
-/// `buffer_stdin` for pre-push. A `pre-push` hook's ref list arrives on
-/// stdin, not in `"$@"` (git pre-push protocol) — sharing that one stream
-/// naively between a displaced foreign hook and the guard means a foreign
-/// hook that reads stdin (a real check, not only a spoof) drains it before
-/// the guard ever sees a line, and the guard's empty `while read` then exits
-/// 0 having refused nothing (verified with a
+/// earlier pre-commit wrapper's only body was `exec
+/// ".../commit-identity-guard"`. Both hook slots share this one wrapper
+/// shape — the guard name and the foreign-displacement name are its only
+/// per-slot parameters, plus `buffer_stdin` for pre-push. A `pre-push`
+/// hook's ref list arrives on stdin, not in `"$@"` (git pre-push protocol)
+/// — sharing that one stream naively between a displaced foreign hook and
+/// the guard means a foreign hook that reads stdin (a real check, not only
+/// a spoof) drains it before the guard ever sees a line, and the guard's
+/// empty `while read` then exits 0 having refused nothing (verified with a
 /// stdin-reading foreign hook: the guard saw 0 refs). `buffer_stdin` copies
 /// stdin to a temp file first and feeds that file to both, so draining one
 /// read cannot starve the other. `pre-commit` never gets this treatment: git
@@ -513,9 +513,9 @@ fn hook_wrapper(guard_name: &str, foreign_name: &str, buffer_stdin: bool) -> Str
 
 /// Writes `text` to `path` as an executable, via temp file + rename so a
 /// commit racing the write never runs a truncated script, and never a window
-/// where `path` is briefly absent: `rename` replaces it in one
-/// step, whatever was there before. Verifies the bit stuck rather than
-/// assuming `set_permissions` and the filesystem agree.
+/// where `path` is briefly absent: `rename` replaces it in one step,
+/// whatever was there before. Verifies the bit stuck rather than assuming
+/// `set_permissions` and the filesystem agree.
 fn write_executable(path: &Path, text: &str) -> Result<(), String> {
     let tmp = path.with_file_name(format!("{}.lane-{}", path.file_name().and_then(|n| n.to_str()).unwrap_or("hook"), std::process::id()));
     lane::atomic::replace(path, &tmp, text.as_bytes(), Some(0o755), |_| {}).map_err(|e| format!("cannot install {}: {e}", path.display()))?;
@@ -527,8 +527,8 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
 }
 
 /// Installs one half of the commit-identity guard (pre-commit, pre-push)
-/// into the hooks dir `dir`, which the caller has already created.
-/// The guard script always goes to `<dir>/<guard_name>` (refreshed in place,
+/// into the hooks dir `dir`, which the caller has already created. The
+/// guard script always goes to `<dir>/<guard_name>` (refreshed in place,
 /// and verified executable). `<dir>/<slot>` becomes the lane's own wrapper
 /// unconditionally: whatever is there when it is not already byte-identical
 /// to `hook_wrapper(guard_name, foreign_name, buffer_stdin)` is foreign — trusted by its
@@ -536,17 +536,17 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
 /// to `<dir>/<foreign_name>` (the original left in place until
 /// `write_executable`'s atomic rename replaces it, so there is never a
 /// moment with no hook at that slot at all), forced executable (git silently
-/// ignores a hook without the bit, and the earlier accepted-hook path
-/// never checked it), and left for the wrapper to run before it always runs
-/// the guard itself. A `<foreign_name>` slot already holding a *different*
-/// foreign hook refuses rather than silently overwriting whatever it held
-/// — that can only mean something installed a new hook over the
-/// lane's wrapper since the last dispatch, and only a human can say which
-/// one should survive. Worktrees share the primary's hooks dir, so one
-/// install covers them all, and the call site holds the claim lock so two
-/// dispatches of the same repo can't race each other's takeover.
-/// Ownership is taken once: a slot that is already byte-identical to the
-/// current wrapper is not displaced again, so a repeat dispatch does not
+/// ignores a hook without the bit, and the earlier accepted-hook path never
+/// checked it), and left for the wrapper to run before it always runs the
+/// guard itself. A `<foreign_name>` slot already holding a *different*
+/// foreign hook refuses rather than silently overwriting whatever it held —
+/// that can only mean something installed a new hook over the lane's
+/// wrapper since the last dispatch, and only a human can say which one
+/// should survive. Worktrees share the primary's hooks dir, so one install
+/// covers them all, and the call site holds the claim lock so two
+/// dispatches of the same repo can't race each other's takeover. Ownership
+/// is taken once: a slot that is already byte-identical to the current
+/// wrapper is not displaced again, so a repeat dispatch does not
 /// re-displace an already-displaced hook — but it is still rewritten through
 /// `write_executable`, so a lost executable bit is repaired.
 fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, guard_content: &str, buffer_stdin: bool) -> Result<(), String> {
@@ -592,8 +592,8 @@ fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str
 }
 
 /// When `core.hooksPath` is set for `primary`, the sentence naming it, where
-/// it came from and the command that unsets it: git resolves the
-/// hooks dir to that path, so a value left over from another environment
+/// it came from and the command that unsets it: git resolves the hooks dir
+/// to that path, so a value left over from another environment
 /// (`/home/agent/.git-no-hooks`) fails as a bare permission error. `None`
 /// when it is not set or the lookup fails — the refusal then stands as it
 /// was.
@@ -640,8 +640,9 @@ fn hooks_dir_is_writable(dir: &str) -> std::io::Result<()> {
 /// half is what actually stops a replayed foreign-email commit from ever
 /// reaching `git push`, where that failure begins.
 fn install_identity_guard(primary: &str) -> Result<(), String> {
-    // Bounded so a timeout reports itself as one rather than folding into the same "cannot resolve"
-    // message a real git failure already gets from `quiet_stdout_timeout`.
+    // Bounded so a timeout reports itself as one rather than folding into
+    // the same "cannot resolve" message a real git failure already gets
+    // from `quiet_stdout_timeout`.
     let dir = quiet_stdout_bounded("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"], git_query_timeout())?
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -774,7 +775,8 @@ impl Claim<'_> {
 
 /// Where a dispatch's workspace branches from.
 enum Base {
-    /// `origin/<default>`, the base of an ordinary dispatch. A spec run lands here only with one slice, which is what it prints.
+    /// `origin/<default>`, the base of an ordinary dispatch. A spec run
+    /// lands here only with one slice, which is what it prints.
     Default,
     /// A spec run with more than one slice: its workspace branch `spec-<n>`
     /// is the integration branch, `created` here off `origin/<default>` and
@@ -917,12 +919,11 @@ fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
 /// The worker's own Claude session name. herdr's own record of which
 /// sessionId is attached to the agent this run just started
 /// (`agent_session.value`) is the one authoritative link — matching on cwd
-/// or pid alone can be fooled by
-/// another live session sharing the worktree, or by a stale registry file
-/// left behind on a reused pid; sessionId can't collide that way. A short
-/// retry covers herdr's own read-after-write lag before it reports the
-/// session. "(unavailable)" on a miss — the report stays total, no dispatch
-/// failure over it.
+/// or pid alone can be fooled by another live session sharing the
+/// worktree, or by a stale registry file left behind on a reused pid;
+/// sessionId can't collide that way. A short retry covers herdr's own
+/// read-after-write lag before it reports the session. "(unavailable)" on
+/// a miss — the report stays total, no dispatch failure over it.
 fn worker_session_name(home: &str, wt: &str, agent: &str) -> String {
     poll_worker_session_name(home, wt, agent, SESSION_POLL_DEADLINE, SESSION_POLL_INTERVAL, || {
         quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_POLL_CALL_TIMEOUT)
@@ -1107,8 +1108,8 @@ fn run() -> Result<(), ExitCode> {
     )
     .map_err(die)?;
 
-    // Inside the claim lock: two dispatches of the same repo can
-    // both find a foreign pre-commit and both try to take ownership of it —
+    // Inside the claim lock: two dispatches of the same repo can both find
+    // a foreign pre-commit and both try to take ownership of it —
     // serialized here, the second sees the first's wrapper already in place
     // and does nothing, instead of renaming the first dispatch's own install
     // over the user's real hook.
@@ -1273,8 +1274,8 @@ fn run() -> Result<(), ExitCode> {
     if !remote_branch_exists(&primary, &default).map_err(die)? {
         return Err(die(format!("no origin/{default} to branch from")));
     }
-    // Where the workspace branches from, settled before the claim so
-    // a refusal here still leaves nothing claimed.
+    // Where the workspace branches from, settled before the claim so a
+    // refusal here still leaves nothing claimed.
     let base = match mode {
         Mode::Spec { .. } => {
             let slices = slice_count(&slug, &n).map_err(die)?;
@@ -1304,13 +1305,13 @@ fn run() -> Result<(), ExitCode> {
     // closingIssuesReferences is the only authoritative record of which
     // tickets a landing closed — so a light clump lands with nothing for
     // merge-cleanup to read, and every ticket but the branch's own keeps its
-    // claim. That is the state this rule exists to end, so the tier that cannot
-    // carry a clump does not get one. The cost is real and small: a
+    // claim. That is the state this rule exists to end, so the tier that
+    // cannot carry a clump does not get one. The cost is real and small: a
     // docs-only clump gets a PR it would not have had alone. One ticket is
-    // unchanged — its documentation label still decides its tier.
-    // A slice of a spec is never light either, whatever its label says:
-    // light tier lands with no PR, the wrong shape for a slice, which
-    // merges into its spec's integration branch by PR.
+    // unchanged — its documentation label still decides its tier. A slice
+    // of a spec is never light either, whatever its label says: light tier
+    // lands with no PR, the wrong shape for a slice, which merges into its
+    // spec's integration branch by PR.
     let tier = if tickets.len() == 1 && tickets[0].documentation && !matches!(base, Base::Slice { .. }) { "light" } else { "heavy" };
 
     // Past here the clump is claimed; a failure says how to release it. A
@@ -1358,13 +1359,14 @@ fn run() -> Result<(), ExitCode> {
             Ok(c) if c.success => claimed.push(t),
             other => {
                 release_claimed(&claimed, &slug);
-                // Names the underlying gh output so a timeout here — where GitHub may still have
-                // applied the edit after this process's own child was
-                // killed — reads as a timeout an operator should check
-                // GitHub over, not a bare "could not claim" that looks
-                // like an ordinary gh failure. This ticket itself is never
-                // auto-released past a timeout: doing so on a claim that
-                // actually landed server-side would incorrectly revert it.
+                // Names the underlying gh output so a timeout here — where
+                // GitHub may still have applied the edit after this
+                // process's own child was killed — reads as a timeout an
+                // operator should check GitHub over, not a bare "could not
+                // claim" that looks like an ordinary gh failure. This
+                // ticket itself is never auto-released past a timeout:
+                // doing so on a claim that actually landed server-side
+                // would incorrectly revert it.
                 let why = match other {
                     Ok(c) => c.combined,
                     Err(e) => e.to_string(),
@@ -1394,8 +1396,8 @@ fn run() -> Result<(), ExitCode> {
         git_mutation_timeout(),
     );
     claim.step("git worktree add", wa, None)?;
-    // Where the branch started: merge-cleanup counts a branch as
-    // landed by the ancestor test only when its tip has moved off this sha.
+    // Where the branch started: merge-cleanup counts a branch as landed by
+    // the ancestor test only when its tip has moved off this sha.
     let fork = claim.step("reading the fork point", run_timeout("git", &["-C", &primary, "rev-parse", "--verify", &format!("refs/heads/{branch}^{{commit}}")], git_query_timeout()), None)?;
     let fork = fork.trim().to_string();
     if fork.len() != 40 || !fork.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -1405,8 +1407,8 @@ fn run() -> Result<(), ExitCode> {
     claim.step("recording the fork point", set, None)?;
     match &base {
         // The one recorded fact the gate, the slice merge and the spec
-        // review are to read a slice's base from,
-        // never a missing file or a gh call.
+        // review are to read a slice's base from, never a missing file or a
+        // gh call.
         Base::Slice { spec } => {
             let set = run_timeout("git", &["-C", &primary, "config", &format!("branch.{branch}.base"), &format!("spec-{spec}")], git_query_timeout());
             claim.step("recording the slice's base", set, None)?;
@@ -1456,10 +1458,10 @@ fn run() -> Result<(), ExitCode> {
         }
     }
 
-    // The flow's mods load in the worker. `herdr agent start` runs
-    // claude in an existing pane and takes no environment, so the folder
-    // rides on the agent's own command line; a folder of plugins loads each
-    // child (`claude --help`, `--plugin-dir`).
+    // The flow's mods load in the worker. `herdr agent start` runs claude
+    // in an existing pane and takes no environment, so the folder rides on
+    // the agent's own command line; a folder of plugins loads each child
+    // (`claude --help`, `--plugin-dir`).
     let mods = format!("{home}/.agents/skills/flow/mods");
     claim.step(
         "herdr agent start",
@@ -1509,31 +1511,31 @@ fn run() -> Result<(), ExitCode> {
 
     let session = worker_session_name(&home, wt.to_str().unwrap_or(""), &agent);
 
-    // The controller's own session survives a `/clear` (the process
-    // does, only the context is wiped), so this record is what a
-    // SessionStart hook reads back to restore what it controls. Best-effort:
-    // a controller this run cannot resolve to a live session still gets its
+    // The controller's own session survives a `/clear` (the process does,
+    // only the context is wiped), so this record is what a SessionStart
+    // hook reads back to restore what it controls. Best-effort: a
+    // controller this run cannot resolve to a live session still gets its
     // worker dispatched, just with nothing to restore for it.
     let cleanup = format!("cd {primary} && merge-cleanup {branch} --repo {primary}");
     match resolve_controller_pid(Path::new(&home), &controller_session, &controller) {
         Some(pid) => {
-            // The controller session's own
-            // starttime, read fresh here rather than trusted from whichever
-            // registry lookup found `pid` — this is what lets
-            // `controller-restore` tell "this session" from "a session that
-            // now happens to reuse this pid" once the original controller is
-            // gone. Empty on a read failure (the pid died in the gap since
-            // resolution); an empty proc_start never matches a live one, so
-            // the record is simply dropped as stale on restore rather than
-            // failing this dispatch over it.
+            // The controller session's own starttime, read fresh here
+            // rather than trusted from whichever registry lookup found
+            // `pid` — this is what lets `controller-restore` tell "this
+            // session" from "a session that now happens to reuse this pid"
+            // once the original controller is gone. Empty on a read failure
+            // (the pid died in the gap since resolution); an empty
+            // proc_start never matches a live one, so the record is simply
+            // dropped as stale on restore rather than failing this dispatch
+            // over it.
             let proc_start = pid.parse::<i32>().ok().and_then(proc_info::read_stat).map(|s| s.start).unwrap_or_default();
             let record = lane::workers::WorkerRecord {
                 agent: agent.clone(),
                 tickets: ns.clone(),
                 branch: branch.clone(),
-                // Canonicalized so a symlinked `primary` (or repo
-                // root) still spells the same string `merge-cleanup` reads
-                // back off `git worktree list` and canonicalizes in turn.
+                // Canonicalized so a symlinked `primary` (or repo root)
+                // still spells the same string `merge-cleanup` reads back
+                // off `git worktree list` and canonicalizes in turn.
                 workspace: lane::workers::canonical_workspace_path(&wt.display().to_string()),
                 repo: slug.clone(),
                 cleanup: cleanup.clone(),

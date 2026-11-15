@@ -1,5 +1,5 @@
-"""End-to-end test for an integration branch per spec, with one
-review for the whole spec.
+"""End-to-end test for an integration branch per spec, with one review for
+the whole spec.
 
 One spec's life through the entry points a worker and a controller reach, in
 a throwaway repo whose `origin` is a bare clone, with a fake `gh` and the

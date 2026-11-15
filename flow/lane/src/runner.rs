@@ -72,17 +72,16 @@ const READ_GRACE: Duration = Duration::from_secs(2);
 /// the child is placed in its own process group so the whole group (not
 /// just the direct child) gets killed. Returns whether it timed out
 /// alongside the exit status, since a killed child's status alone doesn't
-/// say why it failed — a caller reporting to a person needs the "why."
-/// The read side is bounded even when the *direct* child never times out: a
+/// say why it failed — a caller reporting to a person needs the "why." The
+/// read side is bounded even when the *direct* child never times out: a
 /// child that exits on its own but backgrounds a descendant still holding
 /// stdout/stderr open (a hook that forks a daemon, e.g.) would otherwise
 /// leave `recv_drained` blocking forever, with no timeout ever having fired
 /// to explain it. The drain deadline applies unconditionally, whether or not
-/// the direct child itself timed out — but
-/// the process-group kill stays timeout-only: a child that exited on its own
-/// may have legitimately started a long-lived process (`herdr` launched by a
-/// hook) that is not this call's to kill just because its own pipe is still
-/// open.
+/// the direct child itself timed out — but the process-group kill stays
+/// timeout-only: a child that exited on its own may have legitimately
+/// started a long-lived process (`herdr` launched by a hook) that is not
+/// this call's to kill just because its own pipe is still open.
 fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<(ExitStatus, Vec<u8>, Vec<u8>, bool, bool)> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     // A new process group headed by the child's own pid: on timeout we can
@@ -109,11 +108,11 @@ fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<(ExitStat
 /// whole buffer read so far — so the channel's queue stays linear in the
 /// bytes read rather than quadratic: sending `buf.clone()` per chunk, with
 /// nothing consuming the channel until the child exits, would queue O(n)
-/// snapshots of up to O(n) bytes each. The receiver accumulates the
-/// chunks itself. The bool is whether this is the final message (the pipe
-/// reached EOF or errored); a pipe left stuck open past the receiver's
-/// deadline leaks this one thread — accepted, since the alternative is the
-/// caller blocking on it instead.
+/// snapshots of up to O(n) bytes each. The receiver accumulates the chunks
+/// itself. The bool is whether this is the final message (the pipe reached
+/// EOF or errored); a pipe left stuck open past the receiver's deadline
+/// leaks this one thread — accepted, since the alternative is the caller
+/// blocking on it instead.
 fn drain(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<(Vec<u8>, bool)> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -365,8 +364,8 @@ pub fn quiet_code_bounded(program: &str, args: &[&str], timeout: Duration) -> Re
 /// means a command reading the terminal (a credential prompt) is stopped
 /// rather than answered, and so fails at the bound; and Ctrl-C reaches this
 /// process but not the child, which is left running. Both are accepted
-/// costs of a bound that can kill the whole group. `Err` names
-/// the command and why: it timed out, or it could not be spawned.
+/// costs of a bound that can kill the whole group. `Err` names the command
+/// and why: it timed out, or it could not be spawned.
 pub fn status_bounded(program: &str, args: &[&str], drop_stdout: bool, timeout: Duration) -> Result<bool, String> {
     let command = format!("{program} {}", args.join(" "));
     let mut cmd = Command::new(program);
@@ -424,7 +423,8 @@ pub fn on_path(name: &str) -> bool {
 }
 
 /// Stdout and stderr passed through to this process's own, for the steps
-/// whose git output the operator should see. A command that cannot be spawned counts as failed.
+/// whose git output the operator should see. A command that cannot be
+/// spawned counts as failed.
 pub fn status(program: &str, args: &[&str]) -> bool {
     Command::new(program).args(args).status().map(|s| s.success()).unwrap_or(false)
 }
@@ -493,11 +493,11 @@ mod tests {
         assert_eq!(out.combined, "hello");
     }
 
-    // Killing only the direct child leaves a
-    // grandchild it forked (rather than exec-replaced) holding the pipe
-    // open, so the reader thread's `read_to_end` never sees EOF and the
-    // bound never actually fires. `sh -c "sleep 5 & wait"` reproduces that
-    // shape on purpose (see the note above on why the other tests avoid it).
+    // Killing only the direct child leaves a grandchild it forked (rather
+    // than exec-replaced) holding the pipe open, so the reader thread's
+    // `read_to_end` never sees EOF and the bound never actually fires. `sh
+    // -c "sleep 5 & wait"` reproduces that shape on purpose (see the note
+    // above on why the other tests avoid it).
     #[test]
     fn run_timeout_does_not_hang_on_a_grandchild_still_holding_the_pipe_open() {
         use std::time::{Duration, Instant};
@@ -548,11 +548,11 @@ mod tests {
         assert!(out.combined.to_lowercase().contains("timed out"), "combined was {:?}", out.combined);
     }
 
-    // After the drain deadline `recv_timeout(0)` still
-    // hands back every queued chunk, so a descendant that keeps writing kept
-    // the loop running past READ_GRACE. Driven at the function, with the
-    // deadline already past: an end-to-end writer fast enough to show it would
-    // hold gigabytes in memory for the whole grace.
+    // After the drain deadline `recv_timeout(0)` still hands back every
+    // queued chunk, so a descendant that keeps writing kept the loop
+    // running past READ_GRACE. Driven at the function, with the deadline
+    // already past: an end-to-end writer fast enough to show it would hold
+    // gigabytes in memory for the whole grace.
     #[test]
     fn recv_drained_reads_a_bounded_amount_past_the_deadline_however_much_is_queued() {
         use std::time::{Duration, Instant};
@@ -567,8 +567,8 @@ mod tests {
         drop(tx);
     }
 
-    // Stdout is read first and can spend the shared deadline;
-    // what the direct child already wrote to stderr is still queued and kept.
+    // Stdout is read first and can spend the shared deadline; what the
+    // direct child already wrote to stderr is still queued and kept.
     #[test]
     fn recv_drained_keeps_what_was_already_queued_when_the_deadline_has_passed() {
         use std::time::{Duration, Instant};
@@ -582,11 +582,11 @@ mod tests {
     }
 
     // `drain` used to send a clone of the whole buffer-so-far on every 8 KiB
-    // chunk, and nothing consumed the channel until the child exited — several
-    // MiB of real output queued roughly its square in bytes. This drains within the timeout and gets
-    // every byte back; the mutation check (revert `drain` to send
-    // `buf.clone()`) is what actually proves the growth was quadratic, since
-    // a small size alone wouldn't show it.
+    // chunk, and nothing consumed the channel until the child exited —
+    // several MiB of real output queued roughly its square in bytes. This
+    // drains within the timeout and gets every byte back; the mutation
+    // check (revert `drain` to send `buf.clone()`) is what actually proves
+    // the growth was quadratic, since a small size alone wouldn't show it.
     #[test]
     fn run_timeout_drains_several_megabytes_without_quadratic_blowup() {
         use std::time::{Duration, Instant};
@@ -597,9 +597,9 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(5), "waited {:?} to drain 16 MiB", start.elapsed());
     }
 
-    // A bounded query must fail loud when the bound fires, never
-    // fold that into the same `None`/`false` a completed command's own
-    // negative answer produces.
+    // A bounded query must fail loud when the bound fires, never fold that
+    // into the same `None`/`false` a completed command's own negative
+    // answer produces.
     #[test]
     fn quiet_stdout_bounded_errs_on_a_hang_instead_of_returning_none() {
         use std::time::Duration;

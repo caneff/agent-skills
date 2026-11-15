@@ -42,11 +42,12 @@ def counts(run, reviews_dir, spec=None):
     `moved` line (a finding added to the open ticket for its component).
     `disputed` lands in neither: a disputed finding shipped nothing.
 
-    A sidecar in the older outcome vocabulary is still read, so a run that was going
-    when the review changed can close: its `filed` lines count as moved, and
-    its `leftover` and `handed-back` lines are returned as `carried`, which
-    `render_counts` prints. Nothing sweeps them any more; the run file's own
-    `leftovers` list still holds the leftover ones.
+    A sidecar with legacy outcomes is still read, so a run that was
+    going when the outcomes changed can close: its `filed` lines count
+    as moved, and its `leftover` and `handed-back` lines are returned
+    as `carried`, which `render_counts` prints. Nothing sweeps them any
+    more; the run file's own `leftovers` list still holds the leftover
+    ones.
 
     A clump closed with no landing (`runfile.py close`) has no PR and
     so no sidecar: it is listed under `closed` as `(lowest, reason)`, by
@@ -132,8 +133,8 @@ def main(argv):
     if args.reviews_dir:
         reviews_dir = os.path.expanduser(args.reviews_dir)
     elif args.repo:
-        # The run's recorded target is what `--repo` must name: a
-        # wrong checkout reads another repo's sidecars. Tops are compared, so
+        # The run's recorded target is what `--repo` must name: a wrong
+        # checkout reads another repo's sidecars. Tops are compared, so
         # a subdirectory or a trailing slash is the same target.
         try:
             top = runfile.checkout_top(args.repo)

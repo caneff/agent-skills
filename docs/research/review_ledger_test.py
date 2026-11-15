@@ -1,7 +1,6 @@
-"""Tests for review_ledger.py. Every test runs a subcommand's command
-line on a fixture tree and reads what comes out: ledger rows, the review file,
-or the report. Nothing here calls the module's functions, and every run points
-HOME at a temp dir so no default path can reach the real ~/.cache."""
+"""Tests for review_ledger.py. Every test runs a subcommand's command line on a fixture tree and reads what
+comes out: ledger rows, the review file, or the report. Nothing here calls the module's functions, and every run
+points HOME at a temp dir so no default path can reach the real ~/.cache."""
 import json
 
 import pytest
@@ -192,8 +191,8 @@ class TestHarvest:
 
 
 class TestMappingLabel:
-    """A drifted label is data: one holding the review file's own ` -> ` separator
-    is listed whole, not split at the wrong arrow."""
+    """A drifted label is data: one holding the review file's own ` -> ` separator is listed whole, not split at
+    the wrong arrow."""
 
     def test_label_containing_an_arrow_is_listed_whole(self, env):
         cache = env.tmp / "cache"
@@ -206,8 +205,7 @@ class TestMappingLabel:
 
 
 class TestVerificationOverlap:
-    """The verification pass never counts toward
-    overlap for a round-1 finding it re-checks."""
+    """The verification pass never counts toward overlap for a round-1 finding it re-checks."""
 
     @pytest.fixture
     def env(self, env):
@@ -611,8 +609,8 @@ class TestReport:
         assert types["standards"]["leftover_rate"] == 1.0
 
     def test_a_moved_finding_carries_value_like_a_filed_one(self, env):
-        # `moved` is a valid finding that went onto an open ticket, the
-        # successor of `filed` for a finding that needs its own design.
+        # `moved` is a valid finding that went onto an open ticket, the successor of `filed` for a finding that
+        # needs its own design.
         moved = [dict(report_rows()[0], findings=[
             {"id": "m", "severity": "hard", "outcome": "moved", "partial": False,
              "overlap": "unique", "k": 1}])]

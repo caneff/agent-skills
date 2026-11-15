@@ -1,9 +1,9 @@
-//! Contract tests for `controller-adopt`: a live session on the
-//! primary checkout takes over a worker whose controller session is gone.
-//! The real binary runs as a child of this test process, which stands in
-//! for the adopting session (its session record is what `find_own_pid`'s
-//! ancestor walk finds), against the fake `herdr` from `lane-fake` and a
-//! scratch `~/.claude/sessions` — the `controller_restore.rs` seam.
+//! Contract tests for `controller-adopt`: a live session on the primary
+//! checkout takes over a worker whose controller session is gone. The real
+//! binary runs as a child of this test process, which stands in for the
+//! adopting session (its session record is what `find_own_pid`'s ancestor
+//! walk finds), against the fake `herdr` from `lane-fake` and a scratch
+//! `~/.claude/sessions` — the `controller_restore.rs` seam.
 
 mod support;
 use lane::workers::{self, WorkerRecord};
@@ -257,8 +257,8 @@ fn adopt_refuses_while_any_live_controller_holds_the_worker_beside_an_orphaned_c
 
 #[test]
 fn adopting_again_a_worker_this_session_already_controls_says_so_and_succeeds() {
-    // The second run is not "another controller is alive" —
-    // that controller is this session.
+    // The second run is not "another controller is alive" — that controller
+    // is this session.
     let f = Fixture::new();
     let (own_pid, _) = adopter(&f);
     let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
@@ -274,9 +274,9 @@ fn adopting_again_a_worker_this_session_already_controls_says_so_and_succeeds() 
 
 #[test]
 fn adopt_refuses_before_moving_anything_when_herdr_cannot_be_asked() {
-    // A failed listing is not "no herdr agent" — re-pointing
-    // the worker at the session name then would brief an address a restart
-    // ages, silently (implement-dispatch refuses the same case).
+    // A failed listing is not "no herdr agent" — re-pointing the worker at
+    // the session name then would brief an address a restart ages, silently
+    // (implement-dispatch refuses the same case).
     let f = Fixture::new();
     adopter(&f);
     let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
@@ -292,9 +292,9 @@ fn adopt_refuses_before_moving_anything_when_herdr_cannot_be_asked() {
 
 #[test]
 fn adopt_never_reaches_a_same_named_worker_under_another_checkout() {
-    // Only a workspace under this primary checkout is this
-    // session's to adopt; another repo's orphan with the same agent name
-    // stays where it is.
+    // Only a workspace under this primary checkout is this session's to
+    // adopt; another repo's orphan with the same agent name stays where it
+    // is.
     let f = Fixture::new();
     adopter(&f);
     let (primary, _) = f.repo_with_workspace("scroller", BRANCH);
@@ -311,12 +311,12 @@ fn adopt_never_reaches_a_same_named_worker_under_another_checkout() {
 
 #[test]
 fn an_adopt_killed_after_landing_leaves_the_worker_with_its_adopter_and_offered_to_no_one() {
-    // A process death mid-adopt must never strand the
-    // worker in neither sidecar. The record lands in the adopter's sidecar
-    // before it leaves the dead one, so a kill in between leaves a
-    // duplicate: the adopter's copy restores, and the dead copy is inert,
-    // neither offered nor adoptable while the adopter lives. The kill is a
-    // real SIGABRT from the debug-build failpoint at exactly that window.
+    // A process death mid-adopt must never strand the worker in neither
+    // sidecar. The record lands in the adopter's sidecar before it leaves
+    // the dead one, so a kill in between leaves a duplicate: the adopter's
+    // copy restores, and the dead copy is inert, neither offered nor
+    // adoptable while the adopter lives. The kill is a real SIGABRT from
+    // the debug-build failpoint at exactly that window.
     let f = Fixture::new();
     let (own_pid, own_start) = adopter(&f);
     let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
@@ -349,11 +349,11 @@ fn an_adopt_killed_after_landing_leaves_the_worker_with_its_adopter_and_offered_
 
 #[test]
 fn an_adopt_killed_mid_rewrite_of_the_dead_sidecar_loses_none_of_its_other_records() {
-    // Removing the adopted copy rewrites the dead controller's
-    // sidecar. A process death partway through that rewrite must leave the
-    // sidecar whole in its old or its new version: the dead controller's
-    // other worker is still there to restore or adopt. The kill is a real
-    // SIGABRT from the debug-build failpoint, after half the new bytes.
+    // Removing the adopted copy rewrites the dead controller's sidecar. A
+    // process death partway through that rewrite must leave the sidecar
+    // whole in its old or its new version: the dead controller's other
+    // worker is still there to restore or adopt. The kill is a real SIGABRT
+    // from the debug-build failpoint, after half the new bytes.
     let f = Fixture::new();
     let (own_pid, own_start) = adopter(&f);
     let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
@@ -378,10 +378,10 @@ fn an_adopt_killed_mid_rewrite_of_the_dead_sidecar_loses_none_of_its_other_recor
 
 #[test]
 fn an_adopt_killed_mid_landing_is_retried_and_restore_finds_the_worker() {
-    // A landing cut off after a
-    // prefix of the record must not leave an unterminated line the retry's
-    // record merges into, or the retry removes the only readable copy from
-    // the dead sidecar and the worker is in neither file.
+    // A landing cut off after a prefix of the record must not leave an
+    // unterminated line the retry's record merges into, or the retry
+    // removes the only readable copy from the dead sidecar and the worker
+    // is in neither file.
     let f = Fixture::new();
     let (own_pid, own_start) = adopter(&f);
     let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);

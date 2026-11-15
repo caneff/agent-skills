@@ -1,13 +1,14 @@
-"""Tests for `drain`. Seam: the command line, `drain.py [--once]
-[--max n] [--bundle-max k] [--anchor n] [--repo path]`, run as a subprocess
-against a real git repo with a bare origin, a fake `gh` (a JSON state file), a
-stub `claude` that answers the bundle chooser, a stub `implement-dispatch` that
-claims the bundle and builds as the worker would (commit, push, PR), a stub
-`herdr` that reports the worker's status, and a stub `merge-cleanup`. Each case
-is a queue in, labels / merges / summary out. `HOME` and the global git config
-are the test's own, so no case reads the real ones. A last group tests the wait
-on a worker in-process, since a three-hour clock has no command-line witness,
-and one `excerpt` case, since the fake `gh` cannot offer a natively unblocked empty ticket.
+"""Tests for `drain`. Seam: the command line, `drain.py [--once] [--max n]
+[--bundle-max k] [--anchor n] [--repo path]`, run as a subprocess against a real
+git repo with a bare origin, a fake `gh` (a JSON state file), a stub `claude`
+that answers the bundle chooser, a stub `implement-dispatch` that claims the
+bundle and builds as the worker would (commit, push, PR), a stub `herdr` that
+reports the worker's status, and a stub `merge-cleanup`. Each case is a queue
+in, labels / merges / summary out. `HOME` and the global git config are the
+test's own, so no case reads the real ones. A last group tests the wait on a
+worker in-process, since a three-hour clock has no command-line witness, and one
+`excerpt` case, since the fake `gh` cannot offer a natively unblocked empty
+ticket.
 """
 import json
 import os
@@ -412,9 +413,10 @@ class Sandbox:
         return [b for i, b in self.state()["comments"] if i == str(n) and "could not land" in b]
 
     def spec_state(self, slices=(2, 3), extra=None):
-        """A spec parent in the `spec` bucket is a bundle in its own right: drain starts
-        it with `implement-dispatch --spec` and merges the integration PR its run reports. The
-        stub dispatch claims `SPEC_SLICES` as the spec run would and its PR closes them with the spec."""
+        """A spec parent in the `spec` bucket is a bundle in its own right:
+        drain starts it with `implement-dispatch --spec` and merges the
+        integration PR its run reports. The stub dispatch claims `SPEC_SLICES`
+        as the spec run would and its PR closes them with the spec."""
         self.write_state({1: SPEC, **{n: {"parent": 1} for n in slices}, **(extra or {})})
 
 
@@ -1219,8 +1221,8 @@ def test_anchor_that_is_not_ready_or_is_blocked_is_refused_before_any_work(sb):
 
 
 def test_a_ready_slice_is_never_the_anchor_and_never_joins_a_bundle(sb):
-    # A slice is built inside its spec run only, even
-    # one older than every lone ticket and one the chooser asks for.
+    # A slice is built inside its spec run only, even one older than every
+    # lone ticket and one the chooser asks for.
     spec = {"labels": ["spec"], "body": "the spec"}
     sb.write_state({1: {"parent": 9}, 2: {}, 3: {"parent": 9}, 4: {}, 9: spec})
     r = sb.drain("--once", env={"TAKE": "3"})

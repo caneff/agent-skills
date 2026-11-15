@@ -1,6 +1,6 @@
-"""The audit record's body: what `driver.py multi` files as one issue
-per repo, built from facts the sweep left on disk. No model writes or merges
-any of it; this module only formats and splits.
+"""The audit record's body: what `driver.py multi` files as one issue per repo,
+built from facts the sweep left on disk. No model writes or merges any of it;
+this module only formats and splits.
 
 `build` returns the issue body followed by the comments that continue it. Every
 chunk is at most GitHub's 65,536-character limit, a finding is never cut in two

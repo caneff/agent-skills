@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Pass one of docstring-coverage: parse ruff D + interrogate text into findings rows.
 
-ruff D1xx is JSON-native; interrogate has no JSON
-output — its text summary is the stable contract, exactly like vulture's text
-was for dead-code. `parse_coverage` pulls one finding row per ruff D1xx hit
-(private and already-documented symbols are naturally absent from that
-output — ruff's own rule semantics do the filtering, no hand-filter here) and
-scrapes interrogate's overall coverage percentage onto every row's
-`extra.coverage`. It never judges document vs skip — that's the judgment pass
-(SKILL.md) reading these rows and re-bucketing them.
+ruff D1xx is JSON-native; interrogate has no JSON output — its text summary
+is the stable contract, exactly like vulture's text was for dead-code.
+`parse_coverage` pulls one finding row per ruff D1xx hit (private and
+already-documented symbols are naturally absent from that output — ruff's
+own rule semantics do the filtering, no hand-filter here) and scrapes
+interrogate's overall coverage percentage onto every row's `extra.coverage`.
+It never judges document vs skip — that's the judgment pass (SKILL.md)
+reading these rows and re-bucketing them.
 """
 
 import json

@@ -3,8 +3,8 @@
 This is the end-to-end test: it drives the driver, the half of the skill that posts, through every
 acceptance criterion it carries, and `bash tests/all.sh` runs it. WSL `node` runs the driver against a
 headless Chromium, as Windows `node.exe` runs it against the stream browser in real use. Chromium loads a
-fake LMD: the saved copies of the real upload and submit forms (`fixtures/`), served by a local
-HTTP server that records every request and form it gets and answers with pages carrying the ids. Each
+fake LMD: the saved copies of the real upload and submit forms (`fixtures/`), served by a local HTTP
+server that records every request and form it gets and answers with pages carrying the ids. Each
 field the driver must set starts in the fake's forms at the value it must not send, so a field the
 driver leaves alone shows in what the fake receives. Chromium is Playwright's headless shell, found in
 Playwright's browser cache under the user's home directory as `node` is found on PATH: a tool the
@@ -150,8 +150,8 @@ assert len(UPLOAD_FORM.findall(UPLOAD_PAGE)) == 1
 
 def _upload_page(rows, form=True):
     """The upload fixture with `rows` (newest first, `(id, name)`) above its two made-up entries; without
-    its upload form when `form` is false, as live LMD serves /Dateien/ right after an upload (seen on live LMD for
-    Check-In: the reload showed only the file list)."""
+    its upload form when `form` is false, as live LMD serves /Dateien/ right after an upload (seen on
+    live LMD for Check-In: the reload showed only the file list)."""
     html = "".join(
         f'<tr><td><a href="/Dateien/index.php?id={i}">img</a></td><td>'
         f'<span class="upload_list_gross_name"><a href="/Dateien/index.php?id={i}">{n}</a></span><br>'

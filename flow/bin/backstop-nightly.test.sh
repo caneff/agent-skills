@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Contract test for bin/backstop-nightly: it runs the backstop once per
-# repo in the list file, and a missing, unreadable or empty list fails loudly
-# instead of running zero repos. backstop.py is a recording stub.
+# Contract test for bin/backstop-nightly: it runs the backstop once per repo in
+# the list file, and a missing, unreadable or empty list fails loudly instead
+# of running zero repos. backstop.py is a recording stub.
 # Run: bash flow/bin/backstop-nightly.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

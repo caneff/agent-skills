@@ -801,8 +801,8 @@ def test_a_lock_someone_else_holds_times_out_as_a_refusal(cache, cli):
 def test_a_malformed_environment_value_is_a_refusal_not_a_traceback(cache, cli, name, value):
     # Malformed persisted state must not escape the clean-refusal path; an
     # unguarded `float()` on an inherited env value is the same contract with
-    # a new surface. A bad value inherited from a parent shell
-    # must not turn a restart recovery into a stack trace.
+    # a new surface. A bad value inherited from a parent shell must not turn
+    # a restart recovery into a stack trace.
     cli("start", "--repo", REPO, "run-1", "--slots", "2")
     got = subprocess.run(
         [sys.executable, RUNFILE, "clump", "run-1", "--tickets", "901",
@@ -888,8 +888,9 @@ def test_a_job_must_name_a_clump_of_this_run(cache):
 
 
 def test_a_run_file_written_before_jobs_existed_still_reads(cache):
-    """The first run files have no `job` key. A controller resuming one of those
-    must get its run back, not a refusal about a field that did not exist."""
+    """The first run files have no `job` key. A controller resuming one of
+    those must get its run back, not a refusal about a field that did not
+    exist."""
     runfile.start("r-old", 2, "dc", cache, repo=REPO)
     runfile.clump("r-old", [401], "/w/401", "sm-401", cache)
     drop_job("r-old", cache, 401)
@@ -996,7 +997,7 @@ def test_the_cli_records_pr_up_and_shows_it(cli):
 def test_a_cleared_pr_up_makes_a_done_pane_stalled_again(cache, cli):
     """The controller clears the record when it hands findings back, since
     the PR stays open through a fix round: a worker that then stops mid-fix
-    must read `stalled`, not `done` (Codex gate)."""
+    must read `stalled`, not `done`."""
     import loop
     assert cli("start", "--repo", REPO, "r-pr7", "--slots", "2").returncode == 0
     assert cli("clump", "r-pr7", "--tickets", "1095", "--workspace",
@@ -1056,8 +1057,8 @@ def test_read_dispositions_reads_the_three_outcomes(sidecar_file):
                                      "mystery", None])
 def test_read_dispositions_refuses_a_removed_or_unknown_outcome_by_file_and_line(
         sidecar_file, outcome):
-    # `leftover`, `filed` and `handed-back` are gone; a reader that
-    # skipped them would count low and exit clean.
+    # `leftover`, `filed` and `handed-back` are gone; a reader that skipped
+    # them would count low and exit clean.
     sidecar = sidecar_file('{"id": "S1", "outcome": "fixed", "sha": "a"}',
                            json.dumps({"id": "S2", "outcome": outcome}))
     with pytest.raises(runfile.RunFileError) as exc:

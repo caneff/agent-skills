@@ -4,11 +4,11 @@ reach Chris.
 
 The check compares the spec's stated decisions against the code. Run without
 the spec's **own ticket list**, it flags a decision the code has not caught up
-with yet as CONTRADICTED — which on one earlier spec run happened twice on one slice,
-both times describing exactly the gap a prefactor slice of that same spec
-existed to close. That is the spec correctly describing a future state, and
-every spec with a prefactor slice generates it, into the one channel that
-reaches Chris.
+with yet as CONTRADICTED — which on one earlier spec run happened twice on
+one slice, both times describing exactly the gap a prefactor slice of that
+same spec existed to close. That is the spec correctly describing a future
+state, and every spec with a prefactor slice generates it, into the one
+channel that reaches Chris.
 
 So a decision the code does not implement, where a ticket of this spec builds
 it, is **not yet built**: a line in the exploration summary. Only "the code

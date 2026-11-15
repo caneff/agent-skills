@@ -1,6 +1,7 @@
-"""The Codex usage preflight: `codex-usage-gate.py` reads the usage
-cache and answers with an exit status a controller can branch on — 0 proceed,
-20 capped (skip, no run), 30 unknown (skip, no run), 40 under the size threshold.
+"""The Codex usage preflight: `codex-usage-gate.py` reads the usage cache
+and answers with an exit status a controller can branch on — 0 proceed, 20
+capped (skip, no run), 30 unknown (skip, no run), 40 under the size
+threshold.
 
 Every run gets `HOME` set to its temporary directory, so the kill-switch file
 (#1354) on the real box never reaches a test.
@@ -131,7 +132,8 @@ def test_capped(newdir):
     status, out = run(newdir, cache(100, resets=time.time() + 5 * DAY))
     assert_gate((status, out), 20, "100%")
     # A PR gated at the cap answers the ceiling line, never a line of its own: the audit reads only
-    # `ceiling` skip rows, so a cap-worded line would leave that PR out of the audit for good.
+    # `ceiling` skip rows, so a cap-worded line would leave that PR out of
+    # the audit for good.
     assert "reserve ceiling 70%" in out and "capped" not in out, out
     assert "resets" in out and time.strftime("%Y-%m-%d", time.localtime(time.time() + 5 * DAY)) in out, out
 
@@ -186,8 +188,9 @@ def test_refresh_returns_nothing(newdir):
     assert after == stale, f"a failed refresh must leave the cache alone: {after}"
 
 
-# `--percent` prints the worst window's percentage and reset time from a live read,
-# never the cache: a cached 10% must not stand in for the 12% the pass just spent.
+# `--percent` prints the worst window's percentage and reset time from a
+# live read, never the cache: a cached 10% must not stand in for the 12%
+# the pass just spent.
 
 
 def test_percent_reads_live_not_the_cache(newdir):
@@ -233,8 +236,8 @@ def test_percent_names_the_cause_on_stderr_and_keeps_stdout(newdir):
     assert "codex usage unknown: FileNotFoundError:" in p.stderr, p.stderr
 
 
-# The kill switch: `~/.config/agent-skills/codex-reviews-off`, any content, turns the
-# gate to CAPPED before any cache read or live fetch.
+# The kill switch: `~/.config/agent-skills/codex-reviews-off`, any content,
+# turns the gate to CAPPED before any cache read or live fetch.
 
 
 def run_switch(newdir, content, *args):
@@ -287,9 +290,10 @@ def test_switch_reads_no_usage(newdir):
     assert not os.path.exists(os.path.join(env["HOME"], "codex-called")), "the switch still read usage"
 
 
-# The size check: `--base <ref> --tickets <n>...` makes the gate measure the PR branch's
-# churn against <ref> (added plus deleted lines outside tests and Markdown) and answer 40 when it
-# is under SIZE_THRESHOLD, before any usage read. A `needs-codex` label on any ticket bypasses it.
+# The size check: `--base <ref> --tickets <n>...` makes the gate measure
+# the PR branch's churn against <ref> (added plus deleted lines outside
+# tests and Markdown) and answer 40 when it is under SIZE_THRESHOLD, before
+# any usage read. A `needs-codex` label on any ticket bypasses it.
 
 
 def write_lines(root, rel, count):
@@ -359,8 +363,8 @@ def test_size_at_threshold(newdir):
     assert_gate(run_size(newdir, {"a.py": 300}), 0, "5%")
 
 
-# A proceed says why it proceeded: the churn that passed the threshold, or the label
-# that forced a small PR on, with the churn it overrode.
+# A proceed says why it proceeded: the churn that passed the threshold, or
+# the label that forced a small PR on, with the churn it overrode.
 def test_proceed_names_churn(newdir):
     assert_gate(run_size(newdir, {"a.py": 300}), 0, "churn 300 >= 300")
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Regression test for the shift-2 hang: a value-taking flag as the
-# final argument left `shift 2` with only one argument to consume, so it
+# Regression test for the shift-2 hang: a value-taking flag as the final
+# argument left `shift 2` with only one argument to consume, so it
 # shifted nothing and the parse loop spun forever. Each such flag is run
 # alone, last, under a timeout — a timeout exit (124) is the hang, and any
 # exit other than a clean 0 fails the case: a run that never actually

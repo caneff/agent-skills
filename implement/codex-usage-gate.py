@@ -12,8 +12,8 @@ One line on stdout, and an exit status the caller branches on:
   0   proceed — usage is under RESERVE_PERCENT (under 100% with `--audit`); a PR's
       line ends with why: `churn <n> >= <threshold>` or `needs-codex label forced
       it, churn <n> < <threshold>`
-  20  capped — usage is at or above RESERVE_PERCENT (100% included, so
-      the weekly audit reads the skip), at 100% under `--audit`, or the
+  20  capped — usage is at or above RESERVE_PERCENT (100% included, so the
+      weekly audit reads the skip), at 100% under `--audit`, or the
       kill-switch file is present; launch nothing, write no duration row
   30  unknown — no fresh, well-formed reading; launch nothing
   40  under the size threshold — a PR pass only; launch nothing

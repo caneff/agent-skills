@@ -1,8 +1,8 @@
 """Tests for the include-closure clumper. Two seams, both named on the
 ticket: `resolve_closure(root, files)` — the set of files a change to `files`
-regenerates — and `clumps(root, candidates)` — one clump per candidate,
-each carrying its closure for `loop.py dispatch`'s
-hold, plus the mode announcement the run's opening report carries.
+regenerates — and `clumps(root, candidates)` — one clump per candidate, each
+carrying its closure for `loop.py dispatch`'s hold, plus the mode
+announcement the run's opening report carries.
 
 Every case is a fixture repo written under pytest's `tmp_path`: a declaration
 in `AGENTS.md` and a few files that include each other. Nothing here runs a
@@ -179,8 +179,8 @@ def test_a_candidate_colliding_with_nothing_clumps_alone(repo):
     assert numbers(got) == [[451], [501]], got
 
 
-# A real run in small. That repo declares None, so a closure is
-# a candidate's own files; each of five candidates names its own file and the
+# A real run in small. That repo declares None, so a closure is a
+# candidate's own files; each of five candidates names its own file and the
 # same hub (`implement/SKILL.md` there).
 NONE_DECLARED = "## Include closure\n\nNone \u2014 nothing here is generated.\n"
 HUB = {"hub.md": "x\n", **{f"c{n}/own.md": "x\n" for n in range(1, 6)}}
@@ -460,10 +460,10 @@ def test_a_triple_backtick_in_source_does_not_hide_the_directives_after_it(repo)
 
 
 def test_an_indented_directive_in_a_doc_is_an_example_not_an_edge(repo):
-    # An indented block is a code block by the same
-    # CommonMark rule `declaration_section` now applies, and the same doc
-    # explaining the grammar is exactly as likely to show the include line
-    # indented as fenced.
+    # An indented block is a code block by the same CommonMark rule
+    # `declaration_section` now applies, and the same doc explaining the
+    # grammar is exactly as likely to show the include line indented as
+    # fenced.
     root = repo({"_shared/line-kind.js": "x\n",
                  "docs/guide.md": "example:\n\n    #include ../_shared/line-kind.js\n"})
     got = C.resolve_closure(root, ["_shared/line-kind.js"])
@@ -698,8 +698,8 @@ def test_a_callers_git_environment_does_not_redirect_the_scan(repo, monkeypatch)
 
 def test_a_callers_git_config_environment_still_reaches_the_scan_1254(repo, tmp_path,
                                                                       monkeypatch):
-    # GIT_CONFIG_* repoints nothing, and stripping it drops settings
-    # the scan needs (a `safe.directory` passed this way). An excludesFile
+    # GIT_CONFIG_* repoints nothing, and stripping it drops settings the
+    # scan needs (a `safe.directory` passed this way). An excludesFile
     # passed the same way shows it arrived.
     root = repo(SHARED)
     ignores = tmp_path / "ignores"
@@ -720,8 +720,8 @@ def test_an_unreadable_gitignored_directory_does_not_break_the_resolve(repo):
 
 
 def test_an_unreadable_skipped_directory_does_not_break_the_resolve_1254(repo):
-    # The .gitignore case above also passes a design that filters
-    # git's list afterwards with no --exclude, because git never opens an
+    # The .gitignore case above also passes a design that filters git's
+    # list afterwards with no --exclude, because git never opens an
     # ignored directory. A SKIP_DIRS directory no .gitignore names is opened
     # unless the --exclude arguments keep git out of it.
     root = repo({**SHARED, "node_modules/pkg/index.js": "x\n"})

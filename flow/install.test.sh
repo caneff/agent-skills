@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Contract test for install.sh's hook handling: run it from a scratch clone
 # with HOME pointed at a scratch dir, so nothing live is touched. Asserts the
-# retired pre-push symlink (tests/all.sh) is removed and never re-created
-# — the merge gate (git config land.testcmd) is where tests/all.sh runs.
+# retired pre-push symlink (tests/all.sh) is removed and never re-created —
+# the merge gate (git config land.testcmd) is where tests/all.sh runs.
 # Run: bash flow/install.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,8 +95,8 @@ if [ -L "$tmp/home/.claude/hooks/refresh-landed.sh" ]; then
 else
   echo "FAIL refresh-landed.sh not linked under the scratch HOME"; fails=1
 fi
-# claude/settings.json is symlinked, not copy-only: a PR that edits
-# the repo file must take effect live without a backup-sync round trip.
+# claude/settings.json is symlinked, not copy-only: a PR that edits the repo
+# file must take effect live without a backup-sync round trip.
 if [ -L "$tmp/home/.claude/settings.json" ] \
    && [ "$(readlink "$tmp/home/.claude/settings.json")" = "$repo/flow/claude/settings.json" ]; then
   echo "PASS claude/settings.json symlinked under the scratch HOME"
@@ -139,9 +139,9 @@ else
   echo "FAIL claude/hooks/worker-send-alert.sh not linked under the scratch HOME"; fails=1
 fi
 # worker-stop-alert.sh sources this file by BASH_SOURCE-relative path, which
-# resolves against the installed symlink's own directory (~/.claude/hooks),
-# not the repo — so it must be linked there too, or the hook silently fails
-# to resolve any controller.
+# resolves against the installed symlink's own directory (~/.claude/hooks), not
+# the repo — so it must be linked there too, or the hook silently fails to
+# resolve any controller.
 if [ -L "$tmp/home/.claude/hooks/worker-alert-lib.sh" ]; then
   echo "PASS the shared worker-alert lib linked under the scratch HOME"
 else
@@ -200,14 +200,14 @@ else
   echo "FAIL backstop.service PATH '$unit_path' lacks:$missing"; fails=1
 fi
 
-# herdr-toast-install is routed from install.sh, but this scratch repo
-# sits under /tmp, so the toast installer refuses (by design) — the refusal
-# must be reported, not swallowed, and must not abort the rest of the install.
-# Both the installer's own refusal text and install.sh's own "skipped" line
-# must show up: either alone could be produced by the installer not running at
-# all (a missing/renamed bin/herdr-toast-install exits 127 with no "refusing:"
-# line, and install.sh would still print "skipped" for it if only that string
-# were checked).
+# herdr-toast-install is routed from install.sh, but this scratch repo sits
+# under /tmp, so the toast installer refuses (by design) — the refusal must be
+# reported, not swallowed, and must not abort the rest of the install. Both the
+# installer's own refusal text and install.sh's own "skipped" line must show
+# up: either alone could be produced by the installer not running at all (a
+# missing/renamed bin/herdr-toast-install exits 127 with no "refusing:" line,
+# and install.sh would still print "skipped" for it if only that string were
+# checked).
 if printf '%s' "$out" | grep -q 'herdr-toast-install skipped' \
    && printf '%s' "$out" | grep -q '^refusing: .*is under /tmp'; then
   echo "PASS a refused herdr-toast-install is reported"
@@ -234,8 +234,8 @@ else
 fi
 
 # A non-refusal failure of herdr-toast-install must not be swallowed as a
-# benign skip: install.sh still runs the rest of the install, but exits
-# nonzero at the end and names the toast step.
+# benign skip: install.sh still runs the rest of the install, but exits nonzero
+# at the end and names the toast step.
 fail="$tmp/fail"
 scratch_repo "$fail"
 cat > "$fail/flow/bin/herdr-toast-install" <<'STUB'
@@ -369,9 +369,9 @@ else
   echo "FAIL the existing .pre-flow backup was clobbered, the second file lost, or the refusal was fatal (rc=$rc): $link_out"; fails=1
 fi
 
-# The interop repoint: ~/.bashrc is in no repo, so install.sh carries the
-# line a new herdr pane shell needs, keeps a backup of what it edits, and adds
-# the line once. A real interactive bash reading that file is the proof.
+# The interop repoint: ~/.bashrc is in no repo, so install.sh carries the line
+# a new herdr pane shell needs, keeps a backup of what it edits, and adds the
+# line once. A real interactive bash reading that file is the proof.
 br="$tmp/br"
 scratch_repo "$br"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$br/flow/lane-install.sh"

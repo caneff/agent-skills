@@ -9,22 +9,23 @@ has() { # has <list: allow|ask> <rule>
   then echo "PASS: permissions.$1 holds $2"
   else echo "FAIL: permissions.$1 has no $2"; fails=1; fi
 }
-lacks() {
+lacks() { # lacks <list: allow|ask> <rule>
   if jq -e --arg l "$1" --arg r "$2" '.permissions[$l] | index($r)' "$settings" >/dev/null 2>&1
   then echo "FAIL: permissions.$1 still holds $2"; fails=1
   else echo "PASS: permissions.$1 dropped $2"; fi
 }
 
 # The live e2e lock, narrowed by Chris's ruling: only an e2e.sh run carrying
-# --main-monitor is an `ask` rule, since that run takes over Chris's monitor; a
-# virtual-monitor run needs no go. Anchored at the start of a subcommand: a leading `*`
-# matched `e2e.sh` and `--main-monitor` anywhere in a command, so a heredoc
-# quoting a repo's AGENTS.md was denied in a `-p` run. Asserted by behaviour:
-# samples are matched against permissions.ask the way the harness matches a
-# Bash rule (code.claude.com/docs/en/permissions: `*` = any text, the rule must
-# match the whole subcommand). This models one subcommand; it does not split
-# compound commands on `&&`, `;`, `|` or newlines as the harness does first,
-# so a sample is one already-split subcommand (the heredoc is one command).
+# --main-monitor is an `ask` rule, since that run takes over Chris's monitor;
+# a virtual-monitor run needs no go. Anchored at the start of a subcommand: a
+# leading `*` matched `e2e.sh` and `--main-monitor` anywhere in a command, so
+# a heredoc quoting a repo's AGENTS.md was denied in a `-p` run. Asserted by
+# behaviour: samples are matched against permissions.ask the way the harness
+# matches a Bash rule (code.claude.com/docs/en/permissions: `*` = any text,
+# the rule must match the whole subcommand). This models one subcommand; it
+# does not split compound commands on `&&`, `;`, `|` or newlines as the
+# harness does first, so a sample is one already-split subcommand (the heredoc
+# is one command).
 e2e_check=$(jq -c '.permissions.ask' "$settings" 2>&1 | python3 -c '
 import fnmatch, json, sys
 ask = json.loads(sys.stdin.read())

@@ -40,10 +40,10 @@ def _parse_answer_key(path):
 
 
 def test_matches_answer_key_md_table():
-    """Running the script over the fixture JSON reproduces the answer
-    key, parsed live from fixtures/sample_project/answer-key.md (not
-    retyped) so the doc and the code can't silently drift apart. The table's
-    row order is also the doc's ranking order, so this doubles as the
+    """Running the script over the fixture JSON reproduces the answer key,
+    parsed live from fixtures/sample_project/answer-key.md (not retyped)
+    so the doc and the code can't silently drift apart. The table's row
+    order is also the doc's ranking order, so this doubles as the
     ranking-order assertion."""
     radon_json, coverage_json = _load_fixture()
     rows = audit.normalize(radon_json, coverage_json)
@@ -132,11 +132,11 @@ def test_cli_scored_count_counts_each_class_method_once(tmp_path):
 
 
 def test_line1_function_does_not_inherit_module_summary():
-    """coverage.py's `""` module-scope entry is always
-    start_line 1 and is emitted last in `functions`. A real function that
-    also starts on line 1 must join on its own summary, not the module's --
-    else a 0%-covered function silently reads as 100% covered and its
-    CRAP score vanishes from the findings.
+    """coverage.py's `""` module-scope entry is always start_line 1 and is
+    emitted last in `functions`. A real function that also starts on line
+    1 must join on its own summary, not the module's -- else a 0%-covered
+    function silently reads as 100% covered and its CRAP score vanishes
+    from the findings.
 
     The synthetic JSON below only varies the coverage percentages; its
     *shape* is not assumed, it is first checked against the committed real
@@ -383,8 +383,8 @@ def test_normalize_ts_reproduces_captured_tool_crap_via_unchanged_score():
 
 
 def test_normalize_ts_attributes_the_arrow_function():
-    """The fixture's arrow function is attributed a row at all, with
-    the right file/line/complexity -- normalize_ts must not silently drop
+    """The fixture's arrow function is attributed a row at all, with the
+    right file/line/complexity -- normalize_ts must not silently drop
     arrow-function methods the way a naive declaration-only walk would."""
     report = _load_ts_fixture()
     rows = audit.normalize_ts(report)
@@ -470,8 +470,8 @@ def test_normalize_ts_structural_na_counts_as_fully_covered_both_axes():
 
 
 def test_ts_findings_validate_against_findings_schema():
-    """score() applied to normalize_ts's rows produces findings-schema-valid
-    rows, same as the Python path."""
+    """score() applied to normalize_ts's rows produces
+    findings-schema-valid rows, same as the Python path."""
     report = _load_ts_fixture()
     rows = audit.normalize_ts(report)
     result = audit.score(rows)
@@ -492,9 +492,9 @@ def _assert_axis_nulled(row, measured_axis, measured_value):
 
 
 def test_ts_findings_never_report_the_synthetic_unmeasured_axis():
-    """normalize_ts fills the non-dominant axis with a synthetic
-    100.0 so score()'s min() ignores it -- that number must never leak into
-    a finding's extra as if it were measured."""
+    """normalize_ts fills the non-dominant axis with a synthetic 100.0 so
+    score()'s min() ignores it -- that number must never leak into a
+    finding's extra as if it were measured."""
     report = _load_ts_fixture()
     rows = audit.normalize_ts(report)
     result = audit.score(rows)

@@ -11,11 +11,11 @@ SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
 
 # commit_staged <message> — commit what is staged, with the checkout's own
 # identity (no `-c user.*` override: the commit-identity guard refuses one).
-# Returns 0 when it committed, NOTHING_STAGED when nothing was staged,
-# and git's own status when git refused, with its stderr left visible. A
-# refusal must never read as "nothing to commit". An unborn HEAD (a refused
-# baseline commit) is compared against the empty tree, so the next run can
-# still make the root commit.
+# Returns 0 when it committed, NOTHING_STAGED when nothing was staged, and
+# git's own status when git refused, with its stderr left visible. A refusal
+# must never read as "nothing to commit". An unborn HEAD (a refused baseline
+# commit) is compared against the empty tree, so the next run can still make
+# the root commit.
 NOTHING_STAGED=3
 commit_staged(){
   local rc=0 ref=HEAD

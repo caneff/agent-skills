@@ -1,6 +1,6 @@
 """Tests for mutation-audit's parsers, candidate selection and `audit.py` CLI.
 
-One pytest function per behaviour, so a failure names the behaviour that broke
+One pytest function per behaviour, so a failure names the behaviour that broke.
 These were `audit.py`'s `_selfcheck` checks.
 """
 import contextlib

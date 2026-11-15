@@ -2,18 +2,19 @@
 """The audit sweep driver.
 
 Runs each guarded audit as its own `claude -p "/name"` process (several audit
-skills carry `disable-model-invocation`, so only an explicit `-p "/name"` slash
-invocation gets past the guard — a subagent fan-out would silently lose them), collects
-the report folders under one `collection/` dir, and builds `index.html`.
+skills carry `disable-model-invocation`, so only an explicit `-p "/name"`
+slash invocation gets past the guard — a subagent fan-out would silently
+lose them), collects the report folders under one `collection/` dir, and
+builds `index.html`.
 
 A sweep is three steps: plan (ask the staleness cache what still needs a run),
 execute (the only step that spawns audits), collect (assemble the collection
 and render the index). The `index` mode calls collect alone.
 
-Environment: `SWEEP_JOBS` caps how many audits a sweep runs at once
-after the smoke test (a positive integer, default 4; anything else exits 2
-before any audit starts). `MUTATION_JOBS` does the same for the
-modules of a `mutation` sweep (default 4).
+Environment: `SWEEP_JOBS` caps how many audits a sweep runs at once after
+the smoke test (a positive integer, default 4; anything else exits 2 before
+any audit starts). `MUTATION_JOBS` does the same for the modules of a
+`mutation` sweep (default 4).
 """
 import argparse
 import collections
@@ -366,8 +367,8 @@ def mutation_answer_failure(manifests_dir, name):
 
 def record_inconclusive(manifests_dir, name, collection_dir):
     """A manifest carrying `inconclusive` becomes `inconclusive.txt` in the
-    module's collected dir, the file the mutation sub-index reads: a
-    module that measured nothing is listed as such, never as clean."""
+    module's collected dir, the file the mutation sub-index reads: a module
+    that measured nothing is listed as such, never as clean."""
     data = read_manifest(manifests_dir, name)
     if "inconclusive" in data:
         with open(inconclusive_path(collection_dir, name), "w", encoding="utf-8") as f:
@@ -428,8 +429,8 @@ def collected_not_applicable(collection, name):
 def run_one(name, repo, outlogs, manifests_dir, not_applicable=None):
     """Run one audit. Returns None on success, else the failure reason —
     a nonzero `claude` exit, no manifest or a manifest naming a missing
-    report; `done` prints only on success. With
-    `not_applicable` (a language, from the plan) no `claude` starts."""
+    report; `done` prints only on success. With `not_applicable` (a
+    language, from the plan) no `claude` starts."""
     print(f"[{name}] starting")
     log_path = os.path.join(outlogs, f"{name}.log")
     manifest = manifest_path_for(manifests_dir, name)
@@ -460,8 +461,8 @@ _INDEX_CSS = """main { --vt-measure: 1080px; }
 
 @dataclasses.dataclass
 class IndexModel:
-    """Everything the sweep index renders — one value the collect step
-    fills in, so the renderer takes a model instead of nine positionals."""
+    """Everything the sweep index renders — one value the collect step fills
+    in, so the renderer takes a model instead of nine positionals."""
 
     collection: str
     repo: str
@@ -583,8 +584,8 @@ RUN_TTL_DAYS = 3
 
 @dataclasses.dataclass(frozen=True)
 class RunDir:
-    """The run folder's layout, made once for every mode. One owner
-    for: resolving `--out` or a fresh `run-<timestamp>` under the cache base,
+    """The run folder's layout, made once for every mode. One owner for:
+    resolving `--out` or a fresh `run-<timestamp>` under the cache base,
     pruning runs past the TTL, creating the sub-folders, and pointing TMPDIR
     at the run so every audit subprocess writes inside it."""
 
@@ -622,9 +623,9 @@ class RunDir:
 
 @dataclasses.dataclass
 class Plan:
-    """What the sweep will do before it does anything: which audits
-    run, which reuse a cached report, and the note the index prints for
-    each skip. Deciding this spawns no audit."""
+    """What the sweep will do before it does anything: which audits run,
+    which reuse a cached report, and the note the index prints for each skip.
+    Deciding this spawns no audit."""
 
     to_run: list = dataclasses.field(default_factory=list)
     reused: dict = dataclasses.field(default_factory=dict)
@@ -878,8 +879,8 @@ class SweepResult:
 def run_sweep(repo, out, only, short, force, key=None, standalone=True):
     """Plan, execute and collect one sweep. Standalone, it prints its index as
     `index:` and opens it; one repo of a `multi` pass prints `repo index:`
-    and opens nothing, since the pass's own page is its `index:`.
-    Returns what happened: the audit record is built from it."""
+    and opens nothing, since the pass's own page is its `index:`. Returns
+    what happened: the audit record is built from it."""
     repo = os.path.abspath(repo)
     selected = only if only is not None else (SHORT_SET if short else list(AUDIT_NAMES))
     jobs = sweep_jobs()  # before the run dir exists, as mutation_mode does
@@ -1436,8 +1437,8 @@ def mutation_jobs():
 
 
 def mutation_cost_estimate(n, jobs=1, timeout_s=None):
-    """The line printed before a whole-repo run: the module count and
-    the worst case. `audit.py` bounds each of its commands by
+    """The line printed before a whole-repo run: the module count and the
+    worst case. `audit.py` bounds each of its commands by
     `MUTATION_AUDIT_TIMEOUT` seconds and a mutmut module runs two (`run`, then
     `results`), so a module is at most twice that; `jobs` modules overlap."""
     if timeout_s is None:
@@ -1463,8 +1464,8 @@ def _prepass_ranker(repo):
 
 
 def mutation_mode(repo, modules, out, whole_repo=False):
-    """`whole_repo`: every candidate, no `MUTATION_MAX` cut and no
-    model prepass, so the order is the recency order alone."""
+    """`whole_repo`: every candidate, no `MUTATION_MAX` cut and no model
+    prepass, so the order is the recency order alone."""
     repo = os.path.abspath(repo)
 
     use_prepass = not whole_repo and os.environ.get("AUDITS_NO_SYNTH", "0") != "1"
@@ -1500,9 +1501,9 @@ def mutation_mode(repo, modules, out, whole_repo=False):
     print(f"collecting under: {collection}\n")
 
     notest_json = os.path.join(collection, "mutation-no-tests.json")
-    # A planning failure is a real "don't know", never a silent zero —
-    # the index must render this as could-not-determine, not as a repo with
-    # zero testless modules.
+    # A planning failure is a real "don't know", never a silent zero — the
+    # index must render this as could-not-determine, not as a repo with zero
+    # testless modules.
     data = ({"error": probe_error} if planned is None
             else {"no_tests": planned.no_tests, "total": planned.total})
     with open(notest_json, "w", encoding="utf-8") as f:
@@ -1556,8 +1557,7 @@ def _guarded_mutation_module(repo, module, run):
 def _run_mutation_module(repo, module, run):
     """Audit one module in its own worktree. Returns None on success, else
     the failure reason — a setup failure, a nonzero `claude` exit or no
-    manifest, the sweep's `run_one` rule; `done` prints only on
-    success."""
+    manifest, the sweep's `run_one` rule; `done` prints only on success."""
     slug = module_slug(module)
     collection = run.collection
     wt = os.path.join(run.worktrees, slug)

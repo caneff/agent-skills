@@ -8,10 +8,10 @@
 #   backup-sync.sh --restore  live <- repo   (write the snapshots onto this machine)
 #
 # --commit stages the manifest paths plus claude/settings.json (symlinked by
-# install.sh: a harness write lands straight in it, so it still needs
-# committing even though nothing here copies it), and nothing else — it never
-# sweeps an unrelated working-tree edit into its commit. Never exits nonzero
-# on a missing live file (a SessionStart hook must not break the session).
+# install.sh: a harness write lands straight in it, so it still needs committing
+# even though nothing here copies it), and nothing else — it never sweeps an
+# unrelated working-tree edit into its commit. Never exits nonzero on a missing
+# live file (a SessionStart hook must not break the session).
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

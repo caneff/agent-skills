@@ -1,6 +1,7 @@
-//! Typed `herdr agent list` and `herdr workspace list` output, plus the shared
-//! timeout bound for a plain herdr query — the two binaries that call herdr
-//! read that bound from here rather than each keeping their own copy.
+//! Typed `herdr agent list` and `herdr workspace list` output, plus the
+//! shared timeout bound for a plain herdr query — the two binaries that
+//! call herdr read that bound from here rather than each keeping their own
+//! copy.
 
 use serde::Deserialize;
 use std::time::Duration;

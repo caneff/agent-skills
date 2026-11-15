@@ -60,9 +60,9 @@ _NONE = re.compile(r"^[-*\s]*none[ \t]*([.,;:\u2014\u2013-]|$)", re.IGNORECASE)
 
 
 PATH_SLOT = "<path>"
-# The one directive that is not a template: a Python import names a
-# module, not a path, so the form is read by `python_edges` instead of matched
-# by `directive_pattern`.
+# The one directive that is not a template: a Python import names a module,
+# not a path, so the form is read by `python_edges` instead of matched by
+# `directive_pattern`.
 PYTHON_IMPORTS = "python imports"
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".claude"}
 MARKDOWN = {"md", "markdown"}
@@ -284,8 +284,8 @@ def read_text(path, limit=SCAN_LIMIT):
 
     Nothing is truncated. A directive past a cutoff read as absent is a
     missing edge, and a missing edge is two workers in the same files — the
-    cost an earlier spec run paid. A file past `limit` therefore fails the resolve rather
-    than being read in part and reported whole."""
+    cost an earlier spec run paid. A file past `limit` therefore fails the
+    resolve rather than being read in part and reported whole."""
     try:
         with open(path, "rb") as fh:
             raw = fh.read(limit + 1)

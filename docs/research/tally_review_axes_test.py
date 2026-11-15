@@ -1,9 +1,9 @@
 """Tests for the review-axis tally script. Seams: filename parsing,
 repo/round-kind folding, the round-1<->verify<->PR join (including the
-issue<->PR matcher),
-and the mechanical guards (missing cache dir, malformed override file,
-round-1 axis conflicts) — the scaffolding around the LLM classification
-pass, plain test_* functions under pytest, with `tmp_path` for the cache trees."""
+issue<->PR matcher), and the mechanical guards (missing cache dir,
+malformed override file, round-1 axis conflicts) — the scaffolding
+around the LLM classification pass, plain test_* functions under
+pytest, with `tmp_path` for the cache trees."""
 import json
 from pathlib import Path
 
@@ -82,8 +82,8 @@ def test_join_groups_round1_and_verify_reports_by_issue():
 
 
 def test_join_raises_on_a_round1_axis_conflict():
-    # If `agent-skills` and `skills` (folded to the same
-    # repo) ever produced a same-named axis report for the same issue, the
+    # If `agent-skills` and `skills` (folded to the same repo) ever
+    # produced a same-named axis report for the same issue, the
     # silently overwriting one with the other would lose data; that must
     # fail loudly instead.
     reports = [
@@ -156,8 +156,8 @@ def test_find_report_files_skips_any_scratch_prefixed_dir(tmp_path):
 
 
 def test_find_report_files_uses_the_relative_path_not_the_basename(tmp_path):
-    # Same-named dirs at different depths must not
-    # silently merge into one repo bucket.
+    # Same-named dirs at different depths must not silently merge into
+    # one repo bucket.
     root = tmp_path
     (root / "skills").mkdir()
     (root / "skills" / "review-standards-1.md").write_text("x")
@@ -210,8 +210,8 @@ def test_parses_a_valid_finding_line():
 
 
 def test_finding_line_rejects_malformed_json_without_raising():
-    # a partial write costs one line, not the file — the parser
-    # must return None, never raise, on a truncated or malformed line.
+    # a partial write costs one line, not the file — the parser must
+    # return None, never raise, on a truncated or malformed line.
     assert t.parse_finding_line("{not valid json") is None
 
 
@@ -247,8 +247,9 @@ def test_parses_a_valid_handed_back_disposition_line():
 
 
 def test_every_line_of_the_shared_sidecar_fixture_parses():
-    # The fixture is the one example of every outcome the worker writes; a line the
-    # tally cannot parse would be counted undisposed.
+    # The fixture is the one example of every outcome the worker
+    # writes; a line the tally cannot parse would be counted
+    # undisposed.
     fixture = SHARED_SIDECAR_FIXTURE
     lines = [ln for ln in fixture.read_text().splitlines() if ln.strip()]
     parsed = [t.parse_disposition_line(ln) for ln in lines]
@@ -257,7 +258,8 @@ def test_every_line_of_the_shared_sidecar_fixture_parses():
 
 
 def test_parses_a_moved_disposition_line_and_refuses_one_with_no_ticket_number():
-    # `moved` names the open ticket the finding was added to, an int like `filed`'s.
+    # `moved` names the open ticket the finding was added to, an int like
+    # `filed`'s.
     d = t.parse_disposition_line(json.dumps({"id": "C1", "outcome": "moved", "ticket": 1234}))
     assert d == t.Disposition(id="C1", outcome="moved", detail="1234")
     for bad in ("1234", None, [1]):
@@ -326,9 +328,9 @@ def test_disposition_line_rejects_a_string_ticket():
 
 
 def test_tally_sidecars_rejects_a_malformed_handed_back_command_as_undisposed(tmp_path):
-    # A list/dict/number `command` must be rejected as an unparseable line,
-    # which rolls the finding up as undisposed, not tallied as handed-back
-    # via str(detail).
+    # A list/dict/number `command` must be rejected as an unparseable
+    # line, which rolls the finding up as undisposed, not tallied as
+    # handed-back via str(detail).
     root = tmp_path
     (root / "skills").mkdir()
     (root / "skills" / "findings-standards-1.jsonl").write_text(
@@ -387,8 +389,8 @@ def test_tally_sidecars_rolls_findings_and_dispositions_into_a_table(tmp_path):
 
 
 def test_tally_sidecars_rolls_a_handed_back_disposition_into_the_table(tmp_path):
-    # A fourth outcome (handed-back) must not KeyError the
-    # seeded counts dict, and must not roll up as undisposed.
+    # A fourth outcome (handed-back) must not KeyError the seeded
+    # counts dict, and must not roll up as undisposed.
     root = tmp_path
     (root / "skills").mkdir()
     (root / "skills" / "findings-standards-855.jsonl").write_text(
@@ -428,8 +430,8 @@ def test_tally_sidecars_keys_a_disposition_to_its_own_repo_and_issue(tmp_path):
 
 def test_tally_sidecars_survives_one_malformed_line_in_a_real_file(tmp_path):
     # The file-level guarantee ("a partial write costs one line, not the
-    # file") needs a witness through tally_sidecars itself, not only through
-    # the line-parser functions.
+    # file") needs a witness through tally_sidecars itself, not only
+    # through the line-parser functions.
     root = tmp_path
     (root / "skills").mkdir()
     (root / "skills" / "findings-standards-1.jsonl").write_text("\n".join([
@@ -442,9 +444,9 @@ def test_tally_sidecars_survives_one_malformed_line_in_a_real_file(tmp_path):
 
 
 def test_tally_sidecars_skips_one_undecodable_file_without_losing_the_rest(tmp_path):
-    # A sidecar truncated mid multibyte character raises UnicodeDecodeError
-    # out of read_text(); that must cost this one file, not the entire tally
-    # and every other repo/axis's numbers.
+    # A sidecar truncated mid multibyte character raises
+    # UnicodeDecodeError out of read_text(); that must cost this one
+    # file, not the entire tally and every other repo/axis's numbers.
     root = tmp_path
     (root / "skills").mkdir()
     (root / "skills" / "findings-standards-1.jsonl").write_bytes(b"\xff\xfe" + b"garbage")
@@ -472,10 +474,9 @@ def test_tally_sidecars_raises_on_a_duplicate_finding_id_in_one_file(tmp_path):
 
 
 def test_tally_sidecars_raises_on_a_duplicate_id_across_the_repo_alias_fold(tmp_path):
-    # The same collision, reached via fold_repo —
-    # `agent-skills` and `skills` fold to one repo name, so a same-id
-    # finding for the same issue under both directory names must not
-    # silently erase one.
+    # The same collision, reached via fold_repo — `agent-skills` and
+    # `skills` fold to one repo name, so a same-id finding for the same
+    # issue under both directory names must not silently erase one.
     root = tmp_path
     (root / "skills").mkdir()
     (root / "agent-skills").mkdir()
@@ -507,7 +508,8 @@ def test_tally_sidecars_uses_the_filename_axis_over_a_mismatched_line_axis(tmp_p
 
 def test_tally_sidecars_warns_on_an_orphan_disposition(tmp_path, capsys):
     # A disposition whose id matches no finding must not vanish with no
-    # signal — the table would just show undisposed counts that don't add up to what the prose says was dispositioned.
+    # signal — the table would just show undisposed counts that don't
+    # add up to what the prose says was dispositioned.
     root = tmp_path
     (root / "skills").mkdir()
     (root / "skills" / "findings-standards-1.jsonl").write_text(
@@ -538,8 +540,8 @@ def test_tally_sidecars_does_not_warn_on_a_worker_written_sweep_leftover(tmp_pat
 
 
 def test_tally_sidecars_counts_an_over_engineering_cut_as_a_standards_finding(tmp_path):
-    # An OE-id finding and its leftover disposition tally exactly
-    # like an S-id one — nothing about the join keys on the id's prefix.
+    # An OE-id finding and its leftover disposition tally exactly like
+    # an S-id one — nothing about the join keys on the id's prefix.
     # (This is also the parse_finding_line witness for an OE id: the tally
     # only reaches "raised": 1 if the line parses.)
     root = tmp_path
@@ -559,8 +561,9 @@ def test_tally_sidecars_counts_an_over_engineering_cut_as_a_standards_finding(tm
 
 
 def test_tally_sidecars_counts_a_fixed_and_a_disputed_oe_id(tmp_path):
-    # All three outcomes ("fixed, disputed or leftover") are covered, not only leftover — the join is the same
-    # dict lookup regardless of outcome, but each is its own line here.
+    # All three outcomes ("fixed, disputed or leftover") are covered,
+    # not only leftover — the join is the same dict lookup regardless
+    # of outcome, but each is its own line here.
     root = tmp_path
     (root / "skills").mkdir()
     (root / "skills" / "findings-standards-1021.jsonl").write_text("\n".join((

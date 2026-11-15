@@ -4,14 +4,14 @@ seam is blind to, and the spec-level review. The text is a section for the
 spec's integration PR, or for the slice of a one-slice spec, never a
 ticket of its own.
 
-On an earlier spec run the closing ticket said "write one end-to-end test over
-the whole spec's acceptance criteria" and named no seam, so the closing
-worker stopped and asked. The seam that existed — a headless solver bundle —
-had already diverged from the live editor **inside that same spec**: a
-no-ring header verified green headless and broke 4x4 and 6x6 in the real app.
-Naming the seam is necessary and not sufficient; the worker needs its blind
-spot too, and one open of the real thing wherever the spec put a user-visible
-surface the seam cannot reach.
+On an earlier spec run the closing ticket said "write one end-to-end
+test over the whole spec's acceptance criteria" and named no seam, so
+the closing worker stopped and asked. The seam that existed — a headless
+solver bundle — had already diverged from the live editor **inside that
+same spec**: a no-ring header verified green headless and broke 4x4 and
+6x6 in the real app. Naming the seam is necessary and not sufficient;
+the worker needs its blind spot too, and one open of the real thing
+wherever the spec put a user-visible surface the seam cannot reach.
 
 The declaration grammar and the evidence: `references/closing-ticket.md`.
 """
@@ -54,8 +54,8 @@ def _continuation(raw, start, reachable):
     the item, up to a heading, a key line, or a line `reachable` (the indices
     outside a fence) does not hold. Under a list item, blank lines are
     skipped when the next line still continues it, so a loose item's
-    indented second paragraph is part of it, as in Markdown. Under a
-    key line that is no list item a blank line ends the value: what follows
+    indented second paragraph is part of it, as in Markdown. Under a key
+    line that is no list item a blank line ends the value: what follows
     indented is a code block, not a paragraph of it. A key line always ends
     the item, deeper or not, so a declaration nested under a parent bullet
     still reads as before. Read from the raw lines, not from `visible()`,
@@ -83,7 +83,8 @@ def declaration(text):
     """`{seam, blind to}` from a document's `## End-to-end seam` section, or
     `None` when it has no such section — silence, which is not a
     declaration. A value wrapped onto continuation lines is read whole
-    whole: a partial blind spot stated as the whole one is worse than none."""
+    whole: a partial blind spot stated as the whole one is worse than
+    none."""
     raw = (text or "").splitlines()
     lines = visible(raw)
     reachable = {index for index, _ in unfenced(raw)}
@@ -180,18 +181,18 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
     `origin/<default>...spec-<spec>`: the integration branch holds this spec's
     slices and merges of `<default>`, nothing else, so the range is the
     review's own. The merge-sha list and its cherry-pick procedure, which a
-    spec landing slice by slice on a shared `main` needed (one earlier spec's
-    range held ~17 unrelated commits), are gone.
+    spec landing slice by slice on a shared `main` needed (one earlier
+    spec's range held ~17 unrelated commits), are gone.
 
     A one-slice spec has no integration branch: its slice lands on
-    `<default>` with its own review wave, so `one_slice` makes a section for
-    that slice's body with no spec-level review.
+    `<default>` with its own review wave, so `one_slice` makes a section
+    for that slice's body with no spec-level review.
     """
     if surfaces is None:
-        # Not defaulted to none: the failure this check exists to stop was a
-        # user-visible surface nobody asked about. The exploration pass
-        # answers the question, with an empty list where the seam reaches
-        # everything.
+        # Not defaulted to none: the failure this check exists to stop
+        # was a user-visible surface nobody asked about. The exploration
+        # pass answers the question, with an empty list where the seam
+        # reaches everything.
         raise SeamError(
             "the closing check must answer whether the spec has a "
             "user-visible surface the seam cannot reach — pass the surfaces, "
