@@ -165,7 +165,6 @@ fn lock(sidecar: &Path) -> std::io::Result<std::fs::File> {
     Ok(f)
 }
 
-/// The sidecar's contents, or empty when there is no file yet.
 fn read_if_present(path: &Path) -> std::io::Result<String> {
     match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -316,7 +315,6 @@ fn adopt_lock_path(home: &Path) -> PathBuf {
     home.join(".claude/sessions/.adopt.lock")
 }
 
-/// Why `adopt` moved nothing.
 #[derive(Debug, PartialEq)]
 pub enum AdoptRefusal {
     /// No record under the given tree names the agent — or another session
@@ -351,11 +349,11 @@ pub struct Adopter<'a> {
 }
 
 /// Makes the session `me` the controller of the worker `agent` whose
-/// workspace sits under `within` (#1098): moves its record out of its dead
-/// controller's sidecar into `me.pid`'s, restamped with `me.start` so `controller-restore` restores it here after a
-/// `/clear`. Refuses while the record's controller is alive — two
-/// controllers for one worker is the failure this exists to prevent — and
-/// when the workspace is gone.
+/// workspace sits under `within`: moves its record out of its dead
+/// controller's sidecar into `me.pid`'s, restamped with `me.start` so
+/// `controller-restore` restores it here after a `/clear`. Refuses while
+/// the record's controller is alive — two controllers for one worker is the
+/// failure this exists to prevent — and when the workspace is gone.
 ///
 /// Every adoption holds one lock, `.adopt.lock` beside the sidecars, from
 /// its scan for a live holder to its landing, so two sessions adopting one
@@ -363,11 +361,10 @@ pub struct Adopter<'a> {
 /// refused. The move itself also takes the exclusive lock `append` and
 /// `remove_workspace` take, on both sidecars, in path order, and publishes
 /// each sidecar whole (`publish`), so a death mid-write never leaves either
-/// one short of a record it held (#1101). The record
-/// lands in the adopter's sidecar before it leaves the dead one (#1098
-/// Codex [high]): a process death between the two leaves a duplicate the
-/// live copy outranks — `orphans` never offers it, and this refuses it —
-/// never a worker in neither file.
+/// one short of a record it held. The record lands in the adopter's sidecar
+/// before it leaves the dead one: a process death between the two leaves a
+/// duplicate the live copy outranks — `orphans` never offers it, and this
+/// refuses it — never a worker in neither file.
 pub fn adopt(home: &Path, agent: &str, within: &str, me: Adopter) -> Result<Adopted, AdoptRefusal> {
     let io = |e: std::io::Error| AdoptRefusal::Io(e.to_string());
     std::fs::create_dir_all(home.join(".claude/sessions")).map_err(io)?;
@@ -436,9 +433,9 @@ fn move_record(
         publish(from, &kept).map_err(io)?;
         false
     } else {
-        // Landing first: a failed publish leaves the source untouched
-        // (#1098 review C3), and a death after it leaves a duplicate the
-        // live copy outranks rather than a worker in neither file.
+        // Landing first: a failed publish leaves the source untouched, and a
+        // death after it leaves a duplicate the live copy outranks rather
+        // than a worker in neither file.
         add_line(&own, &line).map_err(io)?;
         abort_after_landing();
         publish(from, &kept).is_err()
@@ -471,7 +468,7 @@ mod tests {
         }
     }
 
-    /// #1040: `implement-dispatch` builds a workspace path itself
+    /// `implement-dispatch` builds a workspace path itself
     /// (`PathBuf::join`), `merge-cleanup` reads one back from `git worktree
     /// list`, and a symlinked repo root makes the two spellings differ even
     /// though they name the same directory. `canonical_workspace_path` is
@@ -498,9 +495,9 @@ mod tests {
         assert_eq!(canonical_workspace_path("/no/such/path/at/all"), "/no/such/path/at/all");
     }
 
-    /// The end-to-end case #1040 was filed over: a record stored under one
-    /// spelling of a symlinked workspace is still found and removed when
-    /// queried under the other spelling, once both sides canonicalize.
+    /// The end-to-end case: a record stored under one spelling of a
+    /// symlinked workspace is still found and removed when queried under
+    /// the other spelling, once both sides canonicalize.
     #[test]
     fn remove_workspace_matches_a_symlinked_spelling_when_canonicalized() {
         let tmp = TempDir::new().unwrap();
@@ -607,14 +604,15 @@ mod tests {
         assert!(!remove_workspace(tmp.path(), "/anything"));
     }
 
-    /// #1044: `read` takes the lock every writer holds (shared is enough), so
-    /// a read landing while a writer holds it blocks until the write is done
+    /// `read` takes the lock every writer holds (shared is enough), so a
+    /// read landing while a writer holds it blocks until the write is done
     /// rather than observing the file mid-write and returning no records —
-    /// the torn read `controller-restore` would otherwise hit. Holds the lock
-    /// across an in-place truncate, as a writer that did not publish by
-    /// rename would, spawns `read` on another thread, proves it cannot return
-    /// while the lock is held, then completes the write and checks `read`
-    /// observes the full content rather than the empty truncated file.
+    /// the torn read `controller-restore` would otherwise hit. Holds the
+    /// lock across an in-place truncate, as a writer that did not publish
+    /// by rename would, spawns `read` on another thread, proves it cannot
+    /// return while the lock is held, then completes the write and checks
+    /// `read` observes the full content rather than the empty truncated
+    /// file.
     #[test]
     fn read_waits_for_the_lock_so_it_never_observes_a_torn_truncate() {
         let tmp = TempDir::new().unwrap();
@@ -655,7 +653,7 @@ mod tests {
         assert_eq!(workspaces, vec!["/a", "/b"], "read must observe the completed rewrite, not the torn truncate");
     }
 
-    /// #1101 review C1: the lock survives a publish's rename; one on the sidecar's own inode would not.
+    /// The lock survives a publish's rename; one on the sidecar's own inode would not.
     #[test]
     fn the_lock_still_excludes_a_writer_after_a_publish_renames_the_sidecar() {
         let tmp = TempDir::new().unwrap();
@@ -674,12 +672,12 @@ mod tests {
         appender.join().unwrap();
     }
 
-    /// #964 fix round 1 (Codex high): `remove_workspace`'s read/filter/write
-    /// and `append`'s write must serialize on the same file lock, or an
-    /// append landing between the read and the write is silently lost. Holds
-    /// an exclusive lock externally, proves neither call can finish while it
-    /// is held — that is what makes the earlier version of both unlocked —
-    /// then releases it and checks the racing append survived the rewrite.
+    /// `remove_workspace`'s read/filter/write and `append`'s write must
+    /// serialize on the same file lock, or an append landing between the
+    /// read and the write is silently lost. Holds an exclusive lock
+    /// externally, proves neither call can finish while it is held — that
+    /// is what makes the earlier version of both unlocked — then releases
+    /// it and checks the racing append survived the rewrite.
     #[test]
     fn append_and_remove_serialize_on_the_file_lock_so_a_racing_append_is_never_lost() {
         let tmp = TempDir::new().unwrap();
@@ -720,14 +718,14 @@ mod tests {
         assert!(!workspaces.contains(&"/b"), "{workspaces:?}");
     }
 
-    /// #1098: `adopt`'s check-and-move holds the source sidecar's lock, so a
+    /// `adopt`'s check-and-move holds the source sidecar's lock, so a
     /// second adopter cannot read the record between the first's check and
     /// its rewrite. Holds that lock externally and proves the move cannot
     /// finish while it is held — called on `move_record` directly, since
-    /// `adopt`'s own pre-scan `read` would block on the shared lock first and
-    /// pass this whether or not the move locks. Then releases it: the move
-    /// lands, and a second adopter finds the worker controlled by a live
-    /// session.
+    /// `adopt`'s own pre-scan `read` would block on the shared lock first
+    /// and pass this whether or not the move locks. Then releases it: the
+    /// move lands, and a second adopter finds the worker controlled by a
+    /// live session.
     #[test]
     fn adopt_moves_under_the_source_lock_and_a_second_adopter_is_refused() {
         let tmp = TempDir::new().unwrap();
@@ -760,9 +758,9 @@ mod tests {
         assert_eq!(adopt(&home, "sudokupad-art-143", &root, Adopter { pid: "1", start: "1" }).unwrap_err(), AdoptRefusal::ControllerAlive(me));
     }
 
-    /// #1098 review S2: only a pid that verifiably does not exist is a dead
-    /// controller. A sidecar whose name is no pid proves nothing about its
-    /// controller, and reading it as dead would hand its worker a second one.
+    /// Only a pid that verifiably does not exist is a dead controller. A
+    /// sidecar whose name is no pid proves nothing about its controller,
+    /// and reading it as dead would hand its worker a second one.
     #[test]
     fn only_a_pid_that_does_not_exist_is_a_dead_controller() {
         let r = record("/w");
@@ -771,9 +769,9 @@ mod tests {
         assert!(!is_orphaned("0", &r), "pid 0 is no controller's");
     }
 
-    /// #1098 review C3: a failed landing must leave the record where it was —
-    /// a worker in neither file is one nothing will ever offer or restore
-    /// again. A directory squats on the adopter's `<sidecar>.tmp` here, so the
+    /// A failed landing must leave the record where it was — a worker in
+    /// neither file is one nothing will ever offer or restore again. A
+    /// directory squats on the adopter's `<sidecar>.tmp` here, so the
     /// landing's publish cannot create its temp file and fails.
     #[test]
     fn a_failed_write_into_the_adopters_sidecar_leaves_the_record_where_it_was() {
@@ -793,10 +791,10 @@ mod tests {
         assert_eq!(read(home, &dead), vec![record(&ws)], "the record is back where it was");
     }
 
-    /// #1098 review C4: the move re-checks, under the lock, that the
-    /// controller is still gone — `adopt`'s pre-scan ran unlocked, and a
-    /// record can come alive in between (another session adopting it).
-    /// Called on `move_record` directly so the pre-scan cannot answer first.
+    /// The move re-checks, under the lock, that the controller is still
+    /// gone — `adopt`'s pre-scan ran unlocked, and a record can come alive
+    /// in between (another session adopting it). Called on `move_record`
+    /// directly so the pre-scan cannot answer first.
     #[test]
     fn the_move_refuses_a_record_whose_controller_is_alive_under_the_lock() {
         let tmp = TempDir::new().unwrap();
@@ -816,10 +814,10 @@ mod tests {
         assert!(read(home, "4242").is_empty());
     }
 
-    /// #1098 review C5: the move holds the adopter's own sidecar lock too,
-    /// so a `/clear`'s restore read or a concurrent dispatch append on the
-    /// adopter never interleaves with the landing. Holds that lock
-    /// externally and proves the move cannot finish while it is held.
+    /// The move holds the adopter's own sidecar lock too, so a `/clear`'s
+    /// restore read or a concurrent dispatch append on the adopter never
+    /// interleaves with the landing. Holds that lock externally and proves
+    /// the move cannot finish while it is held.
     #[test]
     fn the_move_waits_for_the_adopters_own_sidecar_lock() {
         let tmp = TempDir::new().unwrap();
@@ -846,7 +844,7 @@ mod tests {
         assert_eq!(read(&home, "4242").len(), 2);
     }
 
-    /// #1101 review C3: a move within one sidecar (a reused pid) still holds its lock.
+    /// A move within one sidecar (a reused pid) still holds its lock.
     #[test]
     fn a_move_within_one_sidecar_waits_for_its_lock() {
         let tmp = TempDir::new().unwrap();
@@ -865,11 +863,11 @@ mod tests {
         assert_eq!(mover.join().unwrap(), Ok(true));
     }
 
-    /// #1098 Codex [high]: every adoption runs under one lock, so the scan
-    /// for a live holder and the landing are one step across all sidecars —
-    /// two adopters taking the two stale copies a crash can leave would
-    /// otherwise each find its own copy orphaned and both win. Holds that
-    /// lock externally and proves `adopt` cannot finish while it is held.
+    /// Every adoption runs under one lock, so the scan for a live holder
+    /// and the landing are one step across all sidecars — two adopters
+    /// taking the two stale copies a crash can leave would otherwise each
+    /// find its own copy orphaned and both win. Holds that lock externally
+    /// and proves `adopt` cannot finish while it is held.
     #[test]
     fn every_adoption_waits_for_the_one_adoption_lock() {
         let tmp = TempDir::new().unwrap();

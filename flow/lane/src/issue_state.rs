@@ -14,7 +14,6 @@ pub struct IssueState {
 }
 
 impl IssueState {
-    /// Whether `label` is one of this issue's labels.
     pub fn has_label(&self, label: &str) -> bool {
         self.labels_csv.split(',').any(|l| l == label)
     }

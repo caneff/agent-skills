@@ -137,6 +137,9 @@ else
   echo "FAIL no-rg fixture: rc=$rc out=$out"; fails=1
 fi
 
+# A vendored node_modules tree with a coincidental case-insensitive hit
+# (a camelCase identifier straddling two words) must not fail the check —
+# it isn't a real reference, only a substring collision.
 vendored="$tmp/vendored"
 mkdir -p "$vendored/repo/node_modules/some-pkg" "$vendored/home/.claude" \
          "$vendored/home/.local/bin" "$vendored/home/src/some-project" \
@@ -186,6 +189,9 @@ else
   echo "FAIL unreadable ~/src fixture: rc=$rc out=$out"; fails=1
 fi
 
+# Planted hits in .git/, .claude/worktrees/<name>/ and .scratch/ inside the
+# repo scan must all be skipped — these are git's own files, other
+# worktrees, and scratch notes, not real references.
 excluded_dirs="$tmp/excluded_dirs"
 mkdir -p "$excluded_dirs/repo/.git" \
          "$excluded_dirs/repo/.claude/worktrees/implement-999" \
@@ -212,6 +218,9 @@ else
   echo "FAIL excluded_dirs fixture: rc=$rc out=$out"; fails=1
 fi
 
+# A planted hit in an ordinary gitignored file elsewhere in the repo (not
+# under .git/, .claude/worktrees/ or .scratch/) must still fail the check —
+# the exclusion is these specific paths, not a tracked-files-only scan.
 ordinary_ignored="$tmp/ordinary_ignored"
 mkdir -p "$ordinary_ignored/repo/build" "$ordinary_ignored/home/.claude" \
          "$ordinary_ignored/home/.local/bin" "$ordinary_ignored/home/src/some-project" \

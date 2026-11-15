@@ -158,12 +158,10 @@ pub fn named_session_of(home: &Path, id: &str) -> Option<LiveSession> {
     live_all(home).into_iter().find(|s| s.session_id == id && !s.name.is_empty())
 }
 
-/// The current name of the live session `id` (`named_session_of`'s name).
 pub fn name_of_session(home: &Path, id: &str) -> Option<String> {
     named_session_of(home, id).map(|s| s.name)
 }
 
-/// Whether a live session is currently named `name`.
 pub fn is_live_name(home: &Path, name: &str) -> bool {
     find_live_by_name(home, name).is_some()
 }

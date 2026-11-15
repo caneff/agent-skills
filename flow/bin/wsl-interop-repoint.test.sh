@@ -219,6 +219,7 @@ start "$DIR/gone" >/dev/null
 want "the script leaves no name behind when it reads the record" "" \
   "$(WSL_INTEROP="$DIR/gone" names_after with_fixture bash | grep -vE '^(BASH_ENV|STUB_DIR|WSL_INTEROP_[A-Z_]+)$')"
 
+# The guard's own job: with no socket directory there is nothing to record.
 fixture no-wsl 10='1\r\n'
 SOCKETS="$DIR/not-wsl"
 want "outside WSL nothing changes" "$DIR/gone" "$(start "$DIR/gone")"

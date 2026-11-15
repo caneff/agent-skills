@@ -30,6 +30,8 @@ wf=$(printf '%s' "$data" | jq -r '
     "\(cnt(.l|any(.=="backlog")))\t💤\tBacklog"
 ')
 
+# One lumped count: open issues that carry none of the frontier labels
+# (unlabeled included) — matches the vscode Other query.
 otherc=$(printf '%s' "$data" | jq --argjson core "$core" '
   [ .[] | select([.labels[].name] | any(. as $x | $core | any(. == $x)) | not) ] | length')
 

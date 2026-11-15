@@ -60,6 +60,7 @@ bash_env=$(jq -r '.env.BASH_ENV // empty' "$settings") ||
 [ "$bash_env" = "$want_bash_env" ] ||
   problem "$settings has env.BASH_ENV [$bash_env], not $want_bash_env, so a Claude Code Bash call can start on a dead WSL_INTEROP"
 
+# A misplaced autoMode block or a list missing "$defaults" is silent damage.
 lint_out=$(bash "$(dirname "${BASH_SOURCE[0]}")/settings-lint.sh" "$settings") || {
   while IFS= read -r line; do problem "${line#PROBLEM: }"; done <<< "$lint_out"
 }

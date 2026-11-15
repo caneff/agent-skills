@@ -28,6 +28,7 @@ stub="$tmp/wscript-stub.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$stub"
 chmod +x "$stub"
 
+# value-taking flags, short and long, exactly as the parser's case arm lists them
 flags=(-a --app-name -i --icon -u --urgency -t --expire-time -c --category -h --hint -A --action -r --replace-id)
 
 case_arm=$(grep -m1 -F -- '-a|--app-name|-i|--icon' "$script")

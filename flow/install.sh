@@ -102,6 +102,8 @@ if [ -L "$git_common_dir/hooks/pre-push" ]; then
   echo "removed retired pre-push hook"
 fi
 
+# Lay down the copy-only backups (files a symlink can't hold): the Windows VS
+# Code settings and the quill output-style copy.
 bash "$here/backup-sync.sh" --restore
 
 # herdr-toast-install links the toast scripts and registers the herdrfocus:

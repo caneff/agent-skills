@@ -11,6 +11,8 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fails=0
 
+# The one definition of the ~/.bashrc line, also copied into each fixture's
+# manifest below.
 # shellcheck source=hooks-manifest.sh
 . "$here/hooks-manifest.sh"
 fixture() { # fixture <name> -> sets FLOW and HOME_DIR

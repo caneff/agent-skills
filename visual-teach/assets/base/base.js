@@ -1,3 +1,4 @@
+/* Each component file is self-contained so it can be copied on its own. */
 (function () {
 /* Cross-origin-safe theme bridge: works even over file://, where a parent
    iframe cannot reach contentDocument to set the theme directly. */

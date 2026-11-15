@@ -165,7 +165,6 @@ check "fixture: the work branch rebases onto origin/trunk" 0 $?
 git push --force-with-lease origin "HEAD:refs/heads/work" >"$tmp/out" 2>&1
 check "a branch rebased onto a remote commit with a foreign committer pushes with lease" 0 $?
 
-# the same push must still refuse a foreign commit replayed locally on top
 git -c user.email=real@gmail.com commit -q --allow-empty -m replayedagain
 git push --force-with-lease origin "HEAD:refs/heads/work" >"$tmp/out" 2>&1
 check "a locally replayed foreign commit on an existing branch is still refused" 1 $?

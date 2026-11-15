@@ -185,6 +185,10 @@ else
   echo "FAIL backstop.timer missing or wrong under the scratch HOME: $(cat "$unit_dir/backstop.timer" 2>&1)"; fails=1
 fi
 
+# The seams of the listed repos need cargo, node, npm, uv, gh, git and python3;
+# the unit's PATH is replaced, so each one's directory must be on it (on this
+# machine cargo is in ~/.cargo/bin, node/npm/uv/gh in ~/.local/bin, git and
+# python3 in /usr/bin).
 unit_path=$(sed -n 's/^Environment=PATH=//p' "$unit_dir/backstop.service" 2>/dev/null)
 missing=""
 for d in '%h/.cargo/bin' '%h/.local/bin' /usr/bin; do
@@ -211,6 +215,9 @@ else
   echo "FAIL install.sh did not report a refused herdr-toast-install: $out"; fails=1
 fi
 
+# The success path: with the /tmp refusal lifted (HERDR_TOAST_ALLOW_TMP=1) and
+# the registry stubbed above, herdr-toast-install actually runs to completion —
+# not just its by-design refusal.
 succ="$tmp/succ"
 scratch_repo "$succ"
 out=$(HOME="$tmp/succ-home" HERDR_TOAST_ALLOW_TMP=1 bash "$succ/flow/install.sh" 2>&1) || { echo "FAIL install.sh exited non-zero with HERDR_TOAST_ALLOW_TMP=1: $out"; fails=1; }
@@ -275,6 +282,8 @@ else
   echo "FAIL the real-directory refusal was swallowed as a skip (rc=$rc): $out"; fails=1
 fi
 
+# An empty claude/agents dir leaves the literal glob; without the guard `link`
+# fails it and set -e aborts the install before backup-sync.sh runs.
 empty="$tmp/empty"
 scratch_repo "$empty"
 rm -f "$empty/flow/claude/agents"/*.md
@@ -285,6 +294,8 @@ else
   echo "FAIL an empty claude/agents dir aborted the install"; fails=1
 fi
 
+# The other half of the record: when HEAD does resolve, the install writes that
+# sha, so merge-cleanup has a baseline to diff flow/lane against.
 recorded="$tmp/recorded"
 scratch_repo "$recorded"
 git -C "$recorded" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m base
@@ -315,6 +326,9 @@ else
   echo "FAIL an unwritable state dir failed the install (rc=$rc): $out"; fails=1
 fi
 
+# A failing lane-install.sh (a missing cargo, a compile error) runs last and
+# must not half-install everything else — it is not a gate on the rest of
+# install.sh.
 broken="$tmp/broken"
 scratch_repo "$broken"
 printf '#!/usr/bin/env bash\necho "lane-install: boom" >&2\nexit 1\n' > "$broken/flow/lane-install.sh"
@@ -355,6 +369,9 @@ else
   echo "FAIL the existing .pre-flow backup was clobbered, the second file lost, or the refusal was fatal (rc=$rc): $link_out"; fails=1
 fi
 
+# The interop repoint: ~/.bashrc is in no repo, so install.sh carries the
+# line a new herdr pane shell needs, keeps a backup of what it edits, and adds
+# the line once. A real interactive bash reading that file is the proof.
 br="$tmp/br"
 scratch_repo "$br"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$br/flow/lane-install.sh"
@@ -380,6 +397,7 @@ if [ "$(grep -c 'wsl-interop-repoint' "$br_home/.bashrc")" = 1 ] \
 else
   echo "FAIL a second install changed the line count or the backup"; fails=1
 fi
+# The script only needs to prove it ran: a marker in place of the real one.
 printf 'export REPOINT_RAN=yes\n' > "$br/flow/bin/wsl-interop-repoint.sh"
 # The system bashrc may print its own lines first, so read the last of them.
 got=$(HOME="$br_home" bash --rcfile "$br_home/.bashrc" -ic 'printf %s "$REPOINT_RAN"' 2>/dev/null)

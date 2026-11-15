@@ -204,6 +204,7 @@ def test_on_the_date_appends_commits_pushes_and_removes_its_line(rc):
     cron = rc.crontab_file.read_text()
     assert TAG not in cron
     assert "other-job  # other" in cron
+    # The primary checkout is not touched: the commit is made elsewhere.
     assert (rc.root / NOTE).read_text() == "# note\n"
     assert rc.git(rc.root, "worktree", "list").count("\n") == 1
 
@@ -234,6 +235,8 @@ def test_unreadable_closed_at_fails_without_appending(rc, payload):
 
 
 def test_unreadable_crontab_is_never_rewritten(rc):
+    # Only "no crontab for <user>" is an empty crontab; any other failure
+    # of `crontab -l` must not install a crontab built from nothing.
     before = rc.crontab_file.read_text()
     (rc.tmp / "crontab-mode").write_text("broken")
     out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
@@ -256,6 +259,8 @@ def test_install_cron_with_no_crontab_yet(rc):
 
 
 def test_empty_window_is_an_error_not_a_result(rc):
+    # Fourteen days with no transcript means the count could not see
+    # them, not that nothing ran: nothing is appended, the line stays.
     rc.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
     (rc.projects / "x" / "s.jsonl").unlink()
     out = rc.recount("2026-10-19T12:00:00Z")

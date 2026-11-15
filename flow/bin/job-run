@@ -260,6 +260,8 @@ record() {
   printf 'rc=%s\ncause=%s\nended=%s\n' "$rc" "$cause" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/exit"
 }
 
+# Forward the signal to the job and go on waiting. A job that ignores it keeps
+# the wrapper alive, which is the truth: this records, it does not enforce.
 stop() { [ -n "$child" ] && kill -"$1" "$child" 2>/dev/null; }
 trap 'stop INT' INT
 trap 'stop TERM' TERM
