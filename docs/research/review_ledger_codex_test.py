@@ -1,4 +1,4 @@
-"""Tests for the Codex rows of `review_ledger.py` (#1267): `harvest` fed
+"""Tests for the Codex rows of `review_ledger.py`: `harvest` fed
 `codex-adversarial-<n>-<phase>.{json,out}` records, and the Codex columns of `report`.
 Every test runs the command line on a fixture tree; HOME is a temp dir, so no default
 path reaches the real ~/.cache or ~/.claude."""
@@ -177,7 +177,7 @@ class TestCodexGuard:
         assert "codex-gate-1" not in section(env.review.read_text(), "Dispositions with no finding")
 
     def test_a_valued_half_beside_an_unreadable_half_is_unknown_and_listed_unmapped(self, env):
-        # #1406 C3: half the ruling unread is not a known partial fix.
+        # Half the ruling unread is not a known partial fix.
         f = self.split(env, {"id": "codex-gate-1a", "outcome": "fixed", "sha": "a"},
                        {"id": "codex-gate-1b", "outcome": "bogus-word"})
         assert (f["outcome"], f["partial"]) == ("unknown", False)

@@ -1,4 +1,4 @@
-"""Tests for the mutation rows of `review_ledger.py` (#1270): `append` fed witness-check
+"""Tests for the mutation rows of `review_ledger.py`: `append` fed witness-check
 status files, and the mutation columns of `report`. Every test runs the command line;
 HOME is a temp dir, so no default path reaches the real ~/.cache or ~/.claude."""
 import json

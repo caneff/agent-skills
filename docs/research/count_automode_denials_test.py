@@ -1,4 +1,4 @@
-"""Tests for the auto-mode denial counter (#1538). Seams: transcript parsing
+"""Tests for the auto-mode denial counter. Seams: transcript parsing
 (denial kinds, the tool_use join, dedup across files, bad lines), edit-window
 assignment, rates, and the soft_deny names read from settings. Plain test_*
 functions under pytest, with `tmp_path` for the transcript trees."""

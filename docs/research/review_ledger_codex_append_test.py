@@ -1,4 +1,4 @@
-"""Tests for the Codex rows the controller writes at merge (#1269): `append --type codex-<phase>`
+"""Tests for the Codex rows the controller writes at merge: `append --type codex-<phase>`
 and `harvest`, both reading the usage change from the two live readings the pass's record carries
 (`usage_before`, `usage_after`, as `codex-usage-gate.py --percent` prints them). Every test runs the
 command line; HOME is a temp dir, so no default path reaches the real ~/.cache."""
@@ -78,7 +78,7 @@ class TestUsageChange:
 
     @pytest.mark.parametrize("extra", [(), ("--skip-reason", "usage capped"), ("--refusal", "stale")])
     def test_the_retired_third_phase_is_refused_by_name(self, px, extra):
-        """#1360: the second pass is final, so a stale controller's third row is refused, not written."""
+        """The second pass is final, so a stale controller's third row is refused, not written."""
         px.record(500, "third", f"1 {W1}", f"2 {W1}")
         r = px.append(500, "third", *extra)
         assert r.returncode != 0, extra
@@ -110,8 +110,7 @@ class TestUsageChange:
         assert "different windows" in delta["reason"]
 
     def test_a_zero_percent_before_reading_names_no_window_so_its_drifting_reset_time_is_no_change(self, px):
-        # #1552: at 0% no window has started, so `resetsAt` moves with the clock (8 s apart in the two
-        # rows that showed it). The pass is one weekly window and its 2 points are the cost.
+        # At 0% no window has started, so `resetsAt` moves with the clock. The pass is one weekly window and its 2 points are the cost.
         px.record(500, before=f"0 {W1}", after=f"2 {W2}")
         px.ok(500, "gate")
         assert px.only_row()["cost"]["usage_delta"] == {"status": "known", "before": 0.0, "after": 2.0, "delta": 2.0}
@@ -161,7 +160,7 @@ class TestUsageChange:
         assert px.only_row() == appended
 
     def test_a_harvest_after_the_record_is_pruned_keeps_the_appended_row(self, px):
-        # #1304: append, harvest, the 14-day prune takes the record, harvest again.
+        # Append, harvest, the 14-day prune takes the record, harvest again.
         px.record(500, before=f"10 {W1}", after=f"12 {W1}", out=OUT_TWO)
         px.record(501)  # a second record, so the cache is not empty once ticket 500's is gone
         px.ok(500, "gate")
@@ -256,8 +255,8 @@ class TestFlags:
         (["--skip-reason", "x"], "witness-mutation", True, "unrecognized arguments: --skip-reason x")])
     def test_refusal_is_for_codex_types_and_skip_reason_for_codex_types_and_the_review_axes(
             self, px, flags, rtype, mutation, message):
-        # #1401: the axes may be skipped (the ablation), so `spec` + --skip-reason is a row, not a refusal.
-        # OE3 (#1406): each type's parser holds only its own flags, so argparse names the foreign one.
+        # The axes may be skipped (the ablation), so `spec` + --skip-reason is a row, not a refusal.
+        # Each type's parser holds only its own flags, so argparse names the foreign one.
         flags = [str(px.cache) if a == "CACHE" else a for a in flags]
         extra = ["--mutation-id", "m1", "--outcome", "red", "--seconds", "1"] if mutation else []
         r = px.run("append", "--repo", "skills", "--ticket", 500, "--type", rtype,
@@ -281,7 +280,7 @@ class TestFlags:
 
 
 class TestAudit:
-    """`append --type codex-audit` (#1361): the weekly audit's one run over the PRs that skipped the gate."""
+    """`append --type codex-audit`: the weekly audit's one run over the PRs that skipped the gate."""
     PRS, RANGE = [101, 104, 107], "aaa..bbb"
 
     def audit_record(self, px, before=f"10 {W1}", after=f"14 {W1}", out=OUT_TWO, status=0, name="2026-10-09",

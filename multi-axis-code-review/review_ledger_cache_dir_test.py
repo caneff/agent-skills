@@ -1,4 +1,4 @@
-"""`review_ledger.py cache-dir` (#1527): the one place the review cache directory is
+"""`review_ledger.py cache-dir`: the one place the review cache directory is
 chosen. The key is the repo's own name read off the common `.git`, folded by the
 ledger's `fold_repo`, so a checkout named `agent-skills` and one named `skills` write
 one directory.

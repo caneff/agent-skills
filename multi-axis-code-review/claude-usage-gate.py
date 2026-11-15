@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude usage gate (#1436): may the review axes spawn?
+"""Claude usage gate: may the review axes spawn?
 
 Run before `SKILL.md` § 4 spawns the axes. Reads the cache the status line writes
 (`flow/ccstatusline-table/helpers/claude-usage.py`); it never reads credentials or the
