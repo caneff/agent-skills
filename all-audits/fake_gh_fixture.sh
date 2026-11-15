@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test fixture (#1679): a fake `gh`. Logs every call (cwd, then argv) to
+# Test fixture: a fake `gh`. Logs every call (cwd, then argv) to
 # $FAKE_GH_LOG and returns a canned reply chosen by environment variables.
 # FAKE_GH_OWNER_FOR="dir=login,.."  repo view: the owner, keyed on the cwd's
 #                                   basename (default caneff)
