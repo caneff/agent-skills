@@ -136,9 +136,9 @@ def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero(roo
 
 
 def test_counts_names_a_closed_clump_as_skipped_rather_than_refusing_it(root, reviews):
-    # burn-skills-2026-09-30: #1236 (already fixed on main) and #1262 (a
-    # nested spec run) closed with no PR here, so neither has a sidecar. The
-    # report names them, so a reader can tell them from a clump never read.
+    # A clump already fixed on main and a nested spec run closed with no PR
+    # here, so neither has a sidecar. The report names them, so a reader can
+    # tell them from a clump never read.
     runfile.start("run-g", slots=3, root=root, repo=REPO)
     runfile.clump("run-g", [901], "/w/a", "agent-a", root=root)
     runfile.clump("run-g", [1236], "/w/b", "agent-b", root=root)
@@ -155,7 +155,7 @@ def test_counts_names_a_closed_clump_as_skipped_rather_than_refusing_it(root, re
 
 
 def test_spec_counts_read_the_specs_one_sidecar_and_need_none_per_slice(root, reviews):
-    # #1542 (c): a slice runs no review wave, so it has no sidecar; the
+    # A slice runs no review wave, so it has no sidecar; the
     # spec's own `dispositions-<spec>.jsonl` is the only record.
     runfile.start("run-s", slots=2, root=root, repo=REPO)
     runfile.clump("run-s", [901], "/w/a", "agent-a", root=root)
@@ -199,7 +199,7 @@ def test_spec_counts_do_not_double_count_a_slices_stray_sidecar(root, reviews):
 def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low(
         root, reviews, landed_run, bad):
     # `runfile.read_dispositions` refuses these lines; a reader that skipped them
-    # would report a low count with a clean exit (codex-second-M1, #1097).
+    # would report a low count with a clean exit (a clean exit on a wrong answer).
     landed_run("run-m", REPO)
     path = counts_mod.dispositions_path(reviews, 901)
     with open(path, "w") as fh:
@@ -213,7 +213,7 @@ def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low(
 @pytest.mark.parametrize("which", ["primary", "linked"])
 def test_cli_counts_accepts_the_primary_checkout_of_a_run_started_in_a_worktree_1254(
         root, home, git_repo, which):
-    # #1190 C2: `start --repo <linked worktree>` and `counts --repo <primary>`
+    # `start --repo <linked worktree>` and `counts --repo <primary>`
     # name one target and read one sidecar directory.
     target = git_repo(home, "target-repo")
     linked = linked_worktree(target, "linked")
@@ -254,7 +254,7 @@ def test_cli_counts_keys_the_cache_on_the_common_git_dir_not_the_checkout_name_1
 
 def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd(root, home, git_repo):
     # The controller runs from one primary checkout and addresses another
-    # with `--repo` (#1093): the sidecar directory is the target's, not the
+    # with `--repo`: the sidecar directory is the target's, not the
     # cwd's — and a same-named sidecar under the cwd repo must not be read.
     target = git_repo(home, "target-repo")
     other = git_repo(home, "other-repo")
@@ -283,7 +283,7 @@ def test_cli_counts_refuses_with_neither_repo_nor_reviews_dir(root, home, git_re
 
 def test_cli_counts_refuses_a_repo_that_is_not_a_git_checkout(root, home):
     # A path git cannot resolve must not read as some other repo's cache
-    # directory (#1093 C1, C2).
+    # directory.
     runfile.start("run-z", slots=1, root=root, repo=REPO)
     got = cli(root, "run-z", "--repo", os.path.join(home, "nope"),
               home=home)

@@ -128,13 +128,13 @@ def check_declared(clump):
 
 def directories(clump):
     """The directories, each as `dir/`, that a clump's files sit in. The
-    repo root is left out (#1342)."""
+    repo root is left out."""
     return {posixpath.dirname(p) + "/" for p in paths(clump)
             if posixpath.dirname(p)}
 
 
 def _nested(a, b):
-    """The directories two clumps share, one inside the other counting (#1342);
+    """The directories two clumps share, one inside the other counting;
     the repo root is left out (`directories`)."""
     return sorted({min(x, y, key=len) for x in directories(a)
                    for y in directories(b) if x.startswith(y) or y.startswith(x)})
@@ -192,10 +192,10 @@ def picks(state, free):
     already read — widest closure first, ties broken by lowest ticket, every
     free slot at once — and every clump the same-tick guard skipped, each
     naming the earlier pick it `overlap`s. The walk goes past the free
-    slots (#1049), so a clump beyond the cut that collides with a pick is
+    slots, so a clump beyond the cut that collides with a pick is
     held too; one that collides with nothing is in neither list. Sorted
-    before the guard runs
-    (#1026): why widest-first, and what it costs: `references/loop.md`.
+    before the guard runs:
+    why widest-first, and what it costs: `references/loop.md`.
 
     A caller reads the frontier once and passes it here, so the picks and
     what is holding the rest come from one read: two reads of one question
@@ -206,7 +206,7 @@ def picks(state, free):
     picked, held = [], []
     # The tie-break is this sort's own key, not borrowed from `frontier`'s
     # pre-sort: a `state` built by some other caller must not silently lose
-    # it (#1026 review, S1/C2).
+    # it.
     widest_first = sorted(state["dispatchable"],
                           key=lambda c: (-len(paths(c)), key_of(c)))
     for clump in widest_first:
@@ -217,7 +217,7 @@ def picks(state, free):
         # collision, there is no live workspace to name: the holder is
         # another candidate picked this same tick, so the held entry is
         # tagged `same_tick` explicitly rather than distinguished by which
-        # keys it happens to carry (#971).
+        # keys it happens to carry.
         blocker = next((earlier for earlier in picked
                         if overlap(clump, earlier)), None)
         if blocker is not None:
@@ -225,7 +225,7 @@ def picks(state, free):
                         "over": overlap(clump, blocker), "same_tick": True})
             continue
         # Past the free-slot cut the walk goes on so a collision with a pick
-        # is still named (#1049); a clump that collides with nothing is only
+        # is still named; a clump that collides with nothing is only
         # out of slots, not held.
         if len(picked) < free:
             picked.append(clump)
@@ -267,7 +267,7 @@ def job_cores(key, record):
 
     `None` is not zero. A worker nobody recorded and a worker that declared it
     launched nothing read alike from here, and charging the first as the
-    second is the #351 dispatch into a box already at 25.8 load — so the
+    second is a dispatch into a box already at 25.8 load — so the
     absent record is refused by name, one layer under the skill's own rule
     that silence is not zero.
     """
@@ -299,7 +299,7 @@ def core_room(free, in_flight):
     seven past its own come off the free ones. That is the bridge the trial
     had nothing for: the controller's budget was in slots, the contention was
     in cores, and a run with a free slot dispatched into a box already at
-    25.8 load (#351).
+    25.8 load.
 
     Each declaration is read off the **clump's own** `job` record, which the
     run file holds, so it survives the restart that a declaration living in
@@ -356,7 +356,7 @@ def landing_steps(clump, outstanding=()):
     worker question, then **merge**, then **cleanup**.
 
     Cleanup is the last act because cleanup is what closes the worker's
-    pane. On #781 a controller merged `#454`, ran `merge-cleanup`, and then
+    pane. A controller once merged, ran `merge-cleanup`, and then
     sent the ruling its worker had asked for in good faith — to an agent
     that no longer existed. Answering before the *merge* is not the rule and
     would write the same bug in a new place: a question answered between
@@ -388,7 +388,7 @@ def cleanup_ready(clump, outstanding=()):
 
 # One deadline for the **whole** sweep, not one per probe. A per-probe bound
 # composes: N hung panes would hold the controller inside one tool call for N
-# timeouts, and a controller in a tool call hears no worker at all (#778). So
+# timeouts, and a controller in a tool call hears no worker at all. So
 # the worst case is this constant, whatever the wave size; a slot the deadline
 # did not reach is read on the next wake, which costs nothing because the
 # sweep only ever runs on a wake the controller already had.
@@ -407,15 +407,13 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
     the deadline did not reach is `unswept` — a slot nobody asked about, read
     on the next wake, which is a different fact from a pane that answered.
     It is the backstop under the wake, not a substitute for it, and it is
-    never a timer: a controller inside a tool call hears no worker at all
-    (#778).
+    never a timer: a controller inside a tool call hears no worker at all.
 
     A vanished pane — herdr has no agent by that name — is the one failure
     only this sweep can find, and it is reported as its own verdict rather
     than as an idle worker. What the sweep cannot see is the other shape: a
-    pane that is present and busy looks `working` whatever it is busy with
-    (#925). A finished pane on a clump with no "PR up" on record (`pr_up`,
-    the run file's) is `stalled`, a line that says read the pane (#1148).
+    pane that is present and busy looks `working` whatever it is busy with. A finished pane on a clump with no "PR up" on record (`pr_up`,
+    the run file's) is `stalled`, a line that says read the pane.
     Nothing about one clump ends the sweep: a probe that fails, and a
     clump the run file left with no agent name, are each that one worker's
     verdict, so a herdr that answers for two workers and not the third still
@@ -451,7 +449,7 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
             verdict, detail = agents.verdict(answer)
             # A finished turn with no "PR up" on record ended mid-lane, or on
             # a question the controller still owes: either way, read the pane
-            # (#1148). `idle` counts as well as `done`, since focusing a pane
+            # `idle` counts as well as `done`, since focusing a pane
             # turns one into the other. Only a PR number is on record: a
             # hand-built workers file can carry 0 or "x".
             pr = clump.get("pr_up")
@@ -544,7 +542,7 @@ def load_run(run_id, root=None):
 
 def slice_base(run):
     """`origin/spec-<p>` when the checkout's branch is a slice, one whose
-    dispatch recorded `branch.<name>.base` as `spec-<p>` (#1486); else None.
+    dispatch recorded `branch.<name>.base` as `spec-<p>`; else None.
     The branch already holds every slice landed on `spec-<p>`, so those files
     are not its own. A recorded base that is not a `spec-<n>` branch is no
     slice, as `implement/fix_check.py` reads it. A detached HEAD has no
@@ -573,7 +571,7 @@ def slice_base(run):
 def workspace_diff(workspace):
     """The files a workspace's branch really changes against its origin's
     default branch: `git diff --name-only origin/<default>...HEAD` run inside
-    it (#1212), plus its uncommitted and untracked files. A slice branch is
+    it, plus its uncommitted and untracked files. A slice branch is
     diffed against `origin/spec-<p>` instead (`slice_base`). Refuses when git
     cannot answer — a workspace whose diff could not be read is not one that
     changed nothing.
@@ -615,7 +613,7 @@ def run_target(run):
 
 def with_workspace_diffs(in_flight, diff=workspace_diff):
     """The in-flight clumps with each live workspace's real diff unioned into
-    the files it owns (#1212). A closure resolved from the ticket's named
+    the files it owns. A closure resolved from the ticket's named
     files is frozen at what the controller wrote by hand; the worker's diff
     is what it actually reached, so the exclusion reads both. A landed or
     closed clump is skipped: its change is on the default branch, or there is
@@ -639,7 +637,7 @@ def with_workspace_diffs(in_flight, diff=workspace_diff):
 
 
 def with_run_jobs(in_flight, run):
-    """The in-flight clumps with each `job`, and `closed` (#1310), read from
+    """The in-flight clumps with each `job`, and `closed`, read from
     the run file, matched by the clump's lowest ticket. `closure.py --json`
     carries neither, so the records `runfile.py job` and `runfile.py close`
     wrote are the only source; a clump the run file
@@ -693,7 +691,7 @@ def render_dispatch(picked, held, run_id, repo):
                      + f" --run {run_id} --repo {shlex.quote(repo)}")
     for entry in held:
         # `same_tick` names the other candidate this tick picked ahead of it;
-        # otherwise the holder is a live workspace (#971).
+        # otherwise the holder is a live workspace.
         where = "this tick" if entry.get("same_tick") \
             else f"in {entry['workspace']}"
         lines.append(
@@ -735,7 +733,7 @@ def cmd_dispatch(args):
     if args.no_workspace_diff:
         # Said, not silent: this run's exclusion reads only the named
         # closures, and its output must not read like one that also
-        # read each workspace's diff (#1212 S1).
+        # read each workspace's diff.
         print("workspace diff: SKIPPED (--no-workspace-diff) — "
               "in-flight closures are the named files only")
     else:
@@ -744,15 +742,15 @@ def cmd_dispatch(args):
     # Measured before any early return: a broken herdr or `ps` must
     # refuse here too, not hide behind "nothing to dispatch".
     count, counter, working, unlisted = agents.agent_count(args)
-    # A landed clump awaiting cleanup, or one closed with no landing
-    # (#1310), is not a live worker: it is
+    # A landed clump awaiting cleanup, or one closed with no landing,
+    # is not a live worker: it is
     # filtered out before the core accounting, the peak live count,
     # and the frontier all see it, so a run file that sets `landed`
     # without ever clearing `job` reads as a freed slot instead of
     # refusing the whole tick on a job record that will never be
-    # recorded (#1003) — and its dead workspace (the change is on
+    # recorded — and its dead workspace (the change is on
     # `main`; the next worker branches from there) never blocks a
-    # candidate sharing its closure (Codex gate, PR #1050).
+    # candidate sharing its closure.
     unsettled = [c for c in in_flight if not runfile.settled(c)]
     cores = core_room(free, unsettled)
     cores_line = render_cores(cores, free)

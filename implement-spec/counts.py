@@ -10,7 +10,7 @@ landed clump's dispositions sidecar (`implement/SKILL.md` § Review's
 `implement/fix-check.sh` checks), and names every clump closed with
 no landing as skipped. Nothing here writes one.
 
-`--spec <n>` is a spec run's form (#1542): a slice runs no review wave and has
+`--spec <n>` is a spec run's form: a slice runs no review wave and has
 no sidecar, so the counts are read from the spec's one
 `dispositions-<n>.jsonl`, which `implement-spec/SKILL.md` keys on the spec
 number, and no per-slice sidecar is read or required.
@@ -27,12 +27,12 @@ from review_cache import CacheDirError, dispositions_path, repo_for_checkout, re
 
 def default_reviews_dir(checkout):
     """`~/.cache/agent-reviews/<repo>`, keyed the same way
-    `review_ledger.py cache-dir` is (#1527): the basename of the directory
+    `review_ledger.py cache-dir` is: the basename of the directory
     holding the common `.git`, folded by `fold_repo`, which is also right for a
     submodule or a `--separate-git-dir` checkout where the primary
     checkout's own name is not the key. `checkout` is `runfile.checkout_top`'s
     answer, so it is already a checkout of the repo the run targets."""
-    # `reviews_root()`, not `REVIEWS_ROOT`: home is read at call time, as before #1774.
+    # `reviews_root()`, not `REVIEWS_ROOT`: home is read at call time.
     return os.path.join(reviews_root(), repo_for_checkout(checkout))
 
 
@@ -42,13 +42,13 @@ def counts(run, reviews_dir, spec=None):
     `moved` line (a finding added to the open ticket for its component).
     `disputed` lands in neither: a disputed finding shipped nothing.
 
-    A sidecar written before #1401 is still read, so a run that was going
+    A sidecar in the older outcome vocabulary is still read, so a run that was going
     when the review changed can close: its `filed` lines count as moved, and
     its `leftover` and `handed-back` lines are returned as `carried`, which
     `render_counts` prints. Nothing sweeps them any more; the run file's own
     `leftovers` list still holds the leftover ones.
 
-    A clump closed with no landing (`runfile.py close`, #1310) has no PR and
+    A clump closed with no landing (`runfile.py close`) has no PR and
     so no sidecar: it is listed under `closed` as `(lowest, reason)`, by
     name, so the report says which clumps it did not read.
 
@@ -57,7 +57,7 @@ def counts(run, reviews_dir, spec=None):
     its reviewers found nothing, so a missing one means this run's own
     bookkeeping is missing (defect class 1).
 
-    With `spec` (a spec run, #1542) the one sidecar read is the spec's own,
+    With `spec` (a spec run) the one sidecar read is the spec's own,
     `dispositions-<spec>.jsonl`: slices have none, and a slice's sidecar is
     never read. The spec's own, missing, is refused the same way."""
     fixed = moved = carried = 0
@@ -127,12 +127,12 @@ def main(argv):
         return 1
 
     # No default from the cwd: the controller may run from a different
-    # primary checkout than the run's target (#1093), and a wrong cwd reads
+    # primary checkout than the run's target, and a wrong cwd reads
     # another repo's sidecars or reports every landed clump missing.
     if args.reviews_dir:
         reviews_dir = os.path.expanduser(args.reviews_dir)
     elif args.repo:
-        # The run's recorded target is what `--repo` must name (#1190): a
+        # The run's recorded target is what `--repo` must name: a
         # wrong checkout reads another repo's sidecars. Tops are compared, so
         # a subdirectory or a trailing slash is the same target.
         try:

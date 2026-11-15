@@ -67,19 +67,19 @@ _TICKET = re.compile(r"[0-9]+\Z")
 # inside the first read a resumed controller does.
 _KEYS = ("run_id", "slots", "controller", "clumps")
 _CLUMP_KEYS = ("tickets", "workspace", "agent", "landed")
-# A clump's parallel-job state. `None` is "nothing on record" — only a #892-era
-# file has it, since registration records `none` (#1311) — which is not
+# A clump's parallel-job state. `None` is "nothing on record" — only a file
+# written before jobs were recorded has it, since registration records `none` — which is not
 # the same fact as "no job": a worker that never declared and a worker that
 # declared none read alike to a controller charging cores, and silence read
-# as zero is the #351 dispatch into a box already at 25.8 load. Absent from
-# a #892-era file, so it is filled in on load rather than demanded.
+# as zero is a dispatch into a box already at 25.8 load. Absent from
+# a pre-jobs file, so it is filled in on load rather than demanded.
 _JOB_STATES = ("running", "none", "done")
 # What a clump registered for the first time records: its worker has launched
-# nothing yet (#1311).
+# nothing yet.
 NEW_CLUMP_JOB = {"state": "none", "cores": 0}
 # The outcomes `implement/SKILL.md` § Review's dispositions sidecar can carry;
 # why any other is refused, not skipped: `references/run-file.md`. The LEGACY
-# ones are what pre-#1401 workers wrote: `counts.py` still reads them, so a run
+# ones are what workers wrote before the review changed: `counts.py` still reads them, so a run
 # that was running when the review changed can close, and the merge check never
 # accepts them.
 SIDECAR_OUTCOMES = ("fixed", "moved", "disputed")
@@ -312,12 +312,12 @@ def load(run_id, root=None):
             # were recorded is still that controller's run.
             entry["job"] = job_record(entry.get("job"))
             # Filled in the same way: the PR a worker's "PR up" named, or
-            # `None` when none reached the controller (#1148).
+            # `None` when none reached the controller.
             pr = entry.get("pr_up")
             entry["pr_up"] = None if pr is None else pr_number(pr)
             if entry["landed"] is not None:
                 checked_sha(entry["landed"])
-            # Filled in the same way: a clump closed with no landing (#1310).
+            # Filled in the same way: a clump closed with no landing.
             closed = entry.get("closed")
             entry["closed"] = None if closed is None else close_reason(closed)
             if entry["landed"] is not None and closed is not None:
@@ -416,11 +416,11 @@ def read_dispositions(sidecar_path, legacy=False):
     """Every line of a dispositions sidecar (`implement/SKILL.md` § Review),
     in order, as `(line number, object)`. A line that is not a JSON object
     with one of the three sidecar outcomes is refused by file and line, and
-    so is a second line carrying an id an earlier line already used (#1124):
+    so is a second line carrying an id an earlier line already used:
     every reader joins on the id, and one of the two would be dropped or
     counted twice. Why a bad line is refused and not skipped:
     `references/run-file.md` § Dispositions and counts. `legacy` also accepts
-    the pre-#1401 outcomes, for `counts.py`."""
+    the pre-change outcomes, for `counts.py`."""
     try:
         with open(sidecar_path) as fh:
             raw_lines = fh.readlines()
@@ -467,7 +467,7 @@ def job(run_id, lowest, state, cores=0, root=None):
     The declaration lives here and not in a dispatch's argv, because a
     controller that restarts mid-run has only this file: a hold that lived in
     one command line is a hold a resume cannot recover, and the free slot it
-    then dispatches into is the contention #351 produced."""
+    then dispatches into is the over-dispatch contention."""
     record = job_record({"state": state, "cores": cores})
     with locked(run_id, root):
         run = load(run_id, root)
@@ -510,7 +510,7 @@ def clump(run_id, tickets, workspace, agent, root=None):
     Registering the same lowest ticket again moves the workspace and the agent
     and keeps the landing sha — a clump redispatched after a park is the same
     clump — and reopens a closed one, which now has a worker again. A new clump
-    records job `none`: its worker has launched nothing yet (#1311). A ticket
+    records job `none`: its worker has launched nothing yet. A ticket
     that already sits in another clump is refused: one ticket in two clumps is
     two workers in the same files."""
     tickets = ticket_numbers(tickets)
@@ -537,7 +537,7 @@ def clump(run_id, tickets, workspace, agent, root=None):
                  "landed": same["landed"] if same else None,
                  # A closed clump registered again is dispatched again.
                  "closed": None,
-                 # A re-registration keeps a declared job (#1311).
+                 # A re-registration keeps a declared job.
                  "job": same["job"] if same else NEW_CLUMP_JOB,
                  # A new agent has sent no "PR up" of its own.
                  "pr_up": same["pr_up"] if same and same["agent"] == agent
@@ -586,7 +586,7 @@ def close_reason(reason):
 
 def close(run_id, lowest, reason, root=None):
     """Record that a clump closed with no landing of its own — its ticket
-    found already fixed on the default branch (#1310). A landed clump is
+    found already fixed on the default branch. A landed clump is
     refused; closing again with the same reason is a no-op, with another
     reason is refused. Why a close and not a `land` at `main`'s tip, and the
     hand recovery when one was recorded anyway: `references/run-file.md`."""
@@ -713,7 +713,7 @@ def render_resume(state):
 
 def parse_tickets(text):
     """`901,902` or `901 902`. ASCII digits only: `int()` reads `9_01` and
-    `+901` as 901, and a run file that says #901 where the brief said `9_01` is
+    `+901` as 901, and a run file that says 901 where the brief said `9_01` is
     a wrong answer rather than a lenient one."""
     parts = text.replace(",", " ").split()
     if not parts or not all(_TICKET.match(part) for part in parts):
