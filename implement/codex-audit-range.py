@@ -8,9 +8,9 @@ Run from a checkout of the repo. Reads the review ledger (`multi-axis-code-revie
 gate skip rows of repo R whose skip reason is exactly `size`, `ceiling` or `unmeasured` (`SKILL.md`
 § The Codex pass): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass
 that ran.
-Finds each skipped ticket's merge commit on `--base` (default `origin/HEAD`): a squash commit whose
-subject ends `(#<pr>)` and either names `(#<ticket>)` earlier in the subject or has a body line
-closing it. A ledger row carries no date, so "since the mark" is read off that merge commit: not an
+Finds each skipped ticket's merge commit on `--base` (default: the recorded `origin/HEAD`): a
+squash commit whose subject ends `(#<pr>)` and either names `(#<ticket>)` earlier in the subject or
+has a body line closing it. A ledger row carries no date, so "since the mark" is read off that merge commit: not an
 ancestor of the mark sha, or committed after the mark date (an ISO date or date-time; one with no
 zone is UTC).
 
@@ -39,7 +39,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "multi-axis-code-review"))
-from gitcmd import GitError, git  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+from shellcmd import CmdError, default_branch, git  # noqa: E402  (#1782)
 from review_ledger import read_ledger  # noqa: E402
 from review_cache import fold_repo  # noqa: E402
 
@@ -64,7 +65,7 @@ def merges(base: str) -> list[tuple[str, datetime, int, str]]:
     """(sha, commit date, PR, message) of every first-parent commit on `base` whose subject names
     a PR, oldest first."""
     found = []
-    for rec in git("log", "--first-parent", "--reverse", "--format=%H%x00%cI%x00%B%x1e", base).stdout.split("\x1e"):
+    for rec in git(["log", "--first-parent", "--reverse", "--format=%H%x00%cI%x00%B%x1e", base]).stdout.split("\x1e"):
         if not rec.strip():
             continue
         sha, date, body = rec.strip("\n").split("\x00", 2)
@@ -76,7 +77,7 @@ def merges(base: str) -> list[tuple[str, datetime, int, str]]:
 
 def after_mark(mark: str):
     """A predicate on (sha, date): is this merge after the mark? A mark is a commit or a date."""
-    r = git("rev-parse", "--verify", "--quiet", f"{mark}^{{commit}}", ok=(0, 1))  # a failed git is no reading at all
+    r = git(["rev-parse", "--verify", "--quiet", f"{mark}^{{commit}}"], ok=(0, 1))  # a failed git is no reading at all
     sha = r.stdout.strip()
     if r.returncode == 1:
         try:
@@ -87,7 +88,7 @@ def after_mark(mark: str):
         return lambda _sha, date: date > when
 
     def not_ancestor(merge_sha: str, _date) -> bool:
-        return git("merge-base", "--is-ancestor", merge_sha, sha, ok=(0, 1)).returncode == 1
+        return git(["merge-base", "--is-ancestor", merge_sha, sha], ok=(0, 1)).returncode == 1
     return not_ancestor
 
 
@@ -122,14 +123,15 @@ def main(argv=None) -> int:
     p.add_argument("--ledger", type=Path, required=True)
     p.add_argument("--repo", required=True, help="the ledger's repo name, as the review cache's directory names it")
     p.add_argument("--mark", required=True, help="the last audit mark: the newest sha it covered, or its date")
-    p.add_argument("--base", default="origin/HEAD", help="the default branch (default origin/HEAD)")
+    p.add_argument("--base", default=None, help="the default branch (default: origin/HEAD, which must be recorded)")
     args = p.parse_args(argv)
     try:
         skipped = skipped_tickets(read_ledger(args.ledger), args.repo)
         is_after = after_mark(args.mark)
-        history = merges(args.base)
-        picked, left_out = pick(skipped, history, is_after, args.base)
-    except (OSError, ValueError, GitError) as e:
+        base = args.base or default_branch(".")
+        history = merges(base)
+        picked, left_out = pick(skipped, history, is_after, base)
+    except (OSError, ValueError, CmdError) as e:
         print(f"codex-audit-range: {e}", file=sys.stderr)
         return ERROR
     if not picked:
@@ -137,8 +139,8 @@ def main(argv=None) -> int:
         print(f"no skipped PRs since the mark {args.mark}: nothing to audit{undated}")
         return EMPTY
     try:
-        parent = git("rev-parse", "--verify", f"{picked[0][1]}~1").stdout.strip()
-    except GitError as e:
+        parent = git(["rev-parse", "--verify", f"{picked[0][1]}~1"]).stdout.strip()
+    except CmdError as e:
         print(f"codex-audit-range: the oldest merge {picked[0][1]} has no parent: {e}", file=sys.stderr)
         return ERROR
     print(f"range {parent}..{picked[-1][1]}")

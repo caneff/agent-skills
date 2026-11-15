@@ -4,7 +4,7 @@ suites the narrowed command selected, judging nothing (#1537, #1593).
 
 Seam: the real script as a subprocess against a throwaway repo whose
 `AGENTS.md` declares a `Narrowed` line, a fake `tests/all.sh` standing in for
-the narrowed runner and a fake `gh` on PATH that records each `pr comment`.
+the narrowed runner and a fake `gh` on PATH that records each comment.
 Every `not checked` case asserts the reason it names, so a refusal for some
 other cause does not pass for the one under test (`AGENTS.md` § Recurring
 defect classes, class 3).
@@ -95,7 +95,7 @@ def test_the_comment_records_the_listing_and_judges_nothing(w):
     out = verdict(w.comment())
     assert out == ("selector: listed 2 suites from `bash tests/all.sh --changed origin/main --list`\n\n"
                    "```\nalpha/a.test.sh\nbeta/b.test.sh\n```")
-    assert w.posted() == ["pr comment 42 --repo me/repo --body " + out.splitlines()[0]] + out.splitlines()[1:]
+    assert w.posted() == ["issue comment 42 --repo me/repo --body " + out.splitlines()[0]] + out.splitlines()[1:]
     for word in ("clean", "miss", "hit"):
         assert f"selector: {word}" not in out
 
@@ -167,7 +167,8 @@ def test_a_failed_post_is_said_and_never_changes_the_script_status(w):
     w.list()
     r = w.comment(env={"GH_FAIL": "1"})
     assert r.returncode == 0
-    assert "selector comment not posted: gh exploded" in r.stdout
+    assert "selector comment not posted: " in r.stdout
+    assert r.stdout.rstrip().endswith(": gh exploded")  # gh's own reason, the end of the error line
     assert r.stdout.startswith("selector: listed 2 suites")
 
 
@@ -308,3 +309,17 @@ def test_failing_suites_reads_whole_unindented_fail_lines_once_each(tmp_path):
     log.write_text("npm ci failed\n")
     assert failing_suites(str(log)) == ([], "the seam's log has no `FAIL <suite>` line")
     assert failing_suites(str(tmp_path / "nope.log"))[1].startswith("the seam's log could not be read")
+
+
+# -- the PR comment, over the issue module's in-memory adapter (#1786) ---------
+
+def test_post_comments_through_the_tracker_and_says_why_it_could_not():
+    sys.path.insert(0, os.path.join(HERE, "..", "common"))
+    sys.path.insert(0, HERE)
+    import selector_check
+    import tracker
+    t = tracker.MemoryTracker()
+    assert selector_check.post(42, "me/repo", "selector: x", tracker=t) is None
+    assert t.comments == [(42, "selector: x")]
+    down = tracker.MemoryTracker(broken={"comment": "gh  down\nagain"})
+    assert selector_check.post(42, "me/repo", "selector: x", tracker=down) == "gh down again"

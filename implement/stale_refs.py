@@ -25,26 +25,23 @@ read has not found the tree clean.
 import argparse
 import os
 import re
-import subprocess
 import sys
 
-
-def git(repo, *args):
-    # quotePath off: a non-ASCII path would otherwise come back octal-quoted
-    # and be searched for in a spelling no file uses.
-    return subprocess.run(["git", "-C", repo, "-c", "core.quotePath=false", *args],
-                          capture_output=True, text=True)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+import shellcmd  # noqa: E402  (#1782)
 
 
 class GitError(Exception):
     pass
 
 
-def checked(repo, *args):
-    result = git(repo, *args)
-    if result.returncode != 0:
-        raise GitError(f"git {' '.join(args)}: {result.stderr.strip()}")
-    return result.stdout
+def git(repo, *args, ok=(0,)):
+    # quotePath off: a non-ASCII path would otherwise come back octal-quoted
+    # and be searched for in a spelling no file uses.
+    try:
+        return shellcmd.git(["-C", repo, "-c", "core.quotePath=false", *args], ok=ok)
+    except shellcmd.CmdError as e:
+        raise GitError(str(e)) from None
 
 
 # Top-level definitions, column 0 only: an indented def is a method or a
@@ -80,14 +77,22 @@ def defined(path, text):
     return names
 
 
+def default_base(root):
+    """`origin/<default>` as the repo records it; a repo with none recorded is a GitError."""
+    try:
+        return shellcmd.default_branch(root)
+    except shellcmd.CmdError as e:
+        raise GitError(str(e)) from None
+
+
 def read_diff(repo, base):
     """({old path: what happened to it}, {name: the file it was removed from})
     from one read of the diff: the paths it renamed or deleted, and the
     top-level names its removed lines define outside test files."""
     # Prefixes pinned so a user's diff.noprefix cannot strip the `a/` and
     # `b/` the headers are parsed by.
-    out = checked(repo, "diff", "-U0", "--no-color", "--no-ext-diff", "-M",
-                  "--src-prefix=a/", "--dst-prefix=b/", f"{base}...HEAD")
+    out = git(repo, "diff", "-U0", "--no-color", "--no-ext-diff", "-M",
+              "--src-prefix=a/", "--dst-prefix=b/", f"{base}...HEAD").stdout
     gone, removed = {}, {}
     old = ""
     header = False  # a removed `-- comment` line inside a hunk is not a file header
@@ -130,11 +135,9 @@ PATH_BEFORE, BASENAME_BEFORE, NAME_BEFORE = "A-Za-z0-9_./-", "A-Za-z0-9_.-", "A-
 
 def hits(repo, pattern):
     """(file, line, text) for each tracked line `pattern` matches."""
-    result = git(repo, "grep", "-n", "-I", "-E", "-e", pattern)
+    result = git(repo, "grep", "-n", "-I", "-E", "-e", pattern, ok=(0, 1))
     if result.returncode == 1:
         return []
-    if result.returncode != 0:
-        raise GitError(f"git grep {pattern}: {result.stderr.strip()}")
     return [tuple(row.split(":", 2)) for row in result.stdout.splitlines()]
 
 
@@ -146,14 +149,13 @@ def main(argv=None):
     try:
         # From the top: `git grep` searches only below its cwd, while the
         # diff names paths from the root.
-        root = checked(args.repo, "rev-parse", "--show-toplevel").strip()
-        base = args.base or checked(
-            root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
-        dirty = checked(root, "status", "--porcelain", "--untracked-files=no")
+        root = git(args.repo, "rev-parse", "--show-toplevel").stdout.strip()
+        base = args.base or default_base(root)
+        dirty = git(root, "status", "--porcelain", "--untracked-files=no").stdout
         if dirty:
             raise GitError("tracked files have uncommitted changes; the diff reads HEAD, "
                            "so commit first:\n" + dirty.rstrip())
-        tracked = {os.path.basename(p) for p in checked(root, "ls-files").splitlines()}
+        tracked = {os.path.basename(p) for p in git(root, "ls-files").stdout.splitlines()}
         gone, removed = read_diff(root, base)
         found = 0
         for old, why in sorted(gone.items()):

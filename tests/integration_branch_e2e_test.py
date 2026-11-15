@@ -60,16 +60,20 @@ class SpecLife:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         self.env = {**env, **IDENT, "HOME": home, "PATH": fakebin + os.pathsep + env["PATH"]}
         self.prs = os.path.join(self.tmp, "prs")  # the open slice PRs `gh pr list` answers with
-        Path(self.prs).write_text("")
+        Path(self.prs).write_text("[]")
         Path(fakebin, "gh").write_text(
             '#!/usr/bin/env bash\n'
             f'if [ "$1 $2" = "pr list" ]; then cat {self.prs}; exit 0; fi\n'
             'echo "fake gh: unexpected $*" >&2; exit 1\n')
         os.chmod(os.path.join(fakebin, "gh"), 0o755)
         origin = os.path.join(self.tmp, "origin.git")
+        # fix-check asks GitHub through the slug of `origin`: origin is named as the GitHub repo `o/r`,
+        # and this world's own git calls reach the bare clone by an `insteadOf` fix-check never sees.
+        self.insteadof = f"url.{origin}.insteadOf=https://github.com/o/r.git"
         self.git(self.tmp, "init", "-q", "--bare", "-b", "main", origin)
         self.primary = os.path.join(self.tmp, "repo")
         self.git(self.tmp, "clone", "-q", origin, self.primary)
+        self.git(self.primary, "remote", "set-url", "origin", "https://github.com/o/r.git")
         Path(self.primary, "AGENTS.md").write_text(AGENTS)
         self.commit(self.primary, "base")
         self.git(self.primary, "push", "-q", "origin", "main")
@@ -84,7 +88,8 @@ class SpecLife:
         assert code == 0, out
 
     def git(self, cwd, *args):
-        done = subprocess.run(["git", *args], cwd=cwd, env=self.env, capture_output=True, text=True)
+        done = subprocess.run(["git", "-c", self.insteadof, *args], cwd=cwd, env=self.env,
+                              capture_output=True, text=True)
         assert done.returncode == 0, (args, done.stderr)
         return done.stdout.strip()
 
@@ -94,8 +99,18 @@ class SpecLife:
         self.git(cwd, "commit", "-q", "-m", message or name)
         return self.git(cwd, "rev-parse", "HEAD")
 
-    def run_tool(self, cwd, *cmd):
-        done = subprocess.run([str(c) for c in cmd], cwd=cwd, env=self.env, capture_output=True, text=True)
+    def open_prs(self, *prs):
+        """The open slice PRs `gh pr list` answers with, each a `(number, base)`."""
+        Path(self.prs).write_text(json.dumps([{"number": n, "url": "u", "baseRefName": b} for n, b in prs]))
+
+    def run_tool(self, cwd, *cmd, reaches_origin=False):
+        """Run `cmd`; `reaches_origin` lets its own git calls fetch and push to the bare clone, which
+        fix-check must not see (it reads origin's URL as the GitHub repo)."""
+        env = self.env
+        if reaches_origin:
+            key, value = self.insteadof.split("=", 1)
+            env = {**env, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": key, "GIT_CONFIG_VALUE_0": value}
+        done = subprocess.run([str(c) for c in cmd], cwd=cwd, env=env, capture_output=True, text=True)
         return done.returncode, done.stdout + done.stderr
 
 
@@ -120,17 +135,17 @@ def test_a_spec_lands_through_its_integration_branch(life):
     assert code == 0, out
     assert "slice of spec-3, no review wave" in out
     assert not os.listdir(life.reviews), "a slice wrote review files"
-    Path(life.prs).write_text("40 main\n")
+    life.open_prs((40, "main"))
     code, out = life.run_tool(slice_ws, "bash", FIX_CHECK, "4")
     assert code == 1, out
     assert "PR #40 from implement-4 targets main, not spec-3" in out
-    Path(life.prs).write_text("40 spec-3\n")
+    life.open_prs((40, "spec-3"))
     code, out = life.run_tool(slice_ws, "bash", FIX_CHECK, "4")
     assert code == 0, out
 
     # The slice lands on origin/spec-3, as its PR's merge does on GitHub; main moves on.
     life.git(slice_ws, "push", "-q", "origin", "HEAD:spec-3")
-    Path(life.prs).write_text("")
+    life.open_prs()
     life.commit(life.primary, "elsewhere")
     life.git(life.primary, "push", "-q", "origin", "main")
 
@@ -145,7 +160,7 @@ def test_a_spec_lands_through_its_integration_branch(life):
     # Its keep-current block, run as written in the spec run's workspace: the slice comes
     # in, main is merged (never rebased), and the push lands.
     block = section.split("### The spec-level review", 1)[1].split("```\n", 2)[1]
-    code, out = life.run_tool(spec_ws, "bash", "-c", block)
+    code, out = life.run_tool(spec_ws, "bash", "-c", block, reaches_origin=True)
     assert code == 0, out
     assert life.git(spec_ws, "rev-parse", "HEAD") == life.git(spec_ws, "rev-parse", "origin/spec-3")
     reviewed = life.git(spec_ws, "log", "--format=%s", "origin/main...spec-3")

@@ -631,6 +631,9 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees(tmp_path):
     # A setup failure is a failed module (#1309), so the run exits nonzero.
     assert r.returncode != 0, r.stdout + r.stderr
     assert "[mutation:solver.py] FAILED: no recognized env manifest" in r.stdout, r.stdout
+    # The failure line points at a log; that log exists and says why (#1730 C7).
+    log = re.search(r"FAILED: .* — see (\S+)", r.stdout).group(1)
+    assert os.path.isfile(log) and "no recognized env manifest" in open(log).read(), log
     assert not os.path.exists(stale), "mutation mode must prune run dirs past the TTL"
 
     runs = [d for d in os.listdir(base) if d.startswith("run-")]
@@ -1955,6 +1958,18 @@ def test_suggest_names_a_repo_with_no_local_checkout_as_skipped(tmp_path):
     assert "skipped: caneff/ghost (no local checkout)" in r.stdout.splitlines()
 
 
+def test_a_checkout_whose_origin_git_cannot_read_is_skipped_and_named(tmp_path, capsys):
+    """#1730 S1: a checkout `origin_slug` raises on is left out of the map,
+    and the skip names it on stderr, so a failed read is never a silent "no origin"."""
+    tmp = str(tmp_path)
+    roots, _ = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
+    broken = os.path.join(roots, "broken")
+    os.mkdir(broken)
+    open(os.path.join(broken, ".git"), "w").write("gitdir: /nonexistent/repo\n")
+    assert driver.local_checkouts([roots]) == {"caneff/alpha": os.path.join(roots, "alpha")}
+    assert f"skipped checkout {broken}:" in capsys.readouterr().err
+
+
 def test_suggest_with_a_failed_gh_search_exits_nonzero_with_the_error_never_an_empty_list(tmp_path):
     tmp = str(tmp_path)
     roots, env = _suggest_fixture(tmp, {"alpha": "https://github.com/caneff/alpha.git"})
@@ -2608,3 +2623,8 @@ def test_a_corrupt_mutation_log_is_not_counted_as_measured_on_the_main_index(tmp
     assert r.returncode == 0, r.stdout + r.stderr
     index = open(os.path.join(tmp, "collection", "index.html")).read()
     assert "1 modules measured, 3 total survivors, 1 CORRUPT" in index, index
+
+
+def test_git_state_of_a_non_repo_is_dirty_never_clean(tmp_path):
+    """#1778: a `git status` that failed is no answer; it must force a run, not read as clean."""
+    assert driver.git_state(str(tmp_path), None) == {"dirty": True, "changed_files": []}

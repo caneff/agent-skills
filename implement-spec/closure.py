@@ -42,6 +42,9 @@ import warnings
 # quoted-template bug.
 from frontier import key_line, section, visible
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+from shellcmd import scrubbed_env  # noqa: E402
+
 _CLOSURE_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+include closure[ \t]*:?[ \t]*$",
                               re.IGNORECASE)
 # `- **Directive**: `#include <path>`` — the key line grammar is
@@ -207,12 +210,13 @@ def git_listing(root):
     """The paths git lists under `root`: tracked, plus untracked and not
     ignored, minus `SKIP_DIRS`. A non-zero exit, or git skipping an unreadable
     directory, raises `ClosureError`."""
-    # A caller's Git environment must not redirect this scan to its repo.
-    # GIT_CONFIG_* redirects nothing and is kept: a `safe.directory` passed
-    # that way is what lets the scan read a checkout owned by another user.
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith("GIT_") or k.startswith("GIT_CONFIG")}
-    env["LC_ALL"] = "C"  # the unreadable-directory warning below is matched by text
+    # A caller's Git environment must not redirect this scan to its repo:
+    # `shellcmd`'s scrub, the one every caller shares. GIT_CONFIG_* survives
+    # it, and a `safe.directory` passed that way is what lets the scan read a
+    # checkout owned by another user. Not `shellcmd.git` itself: the listing
+    # is bytes (a path need not be UTF-8) and LC_ALL=C pins the warning text
+    # matched below, and that call offers neither.
+    env = {**scrubbed_env(), "LC_ALL": "C"}
     # The --exclude arguments are not redundant with the walk's SKIP_DIRS
     # filter: for --others they keep git from opening an unreadable
     # node_modules/, which it warns about and the check below refuses.

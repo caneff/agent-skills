@@ -9,11 +9,15 @@ the filed tickets, the notifications and the exit code out.
 import json
 import os
 import subprocess
+import sys
 
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BACKSTOP = os.path.join(HERE, "backstop.py")
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, os.pardir, "common"))
+import tracker  # noqa: E402
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -28,15 +32,16 @@ if " ".join(args[:2]) in state.get("raw", {}):
     print(state["raw"][" ".join(args[:2])])
 elif args[:2] == ["api", "user"]:
     print(state["login"])
-elif args[:2] == ["issue", "list"]:
-    assert opt("--repo") == state["repo"], args
-    print(json.dumps([dict(number=n, body=i["body"]) for n, i in enumerate(state["issues"], 1)
-                      if i["state"] == "open" and opt("--label") in i["labels"]]))
+elif args[:2] == ["api", "--paginate"]:
+    # the tracker's REST issue list: one page of the open issues holding the `labels=` of the path
+    assert f"repos/{state['repo']}/issues?" in args[-1], args
+    want = args[-1].split("labels=")[1]
+    print(json.dumps([[dict(number=n, body=i["body"], state="open", labels=[{"name": x} for x in i["labels"]])
+                       for n, i in enumerate(state["issues"], 1) if i["state"] == "open" and want in i["labels"]]]))
 elif args[:2] == ["issue", "create"]:
     assert opt("--repo") == state["repo"], args
     labels = [args[i + 1] for i, a in enumerate(args) if a == "--label"]
-    state["issues"].append(dict(title=opt("--title"), body=open(opt("--body-file")).read(),
-                                labels=labels, state="open"))
+    state["issues"].append(dict(title=opt("--title"), body=opt("--body"), labels=labels, state="open"))
     json.dump(state, open(path, "w"))
     print(f"https://github.com/{state['repo']}/issues/{len(state['issues'])}")
 elif args[:2] == ["run", "list"]:
@@ -114,16 +119,15 @@ class Sandbox:
         self.state_path = os.path.join(t, "gh.json")
         self.notify_log = os.path.join(t, "notify.log")
         self.jobs_log = os.path.join(t, "jobs.log")
-        self.origin = os.path.join(t, "origin.git")
+        # A path carrying `github.com/me/repo`: the helper's origin_slug reads it as that repo's remote.
+        self.origin = os.path.join(t, "github.com", "me", "repo.git")
+        os.makedirs(os.path.dirname(self.origin))
         self.repo = os.path.join(t, "repo")
         self.git(t, "init", "-q", "--bare", "-b", "main", self.origin)
         self.git(t, "clone", "-q", self.origin, self.repo)
         self.git(self.repo, "checkout", "-q", "-b", "main")
         self.commit("init", {"AGENTS.md": AGENTS.format(seam="sh seam.sh"), "seam.sh": FAKE_SEAM})
         self.git(self.repo, "remote", "set-head", "origin", "main")
-        url = "https://github.com/me/repo.git"
-        self.git(self.repo, "remote", "set-url", "origin", url)
-        self.git(self.repo, "config", f"url.{self.origin}.insteadOf", url)
         self.save({"login": "me", "repo": "me/repo", "issues": []})
 
     def git(self, cwd, *args):
@@ -433,6 +437,20 @@ def test_repo_owned_by_someone_else_is_refused_before_anything_runs(sb):
     assert "seam could not start" not in note, note
 
 
+def test_an_origin_that_is_not_on_github_is_refused_before_anything_runs(sb):
+    """A remote with no `github.com/<owner>/<name>` in it names no repo to file in or to own."""
+    elsewhere = os.path.join(sb.tmp, "elsewhere", "repo.git")
+    os.makedirs(os.path.dirname(elsewhere))
+    os.symlink(sb.origin, elsewhere)
+    sb.git(sb.repo, "remote", "set-url", "origin", elsewhere)
+    out = sb.run("red")
+    assert out.returncode == 2, out.stderr
+    assert sb.tickets() == [] and sb.last_green() is None
+    assert not os.path.exists(sb.jobs_log), "no seam runs on a repo with no GitHub origin"
+    (note,) = sb.notes()
+    assert "inconclusive" in note and "its origin is not a github.com repo" in note, note
+
+
 def test_missing_origin_head_is_reported_as_itself(sb):
     sb.git(sb.repo, "remote", "set-head", "origin", "-d")
     out = sb.run("green")
@@ -442,10 +460,10 @@ def test_missing_origin_head_is_reported_as_itself(sb):
 
 
 def test_an_unexpected_crash_is_an_inconclusive_night_not_a_red_one(sb):
-    """A malformed `gh issue list` row (no `number`) raises in the red path."""
+    """A malformed issue-list row (no `number`) raises in the red path."""
     red_night(sb)
     green = sb.last_green()
-    sb.set(raw={"issue list": json.dumps([{"body": '<!-- backstop suites: ["b/b.test.sh"] -->'}])})
+    sb.set(raw={"api --paginate": json.dumps([[{"body": '<!-- backstop suites: ["b/b.test.sh"] -->'}]])})
     out = sb.run("red")
     assert out.returncode == 2, out.stderr
     assert sb.last_green() == green and sb.tickets() == []
@@ -462,6 +480,23 @@ def test_a_backstop_that_cannot_import_its_neighbours_is_inconclusive(sb):
     assert sb.last_green() is None and not os.path.exists(sb.jobs_log)
     (note,) = sb.notes()
     assert "inconclusive" in note and "could not import" in note, note
+
+
+def test_a_backstop_night_never_loads_drain(sb):
+    """Run the backstop under a wrapper that reports whether `drain` ended up in `sys.modules`;
+    the night goes green and drain was never imported (#1779)."""
+    seen = os.path.join(sb.tmp, "modules.txt")
+    wrapper = os.path.join(sb.tmp, "wrap.py")
+    write(wrapper, "import runpy, sys\n"
+                   "try:\n"
+                   f"    runpy.run_path({BACKSTOP!r}, run_name='__main__')\n"
+                   "except SystemExit as e:\n"
+                   "    code = e.code\n"
+                   f"    open({seen!r}, 'w').write('drain' if 'drain' in sys.modules else 'clean')\n"
+                   "    raise\n")
+    out = sb.run("green", script=wrapper)
+    assert out.returncode == 0, out.stderr
+    assert read(seen) == "clean"
 
 
 def test_direct_commits_do_not_make_a_suite_unknown_and_are_listed(sb):
@@ -610,3 +645,46 @@ def test_ci_run_list_that_fails_is_inconclusive(ci):
     assert out.returncode == 2 and ci.last_green() is None
     (note,) = ci.notes()
     assert "inconclusive" in note and "run list" in note, note
+
+
+# --- the GitHub reads, over the issue module's in-memory adapter (#1786) -------
+
+def _ctx(tracker):
+    import backstop
+    return backstop, backstop.Ctx("/x", "o/r", "origin/main", "/x", tracker)
+
+
+def _bug(n, body, **extra):
+    return {"number": n, "state": "open", "body": body, "labels": [{"name": "bug"}], **extra}
+
+
+def test_open_tickets_are_the_bug_issues_with_a_marker_and_never_a_pull_request():
+    t = tracker.MemoryTracker([_bug(1, '<!-- backstop suites: ["a"] -->'), _bug(2, "no marker"),
+                               _bug(3, '<!-- backstop suites: ["pr-only"] -->', pull_request={}),
+                               _bug(4, "<!-- backstop suites: not json -->")])
+    backstop, ctx = _ctx(t)
+    assert backstop.open_backstop_tickets(ctx) == {"a": 1}
+
+
+def test_a_tracker_that_cannot_list_is_a_backstop_error_not_an_empty_queue():
+    backstop, ctx = _ctx(tracker.MemoryTracker(broken={"issues": "gh down"}))
+    with pytest.raises(backstop.BackstopError, match="gh down"):
+        backstop.open_backstop_tickets(ctx)
+
+
+def test_a_filed_ticket_carries_the_bug_and_ready_labels_and_its_url_comes_back():
+    t = tracker.MemoryTracker()
+    backstop, ctx = _ctx(t)
+    url = backstop.file_ticket(ctx, "abc", ["a/a_test.py"], "the body")
+    assert url == "https://github.com/owner/repo/issues/1"
+    assert [i["number"] for i in t.issues("ready-for-agent")] == [1]
+    assert t.issue(1)["body"] == "the body" and "a/a_test.py" in t.issue(1)["title"]
+
+
+def test_a_prs_listing_is_read_from_its_last_selector_comment_through_the_tracker():
+    t = tracker.MemoryTracker(pr_comments={7: ["selector: listed 1 suite from `c`\n\n```\nold\n```",
+                                              "selector: listed 1 suite from `c`\n\n```\nnew\n```"]})
+    backstop, ctx = _ctx(t)
+    assert backstop.pr_listing(ctx, "7") == ({"new"}, None)
+    suites, why = backstop.pr_listing(ctx, "8")
+    assert suites is None and "#8's comments could not be read" in why

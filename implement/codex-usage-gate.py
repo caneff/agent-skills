@@ -60,7 +60,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -148,11 +147,18 @@ class SizeCheckError(Exception):
 
 
 def run_cmd(argv: list[str]) -> str:
-    """`argv`'s stdout, or SizeCheckError carrying the command and its own stderr."""
-    p = subprocess.run(argv, capture_output=True, text=True)
-    if p.returncode != 0:
-        raise SizeCheckError(f"`{' '.join(argv)}` exited {p.returncode}: {p.stderr.strip()}")
-    return p.stdout
+    """`argv` (a `git` or `gh` command line) run through `shellcmd`: its stdout, or
+    SizeCheckError carrying the command and its own stderr. Imported here, not at the top: only
+    the size check runs a command, and `--percent` stays a file that runs on its own."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+    import shellcmd
+
+    tool = {"git": shellcmd.git, "gh": shellcmd.gh}[argv[0]]
+    try:
+        return tool(argv[1:]).stdout
+    except shellcmd.CmdError as exc:
+        cmd = " ".join(argv)
+        raise SizeCheckError(f"`{cmd}`: {str(exc).removeprefix(cmd + ': ')}") from None
 
 
 def churn(base: str) -> int:

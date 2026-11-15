@@ -31,11 +31,12 @@ state but the three above (`BEHIND`, `DIRTY`, ...): nothing waited on resolves
 those, even with a check running.
 """
 import argparse
-import json
 import os
-import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+import tracker as issue_tracker  # noqa: E402  (#1786)
 
 UNKNOWN_SECONDS = 60
 CHECKS_SECONDS = 15 * 60
@@ -141,41 +142,46 @@ def merge(read, gh_merge, head, sleep=time.sleep, now=time.monotonic, poll=POLL_
     raise SettleError(f"gh pr merge refused {MERGE_RETRIES + 1} times: {refusal}")
 
 
-def gh_reader(pr, repo, extra=""):
+def gh_reader(pr, repo, extra="", tracker=None):
     """A `read()` for `settle`; `extra` names further `--json` fields a caller
-    wants on the view it gets back."""
+    wants on the view it gets back. `tracker` is the issue module's adapter for
+    `repo`, the `gh` one unless a test passes the in-memory one."""
     fields = FIELDS + ("," + extra if extra else "")
+    tracker = tracker or issue_tracker.GhTracker(repo)
 
     def read():
-        out = subprocess.run(["gh", "pr", "view", str(pr), "--repo", repo, "--json", fields],
-                             capture_output=True, text=True)
-        if out.returncode != 0:
-            raise SettleError(f"gh pr view failed: {(out.stderr or out.stdout).strip()}")
         try:
-            return json.loads(out.stdout)
-        except ValueError as exc:
-            raise SettleError(f"gh pr view returned no JSON: {exc}") from exc
+            return tracker.pr_view(pr, fields)
+        except issue_tracker.TrackerError as exc:
+            raise SettleError(f"gh pr view failed: {exc}") from exc
     return read
 
 
-def gh_merger(pr, repo):
+def gh_merger(pr, repo, tracker=None):
+    """A `gh_merge(head)` for `merge`: squash-merge PR `pr` of `repo` only if its head is still
+    `head`, as `(0, "")` when it merged and `(1, <gh's refusal>)` when it did not, since `merge`
+    reads the refusal's text for GitHub's "Base branch was modified"."""
+    tracker = tracker or issue_tracker.GhTracker(repo)
+
     def do(head):
-        out = subprocess.run(["gh", "pr", "merge", str(pr), "--repo", repo, "--squash",
-                              "--match-head-commit", head], capture_output=True, text=True)
-        return out.returncode, (out.stderr or "") + (out.stdout or "")
+        try:
+            tracker.merge(pr, head)
+        except issue_tracker.TrackerError as exc:
+            return 1, str(exc)
+        return 0, ""
     return do
 
 
-def require_own_repo(repo):
+def require_own_repo(repo, tracker=None):
     """`--merge` runs `gh pr merge` inside this process, where the ownership
     hook (`flow/claude/hooks/block-dangerous-git.sh`, which reads a command
     line for the words `gh pr merge`) cannot see it. So the same rule is kept
     here, failing closed: a repo whose owner is not the `gh` login, or a login
     `gh` cannot give, is not merged."""
-    out = subprocess.run(["gh", "api", "user", "--jq", ".login"], capture_output=True, text=True)
-    login = out.stdout.strip()
-    if out.returncode != 0 or not login:
-        raise SettleError(f"refusing to merge: could not read the gh login ({(out.stderr or '').strip()})")
+    try:
+        login = (tracker or issue_tracker.GhTracker(repo)).viewer_login()
+    except issue_tracker.TrackerError as exc:
+        raise SettleError(f"refusing to merge: could not read the gh login ({exc})") from exc
     owner = repo.split("/")[0] if repo.count("/") == 1 else ""
     if owner.lower() != login.lower():
         raise SettleError(f"refusing to merge {repo}: owner {owner or '?'} is not the gh login {login}; "

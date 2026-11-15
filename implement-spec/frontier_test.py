@@ -4,6 +4,7 @@ GitHub issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
 `spec`, `slice`) out. No network: every case is a ticket fixture, which is
 the point of the seam.
 """
+import json
 import os
 import re
 import subprocess
@@ -14,6 +15,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import frontier as F  # noqa: E402
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+import tracker as T  # noqa: E402
 
 FRONTIER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontier.py")
 
@@ -45,7 +49,7 @@ def issue(number, *, title=None, body="", assignees=(), labels=("ready-for-agent
     return out
 
 
-def read(issues, states=None, parents=None, landed=None, native=None):
+def read(issues, states=None, parents=None, landed=None, native=None, asked=None):
     """`frontier(repo, label)` over a fixture list, with blocker states from a
     dict instead of the tracker. A number missing from `states` is a blocker
     whose state could not be read.
@@ -56,41 +60,68 @@ def read(issues, states=None, parents=None, landed=None, native=None):
     ticket in the cases that predate slices looks like.
 
     `landed` maps a `spec-<p>` branch to the ticket numbers whose PR merged
-    into it (an exception for a lookup that fails); `native` maps a ticket number to its native blocker
-    numbers (an exception for a list that could not be read)."""
-    states = states or {}
-    native = native or {}
-    landed = landed or {}
-    parents = parents or {}
-
-    def parent_of(repo, ticket, run=None):
-        answer = parents.get(ticket["number"])
+    into it (an exception for a lookup that fails); `native` maps a ticket
+    number to its native blocker numbers (an exception for a list that could
+    not be read). `asked` collects the integration branches looked up."""
+    broken, stored = {}, {}
+    for number, state in (states or {}).items():
+        stored[number] = {"number": number, "state": state, "labels": []}
+    for number, answer in (parents or {}).items():
         if isinstance(answer, Exception):
-            raise answer
-        return answer
+            broken[f"parent_link:{number}"] = str(answer)
+        elif answer is not None:
+            stored[answer["number"]] = answer
+            stored[number] = {"number": number, "state": "open", "labels": [], "parent": answer["number"]}
+    for number, answer in (native or {}).items():
+        if isinstance(answer, Exception):
+            broken[f"native_blockers:{number}"] = str(answer)
+        else:
+            stored[number] = {**stored.get(number, {"number": number, "state": "open", "labels": []}),
+                              "blockers": answer}
+    merged = {}
+    for branch, answer in (landed or {}).items():
+        if isinstance(answer, Exception):
+            broken[f"merged_bodies:{branch}"] = str(answer)
+        else:
+            merged[branch] = ["".join(f"Closes #{n}\n" for n in answer)]
 
-    return F.frontier(
-        "owner/repo", "ready-for-agent",
-        fetch=lambda repo, label: issues,
-        state_of=lambda repo, number: states.get(number),
-        parent_of=parent_of,
-        landed_of=lambda repo, branch: _landed_answer(landed, branch),
-        native_blockers_of=lambda repo, ticket: _native_answer(native, ticket),
-    )
+    class Listed(T.MemoryTracker):
+        def issues(self, label):  # these tests are of classification, not of the label query
+            return issues
+
+        def merged_bodies(self, base):
+            if asked is not None:
+                asked.append(base)
+            return super().merged_bodies(base)
+
+    return F.frontier("owner/repo", "ready-for-agent",
+                      tracker=Listed(list(stored.values()), merged=merged, broken=broken))
 
 
-def _landed_answer(landed, branch):
-    answer = landed.get(branch, set())
-    if isinstance(answer, Exception):
-        raise answer
-    return answer
+def as_stdout(run):
+    """`run`, a `gh_json` stand-in, as the adapter's `gh` stdout seam."""
+    return lambda args: json.dumps(run(args))
 
 
-def _native_answer(native, ticket):
-    answer = native.get(ticket["number"], [])
-    if isinstance(answer, Exception):
-        raise answer
-    return answer
+def gh_tracker(run):
+    """The gh adapter over `run`, a `gh_json` stand-in."""
+    return T.GhTracker("owner/repo", run=as_stdout(run))
+
+
+def gh_frontier(issues, run=None, state="closed", landed=None):
+    """`frontier` over the gh adapter with `run` for its api calls, the listing and blocker state
+    fixed: the parent and landed lookups are what these tests exercise."""
+    class Fake(T.GhTracker):
+        def issues(self, label):
+            return issues
+
+        def state(self, number):
+            return state
+
+        def merged_bodies(self, base):
+            return landed(base) if landed else []
+
+    return F.frontier("owner/repo", "ready-for-agent", tracker=Fake("owner/repo", run=run and as_stdout(run)))
 
 
 def numbers(bucket):
@@ -411,9 +442,14 @@ def test_each_blocker_state_is_read_once_per_number():
 
     issues = [issue(1, body="## Blocked by\n\n- #7\n"),
               issue(2, body="## Blocked by\n\n- #7\n")]
-    got = F.frontier("owner/repo", "ready-for-agent",
-                     fetch=lambda repo, label: issues, state_of=state_of,
-                     parent_of=lambda repo, ticket, run: None)
+    class Counting(T.MemoryTracker):
+        def issues(self, label):
+            return issues
+
+        def state(self, number):
+            return state_of("owner/repo", number)
+
+    got = F.frontier("owner/repo", "ready-for-agent", tracker=Counting())
     assert calls == [7], calls
     assert numbers(got["unblocked"]) == [1, 2], got
 
@@ -446,23 +482,24 @@ def test_a_label_with_odd_characters_is_encoded_into_the_url():
     # broader queue with exit 0, which is the wrong answer reported as a
     # good one. A space hangs the request outright.
     calls = []
-    got = F.fetch_issues("owner/repo", "needs info#1",
-                         run=lambda args: calls.append(args) or [])
+    got = gh_tracker(lambda args: calls.append(args) or []).issues("needs info#1")
     assert got == [], got
     assert calls[0][-1].endswith("labels=needs%20info%231"), calls
 
 
-def test_a_gh_call_that_answers_nothing_is_an_empty_queue():
-    # A zero-exit `gh` with empty stdout parsed to None, and the frontier
-    # then died on `TypeError: 'NoneType' object is not iterable`.
-    assert F.fetch_issues("owner/repo", "l", run=lambda args: None) == []
+def test_a_gh_call_that_answers_nothing_is_an_error_not_an_empty_queue():
+    # `--slurp` prints `[[]]` for an empty queue (gh 2.95.0), so a zero-exit
+    # `gh` with empty stdout is no answer. Read as `[]` it would also be "no
+    # native blockers", unblocking a ticket on a call that said nothing.
+    quiet = T.GhTracker("owner/repo", run=lambda args: "")
+    for call in (lambda: quiet.issues("l"), lambda: quiet.native_blockers(issue(2))):
+        with pytest.raises(T.TrackerError, match="pages"):
+            call()
 
 
-def test_a_missing_gh_leaves_a_blocker_state_unread():
-    def explode(args):
-        raise FileNotFoundError(2, "No such file or directory", "gh")
-
-    assert F.fetch_state("owner/repo", 7, run=explode) is None
+def test_a_missing_gh_leaves_a_blocker_state_unread(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert T.GhTracker("owner/repo").state(7) is None
 
 
 def test_the_cli_reports_a_failed_gh_call_on_one_line():
@@ -575,7 +612,7 @@ def test_an_inline_line_counts_only_in_the_preamble():
 
 def test_a_preamble_inline_line_still_declares():
     body = "Part of #500\n\nBlocked by: None\n\n## TL;DR\n\nSomething.\n"
-    got = read([issue(1, body=body)])
+    got = read([issue(1, body=body)], parents={1: issue(500, labels=())})
     assert numbers(got["unblocked"]) == [1], got
 
 
@@ -583,21 +620,21 @@ def test_a_preamble_inline_line_still_declares():
 
 def test_every_page_of_a_paginated_queue_comes_back():
     pages = [[issue(1), issue(2)], [issue(3)]]
-    got = F.fetch_issues("owner/repo", "l", run=lambda args: pages)
+    got = gh_tracker(lambda args: pages).issues("l")
     assert [i["number"] for i in got] == [1, 2, 3], got
 
 
 def test_the_paginated_fetch_asks_gh_to_slurp_the_pages():
     calls = []
-    F.fetch_issues("owner/repo", "l", run=lambda args: calls.append(args) or [])
+    gh_tracker(lambda args: calls.append(args) or []).issues("l")
     assert "--slurp" in calls[0], calls
 
 
 @pytest.mark.parametrize("answer", [{"message": "Not Found"}, [{"number": 1}]],
                          ids=["error-object", "flat-list"])
 def test_an_answer_that_is_not_pages_of_issues_is_an_error(answer):
-    with pytest.raises(F.FrontierError) as excinfo:
-        F.fetch_issues("owner/repo", "l", run=lambda args: answer)
+    with pytest.raises(T.TrackerError) as excinfo:
+        gh_tracker(lambda args: answer).issues("l")
     assert "pages" in str(excinfo.value), excinfo.value
 
 
@@ -841,7 +878,7 @@ def test_an_unreadable_parent_is_unresolved_not_unblocked():
     # An absent answer is not "no parent": the ticket would dispatch as
     # ordinary work under a spec nobody could see.
     got = read([issue(491, body=NO_BLOCKERS)],
-               parents={491: F.FrontierError("gh: HTTP 502")})
+               parents={491: T.TrackerError("gh: HTTP 502")})
     assert numbers(got["unresolved"]) == [491], got
     assert numbers(got["unblocked"]) == [], got
     assert "parent" in got["unresolved"][0]["why"], got
@@ -849,7 +886,7 @@ def test_an_unreadable_parent_is_unresolved_not_unblocked():
 
 def test_a_silent_ticket_whose_parent_cannot_be_read_keeps_its_own_reason():
     # Silence is what a human must fix; the failed parent read is said beside it.
-    got = read([issue(491, body="")], parents={491: F.FrontierError("gh: HTTP 502")})
+    got = read([issue(491, body="")], parents={491: T.TrackerError("gh: HTTP 502")})
     why = got["unresolved"][0]["why"]
     assert "no `Blocked by` of any form" in why, why
     assert "its parent could not be read (gh: HTTP 502)" in why, why
@@ -891,52 +928,52 @@ def gh_answers(table):
 
 def test_fetch_parent_reads_the_sub_issue_parent_endpoint():
     run = gh_answers({"repos/owner/repo/issues/491/parent": spec_parent(483)})
-    got = F.fetch_parent("owner/repo", issue(491), run=run)
+    got = F.fetch_parent(gh_tracker(run), issue(491))
     assert got["number"] == 483, got
 
 
 def test_fetch_parent_falls_back_to_a_part_of_line_on_a_404():
     run = gh_answers({
-        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+        "repos/owner/repo/issues/491/parent": T.TrackerError("gh: Not Found (HTTP 404)"),
         "repos/owner/repo/issues/483": spec_parent(483),
     })
-    got = F.fetch_parent("owner/repo", issue(491, body="Part of #483\n\nBody."), run=run)
+    got = F.fetch_parent(gh_tracker(run), issue(491, body="Part of #483\n\nBody."))
     assert got["number"] == 483, got
 
 
 def test_fetch_parent_with_no_parent_anywhere_is_none():
     run = gh_answers({
-        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+        "repos/owner/repo/issues/491/parent": T.TrackerError("gh: Not Found (HTTP 404)"),
     })
-    assert F.fetch_parent("owner/repo", issue(491, body="plain"), run=run) is None
+    assert F.fetch_parent(gh_tracker(run), issue(491, body="plain")) is None
 
 
 def test_fetch_parent_does_not_read_a_failed_call_as_no_parent():
     # The fallback's target is answerable, so a 502 read as a 404 returns a
     # parent and trips the assertion below instead of a missing-key error.
-    run = gh_answers({"repos/owner/repo/issues/491/parent": F.FrontierError("gh: HTTP 502"),
+    run = gh_answers({"repos/owner/repo/issues/491/parent": T.TrackerError("gh: HTTP 502"),
                       "repos/owner/repo/issues/483": spec_parent(483)})
-    with pytest.raises(F.FrontierError) as excinfo:
-        F.fetch_parent("owner/repo", issue(491, body="Part of #483"), run=run)
+    with pytest.raises(T.TrackerError) as excinfo:
+        F.fetch_parent(gh_tracker(run), issue(491, body="Part of #483"))
     assert "502" in str(excinfo.value), excinfo.value
 
 
 def test_a_failure_naming_404_in_its_url_is_not_a_missing_parent():
     # gh's own message for a dropped connection carries the request URL, so a
     # ticket #1404 matched a bare "404" and was read as having no parent.
-    url_failure = F.FrontierError(
+    url_failure = T.TrackerError(
         'gh: Get "https://api.github.com/repos/o/r/issues/1404/parent": connection refused')
     run = gh_answers({"repos/owner/repo/issues/1404/parent": url_failure})
-    with pytest.raises(F.FrontierError) as excinfo:
-        F.fetch_parent("owner/repo", issue(1404, body="plain"), run=run)
+    with pytest.raises(T.TrackerError) as excinfo:
+        F.fetch_parent(gh_tracker(run), issue(1404, body="plain"))
     assert "connection refused" in str(excinfo.value), excinfo.value
 
 
 def test_an_empty_parent_answer_is_not_a_missing_parent():
     # `gh_json` turns empty stdout into None; that is no answer, not "no parent".
     run = gh_answers({"repos/owner/repo/issues/491/parent": None})
-    with pytest.raises(F.FrontierError) as excinfo:
-        F.fetch_parent("owner/repo", issue(491, body="plain"), run=run)
+    with pytest.raises(T.TrackerError) as excinfo:
+        F.fetch_parent(gh_tracker(run), issue(491, body="plain"))
     assert "no issue" in str(excinfo.value), excinfo.value
 
 
@@ -949,7 +986,7 @@ def test_a_slice_with_an_unreadable_declaration_stays_unresolved():
 
 def _parent_run():
     return gh_answers({
-        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+        "repos/owner/repo/issues/491/parent": T.TrackerError("gh: Not Found (HTTP 404)"),
         "repos/owner/repo/issues/483": spec_parent(483),
     })
 
@@ -960,17 +997,15 @@ def test_a_parent_named_by_two_slices_is_read_once():
     asked = []
     table = {"repos/owner/repo/issues/483": spec_parent(483)}
     for n in (491, 492):
-        table[f"repos/owner/repo/issues/{n}/parent"] = F.FrontierError("gh: Not Found (HTTP 404)")
+        table[f"repos/owner/repo/issues/{n}/parent"] = T.TrackerError("gh: Not Found (HTTP 404)")
     answer = gh_answers(table)
 
     def run(args):
         asked.append(args[-1])
         return answer(args)
 
-    got = F.frontier("owner/repo", "ready-for-agent",
-                     fetch=lambda repo, label: [issue(n, body=NO_BLOCKERS + "\n\nPart of #483\n")
-                                                for n in (491, 492)],
-                     state_of=lambda repo, number: None, run=run)
+    got = gh_frontier([issue(n, body=NO_BLOCKERS + "\n\nPart of #483\n") for n in (491, 492)],
+                      run=run, state=None)
     assert numbers(got["slice"]) == [491, 492], got
     assert asked.count("repos/owner/repo/issues/483") == 1, asked
 
@@ -978,33 +1013,33 @@ def test_a_parent_named_by_two_slices_is_read_once():
 def test_fetch_parent_reads_the_link_form_to_tickets_writes():
     body = ("## Parent\n\nPart of [Spec: the thing](https://github.com/owner/repo/issues/483).\n\n"
             "## TL;DR\n\nSomething.\n")
-    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    got = F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body))
     assert got["number"] == 483, got
 
 
 def test_fetch_parent_reads_a_bare_reference_under_the_parent_heading():
     body = "## Parent\n\n#483\n\n## TL;DR\n\nSee #7.\n"
-    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    got = F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body))
     assert got["number"] == 483, got
 
 
 def test_fetch_parent_reads_a_part_of_link_line_outside_a_parent_heading():
     body = "Part of [Spec: the thing](https://github.com/owner/repo/issues/483)\n\nBody.\n"
-    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    got = F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body))
     assert got["number"] == 483, got
 
 
 def test_fetch_parent_reads_a_bare_issue_url_under_the_parent_heading():
     body = "## Parent\n\nhttps://github.com/owner/repo/issues/483\n"
-    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    got = F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body))
     assert got["number"] == 483, got
 
 
 def unreadable_parent(body):
-    """The `FrontierError` `fetch_parent` raises for `body`'s `## Parent`, or
+    """The `TrackerError` `fetch_parent` raises for `body`'s `## Parent`, or
     an `AssertionError` when it answered instead."""
-    with pytest.raises(F.FrontierError) as excinfo:
-        F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    with pytest.raises(T.TrackerError) as excinfo:
+        F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body))
     return excinfo.value
 
 
@@ -1030,28 +1065,25 @@ def test_an_empty_parent_section_is_unreadable():
 
 def test_a_parent_section_saying_none_is_no_parent():
     body = "## Parent\n\nNone\n\n## TL;DR\n\nSee #483.\n"
-    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+    assert F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body)) is None
 
 
 def test_a_slice_whose_parent_section_is_unreadable_is_unresolved():
     body = NO_BLOCKERS + "\n## Parent\n\nPart of [Spec](https://github.com/other/place/issues/12).\n"
-    got = F.frontier("owner/repo", "ready-for-agent",
-                     fetch=lambda repo, label: [issue(491, body=body)],
-                     state_of=lambda repo, number: "closed",
-                     run=_parent_run())
+    got = gh_frontier([issue(491, body=body)], run=_parent_run())
     assert numbers(got["unresolved"]) == [491], got
     assert numbers(got["unblocked"]) == [], got
 
 
 def test_a_bare_reference_beside_a_foreign_link_is_still_the_parent():
     body = "## Parent\n\n#483 (mirrors https://github.com/other/place/issues/12)\n"
-    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    got = F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body))
     assert got["number"] == 483, got
 
 
 def test_fetch_parent_ignores_a_bare_reference_outside_the_parent_heading():
     body = "## TL;DR\n\n#483 is related.\n"
-    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+    assert F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body)) is None
 
 
 def test_a_parent_section_linking_another_repo_is_unreadable():
@@ -1072,25 +1104,22 @@ def test_a_part_of_line_naming_another_repos_shorthand_is_unreadable():
 
 def test_a_prose_line_starting_part_of_is_no_parent():
     body = "Part of the work is a rename.\n"
-    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+    assert F.fetch_parent(gh_tracker(_parent_run()), issue(491, body=body)) is None
 
 
 def test_a_slice_whose_part_of_line_links_another_repo_is_unresolved():
     body = NO_BLOCKERS + "\n\nPart of [Spec](https://github.com/other/place/issues/12).\n"
-    got = F.frontier("owner/repo", "ready-for-agent",
-                     fetch=lambda repo, label: [issue(491, body=body)],
-                     state_of=lambda repo, number: "closed",
-                     run=_parent_run())
+    got = gh_frontier([issue(491, body=body)], run=_parent_run())
     assert numbers(got["unresolved"]) == [491], got
     assert numbers(got["unblocked"]) == [], got
 
 
 def test_a_fenced_part_of_line_is_not_a_parent_reference():
     run = gh_answers({
-        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+        "repos/owner/repo/issues/491/parent": T.TrackerError("gh: Not Found (HTTP 404)"),
     })
     body = "```\nPart of #483\n```\n"
-    assert F.fetch_parent("owner/repo", issue(491, body=body), run=run) is None
+    assert F.fetch_parent(gh_tracker(run), issue(491, body=body)) is None
 
 
 # --- A blocker landed on its spec's integration branch (#1466) -------------
@@ -1145,13 +1174,13 @@ def test_native_blockers_not_all_landed_still_block():
 
 def test_native_blockers_that_cannot_be_listed_stay_blocked():
     got = read([issue(2, blocked_by=1, total_blocked_by=1)], landed=SPEC_483,
-               native={2: F.FrontierError("boom")}, parents={2: spec_parent(483)})
+               native={2: T.TrackerError("boom")}, parents={2: spec_parent(483)})
     assert numbers(got["blocked"]) == [2], got
 
 
 def test_a_failed_landing_lookup_keeps_the_ticket_blocked_and_says_so():
     got = read([issue(2, body=SECTION_ON_1)], states={1: "open"},
-               landed={"spec-483": F.FrontierError("gh down")},
+               landed={"spec-483": T.TrackerError("gh down")},
                parents={2: spec_parent(483)})
     assert numbers(got["blocked"]) == [2], got
     assert "landing lookup failed: gh down" in got["blocked"][0]["why"], got
@@ -1160,11 +1189,8 @@ def test_a_failed_landing_lookup_keeps_the_ticket_blocked_and_says_so():
 def test_landed_is_not_asked_about_a_closed_blocker():
     asked = []
     issues = [issue(2, body=SECTION_ON_1)]
-    got = F.frontier("owner/repo", "ready-for-agent",
-                     fetch=lambda repo, label: issues,
-                     state_of=lambda repo, number: "closed",
-                     parent_of=lambda repo, ticket, run: spec_parent(483),
-                     landed_of=lambda repo, branch: asked.append(branch))
+    got = read(issues, states={1: "closed"}, parents={2: spec_parent(483)},
+               asked=asked)
     assert asked == [], asked
     assert numbers(got["slice"]) == [2], got
 
@@ -1172,11 +1198,8 @@ def test_landed_is_not_asked_about_a_closed_blocker():
 def test_an_integration_branch_is_asked_once_however_many_tickets_need_it():
     asked = []
     issues = [issue(2, body=SECTION_ON_1), issue(3, body=SECTION_ON_1)]
-    F.frontier("owner/repo", "ready-for-agent",
-               fetch=lambda repo, label: issues,
-               state_of=lambda repo, number: "open",
-               parent_of=lambda repo, ticket, run: spec_parent(483),
-               landed_of=lambda repo, branch: asked.append(branch) or {1})
+    read(issues, states={1: "open"}, parents={2: spec_parent(483), 3: spec_parent(483)},
+         asked=asked)
     assert asked == ["spec-483"], asked
 
 
@@ -1190,32 +1213,30 @@ def test_fetch_landed_reads_the_closes_lines_of_merged_prs_into_the_branch():
     def run(args):
         seen.append(args)
         return [{"body": "**Closes #1**\n\nCloses #4\nCloses #5\n"}]
-    assert F.fetch_landed("owner/repo", "spec-483", run=run) == {4, 5}
+    assert F.fetch_landed(gh_tracker(run), "spec-483") == {4, 5}
     assert "spec-483" in seen[0] and "merged" in seen[0], seen
 
 
 def test_fetch_landed_reads_a_clumps_non_lowest_ticket():
-    got = F.fetch_landed("owner/repo", "spec-483",
-                         run=merged_prs("Closes #7\nCloses #8\n", "Closes #9"))
+    got = F.fetch_landed(gh_tracker(merged_prs("Closes #7\nCloses #8\n", "Closes #9")), "spec-483")
     assert got == {7, 8, 9}, got
 
 
 def test_fetch_landed_ignores_a_mention_that_is_not_a_closes_line():
-    got = F.fetch_landed("owner/repo", "spec-483",
-                         run=merged_prs("Part of #3, closes #4 in prose", "`Closes #6`"))
+    got = F.fetch_landed(gh_tracker(merged_prs("Part of #3, closes #4 in prose", "`Closes #6`")), "spec-483")
     assert got == set(), got
 
 
 def test_fetch_landed_lets_a_failed_lookup_raise():
     def run(args):
-        raise F.FrontierError("gh down")
-    with pytest.raises(F.FrontierError):
-        F.fetch_landed("owner/repo", "spec-483", run=run)
+        raise T.TrackerError("gh down")
+    with pytest.raises(T.TrackerError):
+        F.fetch_landed(gh_tracker(run), "spec-483")
 
 
 def test_fetch_landed_refuses_an_answer_that_is_not_a_list():
-    with pytest.raises(F.FrontierError):
-        F.fetch_landed("owner/repo", "spec-483", run=lambda a: {"message": "x"})
+    with pytest.raises(T.TrackerError):
+        F.fetch_landed(gh_tracker(lambda a: {"message": "x"}), "spec-483")
 
 
 def blocker(number, state="open", repo="owner/repo"):
@@ -1231,21 +1252,18 @@ def native_run(*pages):
 
 
 def test_fetch_native_blockers_lists_only_open_blocker_numbers():
-    got = F.fetch_native_blockers(
-        "owner/repo", issue(2), run=native_run([blocker(1), blocker(5, "closed")]))
+    got = gh_tracker(native_run([blocker(1), blocker(5, "closed")])).native_blockers(issue(2))
     assert got == [1], got
 
 
 def test_fetch_native_blockers_reads_every_page():
-    got = F.fetch_native_blockers(
-        "owner/repo", issue(2), run=native_run([blocker(1)], [blocker(40)]))
+    got = gh_tracker(native_run([blocker(1)], [blocker(40)])).native_blockers(issue(2))
     assert got == [1, 40], got
 
 
 def test_fetch_native_blockers_refuses_a_blocker_in_another_repo():
-    with pytest.raises(F.FrontierError):
-        F.fetch_native_blockers("owner/repo", issue(2),
-                                run=native_run([blocker(1, repo="other/repo")]))
+    with pytest.raises(T.TrackerError):
+        gh_tracker(native_run([blocker(1, repo="other/repo")])).native_blockers(issue(2))
 
 
 @pytest.mark.parametrize(
@@ -1253,13 +1271,13 @@ def test_fetch_native_blockers_refuses_a_blocker_in_another_repo():
     [[{"state": "open"}], ["nope"], [{"number": "1", "state": "open"}]],
     ids=["no-number", "not-a-dict", "string-number"])
 def test_fetch_native_blockers_refuses_a_malformed_entry(bad):
-    with pytest.raises(F.FrontierError):
-        F.fetch_native_blockers("owner/repo", issue(2), run=native_run(bad))
+    with pytest.raises(T.TrackerError):
+        gh_tracker(native_run(bad)).native_blockers(issue(2))
 
 
 def test_fetch_native_blockers_refuses_an_answer_that_is_not_pages():
-    with pytest.raises(F.FrontierError):
-        F.fetch_native_blockers("owner/repo", issue(2), run=lambda a: {"message": "x"})
+    with pytest.raises(T.TrackerError):
+        gh_tracker(lambda a: {"message": "x"}).native_blockers(issue(2))
 
 
 # --- A slice whose spec cannot run it is stranded, not skipped (#1485) ------

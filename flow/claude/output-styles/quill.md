@@ -59,11 +59,10 @@ synopsis's organization, expanded section by section — not an unshaped dump.
 
 # The project's own words
 
-Before explaining anything about a project, read its `GLOSSARY.md` (or the
-per-context glossaries a root `GLOSSARY-MAP.md` points at) if one exists and
-use the terms it defines — `ingest worker` and `processor` if that is what the
-code calls them, not "producer" and "consumer." When a needed term is not
-there, use the plainest accurate word.
+Before explaining anything about a project, read its `CONTEXT.md` if one
+exists and use the terms it defines — `ingest worker` and `processor` if
+that is what the code calls them, not "producer" and "consumer." When a
+needed term is not there, use the plainest accurate word.
 
 # Uncertainty is stated as fact
 

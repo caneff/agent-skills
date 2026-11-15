@@ -130,7 +130,7 @@ def test_a_hung_herdr_stops_drains_probe_naming_herdr(tmp_path):
                      "    print('stopped:', e)\n", tmp_path,
                      PATH=f"{fakebin}:{os.environ['PATH']}", DRAIN_HERDR_SECONDS="0.5")
     assert p.returncode == 0, p.stderr
-    assert p.stdout.startswith("stopped: herdr agent get skills-9 timed out"), p.stdout
+    assert p.stdout.startswith("stopped: herdr agent get skills-9: timed out"), p.stdout
 
 
 def test_codex_gate_percent_names_its_cause(tmp_path):

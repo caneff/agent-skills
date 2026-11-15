@@ -352,3 +352,15 @@ def test_session_pids_validates_records_against_a_fake_proc(tmp_path):
     got = agents._session_pids(
         str(reg), proc_start=lambda pid: agents._proc_start(pid, str(proc)))
     assert got == {"sid-A": 100}
+
+
+@pytest.mark.parametrize("answer", [
+    '{"result":{"agent":{"agent_status":"working"}}}',
+    '{"result":{"agent":"claude","agent_status":"working"}}',  # the flat shape
+])
+def test_herdr_get_reads_both_answer_shapes_as_working(tmp_path, monkeypatch, answer):
+    herdr = tmp_path / "herdr"
+    herdr.write_text(f"#!/bin/sh\necho '{answer}'\n")
+    herdr.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    assert agents.verdict(agents.herdr_get("w", timeout=10)) == ("working", "working")
