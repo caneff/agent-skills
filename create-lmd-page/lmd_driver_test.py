@@ -103,6 +103,8 @@ def _edit_page():
         ('name="code" value=""', 'name="code" value="OLDCODE"'),
         ('name="freetags" value=""', 'name="freetags" value="Old Tag"'),
         ('name="einstellen" value="Create"', 'name="einstellen" value="Change"'),
+        # the revision comment an active puzzle's change requires (#1890, read live 2026-11-15), served empty
+        ('<input type="submit" name="einstellen"', '<textarea name="comment" cols="60" rows="3"></textarea>\n<input type="submit" name="einstellen"'),
         # served already scheduled, so a driver that forced "nein" or emptied the dates shows in what it posts
         ('<textarea name="codedescr_en" cols="60" rows="5"></textarea>', '<textarea name="codedescr_en" cols="60" rows="5">Old description.</textarea>'),
         ('type="checkbox" name="label_3" value="1">', 'type="checkbox" name="label_3" value="1" checked>'),
@@ -621,6 +623,13 @@ def test_edit_changes_the_optional_fields_it_is_given(endpoint, lmd, tmp_path):
     assert sorted(k for k in submit if k.startswith("label_")) == ["label_25", "label_3"]
 
 
+def test_edit_fills_the_revision_comment_it_is_given(endpoint, lmd, tmp_path):
+    result = run_edit(endpoint, lmd, tmp_path, values={"comment": "Added an example image."})
+    assert result.returncode == 0, result.stderr
+    _, one = _edit_posted(lmd)
+    assert one["comment"] == "Added an example image."
+
+
 def test_edit_leaves_a_field_it_is_not_given_as_served(endpoint, lmd, tmp_path):
     result = run_edit(endpoint, lmd, tmp_path, values={"title": "Only Title"})
     assert result.returncode == 0, result.stderr
@@ -705,6 +714,7 @@ def test_edit_whose_upload_yields_no_id_reports_the_upload_and_changes_nothing(e
     ({"difficulty": 9}, "values.difficulty must be 1-5"),
     ({"code": "a_b"}, "would strip"),
     ({"title": " "}, "values.title"),
+    ({"comment": " "}, "values.comment"),
 ])
 def test_edit_refuses_bad_or_create_only_values_before_any_request(endpoint, lmd, tmp_path, values, message):
     _assert_refused(run_edit(endpoint, lmd, tmp_path, values=values), message)
