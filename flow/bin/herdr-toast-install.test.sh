@@ -40,7 +40,6 @@ run_install() {
 }
 mkfix() { mkdir -p "$1"; cp "$here/herdr-toast-install" "$1/"; for n in $names; do echo x >"$1/$n"; done; }
 
-# 1. happy path: links made, registry written once, pointing at the fixture and never .local\bin
 mkfix "$tmp/ok/flow/bin"
 mkdir -p "$tmp/ok/.local/bin"; for n in $names; do echo old >"$tmp/ok/.local/bin/$n"; done
 echo keep >"$tmp/ok/.local/bin/notify-send.bak-x"
@@ -58,14 +57,12 @@ check_reg() { # <case> <fixture bin dir>: the whole registry call, one write, ex
 }
 check_reg ok "$tmp/ok/flow/bin"
 
-# 2. refuses under /tmp without the override: no links, no registry call
 mkfix "$tmp/t/flow/bin"
 run_install t "$tmp/t/flow/bin"
 [ $rc != 0 ] || fail "ran from /tmp without the override"
 [ -z "$(ls "$tmp/t/.local/bin")" ] || fail "linked something after refusing /tmp"
 [ ! -s "$tmp/t.log" ] || fail "registry stub called after refusing /tmp"
 
-# 3. refuses from a linked worktree even with the /tmp override
 git init -q "$tmp/repo" && git -C "$tmp/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 git -C "$tmp/repo" worktree add -q "$tmp/wt" -b wt
 mkfix "$tmp/wt/flow/bin"
@@ -75,14 +72,12 @@ grep -q worktree "$tmp/w.out" || fail "worktree refusal did not say why: $(cat "
 [ -z "$(ls "$tmp/w/.local/bin")" ] || fail "linked something after refusing a worktree"
 [ ! -s "$tmp/w.log" ] || fail "registry stub called after refusing a worktree"
 
-# 4. a real directory at a destination is refused before anything is touched
 mkfix "$tmp/d/flow/bin"; mkdir -p "$tmp/d/.local/bin/herdr-focus.vbs"
 run_install d "$tmp/d/flow/bin" HERDR_TOAST_ALLOW_TMP=1
 [ $rc != 0 ] || fail "ran over a real directory"
 [ ! -e "$tmp/d/.local/bin/notify-send" ] || fail "linked before refusing the directory"
 [ ! -s "$tmp/d.log" ] || fail "registry stub called after refusing a directory"
 
-# 5. a registry failure leaves ~/.local/bin untouched: real files stay real, no .pre-flow
 mkfix "$tmp/f/flow/bin"; mkdir -p "$tmp/f/.local/bin"; for n in $names; do echo old >"$tmp/f/.local/bin/$n"; done
 run_install f "$tmp/f/flow/bin" HERDR_TOAST_ALLOW_TMP=1 STUB_RC=1
 [ $rc != 0 ] || fail "exited 0 after the registry write failed"
@@ -91,13 +86,11 @@ for n in $names; do
   [ ! -e "$tmp/f/.local/bin/$n.pre-flow" ] || fail "$n.pre-flow made although the registry write failed"
 done
 
-# 6. a fixture directory with a space keeps the quoted form intact
 mkfix "$tmp/sp ace/flow/bin"
 run_install s "$tmp/sp ace/flow/bin" HERDR_TOAST_ALLOW_TMP=1
 [ $rc = 0 ] || fail "space-in-path run exited $rc: $(cat "$tmp/s.out")"
 check_reg s "$tmp/sp ace/flow/bin"
 
-# 7. every Windows-read file names no ~/.local/bin UNC path (Windows cannot follow the link)
 for f in notify-send herdr-focus.vbs herdr-focus-pick.ps1 run-hidden.vbs; do
   [ -f "$here/$f" ] || { fail "$f missing from flow/bin"; continue; }
   grep -q 'wsl.localhost.*\.local' "$here/$f" && fail "$f names a UNC path into .local"

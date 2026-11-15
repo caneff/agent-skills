@@ -13,7 +13,6 @@ fails=0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# A clean fixture: an empty repo, an empty worktree dir, no AGENTS.md hits.
 clean="$tmp/clean"
 mkdir -p "$clean/repo" "$clean/home/.claude" "$clean/home/.local/bin" \
          "$clean/home/src/some-project" "$clean/home/$needle/workspaces"
@@ -34,8 +33,6 @@ else
   echo "FAIL clean fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A fixture with one planted hit in the repo scan, and a non-empty worktree
-# dir — both should be reported, and the exit should be non-zero.
 dirty="$tmp/dirty"
 mkdir -p "$dirty/repo" "$dirty/home/.claude" "$dirty/home/.local/bin" \
          "$dirty/home/src/some-project" "$dirty/home/$needle/workspaces/leftover-repo"
@@ -57,7 +54,6 @@ else
   echo "FAIL dirty fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A hit in ~/.claude/CLAUDE.md alone (repo and everything else clean).
 claude_md_hit="$tmp/claude_md_hit"
 mkdir -p "$claude_md_hit/repo" "$claude_md_hit/home/.claude" "$claude_md_hit/home/.local/bin" \
          "$claude_md_hit/home/src/some-project" "$claude_md_hit/home/$needle/workspaces"
@@ -78,7 +74,6 @@ else
   echo "FAIL CLAUDE.md fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A hit inside ~/.local/bin alone.
 local_bin_hit="$tmp/local_bin_hit"
 mkdir -p "$local_bin_hit/repo" "$local_bin_hit/home/.claude" "$local_bin_hit/home/.local/bin" \
          "$local_bin_hit/home/src/some-project" "$local_bin_hit/home/$needle/workspaces"
@@ -100,7 +95,6 @@ else
   echo "FAIL local_bin fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A hit inside an AGENTS.md reached only through a symlinked ~/src.
 symlinked_src="$tmp/symlinked_src"
 mkdir -p "$symlinked_src/repo" "$symlinked_src/home/.claude" "$symlinked_src/home/.local/bin" \
          "$symlinked_src/real-src/some-project" "$symlinked_src/home/$needle/workspaces"
@@ -143,9 +137,6 @@ else
   echo "FAIL no-rg fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A vendored node_modules tree with a coincidental case-insensitive hit
-# (a camelCase identifier straddling two words) must not fail the check —
-# it isn't a real reference, only a substring collision.
 vendored="$tmp/vendored"
 mkdir -p "$vendored/repo/node_modules/some-pkg" "$vendored/home/.claude" \
          "$vendored/home/.local/bin" "$vendored/home/src/some-project" \
@@ -195,9 +186,6 @@ else
   echo "FAIL unreadable ~/src fixture: rc=$rc out=$out"; fails=1
 fi
 
-# Planted hits in .git/, .claude/worktrees/<name>/ and .scratch/ inside the
-# repo scan must all be skipped — these are git's own files, other
-# worktrees, and scratch notes, not real references.
 excluded_dirs="$tmp/excluded_dirs"
 mkdir -p "$excluded_dirs/repo/.git" \
          "$excluded_dirs/repo/.claude/worktrees/implement-999" \
@@ -224,9 +212,6 @@ else
   echo "FAIL excluded_dirs fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A planted hit in an ordinary gitignored file elsewhere in the repo (not
-# under .git/, .claude/worktrees/ or .scratch/) must still fail the check —
-# the exclusion is these specific paths, not a tracked-files-only scan.
 ordinary_ignored="$tmp/ordinary_ignored"
 mkdir -p "$ordinary_ignored/repo/build" "$ordinary_ignored/home/.claude" \
          "$ordinary_ignored/home/.local/bin" "$ordinary_ignored/home/src/some-project" \

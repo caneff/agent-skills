@@ -1,4 +1,4 @@
-"""Contract tests for flow/bin/automode-entry (#1534).
+"""Contract tests for flow/bin/automode-entry.
 
 Every test runs the command as Chris would, against a fake HOME whose
 ~/.claude/settings.json is a symlink into a throwaway git repo (with a bare
@@ -192,7 +192,7 @@ def test_apply_diffs_per_entry_writes_in_place_and_commits(rig):
     text = rig.doc().read_text()
     text = text.replace("Alpha entry.", "Gamma entry.").replace("Beta entry.\n\n", "")
     text = text.replace("# environment", "Soft two.\n\n# environment")  # lands in soft_deny
-    rig.doc().write_text(text)
+    rig.doc().write_text(text)  # Soft one. now sits under # allow
     r = rig.run("apply")
     assert r.returncode == 0, out(r)
     d = rig.data()["autoMode"]
@@ -273,7 +273,7 @@ def test_apply_moving_an_entry_between_sections_commits(rig):
     text = rig.doc().read_text().replace("Soft one.\n\n", "").replace(
         "# soft_deny", "Soft one.\n\n# soft_deny"
     )
-    rig.doc().write_text(text)  # Soft one. now sits under # allow
+    rig.doc().write_text(text)
     r = rig.run("apply")
     assert r.returncode == 0, out(r)
     d = rig.data()["autoMode"]

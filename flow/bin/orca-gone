@@ -23,8 +23,8 @@
 #   - both CLAUDE.md copies: this repo's flow/claude/CLAUDE.md (covered by
 #     the repo scan above) and ~/.claude/CLAUDE.md
 #   - regular files in ~/.local/bin (content only — a dangling symlink or an
-#     empty file left at a retired name, the artifact class #715's cleanup
-#     loop existed for, has no content to match and would pass unnoticed;
+#     empty file left at a retired name,
+#     has no content to match and would pass unnoticed;
 #     rg also does not follow symlinks by default, so the many scripts
 #     symlinked in from this repo are not re-scanned here)
 #   - every AGENTS.md under ~/src, following ~/src itself if it is a symlink

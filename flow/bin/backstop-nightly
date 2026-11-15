@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # backstop-nightly [<list-file>] — run the backstop (backstop/backstop.py) once
-# per repo named in the list file (#1595); the systemd backstop.service runs it.
+# per repo named in the list file; the systemd backstop.service runs it.
 # The list defaults to flow/backstop-repos. A missing, unreadable or empty list
 # is an error, never zero repos run: a night with nothing checked must not look
 # like a green one. Every repo runs even when an earlier one fails; the exit

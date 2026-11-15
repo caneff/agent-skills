@@ -17,14 +17,12 @@ fails=0
 ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; [ $# -gt 1 ] && printf '  %s\n' "$2"; fails=1; }
 
-# --- a run leaves a directory holding what it ran and what it printed --------
 "$job_run" --name hello -- sh -c 'echo out; echo err >&2' >/dev/null 2>&1
 [ -d "$jobs_dir/hello" ] && ok "a run creates its directory" || no "a run creates its directory"
 grep -q 'echo out' "$jobs_dir/hello/cmd" \
   && ok "cmd records the command as invoked" \
   || no "cmd records the command as invoked" "$(cat "$jobs_dir/hello/cmd" 2>&1)"
 
-# A wrapped job has to look like the unwrapped one to whatever reads its output.
 out=$("$job_run" --name passthrough -- sh -c 'echo out; echo err >&2' 2>&1)
 [ "$out" = "out
 err" ] \
@@ -39,7 +37,6 @@ grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z err$' "$prog" \
   && ok "stderr lands in progress, timestamped" \
   || no "stderr lands in progress, timestamped" "$(cat "$prog" 2>&1)"
 
-# --- a run records the session that started it -------------------------------
 # The job-wake mod finds a session's own jobs by this file, so a run started
 # outside any session leaves it empty rather than absent.
 CLAUDE_CODE_SESSION_ID=sess-1 "$job_run" --name owned -- true >/dev/null 2>&1
@@ -51,8 +48,6 @@ env -u CLAUDE_CODE_SESSION_ID "$job_run" --name owned -- true >/dev/null 2>&1
   && ok "a rerun outside a session empties the previous run's session" \
   || no "a rerun outside a session empties the previous run's session" "$(cat "$jobs_dir/owned/session" 2>&1)"
 
-# A reused name starts over: the job finds its own session and none of the
-# previous run's output.
 mkdir -p "$jobs_dir/order"; echo "old line" > "$jobs_dir/order/progress"; echo "old-sess" > "$jobs_dir/order/session"
 CLAUDE_CODE_SESSION_ID=sess-2 "$job_run" --name order -- sh -c '
   d="$HOME/.cache/agent-jobs/order"
@@ -61,14 +56,12 @@ grep -qE '^pid=[0-9]+ session=sess-2 progress=0$' "$tmp/order.out" \
   && ok "the job sees its own session and an emptied progress" \
   || no "the job sees its own session and an emptied progress" "$(cat "$tmp/order.out")"
 
-# --- a missing --name is an error and creates nothing ------------------------
 rm -rf "$jobs_dir"
 out=$("$job_run" -- true 2>&1); rc=$?
 [ "$rc" != 0 ] && [ ! -d "$jobs_dir" ] \
   && ok "a missing --name errors and creates no run directory" \
   || no "a missing --name errors and creates no run directory" "rc=$rc out=$out"
 
-# --- a flag with no value is an error, not a hang ----------------------------
 # `shift 2` on one remaining argument fails silently, and without this guard the
 # arg loop spins forever on a typo.
 for flag in --name --status; do
@@ -78,7 +71,6 @@ for flag in --name --status; do
     || no "$flag with no value errors instead of hanging" "rc=$rc out=$out"
 done
 
-# --- observed exits ----------------------------------------------------------
 "$job_run" --name clean -- true >/dev/null 2>&1
 grep -q '^rc=0$' "$jobs_dir/clean/exit" \
   && ok "a clean exit records rc=0" \
@@ -92,27 +84,22 @@ grep -q '^rc=7$' "$jobs_dir/failed/exit" \
   && ok "job-run returns the job's own exit status to its caller" \
   || no "job-run returns the job's own exit status to its caller" "got $caller_rc"
 
-# --- a chatty job loses nothing, to the caller or to the record --------------
-# A per-line `date` fork once held the tee to about a thousand lines a second,
-# slow enough that the drain below cut the tail off both streams in silence.
+# Enough lines that a slow per-line timestamp would let the drain cut the tail
+# off both streams in silence.
 lines=$("$job_run" --name chatty -- sh -c 'seq 1 20000' 2>/dev/null | wc -l)
 [ "$lines" = 20000 ] && [ "$(wc -l < "$jobs_dir/chatty/progress")" = 20000 ] \
   && ok "20000 lines reach both the caller and progress" \
   || no "20000 lines reach both the caller and progress" \
        "caller=$lines progress=$(wc -l < "$jobs_dir/chatty/progress")"
 
-# --- the caller's stdin reaches the job --------------------------------------
-# bash hands an async command /dev/null, so without the fd this silently differs
-# from running the job unwrapped.
 got=$(echo hello | "$job_run" --name reads-stdin -- cat 2>/dev/null)
 [ "$got" = hello ] \
   && ok "the caller's stdin reaches the job" \
   || no "the caller's stdin reaches the job" "got=$got"
 
-# --- every progress timestamp is UTC, including the ones the wrapper writes ---
 # A job whose child outlives it makes the wrapper write the one progress line it
-# does not write from inside the tee. Under a non-UTC TZ that line used to be
-# local time wearing a Z, landing hours out of order in its own file.
+# does not write from inside the tee; under a non-UTC TZ that line must still be
+# UTC, or it lands hours out of order in its own file.
 TZ=Asia/Tokyo "$job_run" --name tz -- sh -c 'sleep 9 & echo first' >/dev/null 2>&1
 notice=$(grep -c 'outlived the job' "$jobs_dir/tz/progress")
 stamp=$(sed -n '$s/ .*//p' "$jobs_dir/tz/progress")
@@ -122,14 +109,12 @@ skew=$(( $(date -u +%s) - $(date -u -d "$stamp" +%s 2>/dev/null || echo 0) ))
   || no "the cut-short notice is stamped in UTC like every line above it" \
        "skew=${skew}s $(cat "$jobs_dir/tz/progress")"
 
-# --- a job that never ran is not a clean success -----------------------------
 "$job_run" --name missing-tool -- sh -c 'notarealtool --x' >/dev/null 2>&1; rc=$?
 [ "$rc" = 127 ] && grep -q '^rc=127$' "$jobs_dir/missing-tool/exit" \
   && ok "command-not-found records rc=127, not success" \
   || no "command-not-found records rc=127, not success" \
        "rc=$rc $(cat "$jobs_dir/missing-tool/exit" 2>&1)"
 
-# --- a run name is one directory under the jobs dir, never a way out of it ---
 escape="$tmp/escaped"
 out=$("$job_run" --name "../../../../${escape#/}" -- sh -c 'echo pwned' 2>&1); rc=$?
 [ "$rc" != 0 ] && [ ! -e "$escape" ] \
@@ -142,7 +127,6 @@ out=$("$job_run" --status "../../etc" 2>&1); rc=$?
   && ok "--status refuses the same shape" \
   || no "--status refuses the same shape" "rc=$rc out=$out"
 
-# --- a SIGTERMed run records the cause; a SIGKILLed one records nothing ------
 # Both drive a real background job-run and signal the wrapper itself.
 start_bg() { # start_bg <name> ; echoes the job-run pid
   "$job_run" --name "$1" -- sh -c 'echo started; sleep 5' >/dev/null 2>&1 &
@@ -161,8 +145,6 @@ else
   no "a SIGTERMed run records that cause" "$(cat "$jobs_dir/termed/exit" 2>&1)"
 fi
 
-# A job that ignores the forwarded signal and finishes on its own exited — the
-# cause follows what the job returned, never what the wrapper was asked to do.
 "$job_run" --name outlives -- bash -c 'trap "" TERM; sleep 1; exit 5' >/dev/null 2>&1 &
 pid=$!
 await "$jobs_dir/outlives/pid" && sleep 0.3
@@ -186,16 +168,12 @@ sleep 3.5
   || no "a kill -9ed run leaves no exit file" "$(cat "$jobs_dir/killed/exit" 2>&1)"
 pkill -9 -P "$pid" 2>/dev/null
 
-# --- the job can append its own lines through the exported variable ----------
 "$job_run" --name appends -- sh -c 'echo tee-line; echo own-line >> "$JOB_PROGRESS"' >/dev/null 2>&1
 prog="$jobs_dir/appends/progress"
 grep -q 'tee-line' "$prog" && grep -q 'own-line' "$prog" \
   && ok "a job appends its own lines beside the tee'd output" \
   || no "a job appends its own lines beside the tee'd output" "$(cat "$prog" 2>&1)"
 
-# --- nothing is written inside the repo the job runs in ----------------------
-# The run directory's whole address is $HOME/.cache/agent-jobs/<name>, so a job
-# launched from inside a checkout must leave that checkout clean.
 scratch="$tmp/scratch-repo"; mkdir -p "$scratch"
 git -C "$scratch" init -q
 ( cd "$scratch" && "$job_run" --name in-a-repo -- sh -c 'echo noise; echo more >&2' ) >/dev/null 2>&1
@@ -205,10 +183,6 @@ git -C "$scratch" init -q
   || no "a job launched inside a checkout leaves it clean" \
        "$(git -C "$scratch" status --porcelain --untracked-files=all)"
 
-# --- --status: alive, finished, killed, unknown ------------------------------
-# One line each, and an exit status a caller can branch on without parsing it:
-# 0 finished, 10 alive, 11 killed, 12 no such run — the last three above the
-# range bash and the script use for their own errors.
 status_of() { # status_of <name> ; prints "<rc>|<line>"
   local out rc
   out=$("$job_run" --status "$1" 2>&1); rc=$?
@@ -265,7 +239,6 @@ for n in nobody-ran-this clean failed termed killed still-going; do
 done
 [ "$oneline" = 1 ] && ok "every --status answer is one line"
 
-# --- lifecycle: name collision -----------------------------------------------
 pid=$(start_bg held)
 await "$jobs_dir/held/progress" && sleep 0.2
 before=$(cat "$jobs_dir/held/progress")
@@ -279,8 +252,6 @@ out=$("$job_run" --name held -- echo second 2>&1); rc=$?
 kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 await "$jobs_dir/held/exit"
 
-# The same name against a dead pid reuses the directory, and the previous run's
-# exit record does not survive into the new run.
 "$job_run" --name held -- sh -c 'echo rerun; sleep 0.1' >/dev/null 2>&1
 grep -q 'rerun' "$jobs_dir/held/progress" \
   && ok "the same name against a dead pid reuses the directory" \
@@ -289,7 +260,6 @@ grep -q '^cause=exit$' "$jobs_dir/held/exit" \
   && ok "a reused directory does not carry the previous run's exit file" \
   || no "a reused directory does not carry the previous run's exit file" "$(cat "$jobs_dir/held/exit")"
 
-# --- lifecycle: 14-day prune -------------------------------------------------
 age() { # age <name> <days> — a finished run whose files are <days> old
   mkdir -p "$jobs_dir/$1"
   printf 'rc=0\ncause=exit\nended=old\n' > "$jobs_dir/$1/exit"
@@ -307,10 +277,6 @@ age recent 13
   && ok "a run directory newer than 14 days is kept" \
   || no "a run directory newer than 14 days is kept"
 
-# Retention ages a run by the newest thing inside it, not the directory's own
-# mtime: appending to progress never touches the directory, so a killed run that
-# logged for weeks would otherwise be pruned first — exactly the record this is
-# all for.
 mkdir -p "$jobs_dir/long-runner"
 printf '999999\n' > "$jobs_dir/long-runner/pid"
 printf 'old\n' > "$jobs_dir/long-runner/progress"
@@ -321,7 +287,6 @@ touch -d "40 days ago" "$jobs_dir/long-runner"
   && ok "a run whose progress is recent survives an old directory mtime" \
   || no "a run whose progress is recent survives an old directory mtime"
 
-# A live run is never pruned, however old its files are.
 pid=$(start_bg old-but-live)
 await "$jobs_dir/old-but-live/progress" && sleep 0.2
 touch -d "60 days ago" "$jobs_dir/old-but-live"
@@ -348,9 +313,6 @@ chmod 700 "$jobs_dir/stubborn"
   && ok "a directory prune could not remove is left alone" \
   || no "a directory prune could not remove is left alone"
 
-# --- --wait: block until the run ends, then answer as --status would --------
-# Launched as a run_in_background Bash call so the harness wakes the session
-# when the job ends. Never returns 10: a live run is waited on, not reported.
 "$job_run" --name waited -- sh -c 'echo going; sleep 2' >/dev/null 2>&1 &
 wpid=$!
 await "$jobs_dir/waited/pid"
@@ -370,21 +332,18 @@ esac
   || no "--wait prints exactly the line --status prints" "$out"
 wait "$wpid" 2>/dev/null
 
-# A run that already ended answers at once.
 out=$(timeout 2 "$job_run" --wait clean 2>&1); rc=$?
 case "$rc|$out" in
   0\|finished\ clean*) ok "--wait on a finished run returns at once" ;;
   *) no "--wait on a finished run returns at once" "rc=$rc out=$out" ;;
 esac
 
-# A failed job is still "finished": the job's own rc is in the line, not the exit.
 out=$(timeout 2 "$job_run" --wait failed 2>&1); rc=$?
 case "$rc|$out" in
   0\|finished\ failed\ rc=7*) ok "--wait reports a failed job's rc in the line, exit 0" ;;
   *) no "--wait reports a failed job's rc in the line, exit 0" "rc=$rc out=$out" ;;
 esac
 
-# A SIGKILLed wrapper leaves no exit record: --wait says killed, exit 11.
 pid=$(start_bg waitkilled)
 await "$jobs_dir/waitkilled/progress" && sleep 0.2
 kids=$(pgrep -P "$pid")   # the job's own children, taken before the wrapper dies
@@ -395,10 +354,8 @@ case "$rc|$out" in
   *) no "--wait on a SIGKILLed run says killed, exit 11" "rc=$rc out=$out" ;;
 esac
 wait "$pid" 2>/dev/null
-# Reap what the killed wrapper orphaned, by pid: its children and theirs.
 for k in $kids; do pkill -9 -P "$k" 2>/dev/null; kill -9 "$k" 2>/dev/null; done
 
-# Unknown name: 12 at once. A traversal name is refused as a bad name.
 out=$(timeout 2 "$job_run" --wait nosuch 2>&1); rc=$?
 case "$rc|$out" in
   12\|unknown\ nosuch*) ok "--wait on an unknown name exits 12 at once" ;;
@@ -409,7 +366,6 @@ out=$("$job_run" --wait ../x 2>&1); rc=$?
   && ok "--wait refuses a traversal name via check_name" \
   || no "--wait refuses a traversal name via check_name" "rc=$rc out=$out"
 
-# TERM while waiting: the interrupted code (13), never 0/10/11/12, and prompt.
 pid=$(start_bg waitterm)
 await "$jobs_dir/waitterm/progress" && sleep 0.2
 "$job_run" --wait waitterm >"$tmp/term.out" 2>&1 &
@@ -426,7 +382,6 @@ ms=$(( ($(date +%s%N) - t0) / 1000000 ))
        "rc=$rc elapsed=${ms}ms out=$(cat "$tmp/term.out")"
 kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 
-# --wait stands alone and needs a value. Each refusal names its own cause.
 refuse() { # refuse <expected message part> <args...>
   local want="$1" out rc; shift
   out=$(timeout 5 "$job_run" "$@" 2>&1); rc=$?
@@ -440,15 +395,12 @@ refuse "--wait cannot be combined with --name" --name b --wait a
 refuse "--wait cannot be combined with a command" --wait a -- true
 refuse "--wait needs a value" --wait
 
-# --status still ignores what it always ignored: the refusals are --wait's own.
 out=$("$job_run" --status clean --name whatever 2>&1); rc=$?
 case "$rc|$out" in
   0\|finished\ clean*) ok "--status is unchanged by --name beside it" ;;
   *) no "--status is unchanged by --name beside it" "rc=$rc out=$out" ;;
 esac
 
-# A run directory with no pid and no exit record is a run mid-start, not a dead
-# one: it is `starting` (10), so a --wait keeps waiting instead of ending on it.
 mkdir -p "$jobs_dir/midstart"
 got=$(status_of midstart)
 case "$got" in
@@ -461,8 +413,6 @@ timeout 4 "$job_run" --wait midstart >/dev/null 2>&1; rc=$?
   || no "--wait keeps waiting on a run mid-start" "rc=$rc"
 rmdir "$jobs_dir/midstart"
 
-# A reused name drops the previous run's pid and exit record together, so a
-# reader of the new run never sees the old verdict once the new pid is down.
 "$job_run" --name reuse -- sh -c 'exit 4' >/dev/null 2>&1
 "$job_run" --name reuse -- sh -c 'sleep 1' >/dev/null 2>&1 &
 rpid=$!
@@ -478,8 +428,6 @@ wait "$rpid" 2>/dev/null
   && ok "--wait creates no run directory" \
   || no "--wait creates no run directory"
 
-# --- a run may name a job group ----------------------------------------------
-# The job-wake mod wakes a group once; it finds a run's group in this file.
 "$job_run" --name g1 --group shard -- true >/dev/null 2>&1
 [ "$(cat "$jobs_dir/g1/group" 2>&1)" = "shard" ] \
   && ok "group records the run's group name" \

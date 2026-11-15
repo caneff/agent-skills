@@ -1,7 +1,5 @@
-// The cases #1371 names: clean exit, non-zero exit, kill, a failure line
-// mid-run (one wake, not one per line), and a job this session did not
-// launch. A launch reaches the mod through the `session` file `job-run`
-// writes, so no test depends on how the command was spelled.
+// A launch reaches the mod through the `session` file `job-run` writes, so no
+// test depends on how the command was spelled.
 import { test, expect, mock } from 'claude-code/testing'
 
 const JOBS = '/home/test/.cache/agent-jobs'
@@ -17,12 +15,8 @@ const job = (pid: string, status: [number, string], more: Partial<Job> = {}): Jo
 const ALIVE: [number, string] = [10, 'alive hunt pid=100 last=x']
 const DONE: [number, string] = [0, 'finished hunt rc=0 cause=exit ended=2026-10-13T00:00:00Z']
 
-// The world beneath the mod: job directories the test edits between ticks,
-// the wakes that reached core, the lines the mod logged, and switches that
-// make one of its calls fail.
 const world = (on: any) => {
   const jobs: Record<string, Job> = {}
-  // A job the test never made is a test bug, so reading one throws.
   const at = (name: string): Job => jobs[name] ?? (() => { throw new Error(`no job ${name}`) })()
   const wakes: string[] = []
   const logs: string[] = []
@@ -362,7 +356,6 @@ test('a refused Bash call is handed back as refused, and a run found beside it i
   expect(w.wakes.length).toBe(1)
 })
 
-// A sharded run: several `job-run --group` members of one session, one wake.
 const shard = ($: any, w: ReturnType<typeof world>, names: string[]) =>
   bash($, w, { command: 'for i in 0 1 2; do job-run --group shards -- hb & done', run_in_background: true }, () => {
     names.forEach((n, i) => {
