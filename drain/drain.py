@@ -103,22 +103,25 @@ import collections
 import contextlib
 import ctypes
 import fcntl
-import os
 import json
+import os
 import re
 import resource
 import shlex
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 
-for _dir in ("implement-spec", "implement"):
+for _dir in ("implement-spec", "implement", "common"):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", _dir))
 
 import frontier  # noqa: E402
 import pr_settle  # noqa: E402
+import scratch_run  # noqa: E402
+import shellcmd  # noqa: E402
+import tracker  # noqa: E402
+from scratch_run import one_line  # noqa: E402
 from selector_check import UNDECLARED  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
@@ -187,9 +190,9 @@ LOOK_ERRORS = 5
 # for. A question the worker would put to a controller goes unanswered the same
 # way and shows as an idle worker with no PR, a failed build.
 CONTROLLER = "drain"
-_ORIGIN = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
-Ctx = collections.namedtuple("Ctx", "root repo default log_dir bundle_max want")
+# `tracker` is the repo's issue tracker (`tracker.GhTracker`; a test gives `MemoryTracker`).
+Ctx = collections.namedtuple("Ctx", "root repo default log_dir bundle_max want tracker")
 # What an anchor is: a ticket built by a worker, or a spec parent built by a spec run.
 TICKET, SPEC = "ticket", "spec"
 
@@ -211,57 +214,56 @@ def refs(tickets):
     return " ".join(f"#{n}" for n in tickets)
 
 
-def one_line(text, limit=300):
-    return " ".join(str(text).split())[:limit]
-
-
-def run(args, cwd=None, check=True):
-    try:
-        out = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
-    except OSError as exc:
-        raise DrainError(f"{args[0]}: {exc}") from exc
-    if check and out.returncode:
-        raise DrainError(f"{' '.join(args[:3])} failed: {(out.stderr or out.stdout).strip()}")
-    return out.stdout.strip()
-
-
 def gh(*args):
-    return run(["gh", *args])
-
-
-def gh_json(*args):
+    """`gh <args>`'s stripped stdout, for the two calls the tracker has no operation for yet
+    (`relabel`, `closing_commit`); a failure is a `DrainError`."""
     try:
-        return frontier.gh_json(list(args))
-    except frontier.FrontierError as exc:
-        raise DrainError(str(exc)) from exc
+        return shellcmd.gh(list(args)).stdout.strip()
+    except shellcmd.CmdError as exc:
+        raise DrainError(str(exc)) from None
+
+
+def git(args, cwd, ok=(0,)):
+    """`git <args>` in `cwd`: its stripped stdout; an exit outside `ok` is a `DrainError`."""
+    try:
+        return shellcmd.git(args, cwd=cwd, ok=ok).stdout.strip()
+    except shellcmd.CmdError as exc:
+        raise DrainError(str(exc)) from None
 
 
 def labels_of(issue):
-    return {x["name"] for x in issue["labels"]}
-
-
-def _kill(proc):
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, signal.SIGKILL)
-    proc.wait()
-    if proc.stdout:
-        proc.stdout.close()
-
-
-def run_group(cmd, cwd, timeout, out=None, preexec=None):
-    """`(exit code, output)` of a command in its own process group, so the
-    wall clock, ctrl-C and SIGTERM reach everything it started."""
-    proc = subprocess.Popen(cmd, cwd=cwd, stdout=out or subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, start_new_session=True, preexec_fn=preexec)
+    """The label names of a REST or `gh issue view` issue, the one parser (`tracker.labels`)."""
     try:
-        text, _ = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _kill(proc)
-        raise DrainError(f"{cmd[0]} passed the {timeout}s wall clock")
-    except BaseException:
-        _kill(proc)
-        raise
-    return proc.returncode, text or ""
+        return tracker.labels(issue)
+    except tracker.TrackerError as exc:
+        raise DrainError(str(exc)) from exc
+
+
+def asked(call, *args):
+    """`call(*args)`, a call on `ctx.tracker`; a tracker that cannot answer is a `DrainError`."""
+    try:
+        return call(*args)
+    except tracker.TrackerError as exc:
+        raise DrainError(str(exc)) from None
+
+
+def issue_view(ctx, n, fields):
+    """`gh issue view`'s object for ticket `n` with the comma-separated `fields`."""
+    return asked(ctx.tracker.issue_view, n, fields)
+
+
+def relabel(ctx, n, add):
+    """Move ticket `n` from in-progress to `add` and drop drain's assignment."""
+    gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", add,
+       "--remove-assignee", "@me")
+
+
+def run_group(cmd, cwd, timeout, preexec=None):
+    """`scratch_run.run_group`'s `(exit code, output)`; its wall clock is a `DrainError`."""
+    try:
+        return scratch_run.run_group(cmd, cwd, timeout, preexec=preexec)
+    except scratch_run.ScratchError as exc:
+        raise DrainError(str(exc)) from None
 
 
 def _cap_session():
@@ -270,11 +272,14 @@ def _cap_session():
 
 
 def origin_slug(root):
-    url = run(["git", "config", "--get", "remote.origin.url"], cwd=root)
-    m = _ORIGIN.search(url)
-    if not m:
-        raise DrainError(f"origin {url} is not a github.com repo")
-    return f"{m.group(1)}/{m.group(2)}"
+    """`owner/name` of `root`'s origin; a remote that is not github.com is a `DrainError`."""
+    try:
+        slug = shellcmd.origin_slug(root)
+    except shellcmd.CmdError as exc:
+        raise DrainError(str(exc)) from None
+    if slug is None:
+        raise DrainError(f"origin of {root} is not a github.com repo")
+    return slug
 
 
 def read_frontier(ctx, retry=True):
@@ -299,16 +304,11 @@ def read_queue(ctx):
     repo, which no spec run can build (#1485). `passed` is `[(number, why)]`:
     the other open ready tickets, which a drain passes over (human-held,
     claimed, blocked, unresolved, or carrying a non-dispatchable label)."""
-    issues = {}
-
-    def fetch(r, label):
-        got = frontier.fetch_issues(r, label)
-        issues.update({i["number"]: i for i in got})
-        return got
-
+    listing = asked(ctx.tracker.issues, READY)
+    issues = {i["number"]: i for i in listing}
     try:
-        buckets = frontier.frontier(ctx.repo, READY, fetch=fetch)
-    except frontier.FrontierError as exc:
+        buckets = frontier.frontier(ctx.repo, READY, tracker=Listed(ctx.tracker, listing))
+    except tracker.TrackerError as exc:
         raise DrainError(f"frontier: {exc}") from exc
     queue = [(t["number"], t["title"], kind) for kind, bucket in ((TICKET, "unblocked"), (SPEC, "spec"))
              for t in buckets[bucket]]
@@ -316,6 +316,21 @@ def read_queue(ctx):
     waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
     stranded = [(t["number"], t["why"]) for t in buckets["stranded"]]
     return queue, sorted(waiting), stranded, passed_over(issues, buckets)
+
+
+class Listed:
+    """`inner` with `issues(label)` answering the one listing drain already read, so the frontier
+    classifies the very issues `passed_over` names rather than a second read that could differ.
+    Every other call goes to `inner`, which is never changed."""
+
+    def __init__(self, inner, listing):
+        self._inner, self._listing = inner, listing
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def issues(self, label):
+        return list(self._listing)
 
 
 def passed_over(issues, buckets):
@@ -414,11 +429,19 @@ def note_anchor(ctx, anchor, kind):
     ticket with a stray note, which the next pick simply notes again, where the
     other order leaves an in-progress ticket no rerun resumes."""
     with claim_lock(ctx):
-        view = gh_json("issue", "view", str(anchor), "--repo", ctx.repo, "--json", "state,labels")
+        view = issue_view(ctx, anchor, "state,labels")
         if view["state"].lower() != "open" or READY not in labels_of(view) or CLAIMED in labels_of(view):
             return False
-        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body", f"{ANCHOR_NOTE} {branch_of(anchor, kind)}")
+        asked(ctx.tracker.comment, anchor, f"{ANCHOR_NOTE} {branch_of(anchor, kind)}")
     return True
+
+
+def claimed_issues(ctx):
+    """The open in-progress tickets, lowest first, with pull requests and human-held tickets
+    dropped: the one claimed-queue read `resumable` and `claimed_slices` share."""
+    claimed = asked(ctx.tracker.claimed)
+    return sorted((i for i in claimed if not i.get("pull_request") and HUMAN not in labels_of(i)),
+                  key=lambda i: i["number"])
 
 
 def resumable(ctx, ended):
@@ -429,14 +452,10 @@ def resumable(ctx, ended):
     The open list can still carry a ticket just closed, so each candidate's
     state and labels are read again, and an anchor this drain already took up
     (`ended`) is never taken twice."""
-    try:
-        claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
-    except frontier.FrontierError as exc:
-        raise DrainError(f"frontier: {exc}") from exc
-    for issue in sorted(claimed, key=lambda i: i["number"]):
-        if issue["number"] in ended or HUMAN in labels_of(issue) or issue.get("pull_request"):
+    for issue in claimed_issues(ctx):
+        if issue["number"] in ended:
             continue
-        view = gh_json("issue", "view", str(issue["number"]), "--repo", ctx.repo, "--json", "state,labels,comments")
+        view = issue_view(ctx, issue["number"], "state,labels,comments")
         if view["state"].lower() != "open" or CLAIMED not in labels_of(view):
             continue
         marks = [c["body"] for c in view["comments"] if c["body"].startswith((ANCHOR_NOTE, HANDED_NOTE))]
@@ -451,7 +470,7 @@ def noted(ctx, anchor):
     claim: what the agent says it took. Digits are read with `findall`, so a
     note that wraps lines or ends in punctuation still parses; the
     `(of <k> candidates)` count is cut first, since it is not a ticket."""
-    comments = gh_json("issue", "view", str(anchor), "--repo", ctx.repo, "--json", "comments")["comments"]
+    comments = issue_view(ctx, anchor, "comments")["comments"]
     start = max((i for i, c in enumerate(comments) if c["body"].startswith(ANCHOR_NOTE)), default=-1)
     return {int(x) for c in comments[start + 1:] if c["body"].strip().startswith(BUNDLE_NOTE)
             for x in re.findall(r"\d+", CANDIDATES.sub("", c["body"]))} - {anchor}
@@ -467,8 +486,8 @@ def parent_number(ctx, issue):
     key = (ctx.repo, issue["number"])
     if key not in _PARENTS:
         try:
-            parent = frontier.fetch_parent(ctx.repo, issue)
-        except frontier.FrontierError as exc:
+            parent = frontier.fetch_parent(ctx.tracker, issue)
+        except tracker.TrackerError as exc:
             raise DrainError(f"parent of #{issue['number']}: {exc}") from exc
         _PARENTS[key] = parent and parent["number"]
     return _PARENTS[key]
@@ -476,20 +495,16 @@ def parent_number(ctx, issue):
 
 def is_slice_of(ctx, n, spec):
     """Whether ticket `n` (read live) has `spec` as its parent."""
-    body = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "body")["body"]
+    body = issue_view(ctx, n, "body")["body"]
     return parent_number(ctx, {"number": n, "body": body}) == spec
 
 
 def claimed_slices(ctx, spec):
     """The in-progress tickets whose parent is `spec`: the slices its run holds.
     Read live, since the spec run claims them, not drain."""
-    try:
-        claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
-    except frontier.FrontierError as exc:
-        raise DrainError(f"frontier: {exc}") from exc
     held = []
-    for i in claimed:
-        if i["number"] == spec or i.get("pull_request") or HUMAN in labels_of(i):
+    for i in claimed_issues(ctx):
+        if i["number"] == spec:
             continue
         try:
             if parent_number(ctx, i) == spec:
@@ -507,11 +522,11 @@ def bundle_of(ctx, anchor, branch, kind):
         return [anchor] + claimed_slices(ctx, anchor)
     hint = noted(ctx, anchor)
     if open_pr(ctx, branch):
-        view = gh_json("pr", "view", branch, "--repo", ctx.repo, "--json", "closingIssuesReferences")
+        view = asked(ctx.tracker.pr_view, branch, "closingIssuesReferences")
         hint |= {r["number"] for r in view["closingIssuesReferences"]} - {anchor}
     held = []
     for n in sorted(hint):
-        view = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "state,labels")
+        view = issue_view(ctx, n, "state,labels")
         if view["state"].lower() == "open" and CLAIMED in labels_of(view) and HUMAN not in labels_of(view):
             held.append(n)
     return [anchor] + held
@@ -530,20 +545,9 @@ def agent_info(name):
     herdr has no such agent. Any other herdr failure is a `DrainStop`: a herdr
     that cannot be asked is not a worker that is gone."""
     try:
-        out = subprocess.run(["herdr", "agent", "get", name], capture_output=True, text=True,
-                             timeout=HERDR_SECONDS)
-    except subprocess.TimeoutExpired:
-        raise DrainStop(f"herdr agent get {name} timed out after {HERDR_SECONDS:g}s") from None
-    body = {}
-    for text in (out.stdout, out.stderr):  # herdr prints a result on stdout and an error on stderr
-        with contextlib.suppress(ValueError):
-            body = json.loads(text)
-            break
-    if out.returncode == 0 and "result" in body:
-        return body["result"]["agent"]
-    if body.get("error", {}).get("code") == "agent_not_found":
-        return None
-    raise DrainStop(f"herdr agent get {name} failed: {one_line(out.stderr or out.stdout, 150)}")
+        return shellcmd.herdr_agent(name, timeout=HERDR_SECONDS)
+    except shellcmd.CmdError as exc:
+        raise DrainStop(str(exc)) from None
 
 
 def agent_status(name):
@@ -555,10 +559,12 @@ def stop_worker(name):
     """Close the worker's pane, so a bundle handed to Chris does not keep working
     beside the next one. The workspace stays for inspection; the session's
     transcript stays with claude. Best effort: a worker already gone is fine."""
-    with contextlib.suppress(DrainStop, KeyError):
+    with contextlib.suppress(DrainStop, DrainError, KeyError, OSError):
         info = agent_info(name)
         if info:
-            subprocess.run(["herdr", "pane", "close", info["pane_id"]], capture_output=True)
+            # `shellcmd` has no public `herdr` call beyond `agent get`; `run_group` gives the same
+            # scrubbed environment and a bound.
+            run_group(["herdr", "pane", "close", info["pane_id"]], None, HERDR_SECONDS)
 
 
 def excerpt(ctx, n):
@@ -568,7 +574,7 @@ def excerpt(ctx, n):
     A ticket unblocked by GitHub's native dependencies alone may have no body and
     no comments, and says so rather than rendering blank."""
     try:
-        view = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "body,comments")
+        view = issue_view(ctx, n, "body,comments")
     except DrainError as exc:
         return f"(body not read: {one_line(exc, 80)})"
     text = " ".join([view["body"] or "", *(c["body"] or "" for c in view["comments"])])
@@ -628,7 +634,7 @@ def dispatch(ctx, bundle, kind):
                          capture_output=True, text=True)
     if out.returncode:
         reason = "implement-dispatch failed: " + one_line(out.stderr or out.stdout, 250)
-        view = gh_json("issue", "view", str(bundle[0]), "--repo", ctx.repo, "--json", "labels")
+        view = issue_view(ctx, bundle[0], "labels")
         if CLAIMED in labels_of(view):
             raise DrainError(reason)
         raise DrainStop(reason.replace("failed", "refused", 1))
@@ -662,8 +668,7 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
             if status is None or status in IDLE:
                 if open_pr(ctx, branch):
                     outcome = "pr"
-                elif all(gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "state")["state"].lower()
-                         == "closed" for n in bundle):
+                elif all(issue_view(ctx, n, "state")["state"].lower() == "closed" for n in bundle):
                     outcome = "closed"
                 elif status is None:
                     raise WorkerGone(f"the worker {agent} is gone and the build has no PR")
@@ -672,7 +677,7 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
             errors = 0
         except WorkerGone:
             raise
-        except (DrainError, DrainStop) as exc:
+        except (DrainError, DrainStop):
             errors += 1
             if errors >= LOOK_ERRORS:
                 raise
@@ -691,42 +696,17 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
 
 
 def open_pr(ctx, branch):
-    prs = gh_json("pr", "list", "--repo", ctx.repo, "--head", branch, "--state", "open", "--json", "number,url")
+    prs = asked(ctx.tracker.open_prs, branch)
     return prs[0] if prs else None
 
 
-def run_in_scratch_tree(ctx, cmd, log, head=None, rev=None):
-    """`cmd` in a throwaway worktree of current main (or of `rev`), with `head`
-    merged in when given. The merge commit uses the identity the repo is already configured
-    with. Each directory holding a tracked `package-lock.json` gets `npm ci`
-    before `cmd`.
-    Raises `DrainError` on a conflict or a non-zero exit."""
-    scratch = tempfile.mkdtemp(prefix="drain-seam-")
+def run_in_scratch_tree(ctx, cmd, log, head):
+    """`scratch_run.run_in_scratch_tree` on current main with `head` merged in, under the
+    worker's wall clock; any failure there is a `DrainError`."""
     try:
-        run(["git", "worktree", "add", "-q", "--detach", scratch, rev or ctx.default], cwd=ctx.root)
-        if head:
-            merged = subprocess.run(["git", "merge", "--no-edit", head], cwd=scratch, capture_output=True, text=True)
-            if merged.returncode:
-                raise DrainError("merging the PR into current main failed: "
-                                 + one_line(merged.stderr or merged.stdout, 200))
-        with open(log, "w") as out:
-            # A bare worktree has no node_modules, so the declared
-            # dependencies go in first, in the directory of every tracked
-            # lockfile, not only the root's (#1445, #1502).
-            listed = run(["git", "ls-files", "-z", "--", "package-lock.json", "*/package-lock.json"], cwd=scratch)
-            for lock in sorted(x for x in listed.split("\0") if x):
-                try:
-                    code, _ = run_group(["npm", "ci"], os.path.join(scratch, os.path.dirname(lock)),
-                                        WALL_CLOCK_SECONDS, out=out)
-                except OSError as exc:
-                    raise DrainError(f"`npm ci` could not start: {exc}") from exc
-                if code:
-                    raise DrainError(f"`npm ci` failed (output in {log})")
-            code, _ = run_group(["sh", "-c", cmd], scratch, WALL_CLOCK_SECONDS, out=out)
-        if code:
-            raise DrainError(f"`{cmd}` failed (output in {log})")
-    finally:
-        run(["git", "worktree", "remove", "--force", scratch], cwd=ctx.root, check=False)
+        scratch_run.run_in_scratch_tree(ctx.root, ctx.default, cmd, log, WALL_CLOCK_SECONDS, head=head)
+    except scratch_run.ScratchError as exc:
+        raise DrainError(str(exc)) from None
 
 
 SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "implement", "selector_check.py")
@@ -740,7 +720,7 @@ def seam(ctx, head, log, pr):
     merged into current main in a throwaway worktree. The command's own exit
     status is what comes out, never the `selector:` comment's; a resolver
     refusal raises with its reason, before anything runs."""
-    run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+    git(["fetch", "-q", "origin"], cwd=ctx.root)
     log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
     with contextlib.suppress(FileNotFoundError):
         os.remove(log)  # a conflict writes no log, and an earlier drain's must not answer for it
@@ -783,7 +763,8 @@ def verify_pr(ctx, branch, anchor, kind):
     refused on UNKNOWN or a check still running (#1526; `pr_settle.py` has the
     limits), then its closures and the seam."""
     try:
-        view = pr_settle.settle(pr_settle.gh_reader(branch, ctx.repo, "number,url,closingIssuesReferences"))
+        view = pr_settle.settle(pr_settle.gh_reader(branch, ctx.repo, "number,url,closingIssuesReferences",
+                                                    tracker=ctx.tracker))
     except pr_settle.SettleError as exc:
         url = (exc.view or {}).get("url")
         raise DrainError(f"{url} {exc}" if url else str(exc)) from exc
@@ -829,7 +810,7 @@ def closing_commit(ctx, n):
     """The sha of the commit that closed ticket `n`, `None` when it was closed
     by hand, as read from its last `closed` event. Raises `DrainError` when
     GitHub cannot say."""
-    pages = gh_json("api", "--paginate", "--slurp", f"repos/{ctx.repo}/issues/{n}/events")
+    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{ctx.repo}/issues/{n}/events") or "null")
     events = [e for page in pages for e in page if e.get("event") == "closed"]
     if not events:
         raise DrainError("it has no closed event")
@@ -845,11 +826,11 @@ def closes_commit(ctx, n):
     with no commit on its event is moot only when no landed commit says it
     closed the ticket either. Raises `DrainError` when git cannot say."""
     pattern = rf"\b(closes|fixes|resolves) #{n}([^0-9]|$)"
-    found = subprocess.run(["git", "log", "-n1", "--format=%H", "-i", "-E", f"--grep={pattern}", ctx.default],
-                           cwd=ctx.root, capture_output=True, text=True)
-    if found.returncode:
-        raise DrainError(f"git log on {ctx.default} failed: {one_line(found.stderr, 100)}")
-    return found.stdout.strip() or None
+    try:
+        found = git(["log", "-n1", "--format=%H", "-i", "-E", f"--grep={pattern}", ctx.default], cwd=ctx.root)
+    except DrainError as exc:
+        raise DrainError(f"git log on {ctx.default} failed: {one_line(exc, 100)}") from None
+    return found or None
 
 
 def close_outcome(ctx, n):
@@ -859,7 +840,7 @@ def close_outcome(ctx, n):
     read is never read as either of the others."""
     try:
         commit = closing_commit(ctx, n)
-    except (DrainError, KeyError, TypeError) as exc:
+    except (DrainError, KeyError, TypeError, ValueError) as exc:
         return f"closed, no PR (landing not verified: {one_line(exc, 100)})", None
     if commit is None:
         try:
@@ -867,13 +848,13 @@ def close_outcome(ctx, n):
         except DrainError as exc:
             return f"closed, no PR (landing not verified: {one_line(exc, 100)})", None
         return (LANDED_LABEL, commit) if commit else (MOOT_LABEL, None)
-    on_main = subprocess.run(["git", "merge-base", "--is-ancestor", commit, ctx.default], cwd=ctx.root,
-                             capture_output=True, text=True)
+    try:
+        on_main = shellcmd.git(["merge-base", "--is-ancestor", commit, ctx.default], cwd=ctx.root, ok=(0, 1))
+    except shellcmd.CmdError as exc:
+        return (f"closed, no PR (landing not verified: could not check closing commit {commit[:8]}: "
+                f"{one_line(exc, 80)})"), None
     if on_main.returncode == 1:
         return f"closed, no PR (landing not verified: closing commit {commit[:8]} is not on {ctx.default})", None
-    if on_main.returncode:
-        return (f"closed, no PR (landing not verified: could not check closing commit {commit[:8]}: "
-                f"{one_line(on_main.stderr, 80)})"), None
     return LANDED_LABEL, commit
 
 
@@ -885,7 +866,7 @@ def finish_closed(ctx, branch, tickets):
     One result per distinct outcome; the cleanup note rides on the first."""
     notes = cleanup_notes(ctx, branch)
     try:
-        run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+        git(["fetch", "-q", "origin"], cwd=ctx.root)
     except DrainError as exc:
         notes.append(f"fetch failed: {one_line(exc, 100)}")
     groups = {}
@@ -906,14 +887,13 @@ def finish(ctx, anchor, branch, view, kind):
     fails is a note on a merged PR, never a reason to build again."""
     notes, sha = [], view["headRefOid"]
     try:
-        sha = gh_json("pr", "view", str(view["number"]), "--repo", ctx.repo, "--json", "mergeCommit")["mergeCommit"]["oid"]
+        sha = asked(ctx.tracker.pr_view, view["number"], "mergeCommit")["mergeCommit"]["oid"]
     except (DrainError, KeyError, TypeError) as exc:
         notes.append(f"squash sha unread, head shown: {one_line(exc, 100)}")
     notes += cleanup_notes(ctx, branch)
     try:
         for n in set(bundle_of(ctx, anchor, branch, kind)) - set(view["closes"]):
-            gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", READY,
-               "--remove-assignee", "@me")
+            relabel(ctx, n, READY)
     except DrainError as exc:
         notes.append("releasing unclosed tickets failed: " + one_line(exc, 150))
     return [{"tickets": view["closes"], "via": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED}]
@@ -951,7 +931,7 @@ def say(text):
 
 def title_of(ctx, n):
     try:
-        return one_line(gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "title")["title"], 100)
+        return one_line(issue_view(ctx, n, "title")["title"], 100)
     except (DrainError, KeyError, TypeError):
         return "(title unread)"
 
@@ -981,10 +961,8 @@ def work(ctx, anchor, others, resumed, started, kind):
                 if kind == TICKET:  # a spec's slices are its bundle: nothing to choose
                     bundle, why = choose_bundle(ctx, anchor, others, os.path.join(ctx.log_dir, f"{repo_slug(ctx)}-{branch}-choose.log"))
                     if why:
-                        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
-                           f"{CHOOSER_NOTE} #{anchor} alone: {why}")
-                    gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body",
-                       f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)} {count_note(len(others))}")
+                        asked(ctx.tracker.comment, anchor, f"{CHOOSER_NOTE} #{anchor} alone: {why}")
+                    asked(ctx.tracker.comment, anchor, f"{BUNDLE_NOTE} {' '.join(str(n) for n in bundle)} {count_note(len(others))}")
                 dispatch(ctx, bundle, kind)
             tickets = [anchor] + (sorted(noted(ctx, anchor)) if kind == TICKET else [])
             if attempt == 1:
@@ -994,8 +972,8 @@ def work(ctx, anchor, others, resumed, started, kind):
                 return finish_closed(ctx, branch, tickets), None
             view = verify_pr(ctx, branch, anchor, kind)
             try:
-                pr_settle.merge(pr_settle.gh_reader(view["number"], ctx.repo),
-                                pr_settle.gh_merger(view["number"], ctx.repo), view["headRefOid"])
+                pr_settle.merge(pr_settle.gh_reader(view["number"], ctx.repo, tracker=ctx.tracker),
+                                pr_settle.gh_merger(view["number"], ctx.repo, tracker=ctx.tracker), view["headRefOid"])
             except pr_settle.SettleError as exc:
                 raise DrainError(f"{view['url']} {exc}") from exc
         except DrainError as exc:
@@ -1016,10 +994,8 @@ def hand_to_chris(ctx, anchor, reason, kind):
         for n in bundle[1:]:
             stop_worker(agent_name(ctx, n, TICKET))
     for n in bundle:
-        gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", HUMAN,
-           "--remove-assignee", "@me")
-        gh("issue", "comment", str(n), "--repo", ctx.repo, "--body",
-           f"{HANDED_NOTE} this ticket (bundle {refs(bundle)}) after two attempts. "
+        relabel(ctx, n, HUMAN)
+        asked(ctx.tracker.comment, n, f"{HANDED_NOTE} this ticket (bundle {refs(bundle)}) after two attempts. "
            f"Last failure: {reason} The worktree {branch} is kept for inspection and its worker's "
            "pane is closed; drain skips this ticket until that worktree is removed.")
     return bundle
@@ -1218,21 +1194,22 @@ def main(argv):
     try:
         # The primary checkout, even when --repo is a linked worktree: workers,
         # their herdr agent names and `merge-cleanup` are all keyed on it.
-        common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=args.repo)
+        common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=args.repo)
         root = os.path.dirname(common)
         repo = origin_slug(root)
-        login = gh("api", "user", "--jq", ".login")
+        issues = tracker.GhTracker(repo)
+        login = asked(issues.viewer_login)
         if repo.split("/")[0] != login:
             raise DrainError(f"{repo} is not owned by {login}; drain only runs on the caller's own repos")
-        default = run(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=root)
+        default = shellcmd.default_branch(root)
         log_dir = os.environ.get("DRAIN_LOG_DIR") or os.path.expanduser("~/.cache/drain")
         os.makedirs(log_dir, exist_ok=True)
-    except DrainError as exc:
+    except (DrainError, shellcmd.CmdError) as exc:
         print(f"drain.py: {exc}", file=sys.stderr)
         return 1
     limit = 1 if args.once else (args.max or sys.maxsize)
     limit_name = "--once" if args.once else f"--max {args.max}"
-    run_ = drain(Ctx(root, repo, default, log_dir, args.bundle_max, args.anchor), limit, limit_name)
+    run_ = drain(Ctx(root, repo, default, log_dir, args.bundle_max, args.anchor, issues), limit, limit_name)
     say(summary(run_))
     return 1 if run_.stop else 0
 

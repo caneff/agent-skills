@@ -103,7 +103,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -112,6 +111,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "docs" / "research"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+import shellcmd  # noqa: E402  (#1784)
 from tally_review_axes import (  # noqa: E402
     ALL_AXES, OUTCOME_DETAIL_FIELD, find_codex_records, find_sidecar_files, load_jsonl)
 from review_cache import CacheDirError, REVIEWS_ROOT, cache_dir_for, fold_repo, repo_for_checkout  # noqa: E402
@@ -1819,11 +1820,11 @@ class EscapeError(Exception):
     """The history cannot answer: refused by name, never read as no escapes."""
 
 
-def _git(repo_dir: Path, *args: str) -> str:
-    done = subprocess.run(["git", "-C", str(repo_dir), *args], capture_output=True, text=True)
-    if done.returncode != 0:
-        raise EscapeError(f"`git {' '.join(args)}` failed: {done.stderr.strip()}")
-    return done.stdout
+def _git(repo_dir: Path, *args: str, ok: tuple[int, ...] = (0,)) -> str:
+    try:
+        return shellcmd.git(["-C", str(repo_dir), *args], ok=ok).stdout
+    except shellcmd.CmdError as exc:
+        raise EscapeError(str(exc)) from None
 
 
 def _old_ranges(repo_dir: Path, fix: str) -> dict[str, list[tuple[int, int]]]:
@@ -1849,8 +1850,11 @@ def _old_ranges(repo_dir: Path, fix: str) -> dict[str, list[tuple[int, int]]]:
 
 
 def _exists(repo_dir: Path, rev: str, path: str) -> bool:
-    return subprocess.run(["git", "-C", str(repo_dir), "cat-file", "-e", f"{rev}:{path}"],
-                          capture_output=True).returncode == 0
+    try:
+        done = shellcmd.git(["-C", str(repo_dir), "cat-file", "-e", f"{rev}:{path}"], ok=(0, 1, 128))
+    except shellcmd.CmdError as exc:  # git absent or timed out: the history cannot answer
+        raise EscapeError(str(exc)) from None
+    return done.returncode == 0
 
 
 def _origins(repo_dir: Path, fix: str, path: str, first: int, last: int) -> set[str]:
@@ -1872,10 +1876,9 @@ def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str, 
     except CacheDirError as exc:
         raise EscapeError(str(exc))
     try:
-        default = _git(repo_dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
-    except EscapeError as exc:
-        raise EscapeError(f"{exc} — record the default branch with `git remote set-head origin -a`; "
-                          "it is never assumed to be `main`") from None
+        default = shellcmd.default_branch(str(repo_dir))
+    except shellcmd.CmdError as exc:
+        raise EscapeError(str(exc)) from None
     skipped: dict[int, set[str]] = {}
     reviewed: set[int] = set()
     for r in rows:

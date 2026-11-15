@@ -20,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "multi-axis-code-review"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 import runfile  # noqa: E402
 from review_cache import CacheDirError, dispositions_path, repo_for_checkout, reviews_root  # noqa: E402
 
@@ -32,7 +33,7 @@ def default_reviews_dir(checkout):
     checkout's own name is not the key. `checkout` is `runfile.checkout_top`'s
     answer, so it is already a checkout of the repo the run targets."""
     # `reviews_root()`, not `REVIEWS_ROOT`: home is read at call time, as before #1774.
-    return os.path.join(reviews_root(), repo_for_checkout(checkout, runfile.clean_git_env()))
+    return os.path.join(reviews_root(), repo_for_checkout(checkout))
 
 
 def counts(run, reviews_dir, spec=None):

@@ -63,7 +63,9 @@ LEDGER_CLI = HERE.parent / "multi-axis-code-review" / "review_ledger.py"
 
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "multi-axis-code-review"))
-from gitcmd import GitError, git  # noqa: E402
+sys.path.insert(0, str(HERE.parent / "common"))
+from shellcmd import CmdError, default_branch, git, origin_slug, scratch_worktree  # noqa: E402  (#1782)
+from tracker import GhTracker, TrackerError  # noqa: E402  (#1786)
 from review_ledger import DEFAULT_LEDGER, parse_codex_out  # noqa: E402
 from review_cache import REVIEWS_ROOT, CacheDirError, repo_for_checkout  # noqa: E402
 
@@ -104,11 +106,11 @@ class Stop(Exception):
 
 
 def repo_name() -> str:
-    """This checkout's folded repo name, by `review_cache`'s one rule; a failure is a GitError here."""
+    """This checkout's folded repo name, by `review_cache`'s one rule; a failure is a CmdError here."""
     try:
         return repo_for_checkout(Path.cwd())
     except CacheDirError as e:
-        raise GitError(str(e)) from e
+        raise CmdError(str(e)) from e
 
 
 def append_row(ledger: Path, repo: str, *args: str) -> None:
@@ -168,13 +170,15 @@ def audit_range(ledger: Path, repo: str, mark: str, base: str) -> tuple[Span, li
     return Span(*lines[0].removeprefix("range ").split("..")), prs, left_out
 
 
-def render_ticket(slug: str, ticket: int, program: str) -> str:
-    """The ticket's body and comments, rendered by `program`, `implement/SKILL.md`'s jq program."""
-    r = subprocess.run(["gh", "issue", "view", str(ticket), "--repo", slug, "--json", "body,comments"],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        raise Stop(ERROR, f"gh could not read ticket #{ticket}: {r.stderr.strip()}")
-    j = subprocess.run(["jq", "-r", program], input=r.stdout, capture_output=True, text=True)
+def render_ticket(slug: str, ticket: int, program: str, tracker=None) -> str:
+    """The ticket's body and comments, rendered by `program`, `implement/SKILL.md`'s jq program.
+    `tracker` is the issue module's adapter for `slug`, the `gh` one unless a test passes the
+    in-memory one."""
+    try:
+        view = (tracker or GhTracker(slug)).issue_view(ticket, "body,comments")
+    except TrackerError as e:
+        raise Stop(ERROR, f"gh could not read ticket #{ticket}: {e}") from None
+    j = subprocess.run(["jq", "-r", program], input=json.dumps(view), capture_output=True, text=True)
     if j.returncode != 0:
         raise Stop(ERROR, f"jq could not render ticket #{ticket}: {j.stderr.strip()}")
     return j.stdout
@@ -201,11 +205,10 @@ def brief(slug: str, span: Span, prs: list[Merge]) -> str:
 
 
 def github_slug() -> str:
-    url = git("remote", "get-url", "origin").stdout.strip()
-    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
-    if not m:
-        raise Stop(ERROR, f"origin {url} is not a GitHub repo")
-    return m[1]
+    slug = origin_slug(".")
+    if not slug:
+        raise Stop(ERROR, "origin is not a GitHub repo")
+    return slug
 
 
 def usage_percent() -> str:
@@ -225,24 +228,28 @@ def launch(args, span: Span, body: Path, out: Path) -> int:
     """Run Codex over `span` from a detached worktree at its newest merge; its exit status."""
     script = None if args.dry_run else companion()
     tree = out.with_name(out.stem + "-tree")
-    git("worktree", "add", "--detach", str(tree), span.newest)
+    status = None
     try:
-        if script is None:
-            out.write_text(args.simulate_out.read_text() if args.simulate_out else
-                           "No material findings (dry run: Codex was not launched).\n")
-            return args.simulate_status or 0
-        with out.open("w") as f:
-            return subprocess.run(["node", str(script), "adversarial-review", "--wait", "--base", span.base, "--",
-                                   body.read_text()], cwd=tree, stdout=f, stderr=subprocess.STDOUT).returncode
-    finally:
-        try:
-            git("worktree", "remove", "--force", str(tree))
-        except GitError as left:  # the run's own outcome stands; a stale worktree is named, not blamed on it
-            print(f"codex-audit: {left}; remove {tree} by hand", file=sys.stderr)
+        with scratch_worktree(".", span.newest, str(tree)):
+            if script is None:
+                out.write_text(args.simulate_out.read_text() if args.simulate_out else
+                               "No material findings (dry run: Codex was not launched).\n")
+                status = args.simulate_status or 0
+            else:
+                with out.open("w") as f:
+                    status = subprocess.run(["node", str(script), "adversarial-review", "--wait", "--base", span.base,
+                                             "--", body.read_text()], cwd=tree, stdout=f,
+                                            stderr=subprocess.STDOUT).returncode
+    except CmdError as left:
+        if status is None:  # the add failed: nothing launched
+            raise
+        # The run's own outcome stands; a stale worktree is named, not blamed on it.
+        print(f"codex-audit: {left}", file=sys.stderr)
+    return status
 
 
 def report(findings: list[dict], prs: list[Merge]) -> None:
-    files = {m.pr: set(git("show", "--name-only", "--format=", m.sha).stdout.split()) for m in prs}
+    files = {m.pr: set(git(["show", "--name-only", "--format=", m.sha]).stdout.split()) for m in prs}
     for k, f in enumerate(findings, 1):
         if not f["file"]:
             where = "names no file"
@@ -263,13 +270,14 @@ def cmd_run(args) -> int:
         return ERROR
     try:
         repo = repo_name()
-    except GitError as e:
+    except CmdError as e:
         print(f"codex-audit: not in a git checkout, so no repo to record under: {e}", file=sys.stderr)
         return ERROR
     ledger = args.ledger or DEFAULT_LEDGER
     try:
         gate()
-        span, prs, left_out = audit_range(ledger, repo, read_mark(args.trial or TRIAL, repo), args.base)
+        base = args.base or default_branch(".")
+        span, prs, left_out = audit_range(ledger, repo, read_mark(args.trial or TRIAL, repo), base)
         print(f"audit range {span}: {', '.join(f'PR #{m.pr}' for m in prs)}")
         cache = args.cache or REVIEWS_ROOT / repo
         cache.mkdir(parents=True, exist_ok=True)
@@ -279,7 +287,7 @@ def cmd_run(args) -> int:
         out, record = stem.with_suffix(".out"), stem.with_suffix(".json")
         usage_before, started = usage_percent(), datetime.now(timezone.utc).isoformat()
         status = launch(args, span, body, out)
-    except (OSError, GitError) as e:  # a missing `gh`, `jq` or `node`, or a failed git: nothing launched
+    except (OSError, CmdError) as e:  # a missing `gh`, `jq` or `node`, or a failed git: nothing launched
         return stopped(Stop(ERROR, str(e)), ledger, repo)
     except Stop as stop:
         return stopped(stop, ledger, repo)
@@ -297,14 +305,14 @@ def cmd_run(args) -> int:
             return REFUSED
         findings, why = parse_codex_out(out.read_text())
         for t in left_out:
-            print(f"left out: ticket #{t}, not in this audit: no single merge commit on {args.base} closes it")
+            print(f"left out: ticket #{t}, not in this audit: no single merge commit on {base} closes it")
         if findings is None:
             print(f"Codex output unreadable as findings ({why}): read it yourself: {out}")
         elif not findings:
             print(f"no material findings; output {out}")
         else:
             report(findings, prs)
-    except (Stop, GitError) as failed:
+    except (Stop, CmdError) as failed:
         print(f"codex-audit: {failed}; Codex already ran: its record is {record} and its output {out}",
               file=sys.stderr)
         return ERROR
@@ -337,7 +345,7 @@ def cmd_mark(args) -> int:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.date):
             raise Stop(ERROR, f"--date {args.date!r} is not YYYY-MM-DD, so the next run could not read the mark")
         repo = repo_name()
-        r = git("rev-parse", "--verify", "--quiet", f"{args.sha}^{{commit}}", ok=(0, 1))
+        r = git(["rev-parse", "--verify", "--quiet", f"{args.sha}^{{commit}}"], ok=(0, 1))
         if r.returncode != 0:
             raise Stop(ERROR, f"--sha {args.sha} is not a commit in this checkout")
         sha = r.stdout.strip()
@@ -348,12 +356,12 @@ def cmd_mark(args) -> int:
         mine = [m for m in marks if m["repo"] == repo]
         if len(mine) > 1:
             raise Stop(ERROR, f"{len(mine)} audit marks for {repo} in {trial}, not one")
-        if mine and git("merge-base", "--is-ancestor", mine[0]["sha"], sha, ok=(0, 1)).returncode != 0:
+        if mine and git(["merge-base", "--is-ancestor", mine[0]["sha"], sha], ok=(0, 1)).returncode != 0:
             raise Stop(ERROR, f"{sha} does not descend from the current mark {mine[0]['sha']}")
     except Stop as stop:
         print(f"codex-audit: {stop.reason}", file=sys.stderr)
         return stop.status
-    except GitError as e:
+    except CmdError as e:
         print(f"codex-audit: {e}", file=sys.stderr)
         return ERROR
     except OSError as e:
@@ -371,7 +379,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     run = sub.add_parser("run")
-    run.add_argument("--base", default="origin/HEAD")
+    run.add_argument("--base", default=None, help="the default branch (default: origin/HEAD, which must be recorded)")
     run.add_argument("--ledger", type=Path)
     run.add_argument("--cache", type=Path)
     run.add_argument("--trial", type=Path)

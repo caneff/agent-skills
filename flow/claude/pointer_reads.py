@@ -37,6 +37,9 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+import shellcmd  # noqa: E402  (one way to ask git: common/shellcmd.py, #1781)
+
 TICKET = 1413
 REPO = "caneff/agent-skills"
 NOTE = "docs/research/2026-10-04-claude-md-pointer-reads.md"
@@ -48,8 +51,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def cron_line() -> str:
     # The primary checkout, never this file's own worktree, which merge-cleanup
     # deletes. Absolute paths throughout: cron runs with PATH=/usr/bin:/bin.
-    common = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute",
-                             "--git-common-dir"], capture_output=True, text=True, check=True).stdout
+    common = shellcmd.git(["-C", str(ROOT), "rev-parse", "--path-format=absolute",
+                           "--git-common-dir"]).stdout
     primary = Path(common.strip()).parent
     return (f"17 9 * * * PATH={Path.home()}/.local/bin:/usr/bin:/bin python3 "
             f"{primary}/flow/claude/pointer_reads.py recount "
@@ -155,11 +158,11 @@ def closed_at() -> datetime | None:
 
 
 def git(*args: str, cwd: Path) -> str:
-    p = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
-    if p.returncode != 0:
+    try:
+        return shellcmd.git(["-C", str(cwd), *args]).stdout
+    except shellcmd.CmdError as e:
         # The cron log is the only place the reason lands: keep git's own.
-        raise Refusal(f"git {' '.join(args)} failed ({p.returncode}): {p.stderr.strip()}")
-    return p.stdout
+        raise Refusal(str(e)) from None
 
 
 def read_crontab() -> str:
@@ -208,22 +211,27 @@ def recount_or_raise(today: datetime, root: Path, projects: Path) -> int:
             f"{stamp(closed)}; written by `flow/claude/pointer_reads.py recount` from cron.\n\n"
             + tables(projects, closed, end))
     git("fetch", "-q", "origin", "main", cwd=root)
-    tree = Path(tempfile.mkdtemp(prefix="pointer-reads-")) / "tree"
-    git("worktree", "add", "-q", "--detach", str(tree), "origin/main", cwd=root)
-    try:
-        note = tree / NOTE
-        if heading not in note.read_text():
-            with open(note, "a") as f:
-                f.write(body)
-            git("commit", "-q", "-m", f"research: pointer-doc re-count 14 days after #{TICKET}",
-                "--", NOTE, cwd=tree)
-            git("push", "-q", "origin", "HEAD:main", cwd=tree)
-            print(f"appended {heading} to {NOTE} and pushed")
-    finally:
-        git("worktree", "remove", "--force", str(tree), cwd=root)
+    with tempfile.TemporaryDirectory(prefix="pointer-reads-") as tmp:
+        tree = Path(tmp) / "tree"
+        try:
+            with shellcmd.scratch_worktree(str(root), "origin/main", str(tree)):
+                push_note(tree, heading, body)
+        except shellcmd.CmdError as e:
+            raise Refusal(str(e)) from None
     crontab_without_tag()
     print("removed the crontab line")
     return 0
+
+
+def push_note(tree: Path, heading: str, body: str) -> None:
+    note = tree / NOTE
+    if heading not in note.read_text():
+        with open(note, "a") as f:
+            f.write(body)
+        git("commit", "-q", "-m", f"research: pointer-doc re-count 14 days after #{TICKET}",
+            "--", NOTE, cwd=tree)
+        git("push", "-q", "origin", "HEAD:main", cwd=tree)
+        print(f"appended {heading} to {NOTE} and pushed")
 
 
 def install_cron() -> int:

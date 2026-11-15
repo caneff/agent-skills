@@ -53,7 +53,7 @@ def test_run_cli_prints_one_json_line_per_row(tmp_path, capsys):
 
 def _git_repo(path, *files):
     """`git init` `path` and track `files` (created empty)."""
-    env = auditlib.scrubbed_env()
+    env = auditlib.shellcmd.scrubbed_env()
     subprocess.run(["git", "-C", str(path), "init", "-q"], check=True, env=env)
     for f in files:
         (path / f).parent.mkdir(parents=True, exist_ok=True)

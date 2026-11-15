@@ -279,6 +279,8 @@ def test_a_failed_push_names_git_s_reason(rc):
     assert out.returncode != 0
     assert "rejected by test hook" in out.stderr
     assert TAG in rc.crontab_file.read_text()
+    # the throwaway worktree is removed and unregistered on the failure path too
+    assert "pointer-reads-" not in rc.git(rc.root, "worktree", "list")
 
 
 def test_install_cron_adds_the_line_once(rc):
@@ -299,6 +301,8 @@ def test_install_cron_from_a_worktree_names_the_primary_checkout(rc):
     # worktree of it that holds the script.
     (rc.root / "flow" / "claude").mkdir(parents=True)
     (rc.root / "flow" / "claude" / "pointer_reads.py").write_text(SCRIPT.read_text())
+    (rc.root / "common").mkdir()
+    (rc.root / "common" / "shellcmd.py").write_text((SCRIPT.parents[2] / "common" / "shellcmd.py").read_text())
     rc.git(rc.root, "add", "-A")
     rc.git(rc.root, "commit", "-q", "-m", "script")
     wt = rc.tmp / "wt"

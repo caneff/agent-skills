@@ -290,3 +290,29 @@ def test_mark_adds_a_line_for_a_repo_never_audited(case):
     r = case.mark("--sha", case.root, "--date", "2026-10-03")
     assert r.returncode == 0, r.stderr
     assert f"{other}\n- skills: 2026-10-03 {case.root}\n" in case.trial.read_text()
+
+
+# -- the ticket read, over the issue module's in-memory adapter (#1786) --------
+
+def _codex_audit_module():
+    import importlib.util
+    sys.path.insert(0, str(HERE.parent / "common"))
+    spec = importlib.util.spec_from_file_location("codex_audit_under_test", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_render_ticket_feeds_the_trackers_body_and_comments_to_the_program():
+    mod = _codex_audit_module()
+    import tracker
+    t = tracker.MemoryTracker([{"number": 9, "state": "open", "labels": [], "body": "the body",
+                                "comments": [{"body": "later"}]}])
+    assert mod.render_ticket("o/r", 9, '.body, (.comments[] | "+" + .body)', tracker=t) == "the body\n+later\n"
+
+
+def test_render_ticket_stops_when_the_tracker_cannot_read_the_ticket():
+    mod = _codex_audit_module()
+    import tracker
+    with pytest.raises(mod.Stop, match="gh could not read ticket #9"):
+        mod.render_ticket("o/r", 9, ".body", tracker=tracker.MemoryTracker())

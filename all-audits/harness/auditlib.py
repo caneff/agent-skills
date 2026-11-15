@@ -9,11 +9,10 @@ function and imports this module via a short path hook (see
 """
 import json
 import os
-import subprocess
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from procs import scrubbed_env  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "common"))
+import shellcmd  # noqa: E402
 
 # The one definition of the excluded-directory set. `write_json_mirror`
 # below regenerates the JSON copy `test-audit/audit.mjs` reads.
@@ -73,12 +72,13 @@ def tracked_source(root):
     `root` outside any git work tree has no tracked files to go by, so it is
     walked as a folder (`walk_source`). Any other git failure raises,
     naming git's own message."""
-    r = subprocess.run(["git", "-C", root, "ls-files", "-z"], capture_output=True, text=True, env=scrubbed_env())
-    if r.returncode != 0:
-        if "not a git repository" in r.stderr:
+    try:
+        out = shellcmd.git(["-C", root, "ls-files", "-z"]).stdout
+    except shellcmd.CmdError as exc:
+        if "not a git repository" in str(exc):
             return walk_source(root, ("",))
-        raise RuntimeError(f"git ls-files in {root} failed (exit {r.returncode}): {r.stderr.strip()}")
-    return sorted(rel for rel in r.stdout.split("\0") if rel and _kept(rel))
+        raise RuntimeError(f"git ls-files in {root} failed: {exc}") from None
+    return sorted(rel for rel in out.split("\0") if rel and _kept(rel))
 
 
 def not_applicable(root):

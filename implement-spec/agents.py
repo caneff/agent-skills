@@ -11,6 +11,10 @@ import argparse
 import json
 import os
 import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+import shellcmd  # noqa: E402
 
 
 class AgentError(Exception):
@@ -380,29 +384,24 @@ def render_peak(count, live, room, working=None, unlisted=None):
 
 
 def herdr_get(agent, timeout):
-    """`herdr agent get <name>` decoded — the sweep's probe as the controller
-    runs it. herdr exits non-zero for an agent it has no pane for and still
-    prints the `agent_not_found` answer, so the output is read either way and
-    only an unparseable one is an error.
+    """`herdr agent get <name>` through `shellcmd.herdr_agent`, in the answer
+    shape `verdict` reads: `{"result": {"agent": ...}}`, or an
+    `agent_not_found` error for an agent herdr has no pane for. herdr that
+    cannot be asked (a timeout, an unparseable answer, any other error) is an
+    `AgentError`.
 
     `timeout` is what the sweep has left of its whole deadline, not a fresh
     allowance: "bounded" has to mean the wall clock too, and a herdr that
     never answers would otherwise hold the controller inside a tool call,
     where no worker can reach it at all."""
     try:
-        done = subprocess.run(["herdr", "agent", "get", agent],
-                              capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise AgentError(
-            f"herdr agent get {agent} did not answer in {timeout:g}s"
-        ) from None
-    text = done.stdout.strip() or done.stderr.strip()
-    try:
-        return json.loads(text)
-    except ValueError:
-        raise AgentError(
-            f"herdr agent get {agent} answered {text or '(nothing)'!r}"
-        ) from None
+        record = shellcmd.herdr_agent(agent, timeout=timeout)
+    except shellcmd.CmdError as exc:
+        raise AgentError(str(exc)) from None
+    if record is None:
+        return {"error": {"code": "agent_not_found",
+                          "message": f"no agent named {agent}"}}
+    return {"result": {"agent": record}}
 
 
 # The pane states `herdr agent get` reports that the sweep passes through as

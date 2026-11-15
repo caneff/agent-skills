@@ -6,6 +6,9 @@ GitHub issue, in the swept repo. This module owns that layout and every `gh`
 call about it: who owns the repo, its triage label, filing the record,
 posting its missing comments, reading its state, and pruning the sweeps whose
 record is closed. The sweep driver calls it; it never spawns `claude`.
+Every `gh` call goes through `common/` (#1730): the tracker where it has the
+operation, else `shellcmd.gh`, so each is bounded by a timeout and a failed
+call raises rather than reading as an answer.
 """
 import datetime as _dt
 import glob
@@ -15,7 +18,10 @@ import re
 import shutil
 import sys
 
-from procs import run
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+
+import shellcmd  # noqa: E402
+import tracker  # noqa: E402
 
 MULTI_DIR = "multi"  # under stored_sweeps_base(): one folder per sweep id, never a repo's
 OWNER = "caneff"
@@ -33,11 +39,12 @@ def repo_identity(repo):
     them. Anything `gh` cannot answer is a refusal, never a pass."""
     if not os.path.isdir(repo):
         return None, "no such directory"
-    r = run(["gh", "repo", "view", "--json", "owner,name"], cwd=repo)
-    if r.returncode != 0:
-        return None, f"owner check failed (gh exit {r.returncode})"
     try:
-        reply = json.loads(r.stdout)
+        out = shellcmd.gh(["repo", "view", "--json", "owner,name"], cwd=repo).stdout
+    except shellcmd.CmdError as e:
+        return None, f"owner check failed ({e})"
+    try:
+        reply = json.loads(out)
         owner, name = reply["owner"]["login"], reply["name"]
     except (ValueError, KeyError, TypeError):
         return None, "owner check failed (gh reply unreadable)"
@@ -61,15 +68,17 @@ def triage_label(checkout):
     return TRIAGE_ROLE
 
 
-def label_refusal(repo, label):
-    """None when `repo` has `label`, else why it is refused. A `gh` that cannot
-    answer is a refusal, never a pass; no label is ever created."""
-    r = run(["gh", "label", "list", "--limit", "1000", "--json", "name"], cwd=repo)
-    if r.returncode != 0:
-        return f"label check failed (gh exit {r.returncode})"
+def label_refusal(slug, label):
+    """None when the GitHub repo `slug` (`owner/name`) has `label`, else why it
+    is refused. A `gh` that cannot answer is a refusal, never a pass; no label
+    is ever created."""
     try:
-        names = {row["name"] for row in json.loads(r.stdout)}
-    except (ValueError, KeyError, TypeError):
+        rows = tracker.gh_json(["label", "list", "--repo", slug, "--limit", "1000", "--json", "name"])
+    except tracker.TrackerError as e:
+        return f"label check failed ({e})"
+    try:
+        names = {row["name"] for row in rows}
+    except (KeyError, TypeError):
         return "label check failed (gh reply unreadable)"
     return None if label in names else f"label `{label}` is missing"
 
@@ -111,15 +120,13 @@ def record_repo(sweep, rec):
 def issue_state(number, slug):
     """("OPEN" or "CLOSED", "") from `gh`, or (None, why). An answer that is
     neither is never read as either."""
-    r = run(["gh", "issue", "view", str(number), "--repo", slug, "--json", "state"])
     try:
-        state = json.loads(r.stdout)["state"] if r.returncode == 0 else None
-    except (ValueError, KeyError, TypeError):
-        state = None
+        state = tracker.GhTracker(slug).issue_view(number, "state").get("state")
+    except tracker.TrackerError as e:
+        return None, str(e)
     if state in ("OPEN", "CLOSED"):
         return state, ""
-    err = r.stderr.strip()
-    return None, f"gh exit {r.returncode}, state {state!r}{': ' + err if err else ''}"
+    return None, f"gh answered state {state!r}"
 
 
 def earlier_record(name):
@@ -154,11 +161,11 @@ def resume_unposted(name):
         return None
     sweep, rec = records[-1]
     while rec["unposted"]:
-        c = run(["gh", "issue", "comment", str(rec["issue"]), "--repo", record_repo(sweep, rec),
-                  "--body-file", os.path.join(sweep, rec["unposted"][0])])
-        if c.returncode != 0:
-            return (f"audit record {rec['url']} still misses comments {', '.join(rec['unposted'])} "
-                    f"(gh exit {c.returncode}): {c.stderr.strip()}")
+        try:
+            shellcmd.gh(["issue", "comment", str(rec["issue"]), "--repo", record_repo(sweep, rec),
+                         "--body-file", os.path.join(sweep, rec["unposted"][0])])
+        except shellcmd.CmdError as e:
+            return f"audit record {rec['url']} still misses comments {', '.join(rec['unposted'])} ({e})"
         rec["unposted"].pop(0)
         write_json(os.path.join(sweep, RECORD_FILE), rec)
     print(f"{name}: posted the missing comments of {rec['url']}")
@@ -189,12 +196,13 @@ def open_specs_of(sweep, rec):
     carries (`harness/GRILLING.md`), not by parsing the record's closing
     comment. A listing that fails, is not a list of bodies, or fills the
     limit (so may hide an open spec) is a refusal, never "none open"."""
-    r = run(["gh", "issue", "list", "--repo", record_repo(sweep, rec), "--state", "open",
-             "--limit", str(SPEC_LIST_LIMIT), "--json", "number,body"])
-    if r.returncode != 0:
-        return None, f"open-spec lookup failed (gh exit {r.returncode}): {r.stderr.strip()}"
     try:
-        issues = [(int(i["number"]), str(i["body"])) for i in json.loads(r.stdout)]
+        listed = tracker.gh_json(["issue", "list", "--repo", record_repo(sweep, rec), "--state", "open",
+                                  "--limit", str(SPEC_LIST_LIMIT), "--json", "number,body"])
+    except tracker.TrackerError as e:
+        return None, f"open-spec lookup failed ({e})"
+    try:
+        issues = [(int(i["number"]), str(i["body"])) for i in listed]
     except (ValueError, KeyError, TypeError):
         return None, "open-spec lookup failed (gh reply unreadable)"
     if len(issues) >= SPEC_LIST_LIMIT:
@@ -260,12 +268,15 @@ def file_audit_record(repo, stored, title, label, chunks, meta):
         paths.append(os.path.join(stored, f"audit-record-{i}.md"))
         with open(paths[-1], "w", encoding="utf-8") as f:
             f.write(text)
-    created = run(["gh", "issue", "create", "--title", title, "--label", label, "--body-file", paths[0]], cwd=repo)
-    match = re.search(r"/issues/(\d+)", created.stdout)
-    if created.returncode != 0 or not match:
-        return "", (f"audit record not filed (gh exit {created.returncode}): "
-                    f"{created.stderr.strip() or created.stdout.strip()}; its text is in {stored}")
-    url, number = created.stdout.strip().splitlines()[-1], match.group(1)
+    try:
+        out = shellcmd.gh(["issue", "create", "--title", title, "--label", label, "--body-file", paths[0]],
+                          cwd=repo).stdout
+    except shellcmd.CmdError as e:
+        return "", f"audit record not filed ({e}); its text is in {stored}"
+    match = re.search(r"/issues/(\d+)", out)
+    if not match:
+        return "", f"audit record not filed (gh printed no issue URL: {out.strip()!r}); its text is in {stored}"
+    url, number = out.strip().splitlines()[-1], match.group(1)
     meta = {**meta, "issue": int(number), "url": url, "unposted": [os.path.basename(p) for p in paths[1:]]}
     record_path = os.path.join(stored, RECORD_FILE)
     write_json(record_path, meta)
@@ -274,10 +285,11 @@ def file_audit_record(repo, stored, title, label, chunks, meta):
     with open(history, "a", encoding="utf-8") as f:
         f.write(json.dumps({"sweep": os.path.basename(stored), "url": url}) + "\n")
     for path in paths[1:]:
-        c = run(["gh", "issue", "comment", number, "--body-file", path], cwd=repo)
-        if c.returncode != 0:
+        try:
+            shellcmd.gh(["issue", "comment", number, "--body-file", path], cwd=repo)
+        except shellcmd.CmdError as e:
             return url, (f"audit record {url} is missing continuation comments {', '.join(meta['unposted'])} "
-                         f"(gh exit {c.returncode}): {c.stderr.strip()}; their text is in {stored}")
+                         f"({e}); their text is in {stored}")
         meta["unposted"].pop(0)
         write_json(record_path, meta)
     return url, None
