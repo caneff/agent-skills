@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Weekly Codex audit (#1362): one Codex adversarial review over the merged PRs that skipped the
+"""Weekly Codex audit: one Codex adversarial review over the merged PRs that skipped the
 merge-gate pass for size, the reserve ceiling or an unmeasurable PR, and the audit mark that says
 where the next starts.
 

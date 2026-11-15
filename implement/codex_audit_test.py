@@ -1,4 +1,4 @@
-"""Tests for `codex-audit.py` (#1362): the weekly Codex audit's run, from the
+"""Tests for `codex-audit.py`: the weekly Codex audit's run, from the
 usage gate through the ledger row, and the audit mark it reads and moves. Every
 test drives the command line against a fabricated repo, ledger, usage cache,
 trial doc and `gh`, with `--dry-run` in place of the Codex launch, so nothing
@@ -44,9 +44,6 @@ def dry(case):
     return case
 
 
-# --- the gate stops the run
-
-
 def test_the_kill_switch_stops_the_run_and_records_a_skip_row(case):
     case.write_ledger([skip_row(11, "size")])
     case.merge(101, 11, "a", "2026-09-26T12:00:00+00:00")
@@ -71,9 +68,6 @@ def test_usage_above_the_reserve_ceiling_does_not_stop_the_audit(case):
     case.set_usage(95)  # a PR pass stops at 70 %; the audit may spend the reserve
     r = case.run_audit()
     assert r.returncode == 3, r.stdout + r.stderr
-
-
-# --- the range stops the run
 
 
 def test_nothing_skipped_since_the_mark_stops_the_run_and_records_a_skip_row(case):
@@ -112,9 +106,6 @@ def test_a_repo_with_no_mark_line_stops_and_names_the_line_to_write(case):
     assert "codex-audit.py mark --sha" in r.stderr
     [row] = case.rows()
     assert "no audit mark for skills" in row["skip_reason"]
-
-
-# --- the dry run
 
 
 def test_a_clean_run_records_the_range_and_its_prs_and_says_no_findings(dry):
@@ -225,9 +216,6 @@ def test_a_dry_run_refuses_to_default_to_the_real_ledger(dry):
                        cwd=dry.repo, env=dry.env, capture_output=True, text=True)
     assert r.returncode == 2
     assert "--dry-run needs --ledger and --cache" in r.stderr
-
-
-# --- the audit mark
 
 
 def test_mark_moves_this_repos_line_and_leaves_the_others(case):

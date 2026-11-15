@@ -1,4 +1,4 @@
-"""The merge check (#1401): `fix-check.sh <n>` verifies mechanically
+"""The merge check: `fix-check.sh <n>` verifies mechanically
 that every review finding of ticket <n> has exactly one disposition, that a
 `fixed` sha is a commit on the PR branch, that a `moved` ticket is open, and
 that an empty findings sidecar carries its reviewer's completion marker.
@@ -138,7 +138,7 @@ class World:
 
     def ledger_ran(self, rtype, ticket=None, repo=None, digest="on-disk", round=1, suffix=None):
         """A row for review `rtype` that ran (what `append --type <axis>` writes): it carries the
-        sha256 of the sidecar as it is on disk now (#1555), or `digest` when given, None for none.
+        sha256 of the sidecar as it is on disk now, or `digest` when given, None for none.
         `round` 2 or more is `append --round K`: the row's `round` and the sidecar's `-rK` name;
         `round=None` writes a row with no `round` key, as before the field."""
         if digest == "on-disk":
@@ -189,7 +189,6 @@ def disputed(fid, reason="r"):
 
 
 def assert_fix_check(world, want_code, needle, cwd=None, *args):
-    """Run the check and assert its exit code and that its output names the cause."""
     code, out = world.run(cwd, *args)
     assert code == want_code and needle in out, f"want exit {want_code} + {needle!r}, got {code}: {out}"
 
@@ -229,7 +228,7 @@ def clean(world):
 
 @pytest.fixture
 def rebased(make_world):
-    """#1419: a rebase after the review wave moves every committer date past the sidecars, and
+    """A rebase after the review wave moves every committer date past the sidecars, and
     the sidecars must still read as this dispatch's: the branch is dated by author time."""
     w = make_world(author_date=time.time() - 3600)
     w.findings(standards=["S1"])
@@ -257,7 +256,7 @@ def test_sidecars_older_than_the_branchs_authored_commits_are_still_an_earlier_d
     assert_fix_check(rebased, 1, "findings-standards-5.jsonl is older than the first commit")
 
 
-# #1459: a slice of a spec run is reviewed once on its integration branch, so its own
+# A slice of a spec run is reviewed once on its integration branch, so its own
 # branch runs no wave. The skip is read from the base dispatch recorded, never from the
 # missing dispositions file (defect class 1).
 
@@ -293,7 +292,7 @@ def test_before_its_pr_exists_the_slice_says_its_base_is_checked_at_the_merge(sl
     assert_fix_check(slice_world, 0, "no open PR from implement-5 yet")
 
 
-# #1460's S4: fix-check passes a slice with no review, so a slice PR opened against main
+# fix-check passes a slice with no review, so a slice PR opened against main
 # would land there unreviewed; the base GitHub holds is read, not the one dispatch meant.
 def test_a_slice_pr_into_its_spec_3_passes(slice_world):
     slice_world.prs = [(40, "spec-3")]
@@ -332,7 +331,7 @@ def test_the_controllers_origin_implement_5_reads_the_same_recorded_base(slice_w
     assert_fix_check(slice_world, 0, "slice of spec-3", slice_world.primary, "origin/implement-5")
 
 
-# #1461: the spec is reviewed once on its integration branch `spec-<p>`, and the merge check
+# The spec is reviewed once on its integration branch `spec-<p>`, and the merge check
 # is keyed on the spec number: one disposition per finding of that review, every `fixed` sha
 # on `spec-<p>` past main. The branch holds a landed slice that closes #4, as a slice's squash
 # merge into `spec-3` does.
@@ -457,7 +456,7 @@ def test_a_gh_that_cannot_answer_is_the_environments_exit_2_not_a_refusal_the_wo
     assert_fix_check(reviewed, 2, "`gh issue view 77` failed")
 
 
-# #1230: a correctness finding carries its CONFIRMED/PLAUSIBLE rating in the sidecar.
+# A correctness finding carries its CONFIRMED/PLAUSIBLE rating in the sidecar.
 @pytest.fixture
 def correctness(world):
     world.findings(correctness=["C1"])
@@ -537,7 +536,7 @@ def test_a_standards_axis_the_ledger_records_as_skipped_the_ablation_passes_with
     assert_fix_check(no_standards, 0, "0 findings")
 
 
-# #1527: the cache directory is the folded repo name, the same key the ledger rows carry.
+# The cache directory is the folded repo name, the same key the ledger rows carry.
 def test_a_checkout_named_agent_skills_reads_the_skills_cache_directory(make_world):
     w = make_world(checkout="agent-skills")
     w.findings()
@@ -545,7 +544,7 @@ def test_a_checkout_named_agent_skills_reads_the_skills_cache_directory(make_wor
     assert_fix_check(w, 0, "0 findings")
 
 
-# #1527: a review that ran left a ledger row beside its sidecar. The sidecar alone is
+# A review that ran left a ledger row beside its sidecar. The sidecar alone is
 # not the row: a wave that never ran `append` leaves the ledger blind to the axis.
 def test_an_axis_with_a_sidecar_and_no_ledger_row_is_refused(make_world):
     w = make_world()
@@ -591,7 +590,7 @@ def test_a_ledger_row_of_another_ticket_is_no_row_for_this_one(make_world):
     assert_fix_check(w, 1, "no ledger row for the standards review")
 
 
-# #1555: the row must date to this wave. Rows carry the sha256 of the sidecar `append` read, and the
+# The row must date to this wave. Rows carry the sha256 of the sidecar `append` read, and the
 # gate wants one matching the sidecar on disk, so an earlier dispatch's row cannot satisfy it.
 def second_wave(w):
     """A world whose first wave appended its rows, then rewrote the spec sidecar with one finding."""
@@ -677,7 +676,7 @@ def test_a_codex_run_with_no_findings_needs_no_dispositions(clean):
 
 
 def test_a_mutation_correction_row_in_the_ledger_is_no_row_for_a_review(clean):
-    """#1658: a `correction` row has no `status`; the check reads the folded ledger, not the raw one."""
+    """A `correction` row has no `status`; the check reads the folded ledger, not the raw one."""
     clean.ledger_row("worker-mutation", "known", top={"row_id": "r/5/worker-mutation/1/m", "outcome": "red"})
     clean.ledger_row("correction", "known", top={"row_id": "r/5/worker-mutation/1/m/correction/1",
                                                   "corrects": "r/5/worker-mutation/1/m", "outcome": "green",
@@ -719,7 +718,7 @@ def test_no_ticket_number_is_a_usage_error(world):
     assert done.returncode == 2 and "usage" in done.stderr, f"got {done.returncode}: {done.stderr}"
 
 
-# #1576: a later round's sidecar is read like round 1's.
+# A later round's sidecar is read like round 1's.
 
 def test_a_round_two_finding_with_no_disposition_fails_and_names_its_id(world):
     world.findings(standards=["S1"])

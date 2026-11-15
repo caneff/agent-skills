@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""`selector_check.py command|list|comment`: the repo's per-change command
-(#1593), and the selector evidence a merge leaves on its PR (#1537, Chris's
-ruling of 2026-10-11 on caneff/sudokumaker-custom-constraints#809).
+"""`selector_check.py command|list|comment`: the repo's per-change command,
+and the selector evidence a merge leaves on its PR.
 
 `command --root <dir>` prints the command every per-change run uses: the
 `**Narrowed**` command of `<dir>/AGENTS.md` § End-to-end seam when one is
