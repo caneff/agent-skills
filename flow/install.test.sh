@@ -2,7 +2,7 @@
 # Contract test for install.sh's hook handling: run it from a scratch clone
 # with HOME pointed at a scratch dir, so nothing live is touched. Asserts the
 # retired pre-push symlink (tests/all.sh) is removed and never re-created
-# (#633) — the merge gate (git config land.testcmd) is where tests/all.sh runs.
+# — the merge gate (git config land.testcmd) is where tests/all.sh runs.
 # Run: bash flow/install.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,7 +45,7 @@ export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOM
 # tests/all.sh install.sh's pre-push cleanup looks for, git-init'd with no
 # commits, and a no-op backup-sync.sh (--restore writes to absolute live paths,
 # the Windows VS Code settings, not $HOME, so the real one is not a no-op).
-scratch_repo() { # scratch_repo <dir>
+scratch_repo() {
   local dir="$1"
   mkdir -p "$dir/tests"
   cp -r "$root/flow" "$dir/flow"
@@ -58,8 +58,6 @@ scratch_repo() { # scratch_repo <dir>
     "$root/flow/claude/settings.json" > "$dir/flow/claude/settings.json"
 }
 
-# The first case's repo also carries a stale pre-push hook left by an earlier
-# install.
 repo="$tmp/repo"
 scratch_repo "$repo"
 ln -s "$repo/flow/../tests/all.sh" "$repo/.git/hooks/pre-push"
@@ -97,7 +95,7 @@ if [ -L "$tmp/home/.claude/hooks/refresh-landed.sh" ]; then
 else
   echo "FAIL refresh-landed.sh not linked under the scratch HOME"; fails=1
 fi
-# claude/settings.json is symlinked, not copy-only (#1031): a PR that edits
+# claude/settings.json is symlinked, not copy-only: a PR that edits
 # the repo file must take effect live without a backup-sync round trip.
 if [ -L "$tmp/home/.claude/settings.json" ] \
    && [ "$(readlink "$tmp/home/.claude/settings.json")" = "$repo/flow/claude/settings.json" ]; then
@@ -105,8 +103,6 @@ if [ -L "$tmp/home/.claude/settings.json" ] \
 else
   echo "FAIL claude/settings.json not symlinked under the scratch HOME: $(ls -la "$tmp/home/.claude/settings.json" 2>&1)"; fails=1
 fi
-# implement-dispatch (#748) is `cargo install`ed, not linked: a real
-# executable, never a symlink into the repo, and the fake is never installed.
 dispatch_out=$(HOME="$tmp/home" "$tmp/home/.local/bin/implement-dispatch" --repo "$tmp/nowhere" 1 2>&1)
 if [ -x "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -L "$tmp/home/.local/bin/implement-dispatch" ] \
    && [ ! -e "$tmp/home/.local/bin/lane-fake" ] \
@@ -115,8 +111,6 @@ if [ -x "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -L "$tmp/home/.local/
 else
   echo "FAIL implement-dispatch not installed correctly: $dispatch_out"; fails=1
 fi
-# merge-cleanup (#749) is `cargo install`ed the same way, and replaces the
-# symlink an earlier install left pointing at the deleted bash script.
 cleanup_out=$(HOME="$tmp/home" "$tmp/home/.local/bin/merge-cleanup" --repo "$tmp/nowhere" x 2>&1)
 if [ -x "$tmp/home/.local/bin/merge-cleanup" ] && [ ! -L "$tmp/home/.local/bin/merge-cleanup" ] \
    && printf '%s' "$cleanup_out" | grep -q "not a git repo"; then
@@ -147,14 +141,12 @@ fi
 # worker-stop-alert.sh sources this file by BASH_SOURCE-relative path, which
 # resolves against the installed symlink's own directory (~/.claude/hooks),
 # not the repo — so it must be linked there too, or the hook silently fails
-# to resolve any controller (#991).
+# to resolve any controller.
 if [ -L "$tmp/home/.claude/hooks/worker-alert-lib.sh" ]; then
   echo "PASS the shared worker-alert lib linked under the scratch HOME"
 else
   echo "FAIL claude/hooks/worker-alert-lib.sh not linked under the scratch HOME"; fails=1
 fi
-# Re-running changes nothing: the second install leaves the same symlink, not a
-# .pre-flow backup of the first one's.
 HOME="$tmp/home" bash "$repo/flow/install.sh" >/dev/null 2>&1
 if [ -L "$tmp/home/.local/bin/job-run" ] && [ ! -e "$tmp/home/.local/bin/job-run.pre-flow" ]; then
   echo "PASS installing twice changes nothing"
@@ -166,7 +158,6 @@ if [ -L "$tmp/home/.claude/agents/diff-reviewer.md" ]; then
 else
   echo "FAIL claude/agents/diff-reviewer.md not linked under the scratch HOME"; fails=1
 fi
-# The path-scoped rules (#1413) load from ~/.claude/rules/, one link per file.
 for r in instruction-files skill-files research-notes; do
   if [ "$(readlink "$tmp/home/.claude/rules/$r.md")" = "$repo/flow/claude/rules/$r.md" ]; then
     echo "PASS path rule $r linked under the scratch HOME"
@@ -175,9 +166,9 @@ for r in instruction-files skill-files research-notes; do
   fi
 done
 
-# The nightly backstop (#1595): a user service and a Persistent timer, written
-# under the scratch HOME, in the shape of second-brain-v2's digest.timer. The
-# systemctl stub above keeps the install from touching the live user manager.
+# The nightly backstop's user service and timer are written under the scratch
+# HOME. The systemctl stub above keeps the install from touching the live user
+# manager.
 unit_dir="$tmp/home/.config/systemd/user"
 if grep -q '^ExecStart=%h/.local/bin/backstop-nightly$' "$unit_dir/backstop.service" 2>/dev/null \
    && grep -q '^Type=oneshot$' "$unit_dir/backstop.service" \
@@ -194,10 +185,6 @@ else
   echo "FAIL backstop.timer missing or wrong under the scratch HOME: $(cat "$unit_dir/backstop.timer" 2>&1)"; fails=1
 fi
 
-# The seams of the listed repos need cargo, node, npm, uv, gh, git and python3;
-# the unit's PATH is replaced, so each one's directory must be on it (on this
-# machine cargo is in ~/.cargo/bin, node/npm/uv/gh in ~/.local/bin, git and
-# python3 in /usr/bin).
 unit_path=$(sed -n 's/^Environment=PATH=//p' "$unit_dir/backstop.service" 2>/dev/null)
 missing=""
 for d in '%h/.cargo/bin' '%h/.local/bin' /usr/bin; do
@@ -209,7 +196,7 @@ else
   echo "FAIL backstop.service PATH '$unit_path' lacks:$missing"; fails=1
 fi
 
-# herdr-toast-install (#1016) is routed from install.sh, but this scratch repo
+# herdr-toast-install is routed from install.sh, but this scratch repo
 # sits under /tmp, so the toast installer refuses (by design) — the refusal
 # must be reported, not swallowed, and must not abort the rest of the install.
 # Both the installer's own refusal text and install.sh's own "skipped" line
@@ -224,9 +211,6 @@ else
   echo "FAIL install.sh did not report a refused herdr-toast-install: $out"; fails=1
 fi
 
-# The success path: with the /tmp refusal lifted (HERDR_TOAST_ALLOW_TMP=1) and
-# the registry stubbed above, herdr-toast-install actually runs to completion —
-# not just its by-design refusal.
 succ="$tmp/succ"
 scratch_repo "$succ"
 out=$(HOME="$tmp/succ-home" HERDR_TOAST_ALLOW_TMP=1 bash "$succ/flow/install.sh" 2>&1) || { echo "FAIL install.sh exited non-zero with HERDR_TOAST_ALLOW_TMP=1: $out"; fails=1; }
@@ -242,9 +226,9 @@ else
   echo "PASS no spurious skip message on the success path"
 fi
 
-# Codex gate finding 1: a non-refusal failure of herdr-toast-install must not
-# be swallowed as a benign skip — install.sh still runs the rest of the
-# install, but exits nonzero at the end and names the toast step.
+# A non-refusal failure of herdr-toast-install must not be swallowed as a
+# benign skip: install.sh still runs the rest of the install, but exits
+# nonzero at the end and names the toast step.
 fail="$tmp/fail"
 scratch_repo "$fail"
 cat > "$fail/flow/bin/herdr-toast-install" <<'STUB'
@@ -254,7 +238,7 @@ exit 1
 STUB
 chmod +x "$fail/flow/bin/herdr-toast-install"
 # This run reaches the end of install.sh, so it also pins the call to
-# install-check.sh (#1224): a failing stub must surface in install.sh's output.
+# install-check.sh: a failing stub must surface in install.sh's output.
 printf '#!/usr/bin/env bash\necho "PROBLEM: stub-check-ran"\nexit 1\n' > "$fail/flow/install-check.sh"
 out=$(HOME="$tmp/fail-home" bash "$fail/flow/install.sh" 2>&1); rc=$?
 if printf '%s' "$out" | grep -q "stub-check-ran" && printf '%s' "$out" | grep -q "install-check.sh found problems"; then
@@ -278,9 +262,9 @@ else
   echo "FAIL no summary naming the toast step's failure: $out"; fails=1
 fi
 
-# Codex gate finding 2: the installer's third refusal (a real directory at a
-# link destination) is a real machine failure, not one of its two by-design
-# skips (/tmp, linked worktree) — it must not be swallowed as "skipped" either.
+# The installer's third refusal (a real directory at a link destination) is a
+# real machine failure, not one of its two by-design skips (/tmp, linked
+# worktree) — it must not be swallowed as "skipped" either.
 dirref="$tmp/dirref"
 scratch_repo "$dirref"
 mkdir -p "$tmp/dirref-home/.local/bin/herdr-focus.vbs"
@@ -291,8 +275,6 @@ else
   echo "FAIL the real-directory refusal was swallowed as a skip (rc=$rc): $out"; fails=1
 fi
 
-# An empty claude/agents dir leaves the literal glob; without the guard `link`
-# fails it and set -e aborts the install before backup-sync.sh runs.
 empty="$tmp/empty"
 scratch_repo "$empty"
 rm -f "$empty/flow/claude/agents"/*.md
@@ -303,8 +285,6 @@ else
   echo "FAIL an empty claude/agents dir aborted the install"; fails=1
 fi
 
-# The other half of the record: when HEAD does resolve, the install writes that
-# sha, so merge-cleanup has a baseline to diff flow/lane against.
 recorded="$tmp/recorded"
 scratch_repo "$recorded"
 git -C "$recorded" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m base
@@ -335,9 +315,6 @@ else
   echo "FAIL an unwritable state dir failed the install (rc=$rc): $out"; fails=1
 fi
 
-# A failing lane-install.sh (a missing cargo, a compile error) runs last and
-# must not half-install everything else — it was never a gate on the rest of
-# install.sh before #748, and still is not.
 broken="$tmp/broken"
 scratch_repo "$broken"
 printf '#!/usr/bin/env bash\necho "lane-install: boom" >&2\nexit 1\n' > "$broken/flow/lane-install.sh"
@@ -378,9 +355,6 @@ else
   echo "FAIL the existing .pre-flow backup was clobbered, the second file lost, or the refusal was fatal (rc=$rc): $link_out"; fails=1
 fi
 
-# The interop repoint (#1625): ~/.bashrc is in no repo, so install.sh carries the
-# line a new herdr pane shell needs, keeps a backup of what it edits, and adds
-# the line once. A real interactive bash reading that file is the proof.
 br="$tmp/br"
 scratch_repo "$br"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$br/flow/lane-install.sh"
@@ -406,7 +380,6 @@ if [ "$(grep -c 'wsl-interop-repoint' "$br_home/.bashrc")" = 1 ] \
 else
   echo "FAIL a second install changed the line count or the backup"; fails=1
 fi
-# The script only needs to prove it ran: a marker in place of the real one.
 printf 'export REPOINT_RAN=yes\n' > "$br/flow/bin/wsl-interop-repoint.sh"
 # The system bashrc may print its own lines first, so read the last of them.
 got=$(HOME="$br_home" bash --rcfile "$br_home/.bashrc" -ic 'printf %s "$REPOINT_RAN"' 2>/dev/null)

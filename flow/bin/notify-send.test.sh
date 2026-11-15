@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression test for the shift-2 hang (#1017): a value-taking flag as the
+# Regression test for the shift-2 hang: a value-taking flag as the
 # final argument left `shift 2` with only one argument to consume, so it
 # shifted nothing and the parse loop spun forever. Each such flag is run
 # alone, last, under a timeout — a timeout exit (124) is the hang, and any
@@ -28,7 +28,6 @@ stub="$tmp/wscript-stub.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$stub"
 chmod +x "$stub"
 
-# value-taking flags, short and long, exactly as the parser's case arm lists them
 flags=(-a --app-name -i --icon -u --urgency -t --expire-time -c --category -h --hint -A --action -r --replace-id)
 
 case_arm=$(grep -m1 -F -- '-a|--app-name|-i|--icon' "$script")

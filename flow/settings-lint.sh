@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Lint a Claude Code settings file for the autoMode mistakes that fail silently
-# (#1225). The classifier reads `autoMode` only at the top level of the user
+# Lint a Claude Code settings file for the autoMode mistakes that fail silently.
+# The classifier reads `autoMode` only at the top level of the user
 # settings, so a block under `permissions` is dead, and a list written without
 # "$defaults" replaces the built-in rules for that section instead of adding to
 # them (https://code.claude.com/docs/en/auto-mode-config). Prints one line per

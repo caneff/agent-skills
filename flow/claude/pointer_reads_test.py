@@ -1,6 +1,6 @@
-"""Tests for pointer_reads.py (#1413): the pointer-doc read count from
+"""Tests for pointer_reads.py: the pointer-doc read count from
 docs/research/2026-10-04-claude-md-pointer-reads.md, and the one-shot cron
-re-count 14 days after #1413 closes. Every test runs the script's command
+re-count 14 days after the tracking ticket closes. Every test runs the script's command
 line. `gh` and `crontab` are fakes on PATH, the repo is a scratch clone with a
 bare origin, and the transcripts are synthetic, so nothing here reads the
 real ~/.claude/projects or the real crontab."""
@@ -44,7 +44,6 @@ def epoch(iso):
 
 @pytest.fixture
 def projects(tmp_path):
-    """End 2026-10-04T12:00Z, so the window is (2026-09-20T12:00Z, end]."""
     root = tmp_path / "count-projects"
     root.mkdir()
     p = root / "-home-u-repo"
@@ -109,8 +108,6 @@ def test_a_spec_run_session_counts_as_covered(tmp_path):
 
 
 class Recount:
-    """A scratch clone with a bare origin, fake `gh` and `crontab` on PATH, and one synthetic transcript."""
-
     def __init__(self, tmp):
         self.tmp = tmp
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -204,7 +201,6 @@ def test_on_the_date_appends_commits_pushes_and_removes_its_line(rc):
     cron = rc.crontab_file.read_text()
     assert TAG not in cron
     assert "other-job  # other" in cron
-    # The primary checkout is not touched: the commit is made elsewhere.
     assert (rc.root / NOTE).read_text() == "# note\n"
     assert rc.git(rc.root, "worktree", "list").count("\n") == 1
 
@@ -235,8 +231,6 @@ def test_unreadable_closed_at_fails_without_appending(rc, payload):
 
 
 def test_unreadable_crontab_is_never_rewritten(rc):
-    # Only "no crontab for <user>" is an empty crontab; any other failure
-    # of `crontab -l` must not install a crontab built from nothing.
     before = rc.crontab_file.read_text()
     (rc.tmp / "crontab-mode").write_text("broken")
     out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
@@ -259,8 +253,6 @@ def test_install_cron_with_no_crontab_yet(rc):
 
 
 def test_empty_window_is_an_error_not_a_result(rc):
-    # Fourteen days with no transcript means the count could not see
-    # them, not that nothing ran: nothing is appended, the line stays.
     rc.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
     (rc.projects / "x" / "s.jsonl").unlink()
     out = rc.recount("2026-10-19T12:00:00Z")

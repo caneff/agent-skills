@@ -8,7 +8,7 @@
 #   backup-sync.sh --restore  live <- repo   (write the snapshots onto this machine)
 #
 # --commit stages the manifest paths plus claude/settings.json (symlinked by
-# install.sh, #1031 — a harness write lands straight in it, so it still needs
+# install.sh: a harness write lands straight in it, so it still needs
 # committing even though nothing here copies it), and nothing else — it never
 # sweeps an unrelated working-tree edit into its commit. Never exits nonzero
 # on a missing live file (a SessionStart hook must not break the session).
@@ -39,7 +39,7 @@ for rel in "${!COPIES[@]}"; do
 done
 
 if [ "$mode" = --commit ]; then
-  # claude/settings.json is symlinked (#1031), not copied: install.sh points
+  # claude/settings.json is symlinked, not copied: install.sh points
   # ~/.claude/settings.json straight at this file, so a harness write (a
   # plugin toggle, /config, "always allow") lands in it directly. Nothing
   # copies it, but it still has to reach main automatically, so --commit

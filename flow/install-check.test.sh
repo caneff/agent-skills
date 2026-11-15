@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract test for install-check.sh (#1224): a fixture flow dir and a fixture
+# Contract test for install-check.sh: a fixture flow dir and a fixture
 # HOME, one fault per case. The last case runs the check against this repo's
 # own flow/ with a HOME linked the way install.sh links it, so a hook added
 # here and never registered fails this suite, not a weekly digest.
@@ -11,14 +11,8 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fails=0
 
-# The one definition of the ~/.bashrc line, also copied into each fixture's
-# manifest below.
 # shellcheck source=hooks-manifest.sh
 . "$here/hooks-manifest.sh"
-# A healthy fixture: a flow dir with a hook registered by path under
-# ~/.claude/hooks (a.sh) and its lib (a-lib.sh), a hook run from the repo
-# (b.sh), one unregistered by design (quiet.sh) and a test file; and a HOME
-# linking the settings, a.sh and a-lib.sh.
 fixture() { # fixture <name> -> sets FLOW and HOME_DIR
   FLOW="$tmp/$1/flow"; HOME_DIR="$tmp/$1/home"
   mkdir -p "$FLOW/claude/hooks" "$HOME_DIR/.claude/hooks"
@@ -36,7 +30,6 @@ JSON
   ln -s "$FLOW/claude/hooks/a.sh" "$HOME_DIR/.claude/hooks/a.sh"
   ln -s "$FLOW/claude/hooks/a-lib.sh" "$HOME_DIR/.claude/hooks/a-lib.sh"
 }
-# case <name> <want-exit> <stderr-needle> -- runs the check on the current fixture
 case_() {
   local name=$1 want=$2 needle=$3 out rc
   out=$(bash "$check" --home "$HOME_DIR" --flow "$FLOW" 2>&1); rc=$?
@@ -96,7 +89,7 @@ cat > "$FLOW/claude/settings.json" <<'JSON'
 JSON
 case_ "a misplaced autoMode block fails the install check" 1 "permissions.autoMode"
 
-# The carriers of the interop repoint (#1625): with one missing a shell runs on
+# The carriers of the interop repoint: with one missing a shell runs on
 # a dead socket, and nothing else says so.
 fixture no-bashrc
 rm "$HOME_DIR/.bashrc"
@@ -123,7 +116,6 @@ fixture bad-settings
 printf '{nope' > "$FLOW/claude/settings.json"
 case_ "settings.json jq cannot read is not reported as a missing key" 2 "cannot read env.BASH_ENV"
 
-# This repo's own flow/, HOME linked from its manifest.
 real_home="$tmp/real-home"; mkdir -p "$real_home/.claude/hooks"
 repoint_bashrc_line "$here/bin/wsl-interop-repoint.sh" > "$real_home/.bashrc"
 # shellcheck source=hooks-manifest.sh

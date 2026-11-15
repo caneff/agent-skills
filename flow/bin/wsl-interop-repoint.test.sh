@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Contract test for wsl-interop-repoint.sh (#1625), run the way it runs live: a
+# Contract test for wsl-interop-repoint.sh, run the way it runs live: a
 # new bash reading it through BASH_ENV. Real socket files in a fixture dir and a
 # stub powershell.exe that answers per socket and logs each call, so no Windows
-# process starts. The real path is checked live; the PR says how.
+# process starts.
 # Run: bash flow/bin/wsl-interop-repoint.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,7 @@ trap 'rm -rf "$tmp"' EXIT
 fails=0
 pass() { echo "PASS: $1"; }
 fail() { echo "FAIL: $1"; fails=1; }
-want() { # want <name> <expected> <actual>
+want() {
   if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 — want [$2], got [$3]"; fi
 }
 
@@ -60,7 +60,6 @@ record() { cat "$RECORD_DIR/wsl-interop-repoint" 2>/dev/null; }
 record_word() { record | cut -d' ' -f2; }
 write_record() { printf '%s\n' "$*" > "$RECORD_DIR/wsl-interop-repoint"; }
 
-# --- choosing a socket
 fixture newest-wins 10=1 20=0 30='1\r\n'
 want "a dead WSL_INTEROP moves to the newest socket reaching a user session" \
   "$SOCKETS/30_interop" "$(start /run/WSL/gone_interop)"
@@ -90,7 +89,6 @@ fixture unset-var 10='1\r\n'
 want "an unset WSL_INTEROP is repointed like a dead one, since it reaches session 0" \
   "$SOCKETS/10_interop" "$(start "")"
 
-# --- the cost of each path
 fixture live 10='0\r\n' 20='1\r\n'
 want "a live WSL_INTEROP stays put" "$SOCKETS/10_interop" "$(start "$SOCKETS/10_interop")"
 want "a live WSL_INTEROP runs no Windows process" "" "$(calls)"
@@ -144,7 +142,6 @@ write_record "$((EPOCHSECONDS - 11)) unanswered"
 start "$DIR/gone" >/dev/null
 want "an unanswered run holds no longer than that" "10" "$(calls)"
 
-# --- it never gets in the way
 fixture hung 10='1\r\n' 20=hang 30=hang 40=hang 50=hang
 started=$EPOCHSECONDS
 got=$(start "$DIR/gone"); rc=$?
@@ -210,7 +207,6 @@ got=$(printf 'input' | WSL_INTEROP="$DIR/gone" with_fixture bash -c 'cat')
 want "a probe leaves the command's stdin alone" "input" "$got"
 want "the probe did reach the stub" "10" "$(calls)"
 
-# Compared with a bash that never read the script, in case of any new name.
 names_after() { # names_after <command starting bash>: names only it holds
   bash -c 'declare -F; compgen -v' | sort -u > "$DIR/plain"
   "$@" -c 'declare -F; compgen -v' | sort -u | comm -13 "$DIR/plain" -
@@ -223,7 +219,6 @@ start "$DIR/gone" >/dev/null
 want "the script leaves no name behind when it reads the record" "" \
   "$(WSL_INTEROP="$DIR/gone" names_after with_fixture bash | grep -vE '^(BASH_ENV|STUB_DIR|WSL_INTEROP_[A-Z_]+)$')"
 
-# The guard's own job: with no socket directory there is nothing to record.
 fixture no-wsl 10='1\r\n'
 SOCKETS="$DIR/not-wsl"
 want "outside WSL nothing changes" "$DIR/gone" "$(start "$DIR/gone")"

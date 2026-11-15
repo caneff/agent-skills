@@ -138,7 +138,6 @@ const checkGroup = async ($: EngineInterface, group: string, members: Run[]) => 
     const { code, line, hasEnded } = state
     rows.push({ run, line, hasEnded, hasFailed: code === KILLED || (code === FINISHED && !/ rc=0 /.test(line)) })
   }
-  // Failure lines are searched until one has woken the group.
   let isLineWoken = false
   for (const r of rows) isLineWoken ||= await isMarked($, r.run, 'woken-line')
   if (!isLineWoken) for (const r of rows) r.matched = await failureLine($, r.run)
@@ -202,7 +201,6 @@ export const register: Register = on => {
     const result = await next(e)
     scanUntil = (await $.clock.now()) + SCAN_WINDOW_MS
     arm($)
-    // Only a call that can have started a run is worth the short wait.
     const mayLaunch = e.run_in_background === true || /job-run/.test(e.command)
     let fresh: Run[] = []
     for (let i = 0; i < (mayLaunch ? ANNOUNCE_TRIES : 1) && fresh.length === 0; i++) {

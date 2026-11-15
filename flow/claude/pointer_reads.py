@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pointer-doc read count (#1413): do sessions read the docs under
+"""Pointer-doc read count: do sessions read the docs under
 flow/claude/ when they run the commands those docs are for?
 
     pointer_reads.py count --end <iso> [--start <iso>] [--projects <dir>]
@@ -13,10 +13,10 @@ replayable: a transcript is in the window when its mtime or any top-level
 `timestamp` falls in it, and only its lines up to --end are searched. With
 --end 2026-10-04T17:52:01Z it reproduces that note's first table, and with
 17:54:33Z its second (the two were run two minutes apart), but for the sessions
-of the skill #1634 retired, which now read as not covered.
+of a skill since retired, which now read as not covered.
 
 `recount` is the one-shot cron job Chris ruled on 2026-10-04 (option a). It
-asks `gh` for #1413's closedAt and exits silently while the ticket is open or
+asks `gh` for the tracking ticket's closedAt and exits silently while the ticket is open or
 until 14 days after it closed. On or after that day it counts the 14 days
 after closedAt, appends the dated result to the note in a throwaway worktree
 of origin/main, commits and pushes it, and removes its own crontab line. A
@@ -59,7 +59,7 @@ def cron_line() -> str:
             f">> {Path.home()}/.cache/pointer-reads-recount.log 2>&1  {CRON_TAG}")
 
 # (doc, trigger regex, skills that already carry the procedure): the
-# 2026-10-04 note's rows, in its order, less the skill #1634 retired. `implement`
+# 2026-10-04 note's rows, in its order, less a skill since retired. `implement`
 # also matches `implement-spec`: the pattern ends on a word boundary.
 DOCS = [
     ("OPERATIONS", "gh pr merge|implement-dispatch|merge-cleanup", "implement"),
@@ -140,7 +140,7 @@ class Refusal(RuntimeError):
 
 
 def closed_at() -> datetime | None:
-    """#1413's closedAt; None while it is open. Raises on anything unreadable."""
+    """The tracking ticket's closedAt; None while it is open. Raises on anything unreadable."""
     p = subprocess.run(["gh", "issue", "view", str(TICKET), "--repo", REPO, "--json", "state,closedAt"],
                        capture_output=True, text=True)
     if p.returncode != 0:
