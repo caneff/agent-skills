@@ -169,9 +169,11 @@ saved: `docs/research/2026-10-04-auto-mode-self-modification-denials.md`
 
 ## CI
 
-CI is local, not GitHub Actions: a repo's gate is `git config land.testcmd`,
-and new repos get no workflow files. Why: the Actions budget ran out on
-private repos.
+CI is local, not GitHub Actions: a repo's merge gate is the command its
+`AGENTS.md` `## End-to-end seam` section names, and new repos get no workflow
+files. Why: the Actions budget ran out on private repos. `git config
+land.testcmd` is read by no merge path (`drain/drain_test.py` pins that; Chris
+ruled it 2026-11-14).
 
 ## Requests with a fixed shape
 
