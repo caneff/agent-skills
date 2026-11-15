@@ -1,8 +1,8 @@
-"""Tests for the spec's closing check (#897, reshaped by #1402).
+"""Tests for the spec's closing check.
 
 One seam, named on the ticket: `body(...)` — the closing-check section's
 generated body, asserted against a fixture repo that declares an end-to-end
-seam and what that seam is blind to. On #781's spec run the then-separate
+seam and what that seam is blind to. On an earlier spec run the then-separate
 closing ticket named no seam at all and the closing worker stopped and asked;
 the seam that existed had already diverged from the live editor inside that
 same spec, so naming it is necessary and not sufficient.
@@ -55,7 +55,7 @@ def clean_env():
 
 
 def test_the_body_is_a_section_for_the_integration_pr(repo):
-    # #1461: a spec with more than one slice lands on main in one PR from its
+    # A spec with more than one slice lands on main in one PR from its
     # integration branch, and the closing check runs there, not in the last
     # slice's body.
     got = body(repo(), spec=366, surfaces=[])
@@ -88,7 +88,7 @@ def test_the_review_is_keyed_on_the_spec_number(repo):
 
 
 def test_the_fix_worker_runs_the_per_change_command_not_the_full_seam(repo):
-    # #1602: the fix round runs what the resolver prints, as
+    # The fix round runs what the resolver prints, as
     # `implement-spec/SKILL.md` step 3 says; the nightly backstop is the only
     # full run.
     got = body(repo(), spec=366, surfaces=[])
@@ -105,8 +105,7 @@ def test_main_is_merged_in_never_rebased(repo):
 
 def test_the_landed_slices_are_brought_in_before_main(repo):
     # The slices merge into origin/spec-366 on GitHub; the spec run's own
-    # spec-366 stays where dispatch cut it until it takes them in (#1461's
-    # review, P1/C2), or the review reads none of them.
+    # spec-366 stays where dispatch cut it until it takes them in, or the review reads none of them.
     got = body(repo(), spec=366, surfaces=[])
     block = got.split("```\n", 2)[1]
     assert block.index("git merge --ff-only origin/spec-366") < block.index(
@@ -133,7 +132,7 @@ def test_the_default_branch_is_the_one_named(repo):
 
 
 def test_a_one_slice_spec_gets_the_seam_in_its_slice_and_no_spec_review(repo):
-    # Ruling 3a of #1457: a one-slice spec has no integration branch, its
+    # A one-slice spec has no integration branch: its
     # slice lands on main with its own review wave, so the section goes in
     # that slice's body and names no spec-level review.
     got = body(repo(), spec=366, surfaces=[], one_slice=True)
@@ -215,7 +214,7 @@ def test_the_exploration_pass_can_supply_a_seam_the_repo_does_not_declare(repo):
 
 def test_a_seam_with_no_blind_spot_is_refused(repo):
     # Naming the seam is necessary and not sufficient: the seam that existed
-    # on #781 had diverged from the live editor inside that same spec.
+    # on an earlier spec had diverged from the live editor inside that same spec.
     with pytest.raises(T.SeamError) as exc:
         body(repo(agents="""# Fixture repo
 
@@ -279,7 +278,7 @@ def test_the_cli_fails_loud_when_no_seam_is_declared(repo):
 
 
 def test_a_fenced_example_is_not_a_declaration(repo):
-    # #890's rule, as `implement-spec/references/closure.md` states it for the
+    # The fence rule, as `implement-spec/references/closure.md` states it for the
     # include declaration: a grammar shown inside a fence is an example.
     # `references/closing-ticket.md` shows this very grammar in a fence, so
     # the first repo that pastes the doc would otherwise declare the sample.
@@ -298,7 +297,7 @@ def test_a_fenced_example_is_not_a_declaration(repo):
 
 
 def test_an_indented_quotation_is_not_a_declaration():
-    # #999's own risk, named in the ticket: `unfenced()` now opens a fence
+    # The risk of the bounded fence opener: `unfenced()` now opens a fence
     # only at CommonMark's <=3-space bound, so a 4-space-indented example is
     # no longer hidden by an (incorrect) fence match. `declaration` reads raw
     # `unfenced()` with no `_QUOTED` filter of its own, so without this it
@@ -348,8 +347,8 @@ def test_a_colon_inside_the_emphasis_needs_no_space_before_a_code_span(repo):
     "- **Seam**:**x**", "- Seam: plain", "* __Blind to__: a thing",
     "- **Seam**:**"])
 def test_both_readers_parse_a_key_line_as_frontier_does(line):
-    # One key-line parser, in `frontier` (#1000): a second copy is the drift
-    # #928 fixed once already. Run the same awkward lines through each reader
+    # One key-line parser, in `frontier`: a second copy is the drift
+    # that was already fixed once. Run the same awkward lines through each reader
     # and compare with `frontier.key_line`, so a copy under any name that parses
     # them differently fails.
     pair = frontier.key_line(line)
@@ -386,7 +385,7 @@ def test_an_agents_file_that_is_not_utf8_is_reported_not_raised(repo):
 
 
 def test_the_surfaces_question_must_be_answered(repo):
-    # Not "no surfaces by default": the #781 failure was a surface nobody
+    # Not "no surfaces by default": the failure this guards was a surface nobody
     # asked about. An unanswered question is refused, an explicit none is
     # fine.
     with pytest.raises(T.SeamError) as exc:
@@ -461,7 +460,7 @@ WRAPPED = """# Fixture repo
 
 
 def test_a_wrapped_blind_spot_is_read_whole(repo):
-    # #1243: a list item wrapped onto indented continuation lines was cut at
+    # A list item wrapped onto indented continuation lines was cut at
     # its first line break, and the closing ticket stated a partial blind
     # spot as the whole one.
     seam, blind_to = T.seam_of(repo(agents=WRAPPED))
@@ -488,7 +487,7 @@ def test_a_continuation_indented_four_spaces_is_still_the_value():
 def test_an_indented_paragraph_after_a_blank_line_is_still_the_value():
     # A loose list item: Markdown keeps a paragraph indented under the item
     # after a blank line inside it, so the blind spot it states is part of
-    # the value (#1406 C3).
+    # the value.
     text = ("## End-to-end seam\n\n- **Blind to**: the live app\n\n"
             "  and a later paragraph\n")
     assert T.declaration(text)["blind to"] == \
@@ -498,7 +497,7 @@ def test_an_indented_paragraph_after_a_blank_line_is_still_the_value():
 def test_a_blank_line_ends_a_key_line_that_is_no_list_item():
     # Markdown's loose paragraph lives inside a list item only: after a
     # blank line, an indented block under a bare key line is a code block,
-    # never more of the value (#1406 C4).
+    # never more of the value.
     text = ("## End-to-end seam\n\n**Blind to**: the live app\n\n"
             "    $ bash tests/all.sh   # an example run\n")
     assert T.declaration(text)["blind to"] == "the live app", \

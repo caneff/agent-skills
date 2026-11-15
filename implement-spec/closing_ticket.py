@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The spec's closing check: the end-to-end seam it names, and what that
 seam is blind to, and the spec-level review. The text is a section for the
-spec's integration PR (#1461), or for the slice of a one-slice spec, never a
-ticket of its own (#1402).
+spec's integration PR, or for the slice of a one-slice spec, never a
+ticket of its own.
 
-On #781's spec run the closing ticket said "write one end-to-end test over
+On an earlier spec run the closing ticket said "write one end-to-end test over
 the whole spec's acceptance criteria" and named no seam, so the closing
 worker stopped and asked. The seam that existed — a headless solver bundle —
 had already diverged from the live editor **inside that same spec**: a
@@ -20,11 +20,11 @@ import os
 import re
 import sys
 
-# #890's fence reader, imported rather than reimplemented: a fenced region is
+# The fence reader, imported rather than reimplemented: a fenced region is
 # an example, never a declaration, and a second copy of that rule is a second
 # place for the bug it fixed. `references/closing-ticket.md` shows this very
 # grammar inside a fence, so a repo that pastes the doc must declare nothing
-# by showing it. `visible()` rather than the bare `unfenced()` (#999): an
+# by showing it. `visible()` rather than the bare `unfenced()`: an
 # indented quotation is quoted material too, and this reader has no filter
 # of its own to drop it. The import is the same coupling this skill already
 # has — the readers it imports live beside it in `implement-spec`.
@@ -54,13 +54,13 @@ def _continuation(raw, start, reachable):
     the item, up to a heading, a key line, or a line `reachable` (the indices
     outside a fence) does not hold. Under a list item, blank lines are
     skipped when the next line still continues it, so a loose item's
-    indented second paragraph is part of it, as in Markdown (#1406). Under a
+    indented second paragraph is part of it, as in Markdown. Under a
     key line that is no list item a blank line ends the value: what follows
     indented is a code block, not a paragraph of it. A key line always ends
     the item, deeper or not, so a declaration nested under a parent bullet
     still reads as before. Read from the raw lines, not from `visible()`,
     because a four-space continuation is what `visible()` drops as quoted
-    material, and dropping it is the truncation (#1243)."""
+    material, and dropping it is the truncation."""
     depth = _indent(raw[start])
     loose = bool(_LIST_ITEM.match(raw[start]))
     wrapped = []
@@ -83,7 +83,7 @@ def declaration(text):
     """`{seam, blind to}` from a document's `## End-to-end seam` section, or
     `None` when it has no such section — silence, which is not a
     declaration. A value wrapped onto continuation lines is read whole
-    (#1243): a partial blind spot stated as the whole one is worse than none."""
+    whole: a partial blind spot stated as the whole one is worse than none."""
     raw = (text or "").splitlines()
     lines = visible(raw)
     reachable = {index for index, _ in unfenced(raw)}
@@ -117,7 +117,7 @@ def seam_of(root, seam=None, blind_to=None):
     replace the repo's canonical answer with nothing said. Refuses when
     either half is missing from both sources, and when either settled value
     is only emphasis markers (`- **Seam**:**` reads as the value `**`),
-    which names nothing (#1104).
+    which names nothing.
     """
     if not os.path.isdir(root):
         # Distinct from a repo that declares nothing: a typo'd root reported
@@ -163,7 +163,7 @@ def _settled(key, root, declared, explored):
             "wrong and the repo's own file is where that gets fixed")
     value = declared or explored
     # `key_line` reads `- **Seam**:**` as the value `**`; a value of
-    # nothing but emphasis markers names nothing (#1104).
+    # nothing but emphasis markers names nothing.
     if value and not re.sub(r"[\s*_]", "", value):
         raise SeamError(f"{root}: {key} reads {value!r}, which is only "
                         "emphasis markers and names nothing")
@@ -176,21 +176,22 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
     cannot see, and the spec-level review.
 
     A spec with more than one slice lands on `<default>` in one integration PR
-    from `spec-<spec>` (#1461), and this is that PR's section. The review reads
+    from `spec-<spec>`, and this is that PR's section. The review reads
     `origin/<default>...spec-<spec>`: the integration branch holds this spec's
     slices and merges of `<default>`, nothing else, so the range is the
     review's own. The merge-sha list and its cherry-pick procedure, which a
-    spec landing slice by slice on a shared `main` needed (#781's range held
-    ~17 unrelated commits), are gone.
+    spec landing slice by slice on a shared `main` needed (one earlier spec's
+    range held ~17 unrelated commits), are gone.
 
-    A one-slice spec has no integration branch (ruling 3a of #1457): its slice
-    lands on `<default>` with its own review wave, so `one_slice` makes a
-    section for that slice's body with no spec-level review.
+    A one-slice spec has no integration branch: its slice lands on
+    `<default>` with its own review wave, so `one_slice` makes a section for
+    that slice's body with no spec-level review.
     """
     if surfaces is None:
-        # Not defaulted to none: the #781 failure was a user-visible surface
-        # nobody asked about. The exploration pass answers the question, with
-        # an empty list where the seam reaches everything.
+        # Not defaulted to none: the failure this check exists to stop was a
+        # user-visible surface nobody asked about. The exploration pass
+        # answers the question, with an empty list where the seam reaches
+        # everything.
         raise SeamError(
             "the closing check must answer whether the spec has a "
             "user-visible surface the seam cannot reach — pass the surfaces, "

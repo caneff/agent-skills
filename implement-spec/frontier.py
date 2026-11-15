@@ -14,7 +14,7 @@ Three sources, in order: the tracker's native dependencies where it has them
 then the `## Blocked by` section grammar in the ticket body, then nothing —
 and nothing is **unresolved**, never unblocked. Reads only.
 
-Silence is the whole point. On #781 eight of twenty-one `ready-for-agent`
+Silence is the whole point. On one earlier spec run eight of twenty-one `ready-for-agent`
 tickets carried no `## Blocked by` section at all, and reading a missing
 section as "unblocked" dispatches a worker onto a ticket whose prerequisite
 is still open — the cost is a whole build. The grammar this parses, and what
@@ -33,7 +33,7 @@ import tracker as tracker_mod  # noqa: E402
 # `##` is what `/to-tickets` emits and what the grammar specifies.
 _HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
                       re.IGNORECASE)
-# The one heading rule every ticket reader uses (#1772): CommonMark's ATX
+# The one heading rule every ticket reader uses: CommonMark's ATX
 # heading, up to three spaces before the `#`. `closing_ticket` imports it and
 # `closure` reads through `section`, rather than either carrying its own.
 HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
@@ -65,7 +65,7 @@ _NONE = re.compile(r"^[-*\s]*none\b", re.IGNORECASE)
 # quotation back to the reader as live document.
 #
 # CommonMark recognises a fence marker only at up to three spaces of
-# indentation; four spaces or a tab is indented code, not a fence (#999). A
+# indentation; four spaces or a tab is indented code, not a fence. A
 # marker past that bound is quotation like any other indented line, and
 # `visible()`'s own `_QUOTED` bound below already knows to drop it — this
 # bound has to agree with that one, or a quoted fence with no matching
@@ -88,20 +88,20 @@ NON_DISPATCHABLE_LABELS = frozenset({"needs-info"})
 
 # A spec parent is neither of those things. `implement-dispatch` refuses it
 # in plain mode while naming the route that does take it — a spec run,
-# `--spec <n> --slots <k>` (#897) — so it is dispatchable work in a
+# `--spec <n> --slots <k>` — so it is dispatchable work in a
 # different mode. Dropping it hides real work from the only reader that
 # surfaces it, and calling it `unresolved` says a human must determine its
 # blocking state when what it needs is a different verb. Both would be a
-# lie about what the entry is, so it gets its own bucket (#910).
+# lie about what the entry is, so it gets its own bucket.
 SPEC_LABEL = "spec"
 
-# A slice is the other half of that verb (#1242). The spec parent need not
-# carry the queried label — burn-2026-09-27's carried `spec` alone — so the
+# A slice is the other half of that verb. The spec parent need not
+# carry the queried label — it may carry `spec` alone — so the
 # parent never reaches this reader as a candidate, and its slices would read
 # as ordinary unblocked tickets and be built one by one. The slice is found
 # from its side: its parent, by the sub-issue endpoint or a `Part of #<n>`
 # line, carries `spec`. `/to-tickets` writes it under a `## Parent` heading
-# as `Part of [Spec: ...](https://github.com/<o>/<r>/issues/<n>).` (#1282), and
+# as `Part of [Spec: ...](https://github.com/<o>/<r>/issues/<n>).`, and
 # a bare `#<n>` under that heading is the same declaration.
 _PART_OF = re.compile(r"^ {0,3}Part of\b(?:\s+#(\d+)\b)?", re.IGNORECASE)
 _PARENT_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+parent[ \t]*$", re.IGNORECASE)
@@ -152,7 +152,7 @@ def visible(lines):
 # `**Directive:**`#include <path>`` is a valid line. A colon after the
 # emphasis (`**Directive**:`) keeps a bold value's markers, `**Directive**:**x**`
 # reading as the value `**x**`. One grammar for `closure.py` and
-# `implement-spec/closing_ticket.py` (#928, #1000): two copies drifted once.
+# `implement-spec/closing_ticket.py`: two copies drifted once.
 _KEY = re.compile(
     r"^[ \t]*[-*+][ \t]*(?:"
     r"[*_]{1,2}(?P<inside>[A-Za-z][A-Za-z -]*?)[ \t]*:[*_]{1,2}"
@@ -212,7 +212,7 @@ def blocked_by_section(body):
     answers = sections(lines, _HEADING)
     for _, line in lines:
         if HEADING.match(line):
-            break  # the preamble ends at the first heading
+            break
         inline = _INLINE.match(line)
         if inline:
             answers.append(inline.group(1).strip())
@@ -229,7 +229,6 @@ def section_blockers(section):
         return None, "the ticket's `Blocked by` states nothing"
     references = [int(n) for n in _REFERENCE.findall(section)]
     if references:
-        # dedup, keep the order they were written in
         return list(dict.fromkeys(references)), None
     if _NONE.match(section):
         return [], None
@@ -311,11 +310,10 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
 
     `landed_of(integration_branch) -> {numbers}` and
     `native_blockers_of(ticket) -> [numbers]` carry the landed-blocker rule,
-    stated in
-    `references/frontier.md` (#1466); either raises `TrackerError` when it
+    stated in `references/frontier.md`; either raises `TrackerError` when it
     cannot answer, and neither supplied means no blocker has landed.
 
-    `stranded` is a slice whose parent spec cannot run it (#1485): the spec
+    `stranded` is a slice whose parent spec cannot run it: the spec
     is closed, or lives in a repo other than `repo`, where
     `implement-dispatch --spec <n>` would name a different issue. It carries
     no verb to copy, and drain names it instead of leaving it behind."""
@@ -445,9 +443,9 @@ _CLOSES = re.compile(r"^[ \t]*Closes[ \t]+#(\d+)[ \t]*$", re.IGNORECASE | re.MUL
 
 
 def fetch_landed(tracker, integration_branch):
-    """The ticket numbers whose PR merged into `integration_branch` (#1466,
-    ruling (a)): each merged PR's bare `Closes #<n>` body lines, which a
-    clump's PR carries once per ticket. GitHub's own closing references stay
+    """The ticket numbers whose PR merged into `integration_branch`: each
+    merged PR's bare `Closes #<n>` body lines, which a clump's PR carries once
+    per ticket. GitHub's own closing references stay
     empty for a PR into a non-default branch, so the body is the record.
     Raises `TrackerError` when the list cannot be read."""
     return {int(n) for body in tracker.merged_bodies(integration_branch)
@@ -475,7 +473,7 @@ def _parent_number(body, repo):
 
     A `## Parent` section that names no such issue — empty, prose, another
     repo's link — raises `TrackerError`: a declaration this reader cannot
-    resolve is not "no parent" (#1406). `None` under it, as `Blocked by`
+    resolve is not "no parent". `None` under it, as `Blocked by`
     says it, is no parent. A `Part of` line outside the heading that names
     another repo's issue and none in this one raises too; a `Part of` line
     naming no issue at all is prose.
