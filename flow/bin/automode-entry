@@ -50,6 +50,7 @@ def git(repo, *args):
 
 
 def locate():
+    """The settings file the link points at, its repo, and that repo's primary checkout."""
     target = LINK.resolve()
     top = git(target.parent, "rev-parse", "--show-toplevel")
     if top.returncode:
@@ -252,7 +253,7 @@ def cmd_apply(args):
             None, [norm(e) for e in before], after
         ).get_opcodes():
             if op == "equal":
-                merged += before[a1:a2]
+                merged += before[a1:a2]  # an untouched entry keeps its original text
                 continue
             changed = True
             for e in before[a1:a2]:

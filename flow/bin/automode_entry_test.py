@@ -58,7 +58,7 @@ class Rig:
         git(self.repo, "push", "-q", "-u", "origin", "main")
         self.link.parent.mkdir(parents=True)
         self.worktree = None
-        if via_worktree:
+        if via_worktree:  # the live link may point into a linked worktree of the primary checkout
             self.worktree = tmp / "wt"
             git(self.repo, "worktree", "add", "-q", "-b", "wt", str(self.worktree))
             self.settings = self.worktree / "flow" / "claude" / "settings.json"
@@ -76,6 +76,7 @@ class Rig:
         git(self.repo, "commit", "-q", "-am", "edit")
 
     def stub_claude(self, stdout):
+        """A `claude` on PATH that prints stdout for every call."""
         bindir = self.tmp / "bin"
         bindir.mkdir(exist_ok=True)
         stub = bindir / "claude"
@@ -148,7 +149,7 @@ def test_add_reads_text_from_stdin_and_file(rig, tmp_path):
         (("add", "nonsense", "x"), None),
         (("add", "allow", "   "), None),
         (("add", "allow", "Alpha entry."), None),  # duplicate
-        (("add", "allow", "-"), b"bad \xff byte"),
+        (("add", "allow", "-"), b"bad \xff byte"),  # stdin that is not UTF-8
     ],
 )
 def test_add_refusals_leave_file_and_history_alone(rig, args, stdin):

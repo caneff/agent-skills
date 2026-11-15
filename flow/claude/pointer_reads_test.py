@@ -44,6 +44,7 @@ def epoch(iso):
 
 @pytest.fixture
 def projects(tmp_path):
+    """End 2026-10-04T12:00Z, so the window is (2026-09-20T12:00Z, end]."""
     root = tmp_path / "count-projects"
     root.mkdir()
     p = root / "-home-u-repo"
@@ -108,6 +109,8 @@ def test_a_spec_run_session_counts_as_covered(tmp_path):
 
 
 class Recount:
+    """A scratch clone with a bare origin, fake `gh` and `crontab` on PATH, and one synthetic transcript."""
+
     def __init__(self, tmp):
         self.tmp = tmp
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}

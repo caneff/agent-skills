@@ -12,7 +12,7 @@ trap 'rm -rf "$tmp"' EXIT
 fails=0
 pass() { echo "PASS: $1"; }
 fail() { echo "FAIL: $1"; fails=1; }
-want() {
+want() { # want <name> <expected> <actual>
   if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 — want [$2], got [$3]"; fi
 }
 
