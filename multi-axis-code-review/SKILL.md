@@ -481,7 +481,11 @@ it, written without reproducing the original denial (#1324 could not be
 reproduced from a worker session), so a reviewer that is still refused reports
 the refusal verbatim and stops, never reaching the removal another way.
 
-*Isolation.* `git worktree add` a throwaway worktree per mutation. **Never
+*Isolation.* `git worktree add --detach` a throwaway worktree per mutation,
+undone with `git worktree remove --force`: that is the one rule, the same in
+`implement/briefs/fanout-worker.md` and `implement/SKILL.md` § Build, #1696.
+`witness-check.sh` sets `CARGO_TARGET_DIR=<mutation worktree>/target` in each
+witness, since the worktree isolates the tree and not cargo's build dir. **Never
 `cp -a`**, or any other byte copy of the reviewed tree: a linked worktree's
 `.git` is a *file holding a gitdir pointer*, not a directory, so a copy of one
 still points at the original's gitdir and shares its index, HEAD and refs.

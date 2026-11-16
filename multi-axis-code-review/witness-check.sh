@@ -257,7 +257,9 @@ for id in "${mutations[@]}"; do
   # `mutate` in its own subshell: a mutation body ends in a failing suite and
   # is naturally written with `exit`, which would otherwise kill this job
   # before its status is recorded and read back below as `unknown`.
-  { ( mutate "$id" "$witness" "$root/ran/$id" ) >"$root/output/$id" 2>&1
+  # CARGO_TARGET_DIR: the worktree isolates the tree, not cargo's build, and a shared
+  # target dir leaves a mutated build for the next run (#1696).
+  { ( export CARGO_TARGET_DIR="$witness/target"; mutate "$id" "$witness" "$root/ran/$id" ) >"$root/output/$id" 2>&1
     printf '%s\n' "$?" >"$root/status/$id"
     printf '%s\n' "$(( $(date +%s) - started ))" >"$root/seconds/$id"; } &
 done
