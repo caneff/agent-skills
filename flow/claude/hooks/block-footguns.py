@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Footgun guard (PreToolUse, Bash): refuse two command shapes that destroy or
-hang, and say what to run instead. Exit 2 with the reason on stderr blocks;
+"""Footgun guard (PreToolUse, Bash): refuse three command shapes that destroy,
+hang or get denied, and say what to run instead. Exit 2 with the reason on stderr blocks;
 every other path exits 0.
 
 1. A bare `rg` (#1860). `rg <pattern>` with no path reads stdin when stdin is
@@ -17,6 +17,14 @@ every other path exits 0.
    of the same literal argument. Read into a variable first, then write. A
    read of a differently spelled path, or after the statement ends, is not
    seen: this guard stops a drifting agent, not a determined one.
+
+3. A backtick command substitution (#1923). Claude Code's built-in safety check
+   cannot parse the legacy form, so it refuses the whole call as a possible
+   dangerous `rm` even when nothing is removed (`$((`date +%s`-started))`).
+   Refused when an unquoted backtick pair sits in a command, a `$(...)` body or
+   a `bash -c` script, with the `$(...)` rewrite in the message. A backtick in
+   single quotes, a heredoc body, a comment or after a backslash is text and
+   passes; one inside double quotes is not seen.
 
 A failure of the guard itself is said out loud (a systemMessage, exit 0): a
 guard that crashed quietly would read as a command with nothing wrong in it.
@@ -39,11 +47,12 @@ STDIN_OPS = {"<", "<<", "<<-", "<<<", "<&"}
 REDIRECTS = STDIN_OPS | {">", ">>", ">&", "&>"}
 
 
-def tokenize(s, nested):
+def tokenize(s, nested, ticks=None):
     """[(kind, text)], kind 'w' (a word, quotes removed) or 'o' (an operator;
     a newline outside quotes is the operator '\\n'). A `$(...)` or backtick
     body is part of the word it sits in (`rg x $(git ls-files)` names a path)
-    and is appended to `nested` as text to scan as commands of its own."""
+    and is appended to `nested` as text to scan as commands of its own; an
+    unquoted backtick body is also appended to `ticks`, when given."""
     out, cur, n, i = [], None, len(s), 0
 
     def flush():
@@ -96,6 +105,8 @@ def tokenize(s, nested):
                 end = end - 1 if depth == 0 else -1
             end = n if end < 0 else end
             nested.append(s[start:end])
+            if c == "`" and ticks is not None:
+                ticks.append(s[start:end])
             cur = (cur or "") + "$x"
             i = end + 1
             continue
@@ -212,18 +223,18 @@ def rg_is_bare(args):
     return positionals <= (0 if has_pattern_flag else 1)
 
 
-def scan_commands(scan, depth=0):
+def scan_commands(scan, depth=0, ticks=None):
     """Every (words, piped, stdin) in `scan`, including a `$(...)` body and the
     script of a `bash -c`, which run as commands too."""
     nested = []
-    for cmd in commands(tokenize(scan, nested)):
+    for cmd in commands(tokenize(scan, nested, ticks)):
         yield cmd
         words = strip_prefix(cmd[0])
         if depth < 5 and words and os.path.basename(words[0]) in SHELLS and "-c" in words[1:-1]:
             nested.append(words[words.index("-c", 1) + 1])
     if depth < 5:
         for body in nested:
-            yield from scan_commands(body, depth + 1)
+            yield from scan_commands(body, depth + 1, ticks)
 
 
 def bare_rg(scan):
@@ -238,6 +249,14 @@ def bare_rg(scan):
         if rg_is_bare(words[1:]):
             return True
     return False
+
+
+def backtick_bodies(scan):
+    """The text between each unquoted backtick pair in `scan`."""
+    ticks = []
+    for _ in scan_commands(scan, ticks=ticks):
+        pass
+    return ticks
 
 
 def runs_python(scan):
@@ -366,6 +385,15 @@ def main():
                   "stdin is neither a tty nor /dev/null, so rg reads stdin and the "
                   "call hangs until its timeout. Pass a path (`rg <pattern> .`) or "
                   "use `git grep <pattern>`.", file=sys.stderr)
+            return 2
+        ticks = backtick_bodies(scan) if "`" in scan else []
+        if ticks:
+            print(f"BLOCKED: '{command[:200]}' uses a backtick command substitution. "
+                  "Claude Code's built-in safety check cannot parse it and refuses "
+                  "the whole call as a possible dangerous rm, even when nothing is "
+                  "removed. Write each `cmd` as $(cmd), for example "
+                  f"`{ticks[0]}` -> $({ticks[0]}); elapsed time is "
+                  "`$(( $(date +%s) - started ))`.", file=sys.stderr)
             return 2
         return 0
     except Exception as e:  # noqa: BLE001 — the guard's own fault is reported, never silent
