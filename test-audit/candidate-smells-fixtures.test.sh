@@ -6,7 +6,7 @@
 # file together.
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
-[ -d node_modules ] || npm ci --silent
+bash ./bootstrap.sh
 
 fail=0
 check() { # <label> <expected> <actual>

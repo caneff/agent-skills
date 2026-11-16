@@ -3,5 +3,5 @@
 # needs @babel/parser, so install from the tracked lockfile the first time.
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
-[ -d node_modules ] || npm ci --silent
+bash ./bootstrap.sh
 exec node --test audit.test.mjs

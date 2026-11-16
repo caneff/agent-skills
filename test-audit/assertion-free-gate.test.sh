@@ -12,7 +12,7 @@ root=$(git rev-parse --show-toplevel)
 
 python3 audit.py --gate "$root"
 
-# audit.mjs needs @babel/parser, same tracked-lockfile bootstrap as
+# audit.mjs needs @babel/parser, same tracked-lockfile bootstrap (bootstrap.sh) as
 # audit-mjs.test.sh; it exits 2 with a `npm ci` message if that is missing.
-[ -d node_modules ] || npm ci --silent
+bash ./bootstrap.sh
 node audit.mjs --gate "$root"
