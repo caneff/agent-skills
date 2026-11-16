@@ -26,12 +26,10 @@ is under it, where § Control's job record goes. A dispatch outside any run
 passes none. `--spec` refuses the flag,
 since the spec run keeps its own run file.
 
-Several numbers need `--clump`: without it the dispatch is refused, so a stray
-second number never makes a clump. It also refuses a ticket with an open
-blocker (GitHub's blocked-by edges, or an open `#<n>` under `## Blocked by`;
-a blocker inside the clump does not count), and a `--spec` dispatch while 8
-spec runs are live. After the brief is typed it reads the pane back for the
-`/implement` line and fails, naming the release commands, when it is not there.
+Several numbers need `--clump`; without it the dispatch is refused, so a
+stray second number never makes a clump. The other refusals (an open blocker,
+too many live spec runs) and the brief read-back are in
+`implement-dispatch --help`.
 
 `sonnet` for an ordinary ticket, `opus` for a subtle seam — `--spec` mode
 defaults to `opus` instead. Plain mode refuses an issue labelled `spec`,

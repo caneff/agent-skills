@@ -323,7 +323,8 @@ fn run_gh(args: &[String]) -> ExitCode {
     // `api repos/<o>/<r>/issues/<n>/dependencies/blocked_by`: the open
     // blockers' numbers, one per line, from GH_BLOCKED_BY_<n> (space-
     // separated); GH_BLOCKED_BY_FAIL_<n> fails the read.
-    let blockers_of = if a0 == "api" { a1.strip_suffix("/dependencies/blocked_by").and_then(|p| p.rsplit('/').next()) } else { None };
+    let api_path = args.iter().skip(1).find(|a| a.starts_with("repos/")).map(String::as_str).unwrap_or("");
+    let blockers_of = if a0 == "api" { api_path.strip_suffix("/dependencies/blocked_by").and_then(|p| p.rsplit('/').next()) } else { None };
     if let Some(n) = blockers_of {
         if env::var(format!("GH_BLOCKED_BY_FAIL_{n}")).is_ok() {
             eprintln!("gh: Server Error (HTTP 502)");
@@ -394,6 +395,17 @@ fn run_gh(args: &[String]) -> ExitCode {
 /// The `closingIssuesReferences` form is answered separately, from
 /// `$GH_PR_CLOSES`.
 fn gh_pr_list(args: &[String]) -> ExitCode {
+    // `--base spec-<p> --state merged --json body`: the merged PRs' bodies
+    // into an integration branch, from GH_MERGED_BODIES (GH_MERGED_FAIL
+    // fails the read).
+    if args.iter().any(|a| a == "--base") && !args.iter().any(|a| a == "--head") {
+        if env_flag("GH_MERGED_FAIL") {
+            eprintln!("gh: Server Error (HTTP 502)");
+            return ExitCode::FAILURE;
+        }
+        println!("{}", env::var("GH_MERGED_BODIES").unwrap_or_default());
+        return ExitCode::SUCCESS;
+    }
     let head = args.windows(2).find(|w| w[0] == "--head").map(|w| w[1].as_str()).unwrap_or("");
     let jq = args.iter().any(|a| a == "--jq");
     let json_fields = args.windows(2).find(|w| w[0] == "--json").map(|w| w[1].as_str()).unwrap_or("");
@@ -596,15 +608,25 @@ fn run_herdr(args: &[String]) -> ExitCode {
         }
         // The pane's text: the last prompt sent, as a pane that took the brief
         // shows it; HERDR_READ_EMPTY is a pane the brief never reached,
-        // HERDR_READ_FAIL a read that fails.
+        // HERDR_READ_FAIL a read that fails (printing the text too, so a
+        // caller that ignores the exit status still sees the brief). Real
+        // herdr refuses the scrollback sources of a working agent, which
+        // every agent the dispatcher reads is, so only `visible` answers.
         ("agent", "read") => {
-            if env_flag("HERDR_READ_FAIL") {
+            let source = args.windows(2).find(|w| w[0] == "--source").map(|w| w[1].as_str()).unwrap_or("recent");
+            if source != "visible" {
+                println!("{{\"error\":{{\"code\":\"agent_not_idle\",\"message\":\"agent is working\"}}}}");
                 return ExitCode::FAILURE;
             }
-            if !env_flag("HERDR_READ_EMPTY") {
-                if let Ok(log) = env::var("CALL_LOG") {
-                    print!("{}", std::fs::read_to_string(format!("{log}.prompt")).unwrap_or_default());
-                }
+            let shown = if env_flag("HERDR_READ_EMPTY") {
+                String::new()
+            } else {
+                env::var("CALL_LOG").ok().and_then(|log| std::fs::read_to_string(format!("{log}.prompt")).ok()).unwrap_or_default()
+            };
+            print!("{shown}");
+            if env_flag("HERDR_READ_FAIL") {
+                eprintln!("herdr: read failed");
+                return ExitCode::FAILURE;
             }
         }
         ("agent", "prompt") => {

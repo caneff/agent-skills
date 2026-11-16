@@ -125,26 +125,31 @@ lock is under $HOME, so it serializes dispatches sharing a HOME; a hand claim
 or a run under another HOME is caught only by that re-read, which narrows the
 window and does not close it.
 
-A ticket with an open blocker is refused: GitHub's own blocked-by edges, and
-each #<n> under the ticket's `## Blocked by` heading, open now. A blocker that
-is another ticket of the clump is not one. A blocker that cannot be read
-refuses; so does a body that cannot be read, except on a documentation-labelled
-ticket, which keeps its heavy-and-label-kept reading and is checked on GitHub's
-edges alone.
+A ticket with an open blocker is refused: GitHub's own blocked-by edges (every
+page), and each #<n> in the ticket's `Blocked by` (the heading or the inline
+form, read as implement-spec/frontier.py reads them). A blocker that is
+another ticket of the clump, or that landed on the slice's integration branch,
+is not one. A blocker that cannot be read, a blocker in another repo, and a
+ticket declaring its blockers twice refuse; so does a body that cannot be
+read, except on a documentation-labelled ticket, which keeps its
+heavy-and-label-kept reading and is checked on GitHub's edges alone.
 
-After the brief is sent, the pane is read back (`herdr agent read`, up to 5
-reads, LANE_BRIEF_POLL_MS apart, 1000 by default) for the `/implement <n>` or
-`/implement-spec <n>` line. A pane that never shows it fails the dispatch after
-the claim, naming the release commands, like any other post-claim failure.
+After the brief is sent, the pane is read back (`herdr agent read --source
+visible`, up to 5 reads, LANE_BRIEF_POLL_MS apart, 1000 by default) for the
+`/implement <n>` or `/implement-spec <n>` line. A pane that never shows it, or
+cannot be read, fails the dispatch non-zero but prints no release command: the
+worker is already working and may hold the brief, so the tickets stay claimed.
 
 Spec mode refuses when 8 or more spec runs are live in herdr (agents named
-`<repo>-spec-<n>`; LANE_SPEC_RUN_CAP overrides the 8). A burst of dispatches
-each pass any per-dispatch load check before the first run starts, so the
-count is the only thing that stops it. An agent list that fails refuses.
+`<repo>-spec-<n>` that are not done). A spec dispatch holds the claim lock
+until its agent has started, so dispatches of one repo count each other;
+dispatches of different repos do not. An agent list that fails refuses.
 
 Refuses, with nothing claimed or created, when any named issue is not open and
 labelled exactly one of ready-for-agent and ready-for-human, it carries a held
-label (in-progress, needs-info), the same number is named twice, spec mode
+label (in-progress, needs-info), the same number is named twice, several are
+named without --clump, --clump names one or goes with --spec, it has an open
+blocker, spec mode finds 8 spec runs live, spec mode
 names an issue without the spec label or with ready-for-human or names more
 than one, or carries --run, plain mode names one with the spec label, --run
 names no run id, no controller is named or
@@ -933,56 +938,165 @@ fn slice_base(primary: &str, slug: &str, ns: &[String]) -> Result<Base, String> 
     })
 }
 
-/// The `#<n>` references under a ticket's `## Blocked by` heading, up to the
-/// next heading. A reference counts only as a bare `#<n>` (not `a/b#7`, not
-/// inside a word), the form `/to-tickets` writes and
-/// `implement-spec/frontier.py` reads. No such heading names none.
-fn blocked_by_refs(body: &str) -> Vec<String> {
-    let heading = |l: &str| -> Option<String> {
-        let t = l.trim_start_matches(' ');
-        let hashes = t.chars().take_while(|c| *c == '#').count();
-        (1..=6).contains(&hashes).then(|| t[hashes..].trim().trim_end_matches(':').trim().to_lowercase()).filter(|_| t[hashes..].starts_with([' ', '\t']))
-    };
-    let mut refs: Vec<String> = Vec::new();
-    let mut inside = false;
+/// Fenced, indented and blockquoted lines are quotation, never a ticket's own
+/// declaration. A port of `implement-spec/frontier.py`'s `visible()`: a
+/// change to one is a change to both.
+fn visible_lines(body: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut fence: Option<(char, usize)> = None;
     for line in body.lines() {
-        if let Some(h) = heading(line) {
-            inside = h == "blocked by";
+        let t = line.trim_start_matches(' ');
+        let indent = line.len() - t.len();
+        let run = |c: char| t.chars().take_while(|x| *x == c).count();
+        let marker = if indent <= 3 { ['`', '~'].into_iter().find(|c| run(*c) >= 3).map(|c| (c, run(c))) } else { None };
+        match (fence, marker) {
+            (None, Some(m)) => fence = Some(m),
+            (None, None) => {
+                let quoted = line.starts_with("    ") || line.starts_with('\t') || (indent <= 3 && t.starts_with('>'));
+                if !quoted {
+                    out.push(line);
+                }
+            }
+            // A closer carries no info string and is at least as long.
+            (Some((c, n)), Some((mc, mn))) if mc == c && mn >= n && t[mn..].trim().is_empty() => fence = None,
+            (Some(_), _) => {}
+        }
+    }
+    out
+}
+
+/// An ATX heading (up to three spaces of indent): its text, else `None`.
+fn heading_text(line: &str) -> Option<&str> {
+    let t = line.trim_start_matches(' ');
+    let hashes = t.chars().take_while(|c| *c == '#').count();
+    ((line.len() - t.len()) <= 3 && (1..=6).contains(&hashes) && t[hashes..].starts_with([' ', '\t']) && !t[hashes..].trim().is_empty())
+        .then(|| t[hashes..].trim())
+}
+
+/// The rest of an inline `Blocked by: ...` / `**Blocked by:** ...` line.
+fn inline_blocked_by(line: &str) -> Option<String> {
+    let t = line.trim_start_matches(' ');
+    if line.len() - t.len() > 3 || t.starts_with('\t') {
+        return None;
+    }
+    let skip = |s: &'static str, t: &str| -> String { t.trim_start_matches(|c: char| s.contains(c)).to_string() };
+    let mut rest = t.strip_prefix("**").or_else(|| t.strip_prefix("__")).or_else(|| t.strip_prefix(['*', '_'])).unwrap_or(t).trim_start_matches([' ', '\t']).to_string();
+    let lower = rest.to_lowercase();
+    if !lower.starts_with("blocked by") {
+        return None;
+    }
+    rest = rest["blocked by".len()..].to_string();
+    rest = skip(" \t:*_", &rest);
+    Some(rest.trim().to_string())
+}
+
+/// What a ticket's body declares about its blockers.
+#[derive(Debug, PartialEq)]
+enum Declared {
+    /// No `Blocked by` of any form: silence, not "none".
+    Silent,
+    /// More than one declaration: which is the ticket's own cannot be told.
+    Ambiguous,
+    /// The one declaration's text.
+    Text(String),
+}
+
+/// `implement-spec/frontier.py`'s `blocked_by_section`, ported: the lines
+/// under a `## Blocked by` heading up to the next heading, or the rest of an
+/// inline `Blocked by:` line in the preamble. A change to one is a change to
+/// both.
+fn declared_blockers(body: &str) -> Declared {
+    let lines = visible_lines(body);
+    let mut answers: Vec<String> = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        if heading_text(l).is_some_and(|h| h.trim_end_matches(':').trim().eq_ignore_ascii_case("blocked by")) {
+            let section: Vec<&str> = lines[i + 1..].iter().copied().take_while(|r| heading_text(r).is_none()).collect();
+            answers.push(section.join("\n").trim().to_string());
+        }
+    }
+    for l in &lines {
+        if heading_text(l).is_some() {
+            break;
+        }
+        if let Some(text) = inline_blocked_by(l) {
+            answers.push(text);
+        }
+    }
+    match answers.len() {
+        0 => Declared::Silent,
+        1 => Declared::Text(answers.remove(0)),
+        _ => Declared::Ambiguous,
+    }
+}
+
+/// The bare `#<n>` references in a declaration's text: not `a/b#7`, not
+/// inside a word.
+fn bare_refs(text: &str) -> Vec<String> {
+    let mut refs: Vec<String> = Vec::new();
+    let bytes = text.as_bytes();
+    for (i, b) in bytes.iter().enumerate() {
+        if *b != b'#' {
             continue;
         }
-        if !inside {
-            continue;
-        }
-        let bytes = line.as_bytes();
-        for (i, b) in bytes.iter().enumerate() {
-            if *b != b'#' {
-                continue;
-            }
-            let prev_ok = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || matches!(bytes[i - 1], b'_' | b'/' | b'#' | b'-'));
-            let digits: String = line[i + 1..].chars().take_while(char::is_ascii_digit).collect();
-            if prev_ok && !digits.is_empty() && !refs.contains(&digits) {
-                refs.push(digits);
-            }
+        let prev_ok = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || matches!(bytes[i - 1], b'_' | b'/' | b'#' | b'-'));
+        let digits: String = text[i + 1..].chars().take_while(char::is_ascii_digit).collect();
+        if prev_ok && !digits.is_empty() && !refs.contains(&digits) {
+            refs.push(digits);
         }
     }
     refs
 }
 
+/// The ticket numbers whose PR merged into `spec-<p>`: each merged PR's bare
+/// `Closes #<n>` body lines, as `implement-spec/frontier.py`'s `fetch_landed`
+/// reads them (GitHub's closing references stay empty for a PR into a
+/// non-default branch). A slice merged there stays open until the
+/// integration PR closes it, so open alone would stall every dependent slice
+/// of the run.
+fn landed_on(slug: &str, spec: &str) -> Result<Vec<String>, String> {
+    let bodies = quiet_stdout_bounded(
+        "gh",
+        &["pr", "list", "--repo", slug, "--base", &format!("spec-{spec}"), "--state", "merged", "--limit", "500", "--json", "body", "--jq", ".[].body"],
+        gh_query_timeout(),
+    )?
+    .ok_or_else(|| format!("could not read the PRs merged into spec-{spec}, so landed blockers cannot be told from open ones"))?;
+    let mut landed: Vec<String> = Vec::new();
+    for line in bodies.lines() {
+        let l = line.trim();
+        if let Some(n) = l.get(..7).filter(|h| h.eq_ignore_ascii_case("closes ")).and_then(|_| l[7..].trim().strip_prefix('#')) {
+            if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
+                landed.push(n.to_string());
+            }
+        }
+    }
+    Ok(landed)
+}
+
 /// The open issues that block `n`: GitHub's own dependency edges (open
-/// blockers only), and each `#<m>` its `## Blocked by` section names that is
-/// open now. A blocker that is another ticket of this clump is no blocker,
-/// as the clump's brief says. Any read that fails is an `Err`: a blocker
-/// nobody could read is not "none".
-fn open_blockers(slug: &str, n: &str, body: Option<&str>, clump: &[String]) -> Result<Vec<String>, String> {
+/// blockers only, every page), and each `#<m>` its declared `Blocked by`
+/// names that is open now. A blocker that is another ticket of this clump, or
+/// that landed on the slice's integration branch, is met. Any read that fails
+/// is an `Err`, and so is a declaration that cannot be told apart from
+/// another: a blocker nobody could read is not "none". A blocker in another
+/// repo is returned as `owner/name#<n>`, never matched against a bare number.
+fn open_blockers(slug: &str, n: &str, body: Option<&str>, clump: &[String], landed: &[String]) -> Result<Vec<String>, String> {
+    let jq = format!(
+        ".[] | select(.state == \"open\") | if (.repository_url | endswith(\"/repos/{slug}\")) then (.number | tostring) else ((.repository_url | sub(\".*/repos/\"; \"\")) + \"#\" + (.number | tostring)) end"
+    );
     let native = quiet_stdout_bounded(
         "gh",
-        &["api", &format!("repos/{slug}/issues/{n}/dependencies/blocked_by"), "--jq", ".[] | select(.state == \"open\") | .number"],
+        &["api", "--paginate", &format!("repos/{slug}/issues/{n}/dependencies/blocked_by"), "--jq", &jq],
         gh_query_timeout(),
     )?
     .ok_or_else(|| format!("could not read #{n}'s blockers from GitHub"))?;
     let mut open: Vec<String> = native.split_whitespace().map(str::to_string).collect();
-    for r in body.map(blocked_by_refs).unwrap_or_default() {
-        if open.contains(&r) {
+    let refs = match body.map(declared_blockers) {
+        Some(Declared::Text(t)) => bare_refs(&t),
+        Some(Declared::Ambiguous) => return Err(format!("#{n} declares its blockers more than once, so which is its own cannot be told; leave one `Blocked by`")),
+        Some(Declared::Silent) | None => Vec::new(),
+    };
+    for r in refs {
+        if open.contains(&r) || landed.contains(&r) {
             continue;
         }
         match lane::issue_state::read_timeout(slug, &r, gh_query_timeout())? {
@@ -991,31 +1105,29 @@ fn open_blockers(slug: &str, n: &str, body: Option<&str>, clump: &[String]) -> R
             None => return Err(format!("#{n} names blocker #{r}, which could not be read")),
         }
     }
-    open.retain(|b| b != n && !clump.contains(b));
+    open.retain(|b| b != n && !clump.contains(b) && !landed.contains(b));
     Ok(open)
 }
 
 /// How many spec runs the box may hold before a new `--spec` dispatch
 /// refuses. Each is an opus session that fans out its own workers; 23 at once
-/// took load to 59 on 32 cores (#1904). `LANE_SPEC_RUN_CAP` overrides it.
-const DEFAULT_SPEC_RUN_CAP: usize = 8;
-
-fn spec_run_cap() -> usize {
-    env::var("LANE_SPEC_RUN_CAP").ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_SPEC_RUN_CAP)
-}
+/// took load to 59 on 32 cores (#1904).
+const SPEC_RUN_CAP: usize = 8;
 
 /// Whether a herdr agent name is a spec run's: `<repo>-spec-<n>`.
 fn is_spec_run_name(name: &str) -> bool {
     name.rsplit_once("-spec-").is_some_and(|(_, n)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
-/// The spec runs live in herdr now, from a fresh `agent list`. A listing that
-/// fails is an `Err`, never zero.
+/// The spec runs live in herdr now, from a fresh `agent list`: every
+/// `<repo>-spec-<n>` agent not `done`. An idle one still counts: a spec run
+/// sits idle while its slices build, and fans out more workers when they
+/// land. A listing that fails is an `Err`, never zero.
 fn live_spec_runs() -> Result<usize, String> {
     let out = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT)
         .ok_or("herdr agent list failed or timed out, so the live spec runs cannot be counted")?;
     let agents = herdr::parse_agents(&out).ok_or("herdr agent list gave output of an unexpected shape, so the live spec runs cannot be counted")?;
-    Ok(agents.iter().filter(|a| is_spec_run_name(a.name())).count())
+    Ok(agents.iter().filter(|a| is_spec_run_name(a.name()) && a.status() != "done").count())
 }
 
 fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
@@ -1245,6 +1357,8 @@ fn run() -> Result<(), ExitCode> {
     // and every ticket of the clump is read before any of them is claimed,
     // which is what makes the claim all-or-nothing.
     let mut tickets: Vec<Ticket> = Vec::new();
+    // Each ticket's body, read once: the blocker check below reads them.
+    let mut bodies: Vec<(String, Option<String>)> = Vec::new();
     for n in &ns {
         let issue = match lane::issue_state::read_timeout(&slug, n, gh_query_timeout()) {
             Ok(Some(issue)) => issue,
@@ -1290,14 +1404,9 @@ fn run() -> Result<(), ExitCode> {
         if body.is_none() && !labelled {
             return Err(die(format!("could not read #{n}'s body to check its blockers")));
         }
-        let blockers = open_blockers(&slug, n, body.as_deref(), &ns).map_err(die)?;
-        if !blockers.is_empty() {
-            let each: Vec<String> = blockers.iter().map(|b| format!("#{b}")).collect();
-            return Err(die(format!("#{n} is blocked by open {}", each.join(", "))));
-        }
-        let body = if labelled { body } else { None };
+        bodies.push((n.clone(), body.clone()));
         let body_unreadable = labelled && body.is_none();
-        let stripped_for = body.as_deref().and_then(lane::targets::first_code_target);
+        let stripped_for = if labelled { body.as_deref().and_then(lane::targets::first_code_target) } else { None };
         tickets.push(Ticket {
             n: n.clone(),
             ready,
@@ -1347,9 +1456,8 @@ fn run() -> Result<(), ExitCode> {
     // any run starts; the live count is what stops the burst (#1904).
     if let Mode::Spec { .. } = mode {
         let live = live_spec_runs().map_err(die)?;
-        let cap = spec_run_cap();
-        if live >= cap {
-            return Err(die(format!("{live} spec runs are live, at the cap of {cap} (LANE_SPEC_RUN_CAP); dispatch again when one lands")));
+        if live >= SPEC_RUN_CAP {
+            return Err(die(format!("{live} spec runs are live, at the cap of {SPEC_RUN_CAP}; dispatch again when one lands")));
         }
     }
 
@@ -1438,6 +1546,19 @@ fn run() -> Result<(), ExitCode> {
         }
         Mode::Plain => slice_base(&primary, &slug, &ns).map_err(die)?,
     };
+    // Blockers, now that the base is known: on a slice, a blocker that landed
+    // on the integration branch is met though its issue stays open.
+    let landed = match &base {
+        Base::Slice { spec } => landed_on(&slug, spec).map_err(die)?,
+        _ => Vec::new(),
+    };
+    for (t, body) in &bodies {
+        let blockers = open_blockers(&slug, t, body.as_deref(), &ns, &landed).map_err(die)?;
+        if !blockers.is_empty() {
+            let each: Vec<String> = blockers.iter().map(|b| if b.contains('#') { b.clone() } else { format!("#{b}") }).collect();
+            return Err(die(format!("#{t} is blocked by open {}", each.join(", "))));
+        }
+    }
     // The clump lands as one diff. Light is the docs-only tier, so one
     // ticket that is not docs-only makes the whole diff code — the same
     // reading as a worker raising light to heavy the moment its diff turns
@@ -1520,7 +1641,13 @@ fn run() -> Result<(), ExitCode> {
             }
         }
     }
-    drop(claim_lock);
+    // A spec run is counted against the cap by its herdr agent, which exists
+    // only once `herdr agent start` has run: the lock stays held until then,
+    // so a second spec dispatch of this repo counts this one (#1904).
+    let mut claim_lock = Some(claim_lock);
+    if !matches!(mode, Mode::Spec { .. }) {
+        claim_lock.take();
+    }
     let claim = Claim { tickets: &tickets, slug: &slug, wt: &wt };
 
     let start = match &base {
@@ -1615,6 +1742,7 @@ fn run() -> Result<(), ExitCode> {
         None,
     )?;
 
+    claim_lock.take();
     let (brief, described) = match mode {
         Mode::Plain => {
             let (marker, merger) = if chris_merges { (" --chris-merges", ", Chris merges") } else { ("", "") };
@@ -1653,24 +1781,42 @@ fn run() -> Result<(), ExitCode> {
 
     // `--until working` says the agent started doing something, not that
     // the brief is the thing it is doing: read the pane back for the line.
+    // `visible`: herdr refuses the scrollback sources of a working agent.
     let slash = match mode {
         Mode::Plain => format!("/implement {n}"),
         Mode::Spec { .. } => format!("/implement-spec {n}"),
     };
     let tries = 5;
     let mut seen = false;
+    let mut unread: Option<String> = None;
     for i in 0..tries {
         if i > 0 {
             std::thread::sleep(env_ms_or("LANE_BRIEF_POLL_MS", 1000));
         }
-        let pane_text = run_timeout("herdr", &["agent", "read", &agent, "--source", "recent-unwrapped", "--lines", "200"], HERDR_QUERY_TIMEOUT);
-        if matches!(&pane_text, Ok(o) if o.success && o.combined.contains(&slash)) {
-            seen = true;
-            break;
-        }
+        unread = match run_timeout("herdr", &["agent", "read", &agent, "--source", "visible", "--lines", "200"], HERDR_QUERY_TIMEOUT) {
+            Ok(o) if o.success && o.combined.contains(&slash) => {
+                seen = true;
+                break;
+            }
+            Ok(o) if o.success => None,
+            Ok(o) => Some(o.combined),
+            Err(e) => Some(e.to_string()),
+        };
     }
     if !seen {
-        return Err(claim.fail("confirming the brief", &format!("the brief did not arrive: no `{slash}` line in {agent}'s pane after {tries} reads")));
+        // Not `claim.fail`: the agent is already `working`, so the worker
+        // may be live with the brief. Release lines here would unclaim a
+        // running worker (friction log 2026-11-13).
+        let why = match &unread {
+            Some(e) => format!("could not read {agent}'s pane after {tries} tries ({})", e.trim()),
+            None => format!("the brief did not arrive: no `{slash}` line in {agent}'s pane after {tries} reads"),
+        };
+        eprintln!("implement-dispatch: confirming the brief failed: {why}");
+        eprintln!("the worker may be running with its tickets claimed: read the pane (herdr agent read {agent} --source visible) before releasing anything");
+        if wt.exists() {
+            eprintln!("workspace left in place at {}", wt.display());
+        }
+        return Err(ExitCode::FAILURE);
     }
 
     let session = worker_session_name(&home, wt.to_str().unwrap_or(""), &agent);
