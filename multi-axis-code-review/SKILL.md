@@ -307,26 +307,9 @@ if [ -f "$worktree/docs/agents/review-generated-paths.txt" ]; then
     case "$p" in ''|'#'*) ;; *) generated+=("$p"); excludes+=(":(exclude)$p") ;; esac
   done <"$worktree/docs/agents/review-generated-paths.txt"
 fi
-capture_stat() { # <range>: the one stat line every axis prompt carries
-  local gen="" n=0 list=""
-  if [ "${#generated[@]}" -gt 0 ]; then
-    gen=$(git -C "$worktree" diff --name-only "$1" -- "${generated[@]}") || return 1
-    [ -z "$gen" ] || { n=$(printf '%s\n' "$gen" | wc -l); list=": $(printf '%s\n' "$gen" | paste -sd, -)"; }
-  fi
-  printf 'captured: %s; excluded %s generated file(s)%s\n' \
-    "$(git -C "$worktree" diff --shortstat "$1" -- . "${excludes[@]}")" "$n" "$list"
-}
-# The publish protocol, stated once for both capture modes below. Each mode sets
-# its own `patch` stem, takes a temp path from new_capture, writes into it, then
-# hands both to publish_capture, which appends the temp path's random suffix.
-new_capture() { mktemp "$dir/.diff-$n.XXXXXX"; }   # unique per invocation; prints the path
-publish_capture() { # <tmp> <stem>: fail on an empty write here, not inside three sub-agents
-  [ -s "$1" ] || { rm -f "$1"; echo "capture for $2 is empty" >&2; return 1; }
-  # The suffix is mktemp's, unique per invocation; a shell pid is only per shell,
-  # and two captures at one revision in one shell would share it.
-  mv "$1" "$2-${1##*.}.patch" &&        # atomic publish: no axis ever reads a half-written patch
-    wc -l "$2-${1##*.}.patch"           # this exact path and this count go in every prompt
-}
+# The capture functions (capture_stat, new_capture, publish_capture) live in a
+# script, not here: the harness substitutes the skill's args for positional parameters (#1693).
+. ~/.agents/skills/multi-axis-code-review/capture-lib.sh
 ```
 
 Then, for a fixed point, the range capture — in the same shell as the preamble,
@@ -397,7 +380,7 @@ done
 # awk dedupes, so a sha named twice contributes one diff.
 ordered=$(for s in $resolved; do
     printf '%s %s\n' "$(git -C "$worktree" rev-list --count "$s")" "$s"
-  done | sort -n -k1,1 -k2,2 | awk '!seen[$2]++ {print $2}')
+  done | sort -n -k1,1 -k2,2 | awk -v c=2 '!seen[$c]++ {print $c}')
 key=$(printf '%s\n' "$ordered" | git -C "$worktree" hash-object --stdin | cut -c1-12)
 patch="$dir/diff-$n-list$key"             # list digest; the protocol adds the suffix
 tmp=$(new_capture) || exit 1
@@ -554,10 +537,10 @@ The check is a script shipped with this skill,
 You write one file, outside the checkout, defining `mutate`:
 
 ```
-mutate() {   # $1 the id, $2 the witness worktree, $3 a marker path
-  # strip that test's constraint in $2, then on the line IMMEDIATELY before
+mutate() {   # called with the id, the witness worktree and a marker path, in that order
+  # strip that test's constraint in the witness worktree, then on the line IMMEDIATELY before
   # the covering suite's command create the marker, and run only that suite:
-  : >"$3"
+  : >"<the marker path>"
   ...
 }
 ```

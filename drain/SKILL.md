@@ -47,7 +47,7 @@ steps below.
    and at its own 240 seconds:
 
    ```
-   awk -v s=<start> '$1 >= s && /bundle started:|nothing to drain|stopped:|drain\.py:/ {print; fflush(); exit}' < <(timeout 240 tail -n +1 -F ~/.cache/agent-jobs/drain-<repo-short>/progress)
+   awk -v s=<start> -v f=1 '$f >= s && /bundle started:|nothing to drain|stopped:|drain\.py:/ {print; fflush(); exit}' < <(timeout 240 tail -n +1 -F ~/.cache/agent-jobs/drain-<repo-short>/progress)
    ```
 
    - A `bundle started:` line: print its tickets with their titles and the
