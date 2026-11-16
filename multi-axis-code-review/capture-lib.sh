@@ -1,8 +1,6 @@
 # Sourced, never run: the capture functions of multi-axis-code-review/SKILL.md § 4.
-# They live here because the harness substitutes an invocation's arguments for
-# `$1`, `$2` inside a SKILL.md's shell blocks, so a function carrying `"$1"`
-# there cannot run (#1693). `tests/skill-md-no-positional.test.sh` keeps
-# positional parameters out of every SKILL.md block.
+# They live here, not in SKILL.md, because of #1693; the reason is stated in
+# tests/skill-md-no-positional.test.sh.
 #
 # The caller's shell has set `dir`, `n`, `worktree`, `generated` and `excludes`
 # (SKILL.md's preamble) before it sources this file.

@@ -307,9 +307,10 @@ if [ -f "$worktree/docs/agents/review-generated-paths.txt" ]; then
     case "$p" in ''|'#'*) ;; *) generated+=("$p"); excludes+=(":(exclude)$p") ;; esac
   done <"$worktree/docs/agents/review-generated-paths.txt"
 fi
-# The capture functions (capture_stat, new_capture, publish_capture) live in a
-# script, not here: the harness substitutes the skill's args for positional parameters (#1693).
-. ~/.agents/skills/multi-axis-code-review/capture-lib.sh
+# capture_stat, new_capture and publish_capture live in a script, not here
+# (why: tests/skill-md-no-positional.test.sh, #1693).
+. ~/.agents/skills/multi-axis-code-review/capture-lib.sh || {
+  echo "capture-lib.sh is missing or unreadable: reinstall the skill, never retype the capture" >&2; exit 1; }
 ```
 
 Then, for a fixed point, the range capture — in the same shell as the preamble,
@@ -537,9 +538,10 @@ The check is a script shipped with this skill,
 You write one file, outside the checkout, defining `mutate`:
 
 ```
-mutate() {   # called with the id, the witness worktree and a marker path, in that order
-  # strip that test's constraint in the witness worktree, then on the line IMMEDIATELY before
-  # the covering suite's command create the marker, and run only that suite:
+mutate() {   # arguments, in order: the id, the witness worktree, a marker path
+  # strip that test's constraint in the witness worktree, then on the line
+  # IMMEDIATELY before the covering suite's command create the marker (the
+  # third argument) and run only that suite:
   : >"<the marker path>"
   ...
 }
