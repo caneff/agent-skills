@@ -66,6 +66,10 @@ skip() { # skip <why> — pass the call through, and say a record will not exist
 
 [ -n "$cmd" ] || skip "this call carries no command to wrap"
 command -v job-run >/dev/null 2>&1 || skip "job-run is not on PATH (run flow/install.sh)"
+# job-run refuses a script ending in a top-level `&` (#1901); wrapping one would
+# fail the call, so the hook asks job-run (--check) and passes the call through
+# with the reason when it refuses.
+refusal=$(job-run --check -- bash -c "$cmd" 2>&1) || skip "${refusal#job-run: }"
 
 # <slug> - <tail of the tool_use_id>. The slug is the Bash call's description
 # (what the job is, which the job-wake prompt then shows), else the first word

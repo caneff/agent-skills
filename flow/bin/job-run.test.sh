@@ -94,10 +94,125 @@ lines=$("$job_run" --name chatty -- sh -c 'seq 1 20000' 2>/dev/null | wc -l)
 
 # bash hands an async command /dev/null, so without the fd this silently differs
 # from running the job unwrapped.
-got=$(echo hello | "$job_run" --name reads-stdin -- cat 2>/dev/null)
+got=$(echo hello | "$job_run" --name reads-stdin --stdin -- cat 2>/dev/null)
 [ "$got" = hello ] \
-  && ok "the caller's stdin reaches the job" \
-  || no "the caller's stdin reaches the job" "got=$got"
+  && ok "--stdin passes the caller's stdin to the job" \
+  || no "--stdin passes the caller's stdin to the job" "got=$got"
+
+# Both drive a real background job-run and signal the wrapper itself.
+start_bg() { # start_bg <name> ; echoes the job-run pid
+  "$job_run" --name "$1" -- sh -c 'echo started; sleep 5' >/dev/null 2>&1 &
+  echo $!
+}
+await() { # await <file> — up to ~3s for a file to appear
+  local i; for i in $(seq 1 60); do [ -e "$1" ] && return 0; sleep 0.05; done; return 1
+}
+
+# Default: stdin is closed (/dev/null), so a reader sees EOF at once rather than
+# waiting on a pipe that never closes (a 33-minute stall, #1698).
+got=$( (sleep 30 | timeout 10 "$job_run" --name closed-stdin -- cat) 2>/dev/null); rc=$?
+[ "$rc" = 0 ] && [ -z "$got" ] \
+  && ok "by default the job's stdin is closed, so a reader sees EOF" \
+  || no "by default the job's stdin is closed, so a reader sees EOF" "rc=$rc got=$got"
+
+# Default wall-clock timeout, overridable; the kill is recorded as
+# cause=timeout, rc=124.
+started=$(date +%s)
+"$job_run" --name slow --timeout 1 -- sleep 30 >/dev/null 2>&1; rc=$?
+took=$(( $(date +%s) - started ))
+[ "$rc" = 124 ] && grep -q '^rc=124$' "$jobs_dir/slow/exit" \
+  && grep -q '^cause=timeout$' "$jobs_dir/slow/exit" && [ "$took" -lt 15 ] \
+  && ok "--timeout kills a job past its limit and records cause=timeout rc=124" \
+  || no "--timeout kills a job past its limit and records cause=timeout rc=124" \
+     "rc=$rc took=$took $(cat "$jobs_dir/slow/exit" 2>&1)"
+
+# The job writes its descendant's pid, so the check names this run's own process.
+"$job_run" --name slow-tree --timeout 1 -- sh -c 'sleep 30 & echo $! > "$0"; wait' "$tmp/kid.pid" >/dev/null 2>&1
+sleep 0.5
+kid=$(cat "$tmp/kid.pid" 2>/dev/null)
+if [ -n "$kid" ] && ! kill -0 "$kid" 2>/dev/null; then ok "a timeout kills the job's descendants too"
+else no "a timeout kills the job's descendants too" "kid=$kid"; [ -n "$kid" ] && kill -9 "$kid" 2>/dev/null; fi
+
+# A job that ignores TERM is killed after the grace, still recorded as a timeout.
+started=$(date +%s)
+JOB_RUN_KILL_GRACE=1 "$job_run" --name stubborn --timeout 1 -- sh -c 'trap "" TERM; while :; do sleep 1; done' >/dev/null 2>&1; rc=$?
+took=$(( $(date +%s) - started ))
+[ "$rc" = 124 ] && grep -q '^cause=timeout$' "$jobs_dir/stubborn/exit" && [ "$took" -lt 15 ] \
+  && ok "a job that ignores TERM is killed after the grace and recorded as a timeout" \
+  || no "a job that ignores TERM is killed after the grace and recorded as a timeout" \
+     "rc=$rc took=$took $(cat "$jobs_dir/stubborn/exit" 2>&1)"
+
+# The default is 3600 s: a live run has a watchdog whose sleep is that long.
+pid=$(start_bg dflt)
+await "$jobs_dir/dflt/progress" && sleep 0.3
+tree=$(pgrep -P "$pid" | xargs -r -n1 pgrep -a -P | tr '\n' ' ')
+case "$tree" in *"sleep 3600"*) ok "a run with no --timeout has the 3600 s default limit" ;;
+  *) no "a run with no --timeout has the 3600 s default limit" "children: $tree" ;; esac
+kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+
+# A job that ends in time leaves no watchdog: the unique limit names this run's.
+lim=$((4000 + RANDOM % 1000))
+"$job_run" --name fast --timeout "$lim" -- true >/dev/null 2>&1
+grep -q '^cause=exit$' "$jobs_dir/fast/exit" && ! pgrep -fx "sleep $lim" >/dev/null \
+  && ok "a job that ends in time records a normal exit and leaves no watchdog" \
+  || no "a job that ends in time records a normal exit and leaves no watchdog" \
+     "$(cat "$jobs_dir/fast/exit" 2>&1)"
+
+# A wrapper SIGKILLed before the limit orphans its watchdog; at the limit it
+# must not stamp a later same-name run as a timeout.
+"$job_run" --name orphan --timeout 2 -- sleep 30 >/dev/null 2>&1 & opid=$!
+await "$jobs_dir/orphan/pid" && sleep 0.3
+kill -9 "$opid" 2>/dev/null; wait "$opid" 2>/dev/null
+pkill -9 -P "$opid" 2>/dev/null
+sleep 2.5
+"$job_run" --name orphan --timeout 30 -- true >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && grep -q '^cause=exit$' "$jobs_dir/orphan/exit" \
+  && ok "an orphaned watchdog does not mark a later run as a timeout" \
+  || no "an orphaned watchdog does not mark a later run as a timeout" \
+     "rc=$rc $(cat "$jobs_dir/orphan/exit" 2>&1)"
+"$job_run" --name zero --timeout 0 -- true >/dev/null 2>&1
+grep -q '^rc=0$' "$jobs_dir/zero/exit" \
+  && ok "--timeout 0 means no limit" \
+  || no "--timeout 0 means no limit"
+JOB_RUN_TIMEOUT=1 "$job_run" --name envto -- sleep 30 >/dev/null 2>&1
+grep -q '^cause=timeout$' "$jobs_dir/envto/exit" \
+  && ok "JOB_RUN_TIMEOUT sets the default" \
+  || no "JOB_RUN_TIMEOUT sets the default" "$(cat "$jobs_dir/envto/exit" 2>&1)"
+for bad in abc -1 1.5 ""; do
+  out=$("$job_run" --name badto --timeout "$bad" -- true 2>&1); rc=$?
+  [ "$rc" = 1 ] && grep -q -- '--timeout' <<<"$out" \
+    && ok "--timeout '$bad' is refused" || no "--timeout '$bad' is refused" "rc=$rc out=$out"
+done
+out=$("$job_run" --timeout 2>&1); rc=$?
+[ "$rc" = 1 ] && ok "--timeout with no value errors" || no "--timeout with no value errors" "rc=$rc out=$out"
+
+# A trailing `&` in a `sh -c` script makes the wrapper's direct child exit at
+# once, so the wake fires before the work ends (#1901).
+for shellcmd in "bash -c" "sh -c" "bash -lc"; do
+  out=$("$job_run" --name trailing-amp -- $shellcmd 'sleep 5 &' 2>&1); rc=$?
+  [ "$rc" = 1 ] && grep -q 'trailing &' <<<"$out" && [ ! -d "$jobs_dir/trailing-amp" ] \
+    && ok "$shellcmd with a script ending in & is refused, creating no run" \
+    || no "$shellcmd with a script ending in & is refused, creating no run" "rc=$rc out=$out"
+done
+out=$("$job_run" --name trailing-amp -- sh -c 'sleep 3 &' sh 2>&1); rc=$?
+[ "$rc" = 1 ] && ok "a script followed by \$0 is still read" || no "a script followed by \$0 is still read" "rc=$rc"
+out=$("$job_run" --name amp-data -- echo 'q=a&b&' 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$out" = 'q=a&b&' ] \
+  && ok "an & ending another program's argument is data, not refused" \
+  || no "an & ending another program's argument is data, not refused" "rc=$rc out=$out"
+"$job_run" --name amp-ok -- bash -c 'true &&
+echo hi' >/dev/null 2>&1
+grep -q '^rc=0$' "$jobs_dir/amp-ok/exit" \
+  && ok "a && inside a script is not a trailing &" \
+  || no "a && inside a script is not a trailing &"
+"$job_run" --check -- bash -c 'echo x &&' >/dev/null 2>&1; rc1=$?
+"$job_run" --check -- bash -c 'echo x &' >/dev/null 2>&1; rc2=$?
+[ "$rc1" = 0 ] && [ "$rc2" = 1 ] && [ ! -d "$jobs_dir/amp-ok-check" ] \
+  && ok "--check allows a script ending in && and refuses one ending in &" \
+  || no "--check allows a script ending in && and refuses one ending in &" "rc1=$rc1 rc2=$rc2"
+
+[ "$fails" = 0 ] && echo "ALL PASS"
+exit "$fails"
 
 # A job whose child outlives it makes the wrapper write the one progress line it
 # does not write from inside the tee; under a non-UTC TZ that line must still be
@@ -128,15 +243,6 @@ out=$("$job_run" --status "../../etc" 2>&1); rc=$?
 [ "$rc" != 0 ] && [[ "$out" == *"may hold only"* ]] \
   && ok "--status refuses the same shape" \
   || no "--status refuses the same shape" "rc=$rc out=$out"
-
-# Both drive a real background job-run and signal the wrapper itself.
-start_bg() { # start_bg <name> ; echoes the job-run pid
-  "$job_run" --name "$1" -- sh -c 'echo started; sleep 5' >/dev/null 2>&1 &
-  echo $!
-}
-await() { # await <file> — up to ~3s for a file to appear
-  local i; for i in $(seq 1 60); do [ -e "$1" ] && return 0; sleep 0.05; done; return 1
-}
 
 pid=$(start_bg termed)
 await "$jobs_dir/termed/progress" && sleep 0.2

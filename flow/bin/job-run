@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # job-run — run a job so that its death leaves a record.
 #
-#   job-run --name <name> [--group <group>] -- <command> [args...]
+#   job-run --name <name> [--group <group>] [--timeout <seconds>] [--stdin] -- <command> [args...]
+#   job-run --check -- <command> [args...]
 #   job-run --status <name>
 #   job-run --wait <name>
 #
@@ -59,11 +60,37 @@
 # `alive` true, so a wait on a run whose pid was reused blocks until that
 # process ends.
 #
-# job-run records; it does not prevent. No setsid, no detaching, no keep-alive.
+# The job's stdin is /dev/null by default: a job that reads it sees EOF at once
+# instead of waiting on a pipe nothing will close (a probe stalled 33 minutes
+# that way, #1698). `--stdin` hands the job the caller's stdin, for a job that
+# is fed through a pipe.
+#
+# A job also has a wall-clock limit, DEFAULT_TIMEOUT seconds (3600), set per run
+# with `--timeout <seconds>` or for the shell with $JOB_RUN_TIMEOUT; `0` means no
+# limit. A job still running at the limit gets TERM (its descendants too), and
+# KILL after KILL_GRACE seconds; the run records `rc=124 cause=timeout`, so the
+# job-wake mod names it as timed out. A long job, a drain run among them, passes
+# `--timeout 0` or its own bound.
+#
+# The clock runs while the job is paused (SIGSTOP), so a hunt reprioritised that
+# way still counts toward its limit.
+#
+# A shell run as `sh|bash|dash|zsh|ksh -c '<script>'` whose script ends in a
+# top-level `&` is refused: the wrapper waits on its direct child only, so that
+# child returns at once and the wake fires before the work ends (#1901). Drop the
+# `&`. Only that shape is read: an `&` in another program's argument is data, and
+# `& disown` is not seen. `--check -- <command>` runs this one test and nothing
+# else (exit 0 fine, 1 refused, message on stderr), so the wrap hook asks job-run
+# instead of keeping a copy.
+#
+# Otherwise job-run records and does not prevent. No setsid, no detaching, no
+# keep-alive.
 set -uo pipefail
 
 PROGRESS_CAP=$((10 * 1024 * 1024))
 WAIT_INTERVAL=3
+DEFAULT_TIMEOUT=3600
+KILL_GRACE=${JOB_RUN_KILL_GRACE:-5}
 
 die() { echo "job-run: $*" >&2; exit 1; }
 
@@ -74,11 +101,14 @@ alive() { # alive <run dir>
   [ -n "$p" ] && kill -0 "$p" 2>/dev/null
 }
 
-name="" status="" wait_for="" group="" group_given=0
+name="" status="" wait_for="" group="" group_given=0 timeout="${JOB_RUN_TIMEOUT:-$DEFAULT_TIMEOUT}" pass_stdin=0 check_only=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --name)    [ $# -ge 2 ] || die "--name needs a value"; name="$2"; shift 2 ;;
     --group)   [ $# -ge 2 ] || die "--group needs a value"; group="$2"; group_given=1; shift 2 ;;
+    --timeout) [ $# -ge 2 ] || die "--timeout needs a value"; timeout="$2"; shift 2 ;;
+    --stdin)   pass_stdin=1; shift ;;
+    --check)   check_only=1; shift ;;
     --status)  [ $# -ge 2 ] || die "--status needs a value"; status="$2"; shift 2 ;;
     --wait)    [ $# -ge 2 ] || die "--wait needs a value"; wait_for="$2"; shift 2 ;;
     -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
@@ -165,11 +195,39 @@ if [ -n "$wait_for" ]; then
   done
 fi
 
+# The one place a trailing & is judged (#1901). Only `<shell> -c <script>` is read:
+# elsewhere an & is an argument's own data.
+refuse_trailing_amp() { # refuse_trailing_amp <command> [args...]
+  case "${1##*/}" in sh|bash|dash|zsh|ksh) ;; *) return 0 ;; esac
+  shift
+  local script
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -c|-[a-zA-Z]*c) script="${2-}"; break ;;
+      -*) shift ;;
+      *) return 0 ;;
+    esac
+  done
+  [ -n "${script-}" ] || return 0
+  script="${script%"${script##*[![:space:]]}"}"
+  case "$script" in
+    *'&&') ;;
+    *'&') die "the script ends in a trailing &: job-run waits on its direct child, which returns at once, so the wake fires before the work ends. Drop the & (running job-run itself in the background is what backgrounds it)" ;;
+  esac
+}
+if [ "$check_only" = 1 ]; then
+  [ $# -gt 0 ] || die "no command: put it after --"
+  refuse_trailing_amp "$@"; exit 0
+fi
+
 [ -n "$name" ] || die "--name is required and is never auto-generated (a path you cannot predict is a path you lose to a context summary)"
 check_name "$name"
 [ "$group_given" = 1 ] && { [ -n "$group" ] || die "--group may not be empty"; check_name "$group" --group; }
 [ $# -gt 0 ] || die "no command: put it after --"
-
+case "$timeout" in
+  ''|*[!0-9]*) die "--timeout (or JOB_RUN_TIMEOUT) must be a whole number of seconds, 0 for none: '$timeout'" ;;
+esac
+refuse_trailing_amp "$@"
 dir="$jobs_dir/$name"
 
 # Retention, on every start, so nobody has to remember it: a run directory
@@ -202,7 +260,7 @@ mkdir -p "$dir" || die "cannot create $dir"
 
 # The previous run's pid and exit record go together, then the new pid lands: a
 # `--wait` racing this start sees `starting`, never the old run's verdict.
-rm -f "$dir/exit" "$dir/pid" "$dir/group"
+rm -f "$dir/exit" "$dir/pid" "$dir/group" "$dir/timed_out"
 # Everything a reader pairs with the pid lands before it, so a new pid never
 # sits beside the previous run's output or owner.
 : > "$dir/progress"
@@ -244,7 +302,7 @@ pipe="$dir/.pipe"
 rm -f "$pipe"
 mkfifo "$pipe" || die "cannot create $pipe"
 
-rc=0 child="" recorded=0
+rc=0 child="" recorded=0 timed_out=0
 
 record() {
   [ "$recorded" = 1 ] && return
@@ -254,14 +312,17 @@ record() {
   # job that exited. rc above 128 is a death by signal, named rather than left
   # as arithmetic for the reader.
   local cause=exit signame
-  if [ "$rc" -gt 128 ] 2>/dev/null; then
+  if [ "$timed_out" = 1 ]; then
+    cause=timeout
+  elif [ "$rc" -gt 128 ] 2>/dev/null; then
     signame=$(kill -l $((rc - 128)) 2>/dev/null) && [ -n "$signame" ] && cause="$signame"
   fi
   printf 'rc=%s\ncause=%s\nended=%s\n' "$rc" "$cause" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/exit"
 }
 
 # Forward the signal to the job and go on waiting. A job that ignores it keeps
-# the wrapper alive, which is the truth: this records, it does not enforce.
+# the wrapper alive, which is the truth: a signal sent to the wrapper is only
+# forwarded. The one thing job-run enforces is the time limit below.
 stop() { [ -n "$child" ] && kill -"$1" "$child" 2>/dev/null; }
 trap 'stop INT' INT
 trap 'stop TERM' TERM
@@ -269,12 +330,37 @@ trap 'rm -f "$pipe"; record' EXIT
 
 tee_through < "$pipe" &
 cap_pid=$!
-# Hand the job this shell's stdin: bash gives an async command /dev/null, and a
-# wrapped job that silently lost its input would not look like the unwrapped one.
-exec 3<&0
+# The job's stdin: /dev/null by default, so a reader sees EOF. With --stdin it is
+# this shell's own (bash would give an async command /dev/null regardless), so a
+# job fed through a pipe sees what the unwrapped job would.
+if [ "$pass_stdin" = 1 ]; then exec 3<&0; else exec 3</dev/null; fi
 "$@" > "$pipe" 2>&1 <&3 &
 child=$!
 exec 3<&-
+
+# Wall-clock limit. The watchdog is a subshell that sleeps, then signals the
+# job's whole tree; `timed_out` is its only report. It is killed, sleep and all,
+# the moment the job ends, so a short job leaves nothing behind.
+tree() { # tree <pid> ; the pid and every descendant, one per line
+  local k; echo "$1"
+  for k in $(pgrep -P "$1" 2>/dev/null); do tree "$k"; done
+}
+signal_tree() { local p; for p in $(tree "$child"); do kill -"$1" "$p" 2>/dev/null; done; }
+wd="" wrapper=$$
+if [ "$timeout" -gt 0 ]; then
+  (
+    sleep "$timeout" || exit 0
+    # A wrapper SIGKILLed before the limit leaves this watchdog behind: it acts
+    # only for a wrapper still alive, so it can never stamp a later run's dir or
+    # signal a recycled pid.
+    kill -0 "$wrapper" 2>/dev/null || exit 0
+    : > "$dir/timed_out"
+    signal_tree TERM
+    sleep "$KILL_GRACE" || exit 0
+    signal_tree KILL
+  ) >/dev/null 2>&1 </dev/null &
+  wd=$!
+fi
 # A trapped signal interrupts `wait`, so wait again until the child is reaped.
 # Whatever it returns then is the job's own status, 127 (command not found)
 # included — that is how a mistyped background job most often dies.
@@ -284,6 +370,13 @@ while :; do
   rc=$w
   break
 done
+if [ -n "$wd" ]; then
+  # The watchdog's sleep first, so killing the subshell leaves no orphan; the
+  # subshell treats a killed sleep as "job ended" and exits quietly.
+  pkill -P "$wd" 2>/dev/null; kill "$wd" 2>/dev/null; wait "$wd" 2>/dev/null
+  if [ -e "$dir/timed_out" ]; then rc=124; timed_out=1; fi
+  rm -f "$dir/timed_out"
+fi
 # Drain the tee, but bounded: a grandchild that inherited the pipe and outlived
 # the job would otherwise hold the exit record hostage for as long as it runs,
 # which is exactly the silence this script exists to end. Cutting the drain

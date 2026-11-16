@@ -17,7 +17,9 @@ mkdir -p "$tmp/withjr" "$tmp/nojr"
 for t in cat jq tr cut sed; do
   p=$(command -v "$t") && { ln -sf "$p" "$tmp/withjr/$t"; ln -sf "$p" "$tmp/nojr/$t"; }
 done
-printf '#!/usr/bin/env bash\nexit 0\n' > "$tmp/withjr/job-run"; chmod +x "$tmp/withjr/job-run"
+# `--check` is job-run's own test, so the stub hands it to the real script.
+real_jr="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../bin" && pwd)/job-run"
+printf '#!/bin/bash\n[ "${1-}" = --check ] && exec /bin/bash "%s" "$@"\nexit 0\n' "$real_jr" > "$tmp/withjr/job-run"; chmod +x "$tmp/withjr/job-run"
 
 fire() { # fire <path-dir> <json> ; prints "<rc>|<stdout>"
   local out rc
@@ -155,6 +157,15 @@ mentions_wrapped wrapped "grep -r 'job-run --name ' flow/"
 mentions_wrapped wrapped "echo 'use job-run --name x'"
 mentions_wrapped skipped "job-run --name x -- true"
 mentions_wrapped skipped "echo a; job-run --name x -- true"
+# job-run refuses a trailing top-level & (#1901); wrapping one would fail the call.
+mentions_wrapped skipped "sleep 5 &"
+mentions_wrapped wrapped "true && true"
+mentions_wrapped wrapped "echo 'q=a&b&'"
+mentions_wrapped wrapped "echo x &&"
+body=$(fire withjr '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AbCdEfGhIjKlMnOp","tool_input":{"command":"sleep 5 &","run_in_background":true}}'); body=${body#*|}
+printf '%s' "$body" | jq -e '.systemMessage | test("trailing &")' >/dev/null 2>&1 \
+  && ok "a trailing & passes through and says why" \
+  || no "a trailing & passes through and says why" "$body"
 silent "a non-Bash tool call passes through untouched" withjr "$other"
 passthrough "a command the wrapper cannot take passes through" withjr "$nocmd"
 passthrough "job-run missing from PATH passes through" nojr "$bg"
