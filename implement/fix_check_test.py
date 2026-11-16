@@ -361,10 +361,27 @@ def test_a_fixed_sha_that_is_no_commit_on_spec_3_is_refused(spec_world):
     assert_fix_check(w, 1, f"S1: fixed sha {stray} is not a hex commit on origin/spec-3", w.primary, "origin/spec-3")
 
 
-def test_a_finding_moved_onto_a_slice_the_integration_pr_closes_is_refused(spec_world):
+def test_a_finding_moved_onto_a_slice_the_integration_pr_closes_passes(spec_world):
+    # #1700: a slice filed mid-run is the finding's home, and the integration PR closes it on merge.
     w = spec_world
     w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 4})
-    assert_fix_check(w, 1, "P1: moved ticket #4 is one this PR closes", w.primary, "origin/spec-3")
+    w.tickets = {4: "OPEN"}
+    w.write_gh()
+    assert_fix_check(w, 0, "2 findings", w.primary, "origin/spec-3")
+
+
+def test_a_finding_moved_onto_a_slice_the_pr_closes_that_is_already_closed_is_refused(spec_world):
+    w = spec_world
+    w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 4})
+    w.tickets = {4: "CLOSED"}
+    w.write_gh()
+    assert_fix_check(w, 1, "P1: moved ticket #4 is CLOSED", w.primary, "origin/spec-3")
+
+
+def test_a_finding_moved_onto_the_spec_itself_is_refused(spec_world):
+    w = spec_world
+    w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 3})
+    assert_fix_check(w, 1, "P1: moved ticket #3 is the ticket this review is of", w.primary, "origin/spec-3")
 
 
 def test_a_spec_review_with_every_finding_disposed_passes_on_origin_spec_3(spec_world):
@@ -409,12 +426,9 @@ def test_every_finding_disposed_once_passes(reviewed):
      lambda w: [fixed("S1", "HEAD"), disputed("P1")], 1, "S1: fixed sha HEAD"),
     ("an abbreviated fixed sha resolves",
      lambda w: [fixed("S1", w.fix_sha[:9]), disputed("P1")], 0, "2 findings"),
-    ("a finding moved onto the ticket this PR closes would be lost at the merge",
+    ("a finding moved onto the ticket this review is of would be lost at the merge",
      lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 5}],
-     1, "P1: moved ticket #5 is one this PR closes"),
-    ("a finding moved onto a ticket a later commit of the branch closes",
-     lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 6}],
-     1, "P1: moved ticket #6 is one this PR closes"),
+     1, "P1: moved ticket #5 is the ticket this review is of"),
     ("a moved line without an integer ticket",
      lambda w: [fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": "77"}],
      1, "P1: moved without a ticket number"),
@@ -440,6 +454,13 @@ def test_dispositions_of_standards_and_spec_findings(reviewed, name, lines, code
 def test_a_moved_ticket_that_is_open_passes(reviewed):
     reviewed.dispositions(fixed("S1", reviewed.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 77})
     reviewed.tickets = {77: "OPEN"}
+    reviewed.write_gh()
+    assert_fix_check(reviewed, 0, "2 findings")
+
+
+def test_a_finding_moved_onto_a_ticket_a_later_commit_of_the_branch_closes_passes(reviewed):
+    reviewed.dispositions(fixed("S1", reviewed.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 6})
+    reviewed.tickets = {6: "OPEN"}
     reviewed.write_gh()
     assert_fix_check(reviewed, 0, "2 findings")
 

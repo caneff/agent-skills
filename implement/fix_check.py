@@ -15,8 +15,10 @@ mechanically, what the removed verification pass used to grade:
   is read by `runfile.read_dispositions`, the one reader of the format;
 - a `fixed` line's sha is a hex commit on the branch, past `origin`'s default
   branch;
-- a `moved` line's ticket is open, and is not a ticket this PR closes (the
-  merge would close it and lose the finding);
+- a `moved` line's ticket is open, and is not the ticket under review (the
+  merge would close it and lose the finding). A ticket this PR closes is
+  accepted (#1700): a slice filed mid-run is the finding's home, still open
+  until the merge;
 - a `disputed` line gives a reason;
 - a correctness finding's line carries `rating`, CONFIRMED or PLAUSIBLE
   (#1230);
@@ -45,7 +47,8 @@ A spec's own review (#1461) is keyed on the spec number: `<ticket>` is the
 spec and the branch is `spec-<ticket>` (the controller passes
 `origin/spec-<ticket>`), so every `fixed` sha is a commit on the integration
 branch past the default branch, and a finding `moved` onto a slice the
-integration PR closes is refused like any other closed-by-this-PR ticket.
+integration PR closes passes while the slice is open (#1700); onto the spec
+itself it is refused.
 
 A review that ran also has its ledger row (#1527): a sidecar with no
 `review_ledger.py append --type <axis>` row for this ticket and repo (a skip
@@ -95,7 +98,6 @@ RATINGS = ("CONFIRMED", "PLAUSIBLE")
 # a change to one is a change to both.
 SPEC_BASE = re.compile(r"spec-\d+\Z")
 SHA = re.compile(r"[0-9a-f]{7,40}\Z")
-CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #(\d+)", re.IGNORECASE)
 
 
 class Unanswerable(Exception):
@@ -201,7 +203,7 @@ def ledger_types(reviews, n):
 
 class Branch:
     """The branch under review: its commits past the default branch, their
-    start time and the tickets they close.
+    start time.
 
     The start is the earliest author time, not committer time: a rebase after
     the review wave rewrites every committer date to now, which would read each
@@ -219,7 +221,6 @@ class Branch:
         log = git("log", f"{self.base}..{name}", "--format=%at%n%B%n==end==").split("==end==")
         stamps = [int(chunk.strip().split("\n", 1)[0]) for chunk in log if chunk.strip()]
         self.started = min(stamps) if stamps else None
-        self.closes = {int(m.group(1)) for m in CLOSES.finditer("\n".join(log))}
 
     def fresh(self, path):
         """None when `path` was written after the branch began; else the problem."""
@@ -371,8 +372,8 @@ def check_disposition(obj, n, branch):
         ticket = obj.get("ticket")
         if not isinstance(ticket, int) or isinstance(ticket, bool):
             return f"{fid}: moved without a ticket number"
-        if ticket == n or ticket in branch.closes:
-            return f"{fid}: moved ticket #{ticket} is one this PR closes, so the merge would close it"
+        if ticket == n:
+            return f"{fid}: moved ticket #{ticket} is the ticket this review is of, so the merge would close it"
         state = moved_state(ticket)
         if state != "OPEN":
             return f"{fid}: moved ticket #{ticket} is {state}, not OPEN"
