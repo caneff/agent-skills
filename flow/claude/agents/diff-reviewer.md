@@ -94,9 +94,10 @@ staged mutation lands in the real repository.
 A backgrounded run whose completion notice never arrives leaves you waiting on
 nothing, and the whole review wave behind you. The Bash tool's own `timeout`
 (its maximum, 600000 ms) is your ceiling. The script's per-mutant limit (240 s
-by default, `--baseline-seconds` to scale it, `multi-axis-code-review/SKILL.md`
-§ 4) ends one hung mutant inside it; with more mutants than slots the batches run
-one after another, so pass `--timeout` small enough that batches x limit fits. A
+by default, `--baseline-seconds` to scale it; see
+`multi-axis-code-review/SKILL.md` § 4) ends one hung mutant inside it; with more
+mutants than slots the batches run one after another, so pass `--timeout` small
+enough that batches x limit fits. A
 run that still exceeds the ceiling is not waited on: record `witness not run
 (timeout)` for those mutations in your report, rate nothing from them, and
 finish the rest of the review.
