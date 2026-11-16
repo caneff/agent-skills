@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Contract test for block-footguns.py: synthetic PreToolUse JSON on stdin ->
-# exit 0 (allow) or exit 2 + message on stderr (block). Two guards:
+# exit 0 (allow) or exit 2 + message on stderr (block). Three guards:
 #   #1860 a bare `rg` (no path, stdin not supplied) hangs on the harness stdin;
-#   #1704 a Python `open(p,'w')` that reads p in the same statement empties p.
+#   #1704 a Python `open(p,'w')` that reads p in the same statement empties p;
+#   #1923 a backtick command substitution trips Claude Code's built-in rm check.
 # Run: bash flow/claude/hooks/block-footguns.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,7 +70,7 @@ rg foo ."
 
 # Findings of the review wave (C2, C5, C6/P3).
 allows "rg with a path from a substitution" 'rg -n foo $(git ls-files)'
-allows "rg with a path from backticks" 'rg -n foo `git ls-files`'
+blocks "rg with a path from backticks hits the backtick guard" 'rg -n foo `git ls-files`' '$(git ls-files)'
 blocks "rg inside a substitution, no path" 'echo "x: $(rg foo)"; echo $(rg foo | head)' "Pass a path"
 blocks "rg inside a backtick substitution, no path" 'echo `rg foo`' "Pass a path"
 # Only comment handling keeps this quiet: the `;` would split off a bare rg.
@@ -121,6 +122,32 @@ open(p,'w').write(open(p).read())
 EOF"
 blocks "uv run python" "uv run python -c \"open(p,'w').write(open(p).read())\"" "$msg"
 allows "read-mode open only" "python3 -c \"print(open(p).read())\""
+
+# ---- backtick command substitution (#1923) ----
+bt="backtick"
+blocks "the denied elapsed-time line" 'started=$(date +%s); echo secs $((`date +%s`-started))' "$bt"
+blocks "rewrite is in the message" 'echo secs $((`date +%s`-started))' '$(date +%s)'
+blocks "plain backtick substitution" 'echo `date`' '$(date)'
+blocks "backtick inside a bash -c script" "bash -c 'echo \`date\`'" "$bt"
+blocks "backtick inside double quotes" 'echo "took `date`"' "$bt"
+blocks "the elapsed-time line inside double quotes" 'echo "secs $((`date +%s`-started))"' "$bt"
+blocks "backtick in an unquoted heredoc" 'cat <<EOF
+`date`
+EOF' "$bt"
+allows "escaped backtick inside double quotes" 'echo "a \`date\` b"'
+allows "backtick in a quoted-delimiter heredoc" "cat <<'EOF'
+\`date\`
+EOF"
+blocks "backtick after a pipe" 'ls | wc -l `echo x`' "$bt"
+allows "dollar-paren elapsed time" 'started=$(date +%s); echo secs $(( $(date +%s) - started ))'
+allows "backtick in a single-quoted commit message" "git commit -m 'run \`date\` here'"
+allows "backtick in a heredoc body" "git commit -F - <<'EOF'
+use \`date\` not x
+EOF"
+allows "backtick in a comment" 'ls # `date`'
+allows "dollar-paren beside a single-quoted backtick" "echo \$(date) '\`x\`'"
+allows "backtick in a single-quoted gh body" "gh pr comment 5 --body 'the \`rg\` flag'"
+allows "escaped backtick" 'echo \`date\`'
 
 # ---- the guard never fails silently ----
 # A tool call with no command is reported, not read as a clean command (S2).

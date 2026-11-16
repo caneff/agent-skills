@@ -276,8 +276,12 @@ No PR and no reviewer; Chris reads the log after.
   outside the checkout, because this workspace is yours and § Before the PR
   step 3 clears it. Otherwise follow the *Isolation* paragraph of
   `multi-axis-code-review/SKILL.md`'s witness check: never a byte copy of
-  the tree. Time each mutation (`started=$(date +%s)` before its suite) and,
-  once it has gone red, green or never reached its suite, record it (#1270):
+  the tree. Time each mutation: `started=$(date +%s)` before its suite, then
+  `secs=$(( $(date +%s) - started ))` after it. Never write command
+  substitution with backticks in a Bash call: Claude Code's safety check
+  cannot parse them and refuses the whole command as a possible dangerous
+  `rm` (#1923). Once it has gone red, green or never reached its suite,
+  record it (#1270):
 
   ```
   python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo <repo> --ticket <n> --type worker-mutation --mutation-id <id> --outcome red|green|unknown --seconds <s>
