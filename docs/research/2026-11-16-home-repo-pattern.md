@@ -49,6 +49,8 @@ directories, so a session in any repo also sees the index.
 
 ## Verdict
 
-Do not reorganize. If a repo index is wanted, it goes into a file the
-global `CLAUDE.md` already loads, as one line per active repo (path, remote,
-purpose). This is the Bizzotto variant, and every session keeps its own repo.
+Do not reorganize. Chris took the repo index (2026-11-16):
+`flow/claude/REPOS.md`, one line per active repo (path, remote, purpose),
+behind a pointer line in the global `CLAUDE.md`. An `@`-import would put the
+always-on files over the 1,100-word budget in `tests/check-always-on.py`.
+Every session keeps its own repo.

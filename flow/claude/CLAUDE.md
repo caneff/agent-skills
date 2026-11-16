@@ -76,6 +76,8 @@ doc-vs-code contradiction is mine to rule on: report both sides.
   `~/.agents/skills/flow/claude/VISUAL-INSPECTION.md`.
 - Before you dispatch, wait on, merge or clean up after a worker with no
   skill loaded: read `~/.agents/skills/flow/claude/OPERATIONS.md`.
+- Before you look for, open or change another repo of mine: read
+  `~/.agents/skills/flow/claude/REPOS.md`.
 
 # Vault memory
 @/home/caneff/src/second-brain-v2/Memory/RULES.md
