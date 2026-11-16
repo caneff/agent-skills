@@ -50,10 +50,9 @@ If the repo uses bare `.githooks/` + a hand-written bash CI mirror (my old
 pattern), retire both: install `templates/pre-commit-config.yaml`, delete the
 bash mirror and `core.hooksPath`. One source of truth now.
 
-Every converted repo then gets the merge gate, whatever it had before: set it
-with `git config land.testcmd 'just check'` (`flow/claude/WORKFLOW.md` § CI),
-and give `AGENTS.md` the template's `## End-to-end seam` section (step 6), which
-is what the lane's merges run. A GitHub Actions workflow the repo already has
+Every converted repo then gets the merge gate, whatever it had before: give
+`AGENTS.md` the template's `## End-to-end seam` section (step 6), which is the
+command the lane's merges run (`flow/claude/WORKFLOW.md` § CI). A GitHub Actions workflow the repo already has
 stays: add none, delete none.
 
 ## 6. Docs + task runner

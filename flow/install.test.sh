@@ -2,7 +2,7 @@
 # Contract test for install.sh's hook handling: run it from a scratch clone
 # with HOME pointed at a scratch dir, so nothing live is touched. Asserts the
 # retired pre-push symlink (tests/all.sh) is removed and never re-created
-# (#633) — the merge gate (git config land.testcmd) is where tests/all.sh runs.
+# (#633) — the merge gate (the AGENTS.md `## End-to-end seam` command) is where tests/all.sh runs.
 # Run: bash flow/install.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
