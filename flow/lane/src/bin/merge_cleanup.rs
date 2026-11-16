@@ -129,7 +129,8 @@ reached the branch only by cherry-pick, revert or a merge commit writes other
 entries, so such a branch is refused too: clean it up by hand.
 
 The claim clears with the merge: every ticket the branch's merged PR closes
-in this repo, plus the branch's own implement-<n>, loses its in-progress
+in this repo, plus the branch's own implement-<n> (or a spec's integration
+branch spec-<p>, for the spec issue <p>), loses its in-progress
 label and its assignees once that issue is closed. A clump lands as one PR
 closing several tickets, and its closingIssuesReferences is that list. A
 slice landed on spec-<p> clears its own ticket's claim while the ticket is
@@ -1330,7 +1331,7 @@ impl Cleanup {
     /// `closingIssuesReferences` only for a PR into the default branch, so
     /// the ticket stays open until then.
     fn clear_landed_claims(&self, path: &str, b: &str, pr: Option<&str>, slice: bool) -> bool {
-        let Some(n) = ticket_number(b) else { return true };
+        let Some(n) = claim_number(b) else { return true };
         let what = format!("clearing #{n}'s in-progress label and assignee");
         if !on_path("gh") {
             skip(&what, "gh is not on PATH");
@@ -1595,6 +1596,17 @@ fn has_own_commit(path: &str, b: &str) -> bool {
 fn ticket_number(b: &str) -> Option<&str> {
     let n = b.strip_prefix("implement-")?;
     (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).then_some(n)
+}
+
+/// The ticket whose claim a landed branch clears: `ticket_number`'s, or the
+/// spec issue behind an integration branch `spec-<p>` (#1814). Only the claim
+/// clear reads it: `moot_without_commits` keeps `ticket_number`, since a spec
+/// branch is never a slice's moot ticket.
+fn claim_number(b: &str) -> Option<&str> {
+    ticket_number(b).or_else(|| {
+        let p = b.strip_prefix("spec-")?;
+        (!p.is_empty() && p.chars().all(|c| c.is_ascii_digit())).then_some(p)
+    })
 }
 
 enum Reaped {

@@ -241,6 +241,18 @@ impl Cleanup {
         self.record_pr_head(repo, &b, &b);
     }
 
+    /// A merged integration branch `spec-<p>`, as the spec's own PR into main
+    /// leaves it: pushed with one commit, its tip recorded as that PR's head.
+    pub fn mk_spec_branch(&self, repo: &Path, p: &str) {
+        let d = repo.to_str().unwrap();
+        let b = format!("spec-{p}");
+        self.git_ok(&["-C", d, "checkout", "-q", "-b", &b, "main"]);
+        self.commit_line(d, &b, &b);
+        self.git_ok(&["-C", d, "push", "-q", "-u", "origin", &b]);
+        self.git_ok(&["-C", d, "checkout", "-q", "main"]);
+        self.record_pr_head(repo, &b, &b);
+    }
+
     /// A slice of spec `p`, as `implement-dispatch` leaves one: `spec-<p>`
     /// pushed off main, `implement-<n>` cut from it with one commit and
     /// pushed, and `branch.implement-<n>.base` set to `spec-<p>`. Nothing
