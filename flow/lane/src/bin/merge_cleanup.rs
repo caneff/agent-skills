@@ -130,8 +130,8 @@ entries, so such a branch is refused too: clean it up by hand.
 
 The claim clears with the merge: every ticket the branch's merged PR closes
 in this repo, plus the branch's own implement-<n> (or a spec's integration
-branch spec-<p>, for the spec issue <p>), loses its in-progress
-label and its assignees once that issue is closed. A clump lands as one PR
+branch spec-<p>, for the spec issue <p>), loses its in-progress label and its
+assignees once that issue is closed. A clump lands as one PR
 closing several tickets, and its closingIssuesReferences is that list. A
 slice landed on spec-<p> clears its own ticket's claim while the ticket is
 still open, and leaves it open: the spec's integration PR closes it.
@@ -1316,7 +1316,7 @@ impl Cleanup {
     /// several tickets, so the PR's `closingIssuesReferences` is the list —
     /// the branch's own ticket alone left the rest of a clump showing a
     /// stale claim, hand-cleared six times on one trial clump. The branch
-    /// must still be a plain `implement-<n>`: a branch the lane did not cut
+    /// must still be a plain `implement-<n>` or a spec's `spec-<p>`: a branch the lane did not cut
     /// is not a claim this command owns. No gh or no origin: nothing to do,
     /// and `true`. A failed edit is different: git cleanup already
     /// succeeded by then, so this returns `false` — `cleanup_branch` reads
@@ -1565,8 +1565,15 @@ fn pr_closed_tickets(slug: &str, pr: Option<&str>) -> Result<Vec<u64>, String> {
 /// shape; a change to one is a change to both.
 fn recorded_spec_base(path: &str, b: &str) -> Option<String> {
     let base = quiet_stdout("git", &["-C", path, "config", "--get", &format!("branch.{b}.base")])?;
-    let p = base.strip_prefix("spec-")?;
-    (!p.is_empty() && p.chars().all(|c| c.is_ascii_digit())).then_some(base)
+    digits_after("spec-", &base)?;
+    Some(base)
+}
+
+/// What follows `prefix` in `s`, when it is a non-empty run of digits: the
+/// one shape of `implement-<n>` and `spec-<p>` alike.
+fn digits_after<'a>(prefix: &str, s: &'a str) -> Option<&'a str> {
+    let n = s.strip_prefix(prefix)?;
+    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).then_some(n)
 }
 
 /// Where `b` started: the sha `implement-dispatch` recorded in
@@ -1594,8 +1601,7 @@ fn has_own_commit(path: &str, b: &str) -> bool {
 /// `implement-`. `implement-spec-<n>` and any other branch name have no
 /// ticket to clear.
 fn ticket_number(b: &str) -> Option<&str> {
-    let n = b.strip_prefix("implement-")?;
-    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).then_some(n)
+    digits_after("implement-", b)
 }
 
 /// The ticket whose claim a landed branch clears: `ticket_number`'s, or the
@@ -1603,10 +1609,7 @@ fn ticket_number(b: &str) -> Option<&str> {
 /// clear reads it: `moot_without_commits` keeps `ticket_number`, since a spec
 /// branch is never a slice's moot ticket.
 fn claim_number(b: &str) -> Option<&str> {
-    ticket_number(b).or_else(|| {
-        let p = b.strip_prefix("spec-")?;
-        (!p.is_empty() && p.chars().all(|c| c.is_ascii_digit())).then_some(p)
-    })
+    ticket_number(b).or_else(|| digits_after("spec-", b))
 }
 
 enum Reaped {

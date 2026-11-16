@@ -769,12 +769,12 @@ fn a_failed_issue_read_is_reported_not_swallowed() {
 }
 
 #[test]
-fn a_closed_specs_claim_is_cleared_when_its_spec_branch_is_cleaned_up() {
-    // #1814: spec-<p> is the integration seat; its closed spec issue kept
+fn a_closed_specs_claim_is_cleared_when_its_integration_branch_is_cleaned_up() {
+    // #1814: spec-<p> is the integration branch; its closed spec issue kept
     // `in-progress` after the cleanup deleted the branch.
     let c = Cleanup::new();
     let r = c.mkfixture("r5s");
-    c.mk_spec_branch(&r, "1729");
+    c.mk_integration_branch(&r, "1729");
     let run = c.mc(
         Tools::Full,
         &["--repo", s(&r), "spec-1729"],
@@ -788,12 +788,23 @@ fn a_closed_specs_claim_is_cleared_when_its_spec_branch_is_cleaned_up() {
 }
 
 #[test]
-fn an_open_specs_claim_survives_its_spec_branch_cleanup() {
+fn an_open_specs_claim_survives_its_integration_branch_cleanup() {
     let c = Cleanup::new();
     let r = c.mkfixture("r5o");
-    c.mk_spec_branch(&r, "1730");
+    c.mk_integration_branch(&r, "1730");
     let run = c.mc(Tools::Full, &["--repo", s(&r), "spec-1730"], &[("GH_STATE", "OPEN"), ("GH_LABELS", "spec,in-progress")]);
     assert!(run.ok, "{}", run.text());
+    assert!(!c.calls().contains("issue edit"), "{}", c.calls());
+}
+
+#[test]
+fn a_spec_prefixed_branch_with_a_non_numeric_suffix_clears_no_claim() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r5n");
+    c.mk_integration_branch(&r, "1729-rework");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "spec-1729-rework"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.has("clearing #"), "{}", run.text());
     assert!(!c.calls().contains("issue edit"), "{}", c.calls());
 }
 

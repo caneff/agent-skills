@@ -232,20 +232,18 @@ impl Cleanup {
     /// tests: pushed, its tip recorded as a merged PR's head, main left
     /// checked out.
     pub fn mk_implement_branch(&self, repo: &Path, n: &str) {
-        let d = repo.to_str().unwrap();
-        let b = format!("implement-{n}");
-        self.git_ok(&["-C", d, "checkout", "-q", "-b", &b, "main"]);
-        self.commit_line(d, &b, &b);
-        self.git_ok(&["-C", d, "push", "-q", "-u", "origin", &b]);
-        self.git_ok(&["-C", d, "checkout", "-q", "main"]);
-        self.record_pr_head(repo, &b, &b);
+        self.mk_merged_branch(repo, &format!("implement-{n}"));
     }
 
     /// A merged integration branch `spec-<p>`, as the spec's own PR into main
-    /// leaves it: pushed with one commit, its tip recorded as that PR's head.
-    pub fn mk_spec_branch(&self, repo: &Path, p: &str) {
+    /// leaves it.
+    pub fn mk_integration_branch(&self, repo: &Path, p: &str) {
+        self.mk_merged_branch(repo, &format!("spec-{p}"));
+    }
+
+    fn mk_merged_branch(&self, repo: &Path, b: &str) {
         let d = repo.to_str().unwrap();
-        let b = format!("spec-{p}");
+        let b = b.to_string();
         self.git_ok(&["-C", d, "checkout", "-q", "-b", &b, "main"]);
         self.commit_line(d, &b, &b);
         self.git_ok(&["-C", d, "push", "-q", "-u", "origin", &b]);
