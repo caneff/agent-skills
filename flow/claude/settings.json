@@ -154,6 +154,11 @@
           },
           {
             "type": "command",
+            "command": "python3 -I /home/caneff/.agents/skills/flow/claude/hooks/block-footguns.py",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/teach-process-kill.sh",
             "timeout": 5
           },
