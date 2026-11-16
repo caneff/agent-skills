@@ -85,7 +85,7 @@ repo's convention.
 |---|---|---|
 | declares a directive | `closure` | the candidate's files, plus every file that includes one of them |
 | states `None` | `no-include-graph` | the candidate's own files, and nothing else |
-| has no such section | `subtree` | not resolvable; the hold reads the named files, and the files under a directory a ticket names |
+| has no such section | `subtree` | not resolvable; the hold reads the named files, and the files under a directory a candidate names |
 
 In `subtree` mode a clump carries **no closure at all** — only the files its
 tickets named. Handing a consumer those files under the name `closure` would
@@ -96,7 +96,7 @@ stated words:
 
 - ``clumping: include closure, from AGENTS.md (directive `#include <path>`, generator `make examples`); each candidate is its own clump``
 - `clumping: include closure, from AGENTS.md (declared None: this repo has no include graph, so each candidate closes over its own files); each candidate is its own clump`
-- `clumping: no closure — AGENTS.md declares no include closure, so the hold reads only the files each candidate names, and the directories they name; each candidate is its own clump`
+- `clumping: no closure — AGENTS.md declares no include closure, so the hold reads only the files each candidate names, and the files under a directory a candidate names; each candidate is its own clump`
 
 A stated `None` and silence clump the same way on a repo that really has no
 include graph, and they are still two different answers. Silence is a gap
@@ -176,7 +176,7 @@ Forward edges are not followed either: changing a component that includes a
 shared snippet does not regenerate the snippet, and does not reach the
 snippet's other includers.
 
-## The conservative fallback
+## The no-declaration fallback
 
 With no declaration there is no graph, so the hold reads only the files each
 candidate names, and the files under a directory a candidate names. A shared

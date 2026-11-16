@@ -25,6 +25,7 @@ import functools
 import os
 import re
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 
@@ -514,15 +515,21 @@ def _parent_number(body, repo):
     return None
 
 
+# Pause between the two listing reads: the lag #1897 saw was seconds long,
+# so an immediate second read could meet the same stale listing.
+SETTLE_SECONDS = 3.0
+
+
 def settled_listing(tracker, label):
     """The queue's issues, read twice (#1897): a listing taken right after a
     label edit has dropped a clear ticket from every bucket, then listed it
-    seconds later. The second read wins for every ticket it lists. A ticket
+    seconds later. The reads are `SETTLE_SECONDS` apart. The second read wins for every ticket it lists. A ticket
     only the first listed is read on its own: it stays when still open and
     carrying `label`, and is dropped when it left the queue between the
     reads. A read that fails raises, so an unreadable ticket is never an
     absent one."""
     first = tracker.issues(label)
+    time.sleep(SETTLE_SECONDS)
     second = tracker.issues(label)
     listed = {i["number"] for i in second}
     kept = list(second)
@@ -530,7 +537,11 @@ def settled_listing(tracker, label):
         if issue["number"] in listed:
             continue
         now = tracker.issue(issue["number"])
-        if now.get("state") == "open" and label in tracker_mod.labels(now):
+        state = now.get("state")
+        if state not in ("open", "closed"):
+            raise tracker_mod.TrackerError(
+                f"issue #{issue['number']}: re-read answered state {state!r}")
+        if state == "open" and label in tracker_mod.labels(now):
             kept.append(now)
     return sorted(kept, key=lambda i: i["number"])
 

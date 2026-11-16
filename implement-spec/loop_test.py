@@ -224,14 +224,27 @@ def test_picks_runs_a_nested_directory_file_beside_its_parent_directory_file():
     assert len(picked) == 2 and held == []
 
 
-def test_picks_does_not_treat_the_repo_root_as_a_shared_directory():
-    candidates = [
-        {"tickets": [1], "files": ["AGENTS.md"]},
-        {"tickets": [2], "files": ["GLOSSARY.md"]},
-    ]
-    picked, held = loop.picks(loop.frontier(candidates, []), 2)
-    assert [c["tickets"] for c in picked] == [[1], [2]]
-    assert held == []
+def test_picks_holds_a_clump_under_a_directory_an_earlier_pick_names():
+    c = [{"tickets": [1], "files": ["examples/hit-counts", "a.md"]},
+         {"tickets": [2], "files": ["examples/hit-counts/build_size.py"]}]
+    picked, held = loop.picks(loop.frontier(c, []), 2)
+    assert [x["tickets"] for x in picked] == [[1]]
+    assert held[0]["over"] == ["examples/hit-counts/build_size.py"]
+
+
+def test_picks_holds_a_directory_naming_clump_beside_an_earlier_pick_in_it():
+    # The wider clump is picked first, so the directory-naming one is second.
+    c = [{"tickets": [1], "files": ["examples/hit-counts/a.py", "examples/hit-counts/b.py"]},
+         {"tickets": [2], "files": ["examples/hit-counts"]}]
+    picked, held = loop.picks(loop.frontier(c, []), 2)
+    assert [x["tickets"] for x in picked] == [[1]]
+    assert held[0]["over"] == ["examples/hit-counts/a.py", "examples/hit-counts/b.py"]
+
+
+def test_a_live_workspace_naming_a_directory_holds_a_clump_under_it():
+    live = [{"tickets": [655], "workspace": "/w/implement-655", "files": ["examples/hit-counts"]}]
+    state = loop.frontier([{"tickets": [666], "files": ["examples/hit-counts/x.py"]}], live)
+    assert state["dispatchable"] == [] and state["held"][0]["holder"] == 655
 
 
 def test_the_cli_dispatches_two_clumps_sharing_only_a_directory(tmp):
