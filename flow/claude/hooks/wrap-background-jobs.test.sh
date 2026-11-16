@@ -87,11 +87,11 @@ got=$(name_for 'cd /x && make test' ',"description":"Run the full test suite"')
   && ok "the name is taken from the description when there is one" \
   || no "the name is taken from the description when there is one" "$got"
 got=$(name_for 'mkdir -p /x' ',"description":""')
-case "$got" in mkdir-*) ok "an empty description falls back to the first word" ;;
-  *) no "an empty description falls back to the first word" "$got" ;; esac
+case "$got" in job-*) ok "an empty description with a file-verb first word gets the neutral job- prefix" ;;
+  *) no "an empty description with a file-verb first word gets the neutral job- prefix" "$got" ;; esac
 got=$(name_for 'mkdir -p /x' ',"description":"  /// "')
-case "$got" in mkdir-*) ok "a description with nothing to slug falls back to the first word" ;;
-  *) no "a description with nothing to slug falls back to the first word" "$got" ;; esac
+case "$got" in job-*) ok "a description with nothing to slug gets the neutral job- prefix for a file verb" ;;
+  *) no "a description with nothing to slug gets the neutral job- prefix for a file verb" "$got" ;; esac
 # The name sits unquoted in the rewritten command, so the whole command must
 # still read as `job-run --name <one legal token> -- bash -c <original>`; a
 # metacharacter that survived into the name would split or inject there.
@@ -110,8 +110,15 @@ got=$(name_for 'sleep 1' ',"description":"--- dashes   and   gaps ---"')
   && ok "leading dashes are stripped and runs of separators squeezed to one dash" \
   || no "leading dashes are stripped and runs of separators squeezed to one dash" "$got"
 got=$(name_for 'mkdir -p /x' ',"description":{"a":1}')
-case "$got" in mkdir-*) ok "a non-string description falls back to the first word" ;;
-  *) no "a non-string description falls back to the first word" "$got" ;; esac
+case "$got" in job-*) ok "a non-string description gets the neutral job- prefix for a file verb" ;;
+  *) no "a non-string description gets the neutral job- prefix for a file verb" "$got" ;; esac
+for verb in rm cd mkdir mv cp touch; do
+  got=$(name_for "$verb -p /x" '')
+  case "$got" in job-IjKlMnOp) ok "a leading $verb is never a job name" ;;
+    *) no "a leading $verb is never a job name" "$got" ;; esac
+done
+got=$(name_for 'make test' '')
+[ "$got" = "make-IjKlMnOp" ] && ok "another first word still names the job" || no "another first word still names the job" "$got"
 got=$(name_for 'sleep 1' ',"description":"A very long description that keeps going well past any sensible name length limit"')
 slug=${got%-*}
 [ "${#slug}" -le 40 ] && [ "${#slug}" -gt 24 ] \
@@ -178,6 +185,20 @@ got=$(fire withjr "$nocmd"); body=${got#*|}
 printf '%s' "$body" | jq -e '.systemMessage | test("no.*record"; "i")' >/dev/null 2>&1 \
   && ok "an unwrappable command says no record will exist" \
   || no "an unwrappable command says no record will exist" "$body"
+# A poll loop is refused, not wrapped (#1705): the one case where this hook
+# denies, because a loop inside job-run is the spin the no-poll rule bans.
+for loop in 'until [ "$(gh run list -q .[0].status)" = completed ]; do sleep 5; done' \
+            'gh run rerun 1 && sleep 3 && gh run watch 1'; do
+  pj=$(jq -nc --arg c "$loop" '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_use_id:"toolu_01AbCdEfGhIjKlMnOp",tool_input:{command:$c,run_in_background:true}}')
+  got=$(fire withjr "$pj"); rc=${got%%|*}; body=${got#*|}
+  [ "$rc" = 0 ] \
+    && [ "$(printf '%s' "$body" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)" = deny ] \
+    && printf '%s' "$body" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("pr_settle.py") and test("gh run watch")' >/dev/null 2>&1 \
+    && ! printf '%s' "$body" | jq -e '.hookSpecificOutput.updatedInput' >/dev/null 2>&1 \
+    && ok "a poll loop is denied naming pr_settle.py and gh run watch: $loop" \
+    || no "a poll loop is denied naming pr_settle.py and gh run watch: $loop" "rc=$rc body=$body"
+done
+
 blocked=0
 for j in "$bg" "$fg" "$noflag" "$wrapped" "$other" "$nocmd" \
          '' 'not json at all' '{}' '{"tool_name":"Bash"}' \

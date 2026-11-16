@@ -135,7 +135,7 @@ else no "a timeout kills the job's descendants too" "kid=$kid"; [ -n "$kid" ] &&
 
 # A job that ignores TERM is killed after the grace, still recorded as a timeout.
 started=$(date +%s)
-JOB_RUN_KILL_GRACE=1 "$job_run" --name stubborn --timeout 1 -- sh -c 'trap "" TERM; while :; do sleep 1; done' >/dev/null 2>&1; rc=$?
+JOB_RUN_KILL_GRACE=1 "$job_run" --name stubborn --timeout 1 -- sh -c 'trap "" TERM; for i in $(seq 60); do sleep 1; done' >/dev/null 2>&1; rc=$?
 took=$(( $(date +%s) - started ))
 [ "$rc" = 124 ] && grep -q '^cause=timeout$' "$jobs_dir/stubborn/exit" && [ "$took" -lt 15 ] \
   && ok "a job that ignores TERM is killed after the grace and recorded as a timeout" \
@@ -210,6 +210,39 @@ grep -q '^rc=0$' "$jobs_dir/amp-ok/exit" \
 [ "$rc1" = 0 ] && [ "$rc2" = 1 ] && [ ! -d "$jobs_dir/amp-ok-check" ] \
   && ok "--check allows a script ending in && and refuses one ending in &" \
   || no "--check allows a script ending in && and refuses one ending in &" "rc1=$rc1 rc2=$rc2"
+
+# A poll loop wrapped in a job re-creates the spin the no-poll rule bans: the
+# wrapper only hides it from the session (#1705). Refused with exit 2 under
+# --check (the hook's reading) and exit 1 on a real run, creating no run.
+for script in \
+  'until [ "$(gh run list --json status -q .[0].status)" = completed ]; do sleep 5; done' \
+  'while ps aux | grep -q loop57.sh; do sleep 5; done' \
+  'while true
+do
+  sleep 2
+done' \
+  'gh run rerun 1 && sleep 3 && gh run watch 1'; do
+  out=$("$job_run" --name poll-loop -- bash -c "$script" 2>&1); rc=$?
+  [ "$rc" = 1 ] && grep -q 'pr_settle.py' <<<"$out" && grep -q 'gh run watch' <<<"$out" && [ ! -d "$jobs_dir/poll-loop" ] \
+    && ok "a poll loop is refused naming pr_settle.py and gh run watch: ${script%%$'\n'*}" \
+    || no "a poll loop is refused naming pr_settle.py and gh run watch: ${script%%$'\n'*}" "rc=$rc out=$out"
+  "$job_run" --check -- bash -c "$script" >/dev/null 2>&1; rc=$?
+  [ "$rc" = 2 ] && ok "--check answers a poll loop with exit 2: ${script%%$'\n'*}" \
+    || no "--check answers a poll loop with exit 2: ${script%%$'\n'*}" "rc=$rc"
+done
+# Waiting is not polling when the loop has no sleep, a plain sleep is a job, and
+# a read loop that paces itself is not a condition poll.
+for script in \
+  'sleep 2; echo done' \
+  'for i in 1 2 3; do echo $i; sleep 1; done' \
+  'while read -r x; do echo "$x"; sleep 1; done < /dev/null' \
+  'while IFS= read -r x; do echo "$x"; sleep 1; done < /dev/null' \
+  'while [ "$n" -lt 3 ]; do n=$((n+1)); done'; do
+  "$job_run" --check -- bash -c "$script" >/dev/null 2>&1; rc=$?
+  [ "$rc" = 0 ] && ok "--check allows: ${script%%$'\n'*}" || no "--check allows: ${script%%$'\n'*}" "rc=$rc"
+done
+"$job_run" --check -- sleep 1 >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && ok "a direct sleep command is not read as a poll loop" || no "a direct sleep command is not read as a poll loop" "rc=$rc"
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

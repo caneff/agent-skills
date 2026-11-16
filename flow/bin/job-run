@@ -79,9 +79,11 @@
 # top-level `&` is refused: the wrapper waits on its direct child only, so that
 # child returns at once and the wake fires before the work ends (#1901). Drop the
 # `&`. Only that shape is read: an `&` in another program's argument is data, and
-# `& disown` is not seen. `--check -- <command>` runs this one test and nothing
-# else (exit 0 fine, 1 refused, message on stderr), so the wrap hook asks job-run
-# instead of keeping a copy.
+# `& disown` is not seen. The same shape of script is also refused when it polls
+# (#1705): an `until`/`while` loop that sleeps, or a `sleep` chained into `gh run
+# watch`; the message names pr_settle.py and `gh run watch`. `--check -- <command>`
+# runs these two tests and nothing else (exit 0 fine, 1 trailing &, 2 poll loop,
+# message on stderr), so the wrap hook asks job-run instead of keeping a copy.
 #
 # Otherwise job-run records and does not prevent. No setsid, no detaching, no
 # keep-alive.
@@ -195,9 +197,11 @@ if [ -n "$wait_for" ]; then
   done
 fi
 
-# The one place a trailing & is judged (#1901). Only `<shell> -c <script>` is read:
-# elsewhere an & is an argument's own data.
-refuse_trailing_amp() { # refuse_trailing_amp <command> [args...]
+# The one place a shell script is judged (#1901, #1705). Only
+# `<shell> -c <script>` is read: elsewhere an & or a sleep is an argument's own
+# data. Two refusals: a trailing & (exit 1), and a poll loop (exit 2, so the
+# wrap hook can tell a denial from a pass-through).
+refuse_script() { # refuse_script <command> [args...]
   case "${1##*/}" in sh|bash|dash|zsh|ksh) ;; *) return 0 ;; esac
   shift
   local script
@@ -214,10 +218,28 @@ refuse_trailing_amp() { # refuse_trailing_amp <command> [args...]
     *'&&') ;;
     *'&') die "the script ends in a trailing &: job-run waits on its direct child, which returns at once, so the wake fires before the work ends. Drop the & (running job-run itself in the background is what backgrounds it)" ;;
   esac
+  refuse_poll_loop "$script"
+}
+
+# A poll loop in a job is the spin the no-poll rule bans, with the wrapper
+# hiding it from the session (#1705). Read: an `until`/`while` loop whose body
+# sleeps (a `while read` loop pacing itself is not a condition poll), or a
+# `sleep` chained straight into `gh run watch` / `gh pr checks`. It is a text
+# match, so a quoted mention of the same shape is refused too; the cure is the
+# same (use the tool, or reword).
+refuse_poll_loop() { # refuse_poll_loop <script>
+  local s="$1" loop='(^|[^[:alnum:]_.-])(until|while)[[:space:]].*[;[:space:]]do[[:space:]]+(.*[;&|({[:space:]])?sleep[[:space:]]'
+  local watch='(^|[;&|({[:space:]])sleep[[:space:]]+[0-9.smhd]+[[:space:]]*(&&|;)[[:space:]]*gh[[:space:]]+(run[[:space:]]+watch|pr[[:space:]]+checks)'
+  s=$(printf '%s' "$s" | sed -E 's/(^|[^[:alnum:]_.-])while[[:space:]]+(IFS=[^[:space:]]*[[:space:]]+)?read[[:space:]]/\1for /g')
+  if [[ $s =~ $loop || $s =~ $watch ]]; then
+    msg="this script polls (a loop that sleeps, or a sleep before a watch): wrapping it in a job hides the spin, it does not remove it. Wait on the thing itself: python3 ~/.agents/skills/implement/pr_settle.py <pr> --repo <owner/name> for a PR's checks, gh run watch <run-id> for a run, job-run --wait <name> for another job"
+    [ "$check_only" = 1 ] && { echo "job-run: $msg" >&2; exit 2; }
+    die "$msg"
+  fi
 }
 if [ "$check_only" = 1 ]; then
   [ $# -gt 0 ] || die "no command: put it after --"
-  refuse_trailing_amp "$@"; exit 0
+  refuse_script "$@"; exit 0
 fi
 
 [ -n "$name" ] || die "--name is required and is never auto-generated (a path you cannot predict is a path you lose to a context summary)"
@@ -227,7 +249,7 @@ check_name "$name"
 case "$timeout" in
   ''|*[!0-9]*) die "--timeout (or JOB_RUN_TIMEOUT) must be a whole number of seconds, 0 for none: '$timeout'" ;;
 esac
-refuse_trailing_amp "$@"
+refuse_script "$@"
 dir="$jobs_dir/$name"
 
 # Retention, on every start, so nobody has to remember it: a run directory

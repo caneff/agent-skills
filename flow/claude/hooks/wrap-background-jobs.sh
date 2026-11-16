@@ -15,7 +15,10 @@
 # warning banner on every background job would be noise, and nothing here is a
 # warning.
 #
-# It degrades, it never blocks. A call it cannot wrap — no command, or `job-run`
+# It degrades and does not block, with one exception: a poll loop (`until`/`while`
+# that sleeps) is denied, naming pr_settle.py and `gh run watch` (#1705). job-run
+# owns that test, so a bare `job-run -- bash -c '<loop>'` is refused there too.
+# A call it cannot wrap — no command, or `job-run`
 # not on PATH — passes through unchanged *and* says so, because the one failure
 # worse than no record is an agent believing in a record that was never written.
 # An already-wrapped command passes through silently: that record exists.
@@ -69,18 +72,34 @@ command -v job-run >/dev/null 2>&1 || skip "job-run is not on PATH (run flow/ins
 # job-run refuses a script ending in a top-level `&` (#1901); wrapping one would
 # fail the call, so the hook asks job-run (--check) and passes the call through
 # with the reason when it refuses.
-refusal=$(job-run --check -- bash -c "$cmd" 2>&1) || skip "${refusal#job-run: }"
+refusal=$(job-run --check -- bash -c "$cmd" 2>&1); check_rc=$?
+# Exit 2 is the one refusal that denies (#1705): a poll loop in a job is the spin
+# the no-poll rule bans, and passing it through would run it. Any other non-zero
+# is a call job-run cannot take, which passes through and says so.
+if [ "$check_rc" = 2 ]; then
+  jq -nc --arg r "${refusal#job-run: }" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+  exit 0
+fi
+[ "$check_rc" = 0 ] || skip "${refusal#job-run: }"
 
 # <slug> - <tail of the tool_use_id>. The slug is the Bash call's description
 # (what the job is, which the job-wake prompt then shows), else the first word
-# of the command. The id makes concurrent runs of the same command distinct, so
+# of the command — unless that word is a file verb (`rm`, `cd`, `mkdir`, ...)
+# that names the cleanup around the job, not the job (#1711): then `job`. The id makes concurrent runs of the same command distinct, so
 # the wrapper's name-collision refusal can never turn into a failed tool call.
 slugify() { # slugify <max-length> ; stdin -> legal name fragment, may be empty
   tr -c 'A-Za-z0-9' '-' | tr -s '-' | sed 's/^-//' | cut -c1-"$1" | sed 's/-*$//'
 }
 desc=$(field '.tool_input.description // "" | if type == "string" then . else "" end')
 slug=$(printf '%s' "$desc" | slugify 40)
-[ -n "$slug" ] || slug=$(printf '%s' "${cmd%%[ 	;|&]*}" | slugify 24)
+if [ -z "$slug" ]; then
+  first=${cmd%%[ 	;|&]*}
+  case "${first##*/}" in
+    rm|cd|mkdir|rmdir|mv|cp|ln|touch|chmod|chown|pushd|popd|export|set|unset|source|.|true|:|echo) ;;
+    *) slug=$(printf '%s' "$first" | slugify 24) ;;
+  esac
+fi
 slug=${slug:-job}
 # With no tool_use_id there is no stable key, and uniqueness has to win: two
 # concurrent jobs sharing a name would hit job-run's live-name refusal and fail
