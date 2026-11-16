@@ -122,7 +122,8 @@ def test_missing_plugin_entry_fails_and_writes_no_record(env):
 def test_unreadable_usage_is_unknown(env, tmp_path):
     e, repo, body, home = env
     bad = tmp_path / "badusage"
-    bad.write_text("#!/bin/sh\necho 50.0 1790000000\nexit 30\n")  # a reading printed, but exit 30
+    # run as a python script: a reading printed, but exit 30
+    bad.write_text("import sys\nprint('50.0 1790000000')\nsys.exit(30)\n")
     bad.chmod(0o755)
     run(e, repo, body, CODEX_USAGE_GATE=str(bad))
     j = json.loads(cache(home)[1].read_text())
