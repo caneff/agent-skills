@@ -27,7 +27,8 @@ export SKILLS_DIR="$WORK"
 source "$SCRIPT_DIR/safe-update.sh"
 set +e   # the sourced script sets -e; these tests assert on exit codes
 # safe-update.sh forces no identity; the fixtures bring one.
-export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../tests/fixture-identity.sh"
+fixture_env
 cd "$WORK" || exit 1   # never stand in the repo, not even between cases
 
 fails=0

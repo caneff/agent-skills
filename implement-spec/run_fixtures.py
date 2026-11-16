@@ -1,9 +1,12 @@
 """Fixtures the run suites share; not a suite itself."""
 import json
+import sys
 import os
 import subprocess
 
 import runfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 
 def reopen_permissions(root):
@@ -46,8 +49,7 @@ def drop_job(run_id, root, lowest):
 def linked_worktree(primary, name):
     """A linked worktree of the git checkout `primary`, a sibling directory
     called `name` (an empty commit gives the checkout a HEAD to branch from)."""
-    ident = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+    ident = fixture_identity.env()
     subprocess.run(["git", "-C", primary, "commit", "-q", "--allow-empty",
                     "-m", "x"], check=True, env={**os.environ, **ident})
     path = os.path.join(os.path.dirname(primary), name)

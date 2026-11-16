@@ -7,6 +7,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
 import mutation_run  # noqa: E402
 import procs  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 
 def _git(repo, *args):
@@ -18,8 +20,7 @@ def _git(repo, *args):
 def _init_repo(path, files):
     os.makedirs(path, exist_ok=True)
     _git(path, "init", "-q")
-    _git(path, "config", "user.email", "t@example.invalid")
-    _git(path, "config", "user.name", "t")
+    fixture_identity.configure(path, os.path.dirname(os.path.abspath(path)))
     for rel in files:
         open(os.path.join(path, rel), "w").write("x = 1\n")
     return _commit(path, "init")

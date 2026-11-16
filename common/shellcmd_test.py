@@ -5,6 +5,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
+import fixture_identity  # noqa: E402
 import shellcmd  # noqa: E402
 
 
@@ -25,7 +26,7 @@ def repo(tmp_path):
     origin, work = str(tmp_path / "origin.git"), str(tmp_path / "work")
     sh("git", "init", "-q", "--bare", "-b", "main", origin)
     sh("git", "clone", "-q", origin, work)
-    sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "c", cwd=work)
+    sh("git", *fixture_identity.c_args(), "commit", "-q", "--allow-empty", "-m", "c", cwd=work)
     sh("git", "push", "-q", "origin", "HEAD:main", cwd=work)
     return work
 

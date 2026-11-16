@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 pub mod cleanup;
+pub mod identity;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -127,8 +128,7 @@ impl Fixture {
         let dir = self.tmp.path().join(name);
         run_ok("git", &["clone", "-q", origin.to_str().unwrap(), dir.to_str().unwrap()], None);
         run_ok("git", &["-C", dir.to_str().unwrap(), "checkout", "-q", "-b", branch], None);
-        run_ok("git", &["-C", dir.to_str().unwrap(), "config", "user.email", "t@example.com"], None);
-        run_ok("git", &["-C", dir.to_str().unwrap(), "config", "user.name", "t"], None);
+        identity::fixture_identity(&dir, self.tmp.path());
         std::fs::write(dir.join("f"), "one\n").unwrap();
         run_ok("git", &["-C", dir.to_str().unwrap(), "add", "f"], None);
         run_ok("git", &["-C", dir.to_str().unwrap(), "commit", "-qm", "one"], None);

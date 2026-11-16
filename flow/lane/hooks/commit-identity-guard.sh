@@ -20,12 +20,42 @@ if [ -z "$configured" ]; then
   exit 1
 fi
 
+# A fixture identity (t@t, t@example.*, name t) configured on a real checkout
+# is what a test suite writes when its target is wrong; it matches itself, so
+# the comparison below would pass it. Suites build their fixtures under the
+# temp root and run the real hooks there, so only a checkout outside
+# a temp root (${TMPDIR:-/tmp}, /tmp, /var/tmp) is refused (#1728).
+configured_name=$(env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT git config user.name)
+fixture=
+case "$configured" in t@t|t@example.*) fixture="user.email '$configured'" ;; esac
+[ "$configured_name" = t ] && fixture="${fixture:+$fixture and }user.name 't'"
+if [ -n "$fixture" ]; then
+  top=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
+  # An unresolvable root is skipped, never a match: "/*" admits any path.
+  inside=
+  for root in "${TMPDIR:-/tmp}" /tmp /var/tmp; do
+    r=$(cd "$root" 2>/dev/null && pwd -P) || continue
+    case "$top" in "$r"/*) inside=1 ;; esac
+  done
+  case "$inside" in
+    1) ;;
+    *)
+      echo "commit-identity guard: refused — this checkout's configured $fixture is a test-fixture identity on a checkout outside every temp root ($top); a suite wrote it into the real repo config. Restore the real identity (git config user.email <addr>; git config user.name <name>) and rerun the commit. A legitimate other identity: COMMIT_IDENTITY_OVERRIDE=\"<why>\" git commit ..." >&2
+      exit 1 ;;
+  esac
+fi
+
 bad=0
 for role in AUTHOR COMMITTER; do
   ident=$(git var "GIT_${role}_IDENT") || exit 1
   email=${ident#*<}; email=${email%%>*}
   if [ "$email" != "$configured" ]; then
     echo "commit-identity guard: refused — $role email is '$email' but this checkout's configured user.email is '$configured'. Drop the -c user.email / GIT_${role}_EMAIL / --author override; identity comes from the checkout, never from session context. A legitimate other identity: COMMIT_IDENTITY_OVERRIDE=\"<why>\" git commit ..." >&2
+    bad=1
+  fi
+  name=${ident%% <*}
+  if [ -n "$configured_name" ] && [ "$name" != "$configured_name" ]; then
+    echo "commit-identity guard: refused — $role name is '$name' but this checkout's configured user.name is '$configured_name'. Drop the -c user.name / GIT_${role}_NAME override. A legitimate other identity: COMMIT_IDENTITY_OVERRIDE=\"<why>\" git commit ..." >&2
     bad=1
   fi
 done

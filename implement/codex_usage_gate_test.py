@@ -18,6 +18,8 @@ import sys
 import time
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, "codex-usage-gate.py")
@@ -325,8 +327,7 @@ def fake_repo(newdir, changes, base_files=None, moves=(), labels=None, pct=5, sw
     with open(os.path.join(bindir, "codex"), "w") as f:
         f.write(f'#!/bin/sh\n: >"{d}/codex-called"\nexec {sys.executable} "{d}/fake_codex.py"\n')
     os.chmod(os.path.join(bindir, "codex"), 0o755)
-    genv = {"HOME": d, "PATH": bindir, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    genv = {"HOME": d, "PATH": bindir, **fixture_identity.env()}
 
     def g(*a):
         return subprocess.run([GIT, *a], cwd=repo, env=genv, check=True, capture_output=True)

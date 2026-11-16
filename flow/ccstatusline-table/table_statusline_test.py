@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../common"))
+import fixture_identity  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 LINE = HERE / "table-statusline.py"
@@ -162,7 +164,7 @@ def test_frame_color_unreadable_is_not_the_new_session_color():
 
 def _git(cwd, *args):
     subprocess.run(
-        ["git", "-C", str(cwd), "-c", "user.email=t@example.com", "-c", "user.name=t", *args],
+        ["git", "-C", str(cwd), *fixture_identity.c_args(), *args],
         check=True, capture_output=True,
     )
 

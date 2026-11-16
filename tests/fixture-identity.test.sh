@@ -44,4 +44,11 @@ fixture_identity "$outside/other" "$tmp/no-such-dir" 2>"$tmp/err"
 check "missing root is refused" 1 $?
 check "repo under a bad root is left without an email" "" "$(git -C "$outside/other" config --local user.email)"
 
+# fixture_env: the env form of the same identity (GIT_AUTHOR_*/GIT_COMMITTER_*),
+# so a suite that commits through env never spells its own (#1728).
+( fixture_env
+  [ "$GIT_AUTHOR_EMAIL" = t@example.com ] && [ "$GIT_COMMITTER_EMAIL" = t@example.com ] \
+    && [ "$GIT_AUTHOR_NAME" = t ] && [ "$GIT_COMMITTER_NAME" = t ] )
+check "fixture_env exports one identity for author and committer" 0 $?
+
 exit $fail

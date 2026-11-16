@@ -29,6 +29,30 @@ if [ -z "$configured" ]; then
   exit 1
 fi
 
+# A fixture identity (t@t, t@example.*, name t) configured on a real checkout
+# matches commits written under it, so the comparison below would pass them.
+# Suites build their fixtures under the temp root and run the real hooks
+# there, so only a checkout outside a temp root (${TMPDIR:-/tmp}, /tmp, /var/tmp) is refused (#1728).
+configured_name=$(env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT git config user.name)
+fixture=
+case "$configured" in t@t|t@example.*) fixture="user.email '$configured'" ;; esac
+[ "$configured_name" = t ] && fixture="${fixture:+$fixture and }user.name 't'"
+if [ -n "$fixture" ]; then
+  top=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
+  # An unresolvable root is skipped, never a match: "/*" admits any path.
+  inside=
+  for root in "${TMPDIR:-/tmp}" /tmp /var/tmp; do
+    r=$(cd "$root" 2>/dev/null && pwd -P) || continue
+    case "$top" in "$r"/*) inside=1 ;; esac
+  done
+  case "$inside" in
+    1) ;;
+    *)
+      echo "commit-identity guard (pre-push): refused — this checkout's configured $fixture is a test-fixture identity on a checkout outside every temp root ($top); a suite wrote it into the real repo config. Restore the real identity (git config user.email <addr>; git config user.name <name>) before pushing. A legitimate other identity: COMMIT_IDENTITY_OVERRIDE=\"<why>\" git push ..." >&2
+      exit 1 ;;
+  esac
+fi
+
 zero=0000000000000000000000000000000000000000
 remote_name=${1:-origin}
 bad=0

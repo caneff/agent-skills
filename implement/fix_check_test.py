@@ -20,11 +20,12 @@ import sys
 import time
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.join(HERE, "fix-check.sh")
-IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+IDENT = fixture_identity.env()
 
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "common"))

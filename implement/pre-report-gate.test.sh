@@ -18,8 +18,8 @@ trap 'rm -rf "$tmp"' EXIT
 # A throwaway repo: two commits on main, one commit on an abandoned branch.
 repo="$tmp/repo"
 git init -q -b main "$repo"
-git -C "$repo" config user.email t@example.com
-git -C "$repo" config user.name t
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../tests/fixture-identity.sh"
+fixture_identity "$repo" "$tmp" || exit 2
 echo one > "$repo/a.txt"; git -C "$repo" add -A; git -C "$repo" commit -qm one
 first=$(git -C "$repo" rev-parse HEAD)
 echo two >> "$repo/a.txt"; git -C "$repo" commit -qam two

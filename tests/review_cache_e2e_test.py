@@ -33,6 +33,8 @@ import sys
 from pathlib import Path
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MACR = ROOT / "multi-axis-code-review"
@@ -46,8 +48,7 @@ FLAGS = ["--base", "origin/main", "--diff-command", "git diff origin/main...HEAD
 @pytest.fixture
 def box(tmp_path):
     env = {"HOME": str(tmp_path / "home"), "PATH": "/usr/bin:/bin",
-           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+           **fixture_identity.env()}
     (tmp_path / "home").mkdir()
     repo, wt = tmp_path / "agent-skills", tmp_path / "wt"
     for args in (["init", "-q", str(repo)], ["-C", str(repo), "commit", "-q", "--allow-empty", "-m", "x"],

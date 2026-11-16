@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../common"))
+import fixture_identity  # noqa: E402
 
 SCRIPT = Path(__file__).with_name("pointer_reads.py")
 NOTE = "docs/research/2026-10-04-claude-md-pointer-reads.md"
@@ -119,8 +121,7 @@ class Recount:
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
         seed = self.tmp / "seed"
         subprocess.run(["git", "init", "-q", "-b", "main", str(seed)], check=True)
-        self.git(seed, "config", "user.email", "t@example.com")
-        self.git(seed, "config", "user.name", "t")
+        fixture_identity.configure(str(seed), str(self.tmp))
         (seed / "docs" / "research").mkdir(parents=True)
         (seed / NOTE).write_text("# note\n")
         self.git(seed, "add", "-A")

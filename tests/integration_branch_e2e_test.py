@@ -30,19 +30,21 @@ What a green run does NOT cover (the seam is blind to it):
   `implement-spec/SKILL.md` and `implement/SKILL.md`.
 """
 import json
+import sys
 import os
 import subprocess
 from pathlib import Path
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 GATE = ROOT / "implement" / "pre-report-gate.sh"
 LEDGER = ROOT / "multi-axis-code-review" / "review_ledger.py"
 FIX_CHECK = ROOT / "implement" / "fix-check.sh"
 CLOSING = ROOT / "implement-spec" / "closing_ticket.py"
-IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+IDENT = fixture_identity.env()
 AGENTS = """# Fixture
 
 ## End-to-end seam

@@ -84,6 +84,10 @@ pub fn origin_slug_timeout(repo: &Path, timeout: Duration) -> Result<Option<Stri
 }
 
 #[cfg(test)]
+#[path = "../tests/support/identity.rs"]
+mod identity;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
@@ -100,8 +104,7 @@ mod tests {
         let clone = tmp.join(name);
         Command::new("git").arg("clone").arg("-q").arg(&origin).arg(&clone).status().unwrap();
         git(&clone, &["checkout", "-q", "-b", branch]);
-        git(&clone, &["config", "user.email", "t@example.com"]);
-        git(&clone, &["config", "user.name", "t"]);
+        super::identity::fixture_identity(&clone, tmp);
         std::fs::write(clone.join("f"), "one\n").unwrap();
         git(&clone, &["add", "f"]);
         git(&clone, &["commit", "-qm", "one"]);
