@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Footgun guard (PreToolUse, Bash): refuse three command shapes that destroy,
-hang or get denied, and say what to run instead. Exit 2 with the reason on stderr blocks;
-every other path exits 0.
+hang or get denied, and say what to run instead. Exit 2 with the reason on
+stderr blocks; every other path exits 0.
 
 1. A bare `rg` (#1860). `rg <pattern>` with no path reads stdin when stdin is
    not a tty, and the harness's stdin is neither a tty nor /dev/null, so the
@@ -21,14 +21,15 @@ every other path exits 0.
 3. A backtick command substitution (#1923). Claude Code's built-in safety check
    cannot parse the legacy form, so it refuses the whole call as a possible
    dangerous `rm` even when nothing is removed (`$((`date +%s`-started))`).
-   Refused when an unquoted backtick pair sits in a command, a `$(...)` body or
-   a `bash -c` script, with the `$(...)` rewrite in the message. A backtick in
-   single quotes, a heredoc body, a comment or after a backslash is text and
-   passes; one inside double quotes is not seen.
+   Refused when a backtick pair bash would run sits in a command, in double
+   quotes, in a `$(...)` body, in a `bash -c` script or in an unquoted-delimiter
+   heredoc body, with the `$(...)` rewrite in the message. A backtick in single
+   quotes, a quoted-delimiter heredoc, a comment or after a backslash is text
+   and passes.
 
 A failure of the guard itself is said out loud (a systemMessage, exit 0): a
 guard that crashed quietly would read as a command with nothing wrong in it.
-It does not block on its own fault, since neither shape is a loss that
+It does not block on its own fault, since none of these shapes is a loss that
 justifies refusing every Bash call.
 """
 import json
@@ -52,7 +53,8 @@ def tokenize(s, nested, ticks=None):
     a newline outside quotes is the operator '\\n'). A `$(...)` or backtick
     body is part of the word it sits in (`rg x $(git ls-files)` names a path)
     and is appended to `nested` as text to scan as commands of its own; an
-    unquoted backtick body is also appended to `ticks`, when given."""
+    backtick body, unquoted or inside double quotes, is also appended to
+    `ticks`, when given."""
     out, cur, n, i = [], None, len(s), 0
 
     def flush():
@@ -88,6 +90,13 @@ def tokenize(s, nested, ticks=None):
             while j < n and s[j] != '"':
                 if s[j] == "\\" and j + 1 < n:
                     j += 1
+                elif s[j] == "`" and ticks is not None:
+                    end = s.find("`", j + 1)
+                    end = n if end < 0 else end
+                    ticks.append(s[j + 1:end])
+                    buf += s[j:end + 1]
+                    j = end + 1
+                    continue
                 buf += s[j]
                 j += 1
             cur = (cur or "") + buf
@@ -338,15 +347,20 @@ def reads_after_truncate(command):
 
 # ---- heredocs: a body is data, not a command ----
 
-HEREDOC = re.compile(r"""(^|[^<])<<-?\s*["'`]?([A-Za-z_][A-Za-z0-9_]*)""")
+HEREDOC = re.compile(r"""(^|[^<])<<-?\s*(["'`]?)([A-Za-z_][A-Za-z0-9_]*)""")
 
 
-def strip_heredocs(command):
-    out, delim = [], None
+def strip_heredocs(command, expanded=None):
+    """`command` without its heredoc bodies. A body whose delimiter is not
+    quoted is expanded by bash, so when `expanded` is a list its lines are
+    appended to it."""
+    out, delim, quoted = [], None, True
     for line in command.split("\n"):
         if delim is not None:
             if line.strip() == delim:
                 delim = None
+            elif not quoted and expanded is not None:
+                expanded.append(line)
             continue
         out.append(line)
         for m in HEREDOC.finditer(line):
@@ -354,7 +368,7 @@ def strip_heredocs(command):
             before = line[:m.start()] + m.group(1)
             if "((" in before and "))" not in before.rsplit("((", 1)[1]:
                 continue
-            delim = m.group(2)
+            delim, quoted = m.group(3), bool(m.group(2))
             break
     return "\n".join(out)
 
@@ -369,7 +383,8 @@ def main():
         command = (data.get("tool_input") or {}).get("command")
         if not isinstance(command, str):
             raise TypeError("tool_input.command is missing or not a string")
-        scan = strip_heredocs(command)
+        expanded = []
+        scan = strip_heredocs(command, expanded)
         # The heredoc body of `python3 - <<EOF` is the code guard 2 must read,
         # so it scans the raw command, but only when a Python command runs.
         path = reads_after_truncate(command) if runs_python(scan) else None
@@ -387,13 +402,13 @@ def main():
                   "use `git grep <pattern>`.", file=sys.stderr)
             return 2
         ticks = backtick_bodies(scan) if "`" in scan else []
+        ticks += re.findall(r"(?<!\\)`([^`]*)`", "\n".join(expanded))
         if ticks:
             print(f"BLOCKED: '{command[:200]}' uses a backtick command substitution. "
                   "Claude Code's built-in safety check cannot parse it and refuses "
                   "the whole call as a possible dangerous rm, even when nothing is "
                   "removed. Write each `cmd` as $(cmd), for example "
-                  f"`{ticks[0]}` -> $({ticks[0]}); elapsed time is "
-                  "`$(( $(date +%s) - started ))`.", file=sys.stderr)
+                  f"`{ticks[0][:80]}` -> $({ticks[0][:80]}).", file=sys.stderr)
             return 2
         return 0
     except Exception as e:  # noqa: BLE001 — the guard's own fault is reported, never silent

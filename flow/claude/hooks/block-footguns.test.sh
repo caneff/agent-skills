@@ -128,14 +128,24 @@ bt="backtick"
 blocks "the denied elapsed-time line" 'started=$(date +%s); echo secs $((`date +%s`-started))' "$bt"
 blocks "rewrite is in the message" 'echo secs $((`date +%s`-started))' '$(date +%s)'
 blocks "plain backtick substitution" 'echo `date`' '$(date)'
-blocks "backtick inside a double-quoted bash -c script" "bash -c 'echo \`date\`'" "$bt"
+blocks "backtick inside a bash -c script" "bash -c 'echo \`date\`'" "$bt"
+blocks "backtick inside double quotes" 'echo "took `date`"' "$bt"
+blocks "the elapsed-time line inside double quotes" 'echo "secs $((`date +%s`-started))"' "$bt"
+blocks "backtick in an unquoted heredoc" 'cat <<EOF
+`date`
+EOF' "$bt"
+allows "escaped backtick inside double quotes" 'echo "a \`date\` b"'
+allows "backtick in a quoted-delimiter heredoc" "cat <<'EOF'
+\`date\`
+EOF"
 blocks "backtick after a pipe" 'ls | wc -l `echo x`' "$bt"
 allows "dollar-paren elapsed time" 'started=$(date +%s); echo secs $(( $(date +%s) - started ))'
 allows "backtick in a single-quoted commit message" "git commit -m 'run \`date\` here'"
 allows "backtick in a heredoc body" "git commit -F - <<'EOF'
 use \`date\` not x
 EOF"
-allows "backtick in a comment" 'ls # \`date\`'
+allows "backtick in a comment" 'ls # `date`'
+allows "dollar-paren beside a single-quoted backtick" "echo \$(date) '\`x\`'"
 allows "backtick in a single-quoted gh body" "gh pr comment 5 --body 'the \`rg\` flag'"
 allows "escaped backtick" 'echo \`date\`'
 
