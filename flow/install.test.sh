@@ -189,14 +189,16 @@ fi
 # The seams of the listed repos need cargo, node, npm, uv, gh, git and python3;
 # the unit's PATH is replaced, so each one's directory must be on it (on this
 # machine cargo is in ~/.cargo/bin, node/npm/uv/gh in ~/.local/bin, git and
-# python3 in /usr/bin).
+# python3 in /usr/bin). powershell.exe is Windows interop, found by name only
+# when its directory is on PATH; without it the PowerShell tests in the listed
+# repos skip as "no powershell.exe" and the nightly is blind to them (#1800).
 unit_path=$(sed -n 's/^Environment=PATH=//p' "$unit_dir/backstop.service" 2>/dev/null)
 missing=""
-for d in '%h/.cargo/bin' '%h/.local/bin' /usr/bin; do
+for d in '%h/.cargo/bin' '%h/.local/bin' /usr/bin /mnt/c/Windows/System32/WindowsPowerShell/v1.0; do
   case ":$unit_path:" in *":$d:"*) ;; *) missing="$missing $d" ;; esac
 done
 if [ -n "$unit_path" ] && [ -z "$missing" ]; then
-  echo "PASS backstop.service PATH carries the cargo, ~/.local/bin and /usr/bin directories"
+  echo "PASS backstop.service PATH carries the cargo, ~/.local/bin, /usr/bin and Windows PowerShell directories"
 else
   echo "FAIL backstop.service PATH '$unit_path' lacks:$missing"; fails=1
 fi

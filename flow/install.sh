@@ -156,7 +156,9 @@ Description=Nightly full seam run over the repos in flow/backstop-repos (#1595)
 Type=oneshot
 # The listed repos' seams need cargo (~/.cargo/bin); node, npm, uv and gh
 # (~/.local/bin); git and python3 (/usr/bin). systemd's user PATH has neither home dir.
-Environment=PATH=%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# powershell.exe (WSL interop, which works under systemd) lives in the last
+# directory; without it the repos' PowerShell tests skip in the nightly (#1800).
+Environment=PATH=%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/mnt/c/Windows/System32/WindowsPowerShell/v1.0
 ExecStart=%h/.local/bin/backstop-nightly
 UNIT
 cat > "$unit_dir/backstop.timer" <<'UNIT'
