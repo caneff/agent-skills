@@ -30,13 +30,12 @@
 # install would import the reviewed tree's code. With no `uv.lock` at HEAD the
 # `.venv` stays unset and the run says so. `vendor` is not set up.
 #
-# Each mutation's covering suite runs under a limit (#1854), so one mutant that
-# hangs cannot stall the review: `--baseline-seconds <s>`, the unmutated run's own
-# time, gives 3x that with a 60 s floor; with neither flag the limit is 600 s, said
-# in the output; `--timeout <s>` sets it outright. A mutant that reached its suite
-# and hit the limit is `red (timeout)` (the tests noticed) and its ledger row carries
-# `timeout: true`; its whole process group is killed. One that never reached its
-# suite is still `unknown`.
+# Each mutation's suite runs under a time limit (#1854); SKILL.md § 4 *The time
+# limit* gives the reason. `--baseline-seconds <s>` (the unmutated run's own
+# time) sets it to 3x that, 60 s at least; with neither flag it is 240 s, said
+# in the output; `--timeout <s>` sets it outright, and not with a baseline. A
+# mutant that reached its suite and hit the limit reads `red (timeout)`, its
+# ledger row is `red` with `timeout: true`, and its process group is killed.
 #
 # Each run with `--repo` first prunes the repo's cache-home `witness.*`
 # directories older than 7 days (#1547); the code below says how.
@@ -70,12 +69,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 mutations=( "$@" )
-# The per-mutant limit (#1854): an explicit --timeout, else 3x the baseline with a 60 s
-# floor, else 600 s with nothing to scale from.
-if [ -z "$limit" ]; then
-  if [ -n "$baseline" ]; then limit=$(( baseline * 3 )); [ "$limit" -ge 60 ] || limit=60
-  else limit=600; fi
-fi
+# The per-mutant limit (#1854). 240 s with nothing to scale from, so one hung mutant
+# ends well inside the 600 s a foreground Bash call allows (#1921).
+[ -z "$limit" ] || [ -z "$baseline" ] || { echo "witness check: --timeout and --baseline-seconds: not both, --timeout would silently win" >&2; exit 2; }
+if [ -n "$limit" ]; then limit_basis="--timeout"
+elif [ -n "$baseline" ]; then
+  limit=$(( baseline * 3 )); [ "$limit" -ge 60 ] || limit=60; limit_basis="3x baseline $baseline s, 60 s floor"
+else limit=240; limit_basis="no --baseline-seconds given; pass the unmutated run's time to scale it"; fi
 [ -n "$worktree" ] && [ -n "$mutate_file" ] || usage
 # Ledger rows are the review's cost record (#1270): a run that forgot its
 # --repo/--ticket would otherwise drop them silently, so skipping them is said.
@@ -173,11 +173,7 @@ esac
 # path, so `x`'s redirection fails against a directory and `x` is reported red
 # without its suite ever having run.
 mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" "$root/seconds" "$root/outcome" "$root/timedout" || exit 1
-if [ -n "$baseline" ] || [ "$limit" -ne 600 ]; then
-  echo "witness check: per-mutant limit $limit s (baseline ${baseline:-not given})"
-else
-  echo "witness check: per-mutant limit $limit s (no --baseline-seconds given; pass the unmutated run's time to scale it)"
-fi
+echo "witness check: per-mutant limit $limit s ($limit_basis)"
 # Cleanup that reports rather than covers: an `rm -rf` over a worktree git
 # failed to deregister - a full disk is the plausible way - leaves exactly the
 # stale entry SKILL.md says never to create, and the run would exit 0 having
@@ -282,23 +278,22 @@ for id in "${mutations[@]}"; do
   # before its status is recorded and read back below as `unknown`.
   # CARGO_TARGET_DIR: the worktree isolates the tree, not cargo's build, and a shared
   # target dir leaves a mutated build for the next run (#1696).
-  # `timeout` puts the suite in its own process group and signals the whole group at the
-  # limit (#1854), so a hung grandchild dies with it; the suite re-sources the mutate
-  # file in a child shell because `timeout` runs a program, not a function. A status of
-  # 124 (TERM) or 137 (KILL after 5 s) at or past the limit is the timeout; the same
-  # status earlier is the suite's own (an out-of-memory kill, say), never relabelled.
+  # `timeout` runs a program, not a function, so the suite re-sources the mutate file in
+  # a child shell. 124 (TERM) or 137 (KILL after 5 s) counts as the timeout only when
+  # the suite itself ran for the whole limit: the same status earlier is the suite's own.
   # `timeout` leaves this job's group, so an interrupt reaches it only through the
   # trap below, which hands the TERM on; `timeout` then signals the suite's group.
-  { CARGO_TARGET_DIR="$witness/target" timeout -k 5 "$limit" bash -c '. "$1"; mutate "$2" "$3" "$4"' _ \
+  { suite_started=$(date +%s)
+    CARGO_TARGET_DIR="$witness/target" timeout -k 5 "$limit" bash -c '. "$1"; mutate "$2" "$3" "$4"' _ \
       "$mutate_file" "$id" "$witness" "$root/ran/$id" </dev/null >"$root/output/$id" 2>&1 &
     tp=$!
     trap 'kill -TERM "$tp" 2>/dev/null' TERM INT
     wait "$tp"; rc=$?
     while kill -0 "$tp" 2>/dev/null; do wait "$tp"; rc=$?; done
-    elapsed=$(( $(date +%s) - started ))
-    case "$rc" in 124|137) [ "$elapsed" -ge "$limit" ] && : >"$root/timedout/$id" ;; esac
+    now=$(date +%s)
+    case "$rc" in 124|137) [ "$(( now - suite_started ))" -ge "$limit" ] && : >"$root/timedout/$id" ;; esac
     printf '%s\n' "$rc" >"$root/status/$id"
-    printf '%s\n' "$elapsed" >"$root/seconds/$id"; } &
+    printf '%s\n' "$(( now - started ))" >"$root/seconds/$id"; } &
 done
 wait
 for id in "${mutations[@]}"; do

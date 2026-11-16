@@ -566,14 +566,10 @@ bash ~/.agents/skills/multi-axis-code-review/witness-check.sh \
   [--call-site <id>]... -- <id>...
 ```
 
-*The time limit* (#1854). Each mutant's suite runs under a limit so one that
-hangs cannot stall the review (a 4739 s mutant took one review 88 minutes).
-`--baseline-seconds` is the unmutated run's own time of the target files: the
-limit is 3x it, 60 s at least; without it the limit is 600 s and the run says
-so. `--timeout <s>` sets it outright. A mutant that reached its suite and hit
-the limit reads `<id>: red (timeout)` (the tests noticed), its ledger row is
-`red` with `timeout: true`, and its whole process group is killed; one that
-never reached its suite is still `unknown`.
+*The time limit* (#1854). One mutant that hangs must not stall the review (a
+4739 s mutant once cost 88 minutes). Pass `--baseline-seconds <s>`, the
+unmutated run's own time of the target files; the header holds the rest (the
+3x rule, the 240 s default, `red (timeout)`).
 
 `--repo` and `--ticket` are the ledger's, as in § 4's append line; `--no-ledger`
 replaces them only outside a review. Each `--call-site` id is one of the ids.
@@ -604,7 +600,11 @@ run the way `tests/all.sh` would run it (`bash <name>.test.sh`, `python3
 <name>_test.py`) — not the whole gate. `bash tests/all.sh` runs every suite in
 the repo, so a diff adding five tests would pay it five times inside one
 axis, while the covering suite finishes in seconds. The whole gate belongs to
-the worker's own pre-report gate, where it already runs once.
+the worker's own pre-report gate, where it already runs once. The same holds
+before mutating (#1856): the worker's seam run at the reviewed commit stands, so
+run only the files the planned mutants target, unmutated, to confirm they start
+green, never the narrowed or full suite. With no worker seam sha in the brief
+(a review outside the implement lane) that is the reviewer's call.
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs: render it with `--no-spec`, which puts `Spec: no spec available` under its Inputs, so its part (b) reports that instead of judging scope.
 

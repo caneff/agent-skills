@@ -283,7 +283,8 @@ def test_the_correctness_prompt_asks_for_the_unmutated_time_as_the_baseline(wt, 
 def repo_wt(tmp_path):
     path = tmp_path / "gitwt"
     path.mkdir()
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+    env = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
     for cmd in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "base"]):
         subprocess.run(["git", "-C", str(path), *cmd], check=True, env=env, capture_output=True)
@@ -296,6 +297,23 @@ def test_a_seam_sha_equal_to_the_reviewed_sha_tells_the_reviewer_the_seam_run_st
     path, head = repo_wt
     _, out, _ = render(path, diff, "--seam-sha", head, axis="correctness")
     assert "worker's seam run" in out and "never the whole" in out, out
+
+
+def test_a_one_character_seam_sha_that_happens_to_prefix_head_gets_no_seam_instruction(repo_wt, diff):
+    path, head = repo_wt
+    code, out, _ = render(path, diff, "--seam-sha", head[0], axis="correctness")
+    assert code == 0 and "seam run" not in out, (code, out)
+
+
+def test_a_short_seam_sha_of_seven_characters_is_accepted(repo_wt, diff):
+    path, head = repo_wt
+    _, out, _ = render(path, diff, "--seam-sha", head[:7], axis="correctness")
+    assert "worker's seam run" in out, out
+
+
+def test_the_witness_slots_line_says_it_overrides_the_worker_count(wt, diff):
+    _, out, _ = render(wt, diff, axis="correctness")
+    assert "for the witness check this replaces the worker count above" in out, out
 
 
 def test_a_seam_sha_that_is_not_the_reviewed_sha_leaves_the_current_behaviour(repo_wt, diff):

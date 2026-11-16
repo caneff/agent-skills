@@ -231,11 +231,11 @@ def reviewed_sha(worktree):
 
 
 def seam_stands(a):
-    """True only when the brief names a worker's seam sha and it is the reviewed commit (a
-    prefix either way counts, for a short sha). Absent, unreadable or different: the
-    reviewer's current behaviour stands."""
+    """True only when the brief names a worker's seam sha of 7+ hex characters that is a
+    prefix of the reviewed commit. Absent, short, unreadable or different: the reviewer's
+    current behaviour stands, so a mistyped sha never earns the permissive reading."""
     head = reviewed_sha(a.worktree) if a.seam_sha else None
-    return bool(head) and (head.startswith(a.seam_sha) or a.seam_sha.startswith(head))
+    return bool(head) and len(a.seam_sha) >= 7 and head.startswith(a.seam_sha.lower())
 
 
 def correctness_limits(a):
@@ -243,9 +243,10 @@ def correctness_limits(a):
     lines = [
         f"- Run the witness check with `--slots {a.workers * AXIS_COUNT}`: only this axis runs tests (the spec and "
         f"standards reviewers run none), so it takes the whole review's budget of {AXIS_COUNT} axes x "
-        f"{a.workers} worker{'s' if a.workers != 1 else ''}; the script still lowers it when the box is busy.",
+        f"{a.workers} worker{'s' if a.workers != 1 else ''}; for the witness check this replaces the worker count above, "
+        "and the script still lowers it when the box is busy.",
         "- Time the unmutated run of the test files your mutants target and pass it as "
-        "`--baseline-seconds <s>`: each mutant is killed at 3x that (60 s at least) and reads "
+        "`--baseline-seconds <s>`: each mutant is killed at 3x that (60 s at least; 240 s with no baseline) and reads "
         "`red (timeout)`, so a hung mutant cannot stall the review."]
     if seam_stands(a):
         lines.append(

@@ -1311,9 +1311,15 @@ def decode_status(text: str) -> str:
     recipe writes the word, the one home of the exit-status mapping; anything else, an empty
     file and a raw exit status included, is `unknown`, never a pass or a red."""
     word = text.strip()
-    if word == TIMEOUT_WORD:
-        word = "red"
     return word if word in MUTATION_OUTCOMES else "unknown"
+
+
+def read_status(text: str) -> tuple[str, bool]:
+    """A status file's (outcome, timed_out): the witness check writes `red (timeout)` for a
+    mutant killed at its time limit (#1854), which is outcome `red` with `timeout: true`."""
+    if text.strip() == TIMEOUT_WORD:
+        return "red", True
+    return decode_status(text), False
 
 
 def cmd_append_mutation(args) -> int:
@@ -1327,7 +1333,7 @@ def cmd_append_mutation(args) -> int:
         seconds = _finite_nonneg(args.seconds)
         if seconds is None:
             raise ValueError("a mutation row needs --seconds, its wall clock as a finite number of seconds")
-        outcome = args.outcome or decode_status(args.status_file.read_text())
+        outcome, timed_out = (args.outcome, False) if args.outcome else read_status(args.status_file.read_text())
     except (OSError, ValueError) as e:
         print(f"review_ledger append: {e}", file=sys.stderr)
         return 2
@@ -1340,7 +1346,7 @@ def cmd_append_mutation(args) -> int:
                                        "reason": "a mutation's tokens stay with the correctness reviewer, or with the worker for worker-mutation"},
                             "wall_clock": {"status": "known", "seconds": seconds}},
                   origin="append", own_keys={"mutation_id": args.mutation_id, "outcome": outcome,
-                            **({"timeout": True} if args.status_file and args.status_file.read_text().strip() == TIMEOUT_WORD else {})})
+                            **({"timeout": True} if timed_out else {})})
     try:
         update_ledger(args.ledger, lambda ledger: ledger.update({row_id: row}))
     except ValueError as e:
