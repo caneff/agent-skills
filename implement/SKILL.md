@@ -257,7 +257,10 @@ No PR and no reviewer; Chris reads the log after.
   `git worktree remove --force .scratch/mutation-<id>` whether it went red
   or not. The worktree holds only tracked files, so set up there whatever
   the suite needs from the checkout's untracked or ignored state, such as
-  `node_modules` or a clean bytecode cache (#1219). Then read the red
+  `node_modules` or a clean bytecode cache (#1219). A Rust suite there sets
+  `CARGO_TARGET_DIR=.scratch/mutation-<id>/target`: the worktree isolates the
+  tree, not cargo's build, and a shared target dir keeps the mutated build for
+  the next seam run (#1696). Then read the red
   message: it must be your stripped assertion, not a missing file or a
   denied path (`AGENTS.md` § Recurring defect classes,
   class 3). Nothing is restored in the live checkout:
@@ -302,7 +305,10 @@ No PR and no reviewer; Chris reads the log after.
   flag-if-you-disagree). Each brief lists only its worker's findings and asks
   for a `fixed` or `disputed` line per id. The renderer cannot see the review
   sidecars, so passing every id is on the caller; its refusals (an id given
-  twice, a worker with none) are in its docstring. `--workers` (default 1) and
+  twice, whether by `--finding` or `--ruled` alone or both, and a worker with
+  none) are in its `--help`, and one worker is a valid split. A fan-out
+  sub-worker mutates in the same throwaway worktree, never a byte copy: its
+  brief carries the recipe (#1696). `--workers` (default 1) and
   `--ceiling` (default 600 seconds) cap any test run the sub-worker makes.
 - Typecheck and run only the tests for the files you touch as you go; no
   suite run at the end of the build. A ticket's one suite run is § Review
