@@ -154,7 +154,7 @@
           },
           {
             "type": "command",
-            "command": "python3 -I /home/caneff/.agents/skills/flow/claude/hooks/block-footguns.py",
+            "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/block-footguns.sh",
             "timeout": 5
           },
           {

@@ -39,9 +39,11 @@ STDIN_OPS = {"<", "<<", "<<-", "<<<", "<&"}
 REDIRECTS = STDIN_OPS | {">", ">>", ">&", "&>"}
 
 
-def tokenize(s):
+def tokenize(s, nested):
     """[(kind, text)], kind 'w' (a word, quotes removed) or 'o' (an operator;
-    a newline outside quotes is the operator '\\n')."""
+    a newline outside quotes is the operator '\\n'). A `$(...)` or backtick
+    body is part of the word it sits in (`rg x $(git ls-files)` names a path)
+    and is appended to `nested` as text to scan as commands of its own."""
     out, cur, n, i = [], None, len(s), 0
 
     def flush():
@@ -82,13 +84,20 @@ def tokenize(s):
             cur = (cur or "") + buf
             i = j + 1
             continue
-        elif c == "`":
-            flush()
-            out.append(("o", ";"))
-        elif c == "$" and s[i + 1:i + 2] == "(":
-            flush()
-            out.append(("o", "("))
-            i += 2
+        elif c == "`" or (c == "$" and s[i + 1:i + 2] == "("):
+            start = i + (1 if c == "`" else 2)
+            if c == "`":
+                end = s.find("`", start)
+            else:
+                depth, end = 1, start
+                while end < n and depth:
+                    depth += {"(": 1, ")": -1}.get(s[end], 0)
+                    end += 1
+                end = end - 1 if depth == 0 else -1
+            end = n if end < 0 else end
+            nested.append(s[start:end])
+            cur = (cur or "") + "$x"
+            i = end + 1
             continue
         else:
             op = next((o for o in OPERATORS if s.startswith(o, i)), None)
@@ -149,15 +158,29 @@ LONG_VALUE = {"--regexp", "--file", "--glob", "--iglob", "--type", "--type-not",
               "--colors", "--sort", "--sortr", "--engine", "--ignore-file",
               "--pre", "--pre-glob", "--path-separator", "--context-separator",
               "--dfa-size-limit", "--regex-size-limit", "--field-match-separator",
-              "--field-context-separator", "--hyperlink-format", "--generate"}
+              "--field-context-separator", "--hyperlink-format"}
 PATTERN_FLAGS = {"--regexp", "--file"}
 NO_SEARCH = {"--files", "--type-list", "--help", "-h", "--version", "-V",
              "--pcre2-version", "--generate"}
 
 
+# Wrappers that run the next command with their own options before it.
+WRAPPERS = {"timeout", "nice", "stdbuf", "ionice"}
+WRAPPER_ARG = re.compile(r"-.*|\d+[smhd]?$")
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
+
+
 def strip_prefix(words):
-    while words and (words[0] in PREFIX or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", words[0])):
-        words = words[1:]
+    while words:
+        w = words[0]
+        if w in PREFIX or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", w):
+            words = words[1:]
+        elif os.path.basename(w) in WRAPPERS:
+            words = words[1:]
+            while words and WRAPPER_ARG.match(words[0]):
+                words = words[1:]
+        else:
+            break
     return words
 
 
@@ -189,10 +212,24 @@ def rg_is_bare(args):
     return positionals <= (0 if has_pattern_flag else 1)
 
 
+def scan_commands(scan, depth=0):
+    """Every (words, piped, stdin) in `scan`, including a `$(...)` body and the
+    script of a `bash -c`, which run as commands too."""
+    nested = []
+    for cmd in commands(tokenize(scan, nested)):
+        yield cmd
+        words = strip_prefix(cmd[0])
+        if depth < 5 and words and os.path.basename(words[0]) in SHELLS and "-c" in words[1:-1]:
+            nested.append(words[words.index("-c", 1) + 1])
+    if depth < 5:
+        for body in nested:
+            yield from scan_commands(body, depth + 1)
+
+
 def bare_rg(scan):
     if not re.search(r"(^|[^A-Za-z0-9_.-])rg([^A-Za-z0-9_.-]|$)", scan):
         return False
-    for words, piped, stdin in commands(tokenize(scan)):
+    for words, piped, stdin in scan_commands(scan):
         words = strip_prefix(words)
         if not words or os.path.basename(words[0]) != "rg":
             continue
@@ -203,10 +240,23 @@ def bare_rg(scan):
     return False
 
 
+def runs_python(scan):
+    """True when some command in `scan` is a Python interpreter (`python3 -`,
+    `uv run python`): only then is text shaped like `open(p,'w')` code. A
+    commit message or an issue body that quotes the shape runs nothing."""
+    for words, _, _ in scan_commands(scan):
+        words = strip_prefix(words)
+        if any(re.fullmatch(r"python[0-9.]*", os.path.basename(w)) for w in words[:3]):
+            return True
+    return False
+
+
 # ---- guard 2: truncate-then-read open() ----
 
+OPEN_ARG = r"(?P<arg>[^,()]*(?:\([^()]*\)[^,()]*)*?)"
+OPEN_CALL = re.compile(r"\bopen\(\s*" + OPEN_ARG + r"\s*[,)]")
 WRITE_OPEN = re.compile(
-    r"""\bopen\(\s*(?P<arg>[^,()]*(?:\([^()]*\)[^,()]*)*?)\s*,\s*(?:mode\s*=\s*)?['"](?P<mode>[^'"]*)['"]""")
+    r"""\bopen\(\s*""" + OPEN_ARG + r"""\s*,\s*(?:mode\s*=\s*)?['"](?P<mode>[^'"]*)['"]""")
 MODE_LITERAL = re.compile(r"""['"]([rwaxbt+U]+)['"]""")
 
 
@@ -249,13 +299,13 @@ def reads_after_truncate(command):
     # `python3 -c "open(p,\"w\")"`: the shell's quoting layer is not python's.
     text = command.replace('\\"', '"').replace("\\'", "'")
     for m in WRITE_OPEN.finditer(text):
-        if not re.search(r"[w]", m.group("mode")):
+        if "w" not in m.group("mode"):
             continue
         arg = norm(m.group("arg"))
         if not arg:
             continue
         tail = statement_tail(text, m.end())
-        for r in re.finditer(r"\bopen\(\s*(?P<arg>[^,()]*(?:\([^()]*\)[^,()]*)*?)\s*[,)]", tail):
+        for r in OPEN_CALL.finditer(tail):
             if norm(r.group("arg")) != arg:
                 continue
             call_end = tail.find(")", r.start())
@@ -280,9 +330,13 @@ def strip_heredocs(command):
                 delim = None
             continue
         out.append(line)
-        m = HEREDOC.search(line)
-        if m:
+        for m in HEREDOC.finditer(line):
+            # An arithmetic `((` still open before the `<<` makes it a shift.
+            before = line[:m.start()] + m.group(1)
+            if "((" in before and "))" not in before.rsplit("((", 1)[1]:
+                continue
             delim = m.group(2)
+            break
     return "\n".join(out)
 
 
@@ -293,11 +347,13 @@ def main():
         data = json.load(sys.stdin)
         if data.get("tool_name") != "Bash":
             return 0
-        command = (data.get("tool_input") or {}).get("command") or ""
+        command = (data.get("tool_input") or {}).get("command")
         if not isinstance(command, str):
-            raise TypeError("tool_input.command is not a string")
-        # The heredoc body of `python3 - <<EOF` is the code guard 2 must read.
-        path = reads_after_truncate(command)
+            raise TypeError("tool_input.command is missing or not a string")
+        scan = strip_heredocs(command)
+        # The heredoc body of `python3 - <<EOF` is the code guard 2 must read,
+        # so it scans the raw command, but only when a Python command runs.
+        path = reads_after_truncate(command) if runs_python(scan) else None
         if path is not None:
             print(f"BLOCKED: '{command[:200]}' opens {path} for writing and reads it "
                   "in the same statement. The write-mode open truncates the file "
@@ -305,7 +361,7 @@ def main():
                   "variable first, then write: `s = open(p).read()` then "
                   "`open(p, 'w').write(f(s))`.", file=sys.stderr)
             return 2
-        if bare_rg(strip_heredocs(command)):
+        if bare_rg(scan):
             print(f"BLOCKED: '{command[:200]}' runs rg with no path. The harness's "
                   "stdin is neither a tty nor /dev/null, so rg reads stdin and the "
                   "call hangs until its timeout. Pass a path (`rg <pattern> .`) or "

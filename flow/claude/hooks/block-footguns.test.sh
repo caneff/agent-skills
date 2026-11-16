@@ -67,6 +67,23 @@ allows "a quoted pattern starting with #" "rg '#define' src/"
 allows "rg on the line after a comment, with a path" "# note
 rg foo ."
 
+# Findings of the review wave (C2, C5, C6/P3).
+allows "rg with a path from a substitution" 'rg -n foo $(git ls-files)'
+allows "rg with a path from backticks" 'rg -n foo `git ls-files`'
+blocks "rg inside a substitution, no path" 'echo "x: $(rg foo)"; echo $(rg foo | head)' "Pass a path"
+blocks "rg inside a backtick substitution, no path" 'echo `rg foo`' "Pass a path"
+# Only comment handling keeps this quiet: the `;` would split off a bare rg.
+allows "separator inside a comment" 'ls # x; rg foo'
+blocks "rg under timeout" 'timeout 30 rg foo' "Pass a path"
+blocks "rg under nice -n" 'nice -n 5 rg foo' "Pass a path"
+blocks "rg under stdbuf" 'stdbuf -oL rg foo' "Pass a path"
+blocks "rg in a bash -c script" "bash -c 'rg foo'" "Pass a path"
+allows "rg with a path in a bash -c script" "bash -c 'rg foo .'"
+allows "timeout rg with a path" 'timeout 30 rg foo .'
+# A `<<` inside `$(( ))` is a shift: stripping from it would hide the rg below.
+blocks "arithmetic shift is not a heredoc" 'echo $((1<<x))
+rg foo' "Pass a path"
+
 # ---- truncate-then-read open() (#1704) ----
 msg="reads it in the same statement"
 blocks "write.open(read) one-liner" "python3 -c \"p='a.txt'; open(p,'w').write(open(p).read().replace('a','b'))\"" "$msg"
@@ -95,9 +112,30 @@ with open(p, 'w') as f:
     f.write('x')
 print(open(p).read())
 PY"
+allows "a second write-mode open is not a read" "python3 -c \"open(p,'w').write(open(p,'w').name)\""
+# The shape quoted in text, not run as Python (C1, P1).
+allows "commit message quoting the shape" "git commit -m \"never open(p,'w').write(open(p).read())\""
+allows "issue body quoting the shape" "gh issue comment 5 --body \"open(p,'w').write(open(p).read())\""
+allows "notes file quoting the shape" "cat >> notes.md <<'EOF'
+open(p,'w').write(open(p).read())
+EOF"
+blocks "uv run python" "uv run python -c \"open(p,'w').write(open(p).read())\"" "$msg"
 allows "read-mode open only" "python3 -c \"print(open(p).read())\""
 
 # ---- the guard never fails silently ----
+# A tool call with no command is reported, not read as a clean command (S2).
+out=$(printf '%s' '{"tool_name":"Bash","tool_input":{}}' | python3 -I "$hook" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"guard did not run"* ]]; then echo "PASS: missing command says the guard did not run"
+else echo "FAIL: missing command — got $rc: $out"; fails=1; fi
+# The shim is what settings.json registers: with its script missing it says so
+# and lets the call through (python3 on a missing path exits 2, which blocks).
+cp "$here/block-footguns.sh" "$tmp/shim.sh"
+out=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"rg foo"}}' | bash "$tmp/shim.sh" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"guard did not run"* ]]; then echo "PASS: shim without its script passes through, saying so"
+else echo "FAIL: shim without script — got $rc: $out"; fails=1; fi
+out=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"rg foo"}}' | bash "$here/block-footguns.sh" 2>&1); rc=$?
+if [ "$rc" = 2 ] && [[ "$out" == *"Pass a path"* ]]; then echo "PASS: shim runs the guard"
+else echo "FAIL: shim — got $rc: $out"; fails=1; fi
 # Input that is not JSON is the harness's fault, not a command to judge.
 out=$(printf 'not json' | python3 -I "$hook" 2>&1); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"guard did not run"* ]]; then echo "PASS: unreadable input says the guard did not run"
