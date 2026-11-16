@@ -57,4 +57,5 @@ Report: (a) bugs — for each, the concrete failure scenario: the input, environ
 
 - You do your own reading and running and spawn no nested subagent: a nested agent reports to the top-level session, not to you, and its work is lost. A task too large for one agent is reported as such and stopped.
 - Any solve, build or test run uses at most 1 worker and finishes inside 600 seconds of wall clock.
-- Run the witness check with `--slots 1`: it picks its own concurrency otherwise.
+- Run the witness check with `--slots 3`: only this axis runs tests (the spec and standards reviewers run none), so it takes the whole review's budget of 3 axes x 1 worker; for the witness check this replaces the worker count above, and the script still lowers it when the box is busy.
+- Time the unmutated run of the test files your mutants target and pass it as `--baseline-seconds <s>`: each mutant is killed at 3x that (60 s at least; 240 s with no baseline) and reads `red (timeout)`, so a hung mutant cannot stall the review.
