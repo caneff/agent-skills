@@ -65,6 +65,13 @@ skip() { # skip <why> — pass the call through, and say a record will not exist
 }
 
 [ -n "$cmd" ] || skip "this call carries no command to wrap"
+# job-run refuses a command ending in a top-level `&` (its direct child would
+# return at once and the wake fire early); wrapping one would fail the call.
+trimmed=${cmd%"${cmd##*[![:space:]]}"}
+case "$trimmed" in
+  *'&&') ;;
+  *'&') skip "the command ends in a trailing &, which job-run refuses (the wake would fire before the work ends)" ;;
+esac
 command -v job-run >/dev/null 2>&1 || skip "job-run is not on PATH (run flow/install.sh)"
 
 # <slug> - <tail of the tool_use_id>. The slug is the Bash call's description

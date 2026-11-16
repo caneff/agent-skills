@@ -32,7 +32,7 @@ steps below.
 2. **Start it in the background** with the Bash tool's `run_in_background`:
 
    ```
-   job-run --name drain-<repo-short> -- drain --repo <repo> <the other flags, unchanged>
+   job-run --name drain-<repo-short> --timeout 0 -- drain --repo <repo> <the other flags, unchanged>
    ```
 
    `job-run` refuses a second run under the same name while one is alive,

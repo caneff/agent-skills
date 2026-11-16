@@ -186,7 +186,7 @@ each repo finishes): <path>`, and last, as `index: <path>`.
    `skipped:` repos, and take the user's final list. This is the only
    question of the run.
 3. **Launch it under `job-run`, then end the turn.**
-   `job-run --name all-audits-multi -- driver.py multi <path> <path>…`.
+   `job-run --name all-audits-multi --timeout 0 -- driver.py multi <path> <path>…`.
    Do not poll or sleep; the job's completion wakes the session.
 4. **On wake, report from the page.** Read the pass's `index:` line, the last
    line of the job's progress (`job-run --status all-audits-multi`), and give

@@ -257,6 +257,11 @@ defines them.
   completion notice, so one job's end can start two turns: they are the same
   event. A sharded run of several `job-run` processes starts each with the
   same `--group <name>` (rule: `flow/bin/job-run` header), not once per member.
+  `job-run` closes the job's stdin (`--stdin` passes the caller's) and kills
+  it at a wall-clock limit, 3600 s by default (`--timeout <s>`, `0` for none,
+  `$JOB_RUN_TIMEOUT`); a run killed that way wakes as timed out. A command
+  ending in a top-level `&` is refused. A job that legitimately runs past an
+  hour passes `--timeout 0` or its own bound.
   Why: a plain background run loses its output and exit code when its
   shell is killed, a lost completion notice leaves an idle session asleep
   (ADR 0003), and a Monitor expires and needs re-arming (#1223 reports 30

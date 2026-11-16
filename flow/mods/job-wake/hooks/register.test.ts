@@ -60,7 +60,7 @@ const world = (on: any) => {
     if (cmd === 'grep' && args[0] === '-m1') {
       if (faults.progressGrepCode !== undefined) return out(faults.progressGrepCode, '', 'grep: progress: Permission denied\n')
       const name = /agent-jobs\/([^/]+)\/progress$/.exec(args[args.length - 1])?.[1] ?? ''
-      const hit = (jobs[name]?.progress ?? []).find(l => new RegExp(args[args.indexOf('-E') + 1]).test(l))
+      const hit = (jobs[name]?.progress ?? []).find(l => new RegExp(args[args.indexOf('-P') + 1]).test(l))
       return hit === undefined ? out(1, '') : out(0, `${hit}\n`)
     }
     return out(127, '')
@@ -123,6 +123,47 @@ test('a non-zero exit wakes with its rc', async ($, on) => {
   await w.clock.advance(POLL)
   expect(w.wakes.length).toBe(1)
   expect(w.wakes[0]).toContain('rc=3')
+})
+
+test('passing test titles and coverage listings that merely contain Error do not match; failure markers do', async ($, on) => {
+  const w = world(on)
+  await bash($, w, START, () => {
+    w.jobs.hunt = job('100', ALIVE, {
+      progress: [
+        't ✔ rulesDialogStuckError: stays open (2ms)',
+        't ✔ attack 73: scroll → QuotaExceededError',
+        't ok 4 - handles Error objects',
+        't readErrorLog (line 495, column 3)',
+      ],
+    })
+  })
+  await w.clock.advance(POLL * 2)
+  expect(w.wakes).toEqual([])
+  w.at('hunt').progress.push('t ✖ rulesDialog stays open (3ms)')
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  expect(w.wakes[0]).toContain('matched line: t ✖ rulesDialog stays open (3ms)')
+})
+
+for (const line of ['t not ok 5 - fails', 't rc=2', 't TypeError: x is undefined', 't bash: line 1: 77 Killed', 't terminate called after throwing std::bad_alloc'])
+  test(`the failure marker ${line} wakes`, async ($, on) => {
+    const w = world(on)
+    await bash($, w, START, () => {
+      w.jobs.hunt = job('100', ALIVE, { progress: [line] })
+    })
+    await w.clock.advance(POLL)
+    expect(w.wakes.length).toBe(1)
+  })
+
+test('a job that hit its time limit wakes saying it timed out and stalled', async ($, on) => {
+  const w = world(on)
+  await bash($, w, START, () => {
+    w.jobs.hunt = job('100', [0, 'finished hunt rc=124 cause=timeout ended=t'])
+  })
+  await w.clock.advance(POLL)
+  expect(w.wakes.length).toBe(1)
+  expect(w.wakes[0]).toContain('timed out')
+  expect(w.wakes[0]).toContain('stalled')
 })
 
 test('a killed job wakes with the killed line', async ($, on) => {

@@ -155,6 +155,13 @@ mentions_wrapped wrapped "grep -r 'job-run --name ' flow/"
 mentions_wrapped wrapped "echo 'use job-run --name x'"
 mentions_wrapped skipped "job-run --name x -- true"
 mentions_wrapped skipped "echo a; job-run --name x -- true"
+# job-run refuses a trailing top-level & (#1901); wrapping one would fail the call.
+mentions_wrapped skipped "sleep 5 &"
+mentions_wrapped wrapped "true && true"
+body=$(fire withjr '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AbCdEfGhIjKlMnOp","tool_input":{"command":"sleep 5 &","run_in_background":true}}'); body=${body#*|}
+printf '%s' "$body" | jq -e '.systemMessage | test("trailing &")' >/dev/null 2>&1 \
+  && ok "a trailing & passes through and says why" \
+  || no "a trailing & passes through and says why" "$body"
 silent "a non-Bash tool call passes through untouched" withjr "$other"
 passthrough "a command the wrapper cannot take passes through" withjr "$nocmd"
 passthrough "job-run missing from PATH passes through" nojr "$bg"
