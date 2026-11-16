@@ -39,7 +39,7 @@ EOF
 chmod +x "$WORK/bin/npx"
 
 # fixture <name> — a committed buffer (lock included, so the snapshot is clean
-# unless a case edits something) with identity "t <t@example.com>".
+# unless a case edits something) with identity "t <t@example.invalid>".
 fixture(){
   local d="$WORK/$1/skills"
   mkdir -p "$d/a"; echo base > "$d/a/SKILL.md"
@@ -105,7 +105,7 @@ run "$d" none
 check "the run with a pending edit exits 0" 0 "$RC"
 check "the snapshot commit happened (base + snapshot)" 2 "$(git -C "$d" rev-list --count HEAD)"
 check "the last commit is the pre-update snapshot" "pre-update snapshot" "$(git -C "$d" log -1 --format=%s | cut -d' ' -f1-2)"
-check "snapshot author is the checkout's identity" t@example.com "$(git -C "$d" log -1 --format=%ae)"
+check "snapshot author is the checkout's identity" t@example.invalid "$(git -C "$d" log -1 --format=%ae)"
 
 # 6. a buffer whose baseline commit never happened (unborn HEAD) recovers: the
 #    snapshot makes the root commit instead of failing on `diff HEAD`

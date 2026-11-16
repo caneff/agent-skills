@@ -23,12 +23,13 @@ import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.join(HERE, "fix-check.sh")
-IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
 
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "common"))
 import fix_check  # noqa: E402
+import fixture_identity  # noqa: E402
+
+IDENT = fixture_identity.env()
 import tracker  # noqa: E402
 
 CODEX_OUT = """Findings:

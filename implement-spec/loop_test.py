@@ -18,6 +18,8 @@ import loop  # noqa: E402
 import runfile  # noqa: E402
 from run_fixtures import drop_job  # noqa: E402
 from run_fixtures import drop_repo_field  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 # A real git checkout to record as a run's target when the case is not about it.
 REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -729,7 +731,7 @@ def test_the_cli_refuses_a_seat_in_a_worktree_it_makes_itself(tmp):
     # in: a repo with a linked worktree, built here, refused there.
     primary = os.path.join(tmp, "primary")
     linked = os.path.join(tmp, "linked")
-    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t"]
+    git = ["git", *fixture_identity.c_args()]
     subprocess.run(["git", "init", "-q", primary], check=True, timeout=60)
     open(os.path.join(primary, "f"), "w").close()
     subprocess.run([*git, "-C", primary, "add", "f"], check=True, timeout=60)
@@ -747,7 +749,7 @@ def test_the_cli_refuses_a_seat_in_a_worktree_it_makes_itself(tmp):
 def test_the_cli_accepts_a_seat_in_a_spec_worktree_it_makes_itself(tmp):
     primary = os.path.join(tmp, "primary")
     linked = os.path.join(tmp, "linked")
-    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t"]
+    git = ["git", *fixture_identity.c_args()]
     subprocess.run(["git", "init", "-q", primary], check=True, timeout=60)
     open(os.path.join(primary, "f"), "w").close()
     subprocess.run([*git, "-C", primary, "add", "f"], check=True, timeout=60)
@@ -1878,8 +1880,7 @@ def make_workspace(tmp, changed, default="main"):
     work = os.path.join(tmp, "work")
     run_in(tmp, "git", "init", "-q", "--bare", "-b", default, origin)
     run_in(tmp, "git", "clone", "-q", origin, work)
-    for k, v in (("user.email", "t@example.com"), ("user.name", "t")):
-        run_in(work, "git", "config", k, v)
+    fixture_identity.configure(work, tmp)
     with open(os.path.join(work, "a.txt"), "w") as fh:
         fh.write("a")
     run_in(work, "git", "add", "a.txt")

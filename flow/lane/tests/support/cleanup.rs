@@ -165,8 +165,7 @@ impl Cleanup {
         self.git_ok(&["init", "-q", "-b", "main", "--bare", &origin]);
         self.git_ok(&["clone", "-q", &origin, d]);
         self.git_ok(&["-C", d, "checkout", "-q", "-b", "main"]);
-        self.git_ok(&["-C", d, "config", "user.email", "t@example.com"]);
-        self.git_ok(&["-C", d, "config", "user.name", "t"]);
+        super::identity::fixture_identity_via(&output, &dir, self.tmp.path());
         dir
     }
 

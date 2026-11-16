@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -21,6 +22,8 @@ os.environ.setdefault("AUDITS_NO_SYNTH", "1")
 import driver  # noqa: E402
 import mutation_run  # noqa: E402
 import procs  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -420,8 +423,7 @@ def _init_git_repo(path):
     # that repo instead of `path` — scrub them from the child env.
     env = driver.scrubbed_env()
     subprocess.run(["git", "-C", path, "init", "-q"], check=True, env=env)
-    subprocess.run(["git", "-C", path, "config", "user.email", "t@example.com"], check=True, env=env)
-    subprocess.run(["git", "-C", path, "config", "user.name", "t"], check=True, env=env)
+    fixture_identity.configure(path, tempfile.gettempdir(), env=env)
     open(os.path.join(path, "a.py"), "w").write("x = 1\n")
     subprocess.run(["git", "-C", path, "add", "."], check=True, env=env)
     subprocess.run(["git", "-C", path, "commit", "-q", "-m", "init"], check=True, env=env)
@@ -436,7 +438,7 @@ def test_init_git_repo_ignores_leaked_git_dir(tmp_path):
     victim, target = _mkdirs(tmp_path, "victim", "target")
     clean_env = driver.scrubbed_env()
     subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
-    subprocess.run(["git", "-C", victim, "-c", "user.email=v@example.com", "-c", "user.name=v",
+    subprocess.run(["git", "-C", victim, *fixture_identity.c_args(),
                     "commit", "-q", "--allow-empty", "-m", "victim"], check=True, env=clean_env)
     config_path = os.path.join(victim, ".git", "config")
     before = open(config_path).read()
@@ -1441,7 +1443,7 @@ def test_multi_sweeps_origin_main_not_a_dirty_or_other_branch_checkout(tmp_path)
     _git_out(a, "checkout", "-q", "-b", "wip")
     open(os.path.join(a, "wip.py"), "w").write("y = 2\n")
     _git_out(a, "add", ".")
-    _git_out(a, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "wip")
+    _git_out(a, *fixture_identity.c_args(), "commit", "-q", "-m", "wip")
     open(os.path.join(a, "dirty.py"), "w").write("z = 3\n")
     r = _multi([a], env, FAKE_GH_BODIES=os.path.join(tmp, "bodies.log"))
     assert r.returncode == 0, r.stdout + r.stderr
@@ -1520,7 +1522,7 @@ def test_record_one_issue_with_the_mapped_label_holding_every_finding_of_every_a
         "| Label in mattpocock/skills | Label in our tracker | Meaning |\n| --- | --- | --- |\n"
         "| `needs-triage` | `to-look-at` | x |\n| `needs-info` | `info` | y |\n")
     _git_out(a, "add", ".")
-    _git_out(a, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "labels")
+    _git_out(a, *fixture_identity.c_args(), "commit", "-q", "-m", "labels")
     _git_out(a, "push", "-q", "origin", "main")
     rows = [_finding(1), _finding(2), _finding(3)]
     r = _multi([a], env, "--only", "dead-code,domain-drift", **_record_env(tmp, rows, FAKE_GH_LABELS='[{"name":"to-look-at"}]'))
@@ -1705,7 +1707,7 @@ def test_record_counts_what_the_ignore_file_suppressed(tmp_path):
     (a,), env = _multi_fixture(tmp, ["alpha"])
     open(os.path.join(a, ".audit-ignore.md"), "w").write("- src/mod1.py: rejected\n")
     _git_out(a, "add", ".audit-ignore.md")
-    _git_out(a, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "ignore")
+    _git_out(a, *fixture_identity.c_args(), "commit", "-q", "-m", "ignore")
     _git_out(a, "push", "-q", "origin", "main")
     r = _multi([a], env, **_record_env(tmp, [_finding(1)], FAKE_CLAUDE_SUPPRESSED="7"))
     assert r.returncode == 0, r.stdout + r.stderr
@@ -2242,7 +2244,7 @@ def test_multi_fetches_so_a_stale_clone_still_sweeps_the_newest_origin_main(tmp_
     genv = driver.scrubbed_env()
     subprocess.run(["git", "clone", "-q", os.path.join(tmp, "bare-alpha"), other], check=True, env=genv)
     open(os.path.join(other, "new.py"), "w").write("n = 1\n")
-    for argv in (["add", "new.py"], ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "n"],
+    for argv in (["add", "new.py"], [*fixture_identity.c_args(), "commit", "-q", "-m", "n"],
                  ["push", "-q", "origin", "HEAD:main"]):
         subprocess.run(["git", "-C", other, *argv], check=True, env=genv)
     newest = _git_out(other, "rev-parse", "HEAD")

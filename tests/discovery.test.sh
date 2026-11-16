@@ -21,8 +21,8 @@ for plug in flow/mods/m skillplug testedplug; do
 done
 echo 'test' >"$repo/testedplug/x.test.ts"
 git -C "$repo" init -q
-git -C "$repo" config user.email owner@example.org
-git -C "$repo" config user.name owner
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixture-identity.sh"
+fixture_identity "$repo" "$shadow" || exit 2
 git -C "$repo" add -A
 git -C "$repo" commit -qm base
 

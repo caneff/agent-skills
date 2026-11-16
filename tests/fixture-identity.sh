@@ -13,6 +13,15 @@ fixture_identity() {
     "$root"/*) ;;
     *) echo "FAIL: fixture repo $1 is not under $2" >&2; return 1 ;;
   esac
-  git -C "$1" config user.email t@example.com
+  git -C "$1" config user.email t@example.invalid
   git -C "$1" config user.name t
+}
+
+# fixture_env: export the same identity as GIT_AUTHOR_*/GIT_COMMITTER_*, for a
+# suite that commits through the environment. Run it where the exports may
+# stay (a subshell, or a suite whose whole shell is a fixture); it writes no
+# config, so it needs no repo to check.
+fixture_env() {
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
+  export GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 }

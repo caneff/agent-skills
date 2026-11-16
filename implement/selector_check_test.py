@@ -15,6 +15,8 @@ import subprocess
 import sys
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "selector_check.py")
@@ -247,8 +249,7 @@ def based_repo(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1",
-           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.test"}
+           **fixture_identity.env()}
 
     def git(*args):
         subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True)

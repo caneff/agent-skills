@@ -28,8 +28,8 @@ fresh() {
   for f in a/a.test.sh b/b.test.sh tests/t.test.sh; do printf '#!/usr/bin/env bash\nexit 0\n' >"$shadow/repo/$f"; done
   echo c >"$shadow/repo/c/note.md"; echo r >"$shadow/repo/README.md"
   git -C "$shadow/repo" init -q
-  git -C "$shadow/repo" config user.email owner@example.org
-  git -C "$shadow/repo" config user.name owner
+  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixture-identity.sh"
+  fixture_identity "$shadow/repo" "$shadow" || exit 2
   git -C "$shadow/repo" add -A
   git -C "$shadow/repo" commit -qm base
   base=$(git -C "$shadow/repo" rev-parse HEAD)

@@ -4,12 +4,15 @@ against the real ~/src workspace.
 """
 import os
 import subprocess
+import tempfile
 import sys
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
 import generate  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 
 # A caller's leaked GIT_DIR/GIT_WORK_TREE would redirect every call below at
@@ -26,8 +29,7 @@ def _git(repo, *args):
 def _init_repo(repo):
     os.makedirs(repo)
     _git(repo, "init", "-q", "-b", "main")
-    _git(repo, "config", "user.email", "a@b.com")
-    _git(repo, "config", "user.name", "Tester")
+    fixture_identity.configure(repo, tempfile.gettempdir())
     return repo
 
 

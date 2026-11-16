@@ -7,11 +7,14 @@ touches the live settings.
 """
 
 import json
+import sys
 import os
 import subprocess
 from pathlib import Path
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../common"))
+import fixture_identity  # noqa: E402
 
 SCRIPT = Path(__file__).with_name("automode-entry")
 ODD = "Odd   spacing\tentry."  # collapses to one space per run of whitespace
@@ -48,8 +51,7 @@ class Rig:
         self.link = self.home / ".claude" / "settings.json"
         subprocess.run(["git", "init", "-q", "--bare", str(self.remote)], check=True, env=clean_env())
         subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True, env=clean_env())
-        git(self.repo, "config", "user.name", "Fixture")
-        git(self.repo, "config", "user.email", "fixture@example.invalid")
+        fixture_identity.configure(str(self.repo), str(tmp))
         git(self.repo, "remote", "add", "origin", str(self.remote))
         self.settings.parent.mkdir(parents=True)
         self.write(BASE)

@@ -37,8 +37,8 @@ scratch_repo() { # scratch_repo <dir> -> writes a patched backup-sync.sh + fixtu
     "$here/backup-sync.sh" > "$dir/backup-sync.sh"
   chmod +x "$dir/backup-sync.sh"
   git -C "$dir" init -q
-  git -C "$dir" config user.name t
-  git -C "$dir" config user.email t@example.com
+  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../tests/fixture-identity.sh"
+  fixture_identity "$dir" "$tmp" || exit 2
   git -C "$dir" add -A
   git -C "$dir" commit -q -m base
 }

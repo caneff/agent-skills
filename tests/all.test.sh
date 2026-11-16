@@ -52,10 +52,11 @@ git config --local probe.ran yes
 [ -z "${BASH_ENV:-}" ] || git config --local probe.bash-env leaked
 git update-index --add --cacheinfo "100644,$(git hash-object -w --stdin </dev/null),probe-marker"
 PROBE
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixture-identity.sh"
 git -C "$shadow" init -q \
   || { echo "FAIL: could not init the shadow repo"; exit 1; }
 git -C "$shadow" add -A \
-  && git -C "$shadow" -c user.email=t@example.com -c user.name=t commit -q -m shadow \
+  && { fixture_identity "$shadow" "${TMPDIR:-/tmp}" && git -C "$shadow" commit -q -m shadow; } \
   || { echo "FAIL: could not commit the shadow"; exit 1; }
 
 git init -q "$victim" \

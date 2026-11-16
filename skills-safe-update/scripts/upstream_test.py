@@ -12,6 +12,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
 import upstream  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../common"))
+import fixture_identity  # noqa: E402
 
 HEAD_ARGS = ("api", "repos/acme/repo/commits/HEAD", "--jq", ".sha+\" \"+.commit.tree.sha")
 TREES_ARGS = ("api", "repos/acme/repo/git/trees/headsha1234?recursive=1")
@@ -173,8 +175,7 @@ def test_upstream_dir_missing_dir_is_known_and_none(gh_runner):
 
 def _git_repo(path, skills):
     """A repo whose HEAD holds each skill dir; returns {name: tree sha}."""
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+    env = {**os.environ, **fixture_identity.env()}
 
     def git(*a):
         return subprocess.run(["git", *a], cwd=path, env=env, check=True,

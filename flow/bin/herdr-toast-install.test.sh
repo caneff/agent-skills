@@ -63,7 +63,9 @@ run_install t "$tmp/t/flow/bin"
 [ -z "$(ls "$tmp/t/.local/bin")" ] || fail "linked something after refusing /tmp"
 [ ! -s "$tmp/t.log" ] || fail "registry stub called after refusing /tmp"
 
-git init -q "$tmp/repo" && git -C "$tmp/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../tests/fixture-identity.sh"
+git init -q "$tmp/repo" && fixture_identity "$tmp/repo" "$tmp" || fail "fixture identity"
+git -C "$tmp/repo" commit -q --allow-empty -m init
 git -C "$tmp/repo" worktree add -q "$tmp/wt" -b wt
 mkfix "$tmp/wt/flow/bin"
 run_install w "$tmp/wt/flow/bin" HERDR_TOAST_ALLOW_TMP=1

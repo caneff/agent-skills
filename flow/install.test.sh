@@ -299,7 +299,9 @@ fi
 # sha, so merge-cleanup has a baseline to diff flow/lane against.
 recorded="$tmp/recorded"
 scratch_repo "$recorded"
-git -C "$recorded" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m base
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../tests/fixture-identity.sh"
+fixture_identity "$recorded" "$tmp" || exit 2
+git -C "$recorded" commit -q --allow-empty -m base
 head_sha=$(git -C "$recorded" rev-parse HEAD)
 out=$(HOME="$recorded/home" bash "$recorded/flow/install.sh" 2>&1); rc=$?
 got=$(cat "$recorded/home/.local/state/lane/build-sha" 2>/dev/null)

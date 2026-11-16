@@ -7,9 +7,13 @@ Seam: the real script, run from a checkout (or a linked worktree of one) of a
 throwaway repo, with HOME pointed at a temp dir.
 """
 import subprocess
+import sys
+import os
 from pathlib import Path
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "review_ledger.py"
 
@@ -37,7 +41,7 @@ def test_the_directory_is_the_folded_repo_name_under_the_review_cache(tmp_path, 
 
 def test_a_linked_worktree_keys_on_the_repo_not_the_worktree(tmp_path):
     repo = init(tmp_path, "agent-skills")
-    subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+    subprocess.run(["git", "-C", str(repo), *fixture_identity.c_args(),
                     "commit", "-q", "--allow-empty", "-m", "base"], check=True)
     wt = tmp_path / "implement-9"
     subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "implement-9", str(wt)], check=True)

@@ -8,12 +8,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "codex-audit.py"
 
-GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
+GIT_ENV = {**fixture_identity.env(),
            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
 
 

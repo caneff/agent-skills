@@ -29,6 +29,14 @@ defines them.
   replays a commit under a different identity, so `pre-push` re-checks every
   commit about to be pushed against the same checkout-configured
   `user.email` and the same `COMMIT_IDENTITY_OVERRIDE` escape (#1006).
+  A suite that writes its identity into a real checkout matches itself, so
+  the comparison alone passed it (#1728: `t <t@t>` on a worker's commit; the
+  writer was not reproduced, and the guard did not stop it because the
+  checkout's own config held the fixture identity at commit time). Both hooks
+  now also refuse a checkout whose config holds a test-fixture identity
+  outside every temp root, and `pre-commit` also compares the author and
+  committer *name* to `user.name`. Suites take their identity from one helper
+  per language; `tests/fixture-identity-sites.test.sh` fails any other writer.
 - **The agent-model guard.** A bare Agent call inherits the session's model,
   so explore/lookup passes `sonnet` and review/diagnosis `opus`. The guard is
   the `agent-model` mod (`flow/mods/agent-model/`): it rewrites a bare or non-`sonnet`/`haiku` Explore

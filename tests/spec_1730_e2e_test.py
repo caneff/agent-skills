@@ -42,14 +42,15 @@ import sys
 from pathlib import Path
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 LANDED = ROOT / "landed" / "generate.py"
 BACKSTOP = ROOT / "backstop" / "backstop.py"
 COMMON = ROOT / "common"
 SLUG = "me/my.repo"
-IDENT = {"GIT_AUTHOR_NAME": "Ada Author", "GIT_AUTHOR_EMAIL": "ada@example.invalid",
-         "GIT_COMMITTER_NAME": "Ada Author", "GIT_COMMITTER_EMAIL": "ada@example.invalid"}
+IDENT = fixture_identity.env("Ada Author", "ada@example.invalid")
 REDIRECTS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
              "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
 

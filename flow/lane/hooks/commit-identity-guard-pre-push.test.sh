@@ -26,6 +26,9 @@ repo="$tmp/repo"
 git init -q "$repo"
 . "$here/../../../tests/fixture-identity.sh"
 fixture_identity "$repo" "$tmp" || exit 2
+# the guard refuses a fixture identity, so the guarded identity is a non-fixture one
+git -C "$repo" config user.email me@corp.dev
+git -C "$repo" config user.name Me
 cd "$repo" || exit 2
 git remote add origin "$remote"
 mkdir -p .git/hooks
@@ -43,7 +46,7 @@ push main; check "configured identity pushes" 0 $?
 # landing on top, still under the configured branch
 git -c user.email=real@gmail.com commit -q --allow-empty -m replayed
 push main; check "a replayed foreign-email commit is refused" 1 $?
-grep -q "real@gmail.com" "$tmp/out" && grep -q "t@example.com" "$tmp/out"
+grep -q "real@gmail.com" "$tmp/out" && grep -q "me@corp.dev" "$tmp/out"
 check "refusal names both emails" 0 $?
 
 git commit -q --allow-empty --amend --reset-author -m replayed
@@ -71,7 +74,7 @@ git -C "$repo" config --unset user.email
 git -c user.email=a@b.c commit -q --allow-empty -m none
 push main; check "no configured user.email is refused" 1 $?
 grep -q "no user.email is configured" "$tmp/out"; check "the no-configured-email refusal names itself" 0 $?
-git -C "$repo" config user.email t@example.com
+git -C "$repo" config user.email me@corp.dev
 
 # zero ref updates on stdin: the guard passes an empty push and says why
 # (rationale: the hook's own comment), rather than failing the lane step.
@@ -172,5 +175,29 @@ check "a locally replayed foreign commit on an existing branch is still refused"
 grep -q "real@gmail.com" "$tmp/out"; check "that refusal names the replayed email" 0 $?
 git reset -q --hard HEAD~1
 git checkout -q main
+
+# a fixture identity configured on a checkout outside every temp root is
+# refused at push (#1728); inside one it passes. /dev/shm is outside every temp
+# root, so a repo there reads as a real checkout.
+git -C "$repo" config user.email t@t
+git commit -q --allow-empty -m fixturecommit
+push main; check "a configured fixture identity pushes inside a temp root" 0 $?
+git -C "$repo" config user.email me@corp.dev
+git reset -q --hard HEAD~1
+shm=$(mktemp -d /dev/shm/identity-guard-push.XXXXXX) || { echo "FAIL: /dev/shm is not writable; the fixture-refusal cases need a path outside every temp root" >&2; exit 2; }
+trap 'rm -rf "$tmp" "$shm"' EXIT
+git init -q --bare "$shm/remote.git"
+git init -q "$shm/real"
+cp "$hook" "$shm/real/.git/hooks/pre-push"
+chmod +x "$shm/real/.git/hooks/pre-push"
+cd "$shm/real" || exit 2
+git remote add origin "$shm/remote.git"
+git config user.email t@t; git config user.name t
+git commit -q --allow-empty -m fx
+push main; check "a configured fixture identity is refused at push outside the temp roots" 1 $?
+grep -q "fixture" "$tmp/out"; check "the fixture refusal says fixture" 0 $?
+git config user.email me@corp.dev; git config user.name Me
+git commit -q --allow-empty --amend --reset-author -m real
+push main; check "a real configured identity pushes outside the temp roots" 0 $?
 
 exit $fail

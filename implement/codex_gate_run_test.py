@@ -12,6 +12,8 @@ import subprocess
 import sys
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "codex-gate-run.py")
@@ -52,8 +54,7 @@ def env(tmp_path):
     repo.mkdir()
     g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
     g("init", "-q")
-    g("config", "user.email", "t@example.com")
-    g("config", "user.name", "t")
+    fixture_identity.configure(str(repo), str(tmp_path))
     g("commit", "--allow-empty", "-qm", "init")
     body = tmp_path / "body.md"
     body.write_text('ticket "quoted" $(not run) `x` two  words')

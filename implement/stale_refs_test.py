@@ -11,6 +11,8 @@ import subprocess
 import sys
 
 import pytest
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
+import fixture_identity  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.join(HERE, "stale_refs.py")
@@ -45,8 +47,7 @@ def repo(tmp_path):
         root = str(tmp_path / "fixture")
         os.mkdir(root)
         git(root, "init", "-q", "-b", "main")
-        git(root, "config", "user.email", "fixture@example.invalid")
-        git(root, "config", "user.name", "fixture")
+        fixture_identity.configure(root, str(tmp_path))
         write(root, files)
         git(root, "add", "-A")
         git(root, "commit", "-q", "-m", "base")
