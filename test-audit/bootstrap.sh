@@ -13,4 +13,4 @@ installed && exit 0
   flock 9
   installed || npm ci --silent
 ) 9<.   # the lock is on the directory itself: no lock file to leave untracked
-installed || { echo "bootstrap.sh: npm ci left test-audit/node_modules without @babel/parser" >&2; exit 2; }
+installed || { echo "bootstrap.sh: npm ci finished but test-audit/node_modules lacks .package-lock.json or @babel/parser/package.json" >&2; exit 2; }
