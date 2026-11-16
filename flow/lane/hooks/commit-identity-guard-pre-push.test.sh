@@ -184,7 +184,7 @@ git commit -q --allow-empty -m fixturecommit
 push main; check "a configured fixture identity pushes inside a temp root" 0 $?
 git -C "$repo" config user.email me@corp.dev
 git reset -q --hard HEAD~1
-shm=$(mktemp -d /dev/shm/identity-guard-push.XXXXXX) || exit 2
+shm=$(mktemp -d /dev/shm/identity-guard-push.XXXXXX) || { echo "FAIL: /dev/shm is not writable; the fixture-refusal cases need a path outside every temp root" >&2; exit 2; }
 trap 'rm -rf "$tmp" "$shm"' EXIT
 git init -q --bare "$shm/remote.git"
 git init -q "$shm/real"

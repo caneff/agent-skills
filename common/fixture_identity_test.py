@@ -41,7 +41,7 @@ def test_configure_refuses_a_path_that_is_no_repo(tmp_path):
 @pytest.mark.parametrize("root", ["", "/missing-root-1728"])
 def test_configure_refuses_a_root_that_does_not_resolve(tmp_path, root):
     repo = _init(tmp_path / "repo")
-    with pytest.raises(ValueError, match="root"):
+    with pytest.raises(ValueError, match="does not resolve"):
         fixture_identity.configure(repo, root)
     assert _config(repo, "user.email") == ""
 

@@ -19,7 +19,7 @@ check() {
 git init -q "$tmp/repo"
 fixture_identity "$tmp/repo" "$tmp" 2>"$tmp/err"
 check "repo under the root is accepted" 0 $?
-check "accepted repo gets the fixture email" t@example.com "$(git -C "$tmp/repo" config user.email)"
+check "accepted repo gets the fixture email" t@example.invalid "$(git -C "$tmp/repo" config user.email)"
 check "accepted repo gets the fixture name" t "$(git -C "$tmp/repo" config user.name)"
 
 git init -q "$outside/repo"
@@ -47,7 +47,7 @@ check "repo under a bad root is left without an email" "" "$(git -C "$outside/ot
 # fixture_env: the env form of the same identity (GIT_AUTHOR_*/GIT_COMMITTER_*),
 # so a suite that commits through env never spells its own (#1728).
 ( fixture_env
-  [ "$GIT_AUTHOR_EMAIL" = t@example.com ] && [ "$GIT_COMMITTER_EMAIL" = t@example.com ] \
+  [ "$GIT_AUTHOR_EMAIL" = t@example.invalid ] && [ "$GIT_COMMITTER_EMAIL" = t@example.invalid ] \
     && [ "$GIT_AUTHOR_NAME" = t ] && [ "$GIT_COMMITTER_NAME" = t ] )
 check "fixture_env exports one identity for author and committer" 0 $?
 

@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -422,7 +423,7 @@ def _init_git_repo(path):
     # that repo instead of `path` — scrub them from the child env.
     env = driver.scrubbed_env()
     subprocess.run(["git", "-C", path, "init", "-q"], check=True, env=env)
-    fixture_identity.configure(path, os.path.dirname(os.path.abspath(path)), env=env)
+    fixture_identity.configure(path, tempfile.gettempdir(), env=env)
     open(os.path.join(path, "a.py"), "w").write("x = 1\n")
     subprocess.run(["git", "-C", path, "add", "."], check=True, env=env)
     subprocess.run(["git", "-C", path, "commit", "-q", "-m", "init"], check=True, env=env)

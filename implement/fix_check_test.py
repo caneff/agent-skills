@@ -20,16 +20,16 @@ import sys
 import time
 
 import pytest
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
-import fixture_identity  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.join(HERE, "fix-check.sh")
-IDENT = fixture_identity.env()
 
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "common"))
 import fix_check  # noqa: E402
+import fixture_identity  # noqa: E402
+
+IDENT = fixture_identity.env()
 import tracker  # noqa: E402
 
 CODEX_OUT = """Findings:

@@ -19,23 +19,25 @@ def env(name=NAME, email=EMAIL):
             "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email}
 
 
-def c_args(name=NAME, email=EMAIL):
-    """`git -c` arguments committing as one identity, for a repo that gets no config."""
-    return ["-c", f"user.name={name}", "-c", f"user.email={email}"]
+def c_args():
+    """`git -c` arguments committing as the fixture identity, for a repo with no config."""
+    return ["-c", f"user.name={NAME}", "-c", f"user.email={EMAIL}"]
 
 
 def _real(path, env=None):
-    out = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"], capture_output=True, text=True, env=env)
+    cmd = ["git", "-C", path, "rev-parse", "--show-toplevel"]
+    out = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return out.stdout.strip() if out.returncode == 0 else ""
 
 
-def configure(repo, root, name=NAME, email=EMAIL, env=None):
+def configure(repo, root, env=None):
     """Set the identity in `repo` only when its toplevel sits under `root`.
 
     A bare `git config` after a failed chdir wrote the real checkout's config,
     so the target is named and checked. An empty or unresolvable `root` would
-    admit any repo, so it is refused too. `env` is the child environment (a scrubbed one, when GIT_DIR may have
-    leaked). Raises ValueError, writing nothing.
+    admit any repo, so it is refused too. `env` is the child environment (a
+    scrubbed one, when GIT_DIR may have leaked). Raises ValueError, writing
+    nothing.
     """
     if not root or not os.path.isdir(root):
         raise ValueError(f"fixture root {root!r} does not resolve to a directory")
@@ -43,5 +45,6 @@ def configure(repo, root, name=NAME, email=EMAIL, env=None):
     top, base = os.path.realpath(real) if real else "", os.path.realpath(root)
     if not top or not top.startswith(base + os.sep):
         raise ValueError(f"fixture repo {repo} is not under {root}")
-    for key, value in (("user.email", email), ("user.name", name)):
-        subprocess.run(["git", "-C", repo, "config", key, value], check=True, capture_output=True, env=env)
+    for key, value in (("user.email", EMAIL), ("user.name", NAME)):
+        cmd = ["git", "-C", repo, "config", key, value]
+        subprocess.run(cmd, check=True, capture_output=True, env=env)

@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
@@ -20,7 +21,7 @@ def _git(repo, *args):
 def _init_repo(path, files):
     os.makedirs(path, exist_ok=True)
     _git(path, "init", "-q")
-    fixture_identity.configure(path, os.path.dirname(os.path.abspath(path)))
+    fixture_identity.configure(path, tempfile.gettempdir())
     for rel in files:
         open(os.path.join(path, rel), "w").write("x = 1\n")
     return _commit(path, "init")

@@ -1646,7 +1646,7 @@ fn sweep_root(c: &Cleanup) -> std::path::PathBuf {
     let nr = root.join("noremote");
     std::fs::create_dir_all(&nr).unwrap();
     c.git_ok(&["init", "-q", "-b", "main", s(&nr)]);
-    support::identity::fixture_identity_via(&|x| support::cleanup::output(x), &nr, c.tmp.path());
+    support::identity::fixture_identity_via(&support::cleanup::output, &nr, c.tmp.path());
     std::fs::write(nr.join("f"), "x\n").unwrap();
     c.git_ok(&["-C", s(&nr), "add", "f"]);
     c.git_ok(&["-C", s(&nr), "commit", "-qm", "x"]);
@@ -2815,7 +2815,7 @@ fn declare_discardable_and_ignore(r: &std::path::Path, line: &str) {
 /// worktrees a test nests inside a workspace of the first.
 fn init_other_repo(c: &Cleanup, other: &std::path::Path) {
     c.git_ok(&["init", "-q", "-b", "main", s(other)]);
-    support::identity::fixture_identity_via(&|x| support::cleanup::output(x), other, c.tmp.path());
+    support::identity::fixture_identity_via(&support::cleanup::output, other, c.tmp.path());
     c.git_ok(&["-C", s(other), "commit", "-q", "--allow-empty", "-m", "base"]);
 }
 

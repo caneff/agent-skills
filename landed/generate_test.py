@@ -4,6 +4,7 @@ against the real ~/src workspace.
 """
 import os
 import subprocess
+import tempfile
 import sys
 
 import pytest
@@ -28,7 +29,7 @@ def _git(repo, *args):
 def _init_repo(repo):
     os.makedirs(repo)
     _git(repo, "init", "-q", "-b", "main")
-    fixture_identity.configure(repo, os.path.dirname(os.path.abspath(repo)))
+    fixture_identity.configure(repo, tempfile.gettempdir())
     return repo
 
 

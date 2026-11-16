@@ -25,7 +25,7 @@ allowed+='|flow/claude/settings\.json|flow/lane/tests/fixtures/body_targets\.jso
 allowed+='|flow/lane/src/targets\.rs|test-audit/fixtures/test_user_service\.py'                          # prose and a `user.name` attribute
 allowed_files=${allowed#|}
 
-pattern='config[[:space:]"'"'"',]+user\.(name|email)|"user\.(name|email)"|user\.(name|email)=|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)'
+pattern='config[^|;&]*user\.(name|email)|"user\.(name|email)"|user\.(name|email)=|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)|--author[= ]'
 
 scan() { # <repo root>: tracked, non-Markdown files outside docs/ and the allowlist that name an identity
   git -C "$1" grep -nIE -e "$pattern" -- . ':!*.md' ':!docs/' 2>/dev/null |
@@ -37,8 +37,13 @@ trap 'rm -rf "$shadow"' EXIT
 git init -q "$shadow"
 printf 'git config user.email t@t\n' >"$shadow/leak.sh"
 printf 'ok\n' >"$shadow/clean.sh"
+printf 'git config --global user.email t@t\n' >"$shadow/global.sh"
+printf 'git -C d config --local user.name t\n' >"$shadow/local.sh"
+printf 'git config set user.name t\n' >"$shadow/set.sh"
+printf 'git commit --author="t <t@t>" -m x\n' >"$shadow/author.sh"
 git -C "$shadow" add -A
-check "a shadow repo's identity write is found" "leak.sh:1:git config user.email t@t" "$(scan "$shadow")"
+check "a shadow repo's identity writes are all found, whatever the flags" \
+  "author.sh global.sh leak.sh local.sh set.sh" "$(scan "$shadow" | cut -d: -f1 | sort | tr '\n' ' ' | sed 's/ $//')"
 
 found=$(scan "$root")
 check "no identity is written outside the helpers" "" "$found"

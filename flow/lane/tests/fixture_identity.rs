@@ -44,6 +44,6 @@ fn refuses_a_path_that_is_no_repo_and_a_root_that_does_not_resolve() {
     assert!(try_fixture_identity(&tmp.path().join("missing"), tmp.path()).unwrap_err().contains("not under"));
     let repo = tmp.path().join("repo");
     init(&repo);
-    assert!(try_fixture_identity(&repo, &tmp.path().join("no-such-root")).unwrap_err().contains("root"));
+    assert!(try_fixture_identity(&repo, &tmp.path().join("no-such-root")).unwrap_err().contains("does not resolve"));
     assert_eq!(local(&repo, "user.email"), "");
 }

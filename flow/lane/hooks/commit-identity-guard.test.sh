@@ -61,7 +61,7 @@ try env GIT_COMMITTER_NAME=Mallory git commit -qm cname;      check "committer n
 # config. Suites build fixtures under a temp root and run the real hooks there,
 # so a fixture identity inside one passes. /dev/shm is outside every temp root,
 # so a repo there reads as a real checkout.
-shm=$(mktemp -d /dev/shm/identity-guard.XXXXXX) || exit 2
+shm=$(mktemp -d /dev/shm/identity-guard.XXXXXX) || { echo "FAIL: /dev/shm is not writable; the fixture-refusal cases need a path outside every temp root" >&2; exit 2; }
 trap 'rm -rf "$tmp" "$shm"' EXIT
 git init -q "$shm/real"
 cp "$hook" "$shm/real/.git/hooks/pre-commit"
@@ -79,5 +79,14 @@ git config user.email me@corp.dev; git config user.name t
 try git commit -qm fxname;                                    check "configured fixture name t is refused outside the temp roots" 1 $?
 git config user.name Me
 try git commit -qm real;                                      check "a real configured identity passes outside the temp roots" 0 $?
+
+# a configured name git strips on its way to the commit (trailing space) is
+# still the configured name: plain commits pass, no -c override was passed
+git config user.name "Me "
+try git commit -qm stripped;                                  check "a configured name git strips still passes" 0 $?
+# an unset user.name is refused, not read as a match
+git config --unset user.name
+try env GIT_AUTHOR_NAME=x GIT_COMMITTER_NAME=x git commit -qm noname;                                    check "no configured user.name is refused" 1 $?
+grep -q "no user.name is configured" "$tmp/out";              check "the no-name refusal names itself" 0 $?
 
 exit $fail

@@ -56,7 +56,7 @@ PROBE
 git -C "$shadow" init -q \
   || { echo "FAIL: could not init the shadow repo"; exit 1; }
 git -C "$shadow" add -A \
-  && { fixture_identity "$shadow" "$(dirname "$shadow")" && git -C "$shadow" commit -q -m shadow; } \
+  && { fixture_identity "$shadow" "${TMPDIR:-/tmp}" && git -C "$shadow" commit -q -m shadow; } \
   || { echo "FAIL: could not commit the shadow"; exit 1; }
 
 git init -q "$victim" \
