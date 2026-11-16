@@ -257,11 +257,11 @@ defines them.
   completion notice, so one job's end can start two turns: they are the same
   event. A sharded run of several `job-run` processes starts each with the
   same `--group <name>` (rule: `flow/bin/job-run` header), not once per member.
-  `job-run` closes the job's stdin (`--stdin` passes the caller's) and kills
-  it at a wall-clock limit, 3600 s by default (`--timeout <s>`, `0` for none,
-  `$JOB_RUN_TIMEOUT`); a run killed that way wakes as timed out. A command
-  ending in a top-level `&` is refused. A job that legitimately runs past an
-  hour passes `--timeout 0` or its own bound.
+  `job-run` closes the job's stdin, kills it at a default time limit and
+  refuses a `sh -c` script ending in `&` (rules and overrides: `flow/bin/job-run`
+  header). A job meant to run longer than that limit is launched as its own
+  `job-run --name <n> --timeout 0 -- <cmd>`, which the background-job hook leaves
+  alone; a hook-wrapped call cannot be given another limit.
   Why: a plain background run loses its output and exit code when its
   shell is killed, a lost completion notice leaves an idle session asleep
   (ADR 0003), and a Monitor expires and needs re-arming (#1223 reports 30
@@ -273,7 +273,7 @@ defines them.
   event — a message, the progress file on wake — catches it. Why: a spin is
   invisible; every liveness signal reads healthy while it burns.
 - A watch on a background job matches failure signatures
-  (`Traceback|Error|REJECTED|bad_alloc|Killed`) and process exit, not only
+  (the `SIGNATURE` in `flow/mods/job-wake/hooks/register.ts`) and process exit, not only
   the success line — and never a per-item line inside a sweep. The
   `job-wake` mod is that watch for a `job-run` job; one written by hand
   follows the same rule. Report a

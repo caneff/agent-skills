@@ -15,7 +15,8 @@ for `caneff/grid-hunts` (that repo's #748), so one copy serves every repo.
   refuses to start above a 1-minute load of 24 unless `--force-load` is given,
   so a hunt built on that protocol and launched with no `--workers` at all is
   already box-safe.
-- Long runs go under `job-run --name <n>` and append to a progress file, so a
+- Long runs go under `job-run --name <n> --timeout <s>` (a run past one hour
+  needs it or `--timeout 0`, else the default limit kills it) and append to a progress file, so a
   kill does not lose the result. A multi-case job prints one line per case as
   it finishes (case, verdict, seconds), in completion order, so the progress
   file answers a status check. Why: a 51-minute enumeration hid finished

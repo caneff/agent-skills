@@ -134,6 +134,9 @@ test('passing test titles and coverage listings that merely contain Error do not
         't ✔ attack 73: scroll → QuotaExceededError',
         't ok 4 - handles Error objects',
         't readErrorLog (line 495, column 3)',
+        't     ✔ nested handles Killed child',
+        't   ok 3 - REJECTED promise is caught',
+        't ✔ handles REJECTED promise',
       ],
     })
   })
@@ -145,7 +148,7 @@ test('passing test titles and coverage listings that merely contain Error do not
   expect(w.wakes[0]).toContain('matched line: t ✖ rulesDialog stays open (3ms)')
 })
 
-for (const line of ['t not ok 5 - fails', 't rc=2', 't TypeError: x is undefined', 't bash: line 1: 77 Killed', 't terminate called after throwing std::bad_alloc'])
+for (const line of ['t not ok 5 - fails', 't rc=2', 't TypeError: x is undefined', 't bash: line 1: 77 Killed', 't E       AssertionError: x', 't FAILED test_a - ValueError: y', 't [shard 2] Traceback (most recent call last):', 't Uncaught TypeError: z', 't terminate called after throwing std::bad_alloc'])
   test(`the failure marker ${line} wakes`, async ($, on) => {
     const w = world(on)
     await bash($, w, START, () => {

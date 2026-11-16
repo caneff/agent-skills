@@ -1,15 +1,16 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 // The failure signatures ADR 0003 rules a watch on a background job matches.
-// Matched against a progress line (`<timestamp> <text>`) with `grep -P`, anchored
-// to where a failure shows: a line that opens with a pass mark (✔ ✓ ok) never
-// matches, and `Error` counts only as an exception name opening the line
-// (`ValueError: …`), so a passing test title or a coverage listing that merely
-// contains the word (`✔ stuckError: …`, `readErrorLog (line 495…)`) does not
-// wake the session (#1894). REJECTED, bad_alloc and Killed may sit mid-line,
-// where a shell or runtime prints them.
+// Matched against a progress line (`<timestamp> <text>`) with `grep -P` (#1894).
+// A line that opens, indentation aside, with a pass mark (✔ ✓ ok) never matches,
+// whatever it names: a passing test title may say Error or Killed. The `(?![ \t])`
+// after the blanks stops them backing off one, which would hide an indented
+// mark from the lookahead. Any other line matches on a failure marker (✖, not ok,
+// rc=N) or an exception or kill word anywhere in it, `Error` counting as a
+// word's end (`TypeError`) so a coverage listing such as `readErrorLog (line 495…)`
+// does not.
 const SIGNATURE =
-  '^\\S+ +(?!✔|✓|ok )(?:(?:.*\\b)?(?:REJECTED|bad_alloc|Killed)\\b|Traceback|✖|not ok|rc=[1-9]|[\\w.]*Error\\b)'
+  '^\\S+[ \\t]+(?![ \\t])(?!✔|✓|ok )(?:.*(?:Traceback|REJECTED|bad_alloc|Killed|Error)\\b|✖|not ok|rc=[1-9])'
 const POLL_MS = 5000
 // How long after a Bash call the mod keeps looking for a run that call
 // started: a job launched behind a slow step records itself late.
@@ -97,7 +98,7 @@ const failureLine = async ($: EngineInterface, run: Run): Promise<string | undef
 // unmarked, so the next tick sends it again.
 const wake = async ($: EngineInterface, run: Run, status: string, matched?: string): Promise<boolean> => {
   // A run job-run killed at its time limit is a stalled job: say so.
-  const stalled = / cause=timeout( |$)/.test(status) ? ' — timed out: the job stalled past its time limit' : ''
+  const stalled = / cause=timeout( |$)/.test(status) ? ' — timed out at its time limit; read as stalled unless the job was meant to run longer' : ''
   const lines = [`job-wake: job ${run.name}: ${status}${stalled}`]
   if (matched !== undefined) lines.push(`matched line: ${matched}`)
   lines.push(`progress: ${await jobsDir($)}/${run.name}/progress`)
