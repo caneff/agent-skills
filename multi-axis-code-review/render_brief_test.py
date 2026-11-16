@@ -513,6 +513,6 @@ def test_check_step_validates_without_rendering(tmp_path):
 # #1921: the reviewer's standing brief forbids a backgrounded witness run and names the line
 # it reports instead. A prose rule only; the file is what a reviewer reads.
 def test_the_diff_reviewer_runs_the_witness_check_in_the_foreground():
-    text = open(os.path.join(HERE, "..", "flow", "claude", "agents", "diff-reviewer.md")).read()
+    text = " ".join(open(os.path.join(HERE, "..", "flow", "claude", "agents", "diff-reviewer.md")).read().split())
     assert "in the foreground, never `run_in_background`" in text, text
     assert "witness not run (timeout)" in text, text
