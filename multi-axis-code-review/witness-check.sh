@@ -6,7 +6,8 @@
 #
 #   witness-check.sh --worktree <reviewed tree> --mutate <file>
 #                    (--repo <repo> --ticket <n> [--round <k>] [--ledger <path>] | --no-ledger)
-#                    [--slots <k>] [--call-site <id>]... -- <id>...
+#                    [--slots <k>] [--baseline-seconds <s> | --timeout <s>]
+#                    [--call-site <id>]... -- <id>...
 #
 # <file> is sourced and must define `mutate`: $1 the id, $2 the witness
 # worktree, $3 a marker path. It strips that test's constraint in $2, creates
@@ -29,6 +30,13 @@
 # install would import the reviewed tree's code. With no `uv.lock` at HEAD the
 # `.venv` stays unset and the run says so. `vendor` is not set up.
 #
+# Each mutation's suite runs under a time limit (#1854); SKILL.md § 4 *The time
+# limit* gives the reason. `--baseline-seconds <s>` (the unmutated run's own
+# time) sets it to 3x that, 60 s at least; with neither flag it is 240 s, said
+# in the output; `--timeout <s>` sets it outright, and not with a baseline. A
+# mutant that reached its suite and hit the limit reads `red (timeout)`, its
+# ledger row is `red` with `timeout: true`, and its process group is killed.
+#
 # Each run with `--repo` first prunes the repo's cache-home `witness.*`
 # directories older than 7 days (#1547); the code below says how.
 #
@@ -40,7 +48,7 @@ set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() { sed -n '/^#   witness-check.sh/,/^#$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# //' >&2; exit 2; }
-worktree="" mutate_file="" no_ledger=0 repo_name="" max_slots=""
+worktree="" mutate_file="" no_ledger=0 repo_name="" max_slots="" limit="" baseline=""
 ledger_args=() call_site_ids=" "
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -51,6 +59,9 @@ while [ $# -gt 0 ]; do
     --slots)
       case "${2-}" in ''|*[!0-9]*|0) echo "witness check: --slots needs a positive integer, got '${2-}'" >&2; exit 2 ;; esac
       max_slots="$2"; shift 2 ;;
+    --timeout|--baseline-seconds)
+      case "${2-}" in ''|*[!0-9]*|0) echo "witness check: $1 needs a positive integer, got '${2-}'" >&2; exit 2 ;; esac
+      if [ "$1" = --timeout ]; then limit="$2"; else baseline="$2"; fi; shift 2 ;;
     --no-ledger) no_ledger=1; shift ;;
     --call-site) [ $# -ge 2 ] || usage; call_site_ids="$call_site_ids$2 "; shift 2 ;;
     --) shift; break ;;
@@ -58,6 +69,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 mutations=( "$@" )
+# The per-mutant limit (#1854). 240 s with nothing to scale from, so one hung mutant
+# ends well inside the 600 s a foreground Bash call allows (#1921).
+[ -z "$limit" ] || [ -z "$baseline" ] || { echo "witness check: --timeout and --baseline-seconds: not both, --timeout would silently win" >&2; exit 2; }
+if [ -n "$limit" ]; then limit_basis="--timeout"
+elif [ -n "$baseline" ]; then
+  limit=$(( baseline * 3 )); [ "$limit" -ge 60 ] || limit=60; limit_basis="3x baseline $baseline s, 60 s floor"
+else limit=240; limit_basis="no --baseline-seconds given; pass the unmutated run's time to scale it"; fi
 [ -n "$worktree" ] && [ -n "$mutate_file" ] || usage
 # Ledger rows are the review's cost record (#1270): a run that forgot its
 # --repo/--ticket would otherwise drop them silently, so skipping them is said.
@@ -154,7 +172,8 @@ esac
 # worktree `x.out` while mutation `x` is opening its output file at that same
 # path, so `x`'s redirection fails against a directory and `x` is reported red
 # without its suite ever having run.
-mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" "$root/seconds" "$root/outcome" || exit 1
+mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" "$root/seconds" "$root/outcome" "$root/timedout" || exit 1
+echo "witness check: per-mutant limit $limit s ($limit_basis)"
 # Cleanup that reports rather than covers: an `rm -rf` over a worktree git
 # failed to deregister - a full disk is the plausible way - leaves exactly the
 # stale entry SKILL.md says never to create, and the run would exit 0 having
@@ -259,9 +278,22 @@ for id in "${mutations[@]}"; do
   # before its status is recorded and read back below as `unknown`.
   # CARGO_TARGET_DIR: the worktree isolates the tree, not cargo's build, and a shared
   # target dir leaves a mutated build for the next run (#1696).
-  { ( export CARGO_TARGET_DIR="$witness/target"; mutate "$id" "$witness" "$root/ran/$id" ) >"$root/output/$id" 2>&1
-    printf '%s\n' "$?" >"$root/status/$id"
-    printf '%s\n' "$(( $(date +%s) - started ))" >"$root/seconds/$id"; } &
+  # `timeout` runs a program, not a function, so the suite re-sources the mutate file in
+  # a child shell. 124 (TERM) or 137 (KILL after 5 s) counts as the timeout only when
+  # the suite itself ran for the whole limit: the same status earlier is the suite's own.
+  # `timeout` leaves this job's group, so an interrupt reaches it only through the
+  # trap below, which hands the TERM on; `timeout` then signals the suite's group.
+  { suite_started=$(date +%s)
+    CARGO_TARGET_DIR="$witness/target" timeout -k 5 "$limit" bash -c '. "$1"; mutate "$2" "$3" "$4"' _ \
+      "$mutate_file" "$id" "$witness" "$root/ran/$id" </dev/null >"$root/output/$id" 2>&1 &
+    tp=$!
+    trap 'kill -TERM "$tp" 2>/dev/null' TERM INT
+    wait "$tp"; rc=$?
+    while kill -0 "$tp" 2>/dev/null; do wait "$tp"; rc=$?; done
+    now=$(date +%s)
+    case "$rc" in 124|137) [ "$(( now - suite_started ))" -ge "$limit" ] && : >"$root/timedout/$id" ;; esac
+    printf '%s\n' "$rc" >"$root/status/$id"
+    printf '%s\n' "$(( now - started ))" >"$root/seconds/$id"; } &
 done
 wait
 for id in "${mutations[@]}"; do
@@ -279,6 +311,12 @@ for id in "${mutations[@]}"; do
   # executable, or was not found, so it never started. The marker cannot know
   # that - it is written on the line before - and every proxy for "the suite
   # ran" is a proxy. Where a real answer exists, take it instead of inferring.
+  if [ -e "$root/timedout/$id" ]; then
+    printf '%s: red (timeout) — still running at the %s s limit and killed, so the tests noticed; its output so far follows\n' "$id" "$limit"
+    show "$id"
+    printf 'red (timeout)\n' >"$root/outcome/$id"
+    continue
+  fi
   case "$(cat "$root/status/$id" 2>/dev/null)" in
     126|127) printf '%s: unknown — its covering suite command never executed (not found, or not executable)\n' "$id"
              show "$id"

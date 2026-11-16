@@ -778,6 +778,50 @@ refuses() { # <why> <expected message> <checker args...>
 refuses 'a --call-site id outside the mutation ids' 'not among the mutation ids' --no-ledger --call-site zz -- a1
 refuses '--no-ledger with ledger arguments' '--no-ledger with ledger arguments' --no-ledger --repo skills -- a1
 
+# #1854: a mutant that hangs ends at its limit, reads `red (timeout)` in the report and
+# its ledger row, and leaves no child process behind. The fake mutant has a covering
+# suite that spawns a grandchild sleeper, so only a process-group kill clears it.
+ledger_path="$scratch/timeout.jsonl"
+substitute 'h1 h2 h3' 'case "$1" in h2) : >"$3"; echo "MUTANT-$1: fast red"; exit 1;; h3) : >"$3"; echo "MUTANT-$1: own 124"; exit 124;; esac; : >"$3"; echo "MUTANT-$1: hanging"; sh -c "echo \$\$ >\"'"$scratch"'/\$0.gpid\"; exec sleep 30" "$1" & wait' >"$scratch/launcher-timeout.sh"
+sed -i 's| -- h1 h2 h3| --timeout 2 -- h1 h2 h3|' "$scratch/launcher-timeout.sh"
+t_start=$(date +%s)
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-timeout.sh" ) >"$scratch/timeout.out" 2>&1 ||
+  { echo "FAIL: the timeout run exited non-zero" >&2; cat "$scratch/timeout.out" >&2; fail=1; }
+t_secs=$(( $(date +%s) - t_start ))
+[ "$t_secs" -lt 15 ] || { echo "FAIL: a 2 s limit let the hanging mutant run $t_secs s" >&2; fail=1; }
+grep -q 'h1: red (timeout)' "$scratch/timeout.out" ||
+  { echo "FAIL: the hanging mutant was not reported 'red (timeout)'" >&2; cat "$scratch/timeout.out" >&2; fail=1; }
+grep -q 'h2: red (timeout)' "$scratch/timeout.out" &&
+  { echo "FAIL: a mutant that failed fast was reported as a timeout" >&2; fail=1; }
+# C1: a suite's own exit 124 well under the limit is its own red, never a timeout.
+grep -q 'h3: red (timeout)' "$scratch/timeout.out" &&
+  { echo "FAIL: a mutant exiting 124 under the limit was labelled a timeout" >&2; fail=1; }
+grep -q 'h3: red' "$scratch/timeout.out" ||
+  { echo "FAIL: the mutant exiting 124 was not reported red" >&2; cat "$scratch/timeout.out" >&2; fail=1; }
+[ "$(row_field h3 outcome)" = "red" ] ||
+  { echo "FAIL: h3's ledger row is not a plain red" >&2; fail=1; }
+[ "$(row_field h1 outcome timeout)" = "red True" ] ||
+  { echo "FAIL: the hanging mutant's ledger row is '$(row_field h1 outcome timeout)', wanted 'red True'" >&2; fail=1; }
+gp="$(cat "$scratch/h1.gpid" 2>/dev/null)"
+if [ -z "$gp" ]; then echo "FAIL: the hanging mutant's grandchild never started" >&2; fail=1
+elif kill -0 "$gp" 2>/dev/null; then
+  echo "FAIL: the hanging mutant's grandchild $gp outlived the run" >&2; kill -KILL "$gp" 2>/dev/null || true; fail=1
+fi
+# A limit is a positive integer; and a baseline sets it at 3x with a 60 s floor.
+refuses 'a non-numeric --timeout' '--timeout needs a positive integer' --no-ledger --timeout x -- a1
+refuses 'a non-numeric --baseline-seconds' '--baseline-seconds needs a positive integer' --no-ledger --baseline-seconds x -- a1
+printf 'mutate() { : >"$3"; exit 1; }\n' >"$scratch/mutate-def-limit.sh"
+limit_of() { # <args...> -> the limit line the run prints
+  bash "$checker" --worktree "$repo" --mutate "$scratch/mutate-def-limit.sh" --no-ledger "$@" -- lim1 2>&1 | sed -n 's/^witness check: per-mutant limit \([0-9]*\) s.*/\1/p'
+}
+[ "$(limit_of)" = 240 ] || { echo "FAIL: no flags did not give the 240 s default: '$(limit_of)'" >&2; fail=1; }
+default_out="$(bash "$checker" --worktree "$repo" --mutate "$scratch/mutate-def-limit.sh" --no-ledger -- lim1 2>&1)"
+case "$default_out" in *'no --baseline-seconds given'*) ;; *) false ;; esac ||
+  { echo "FAIL: the default limit's notice does not say no baseline was given" >&2; fail=1; }
+refuses '--timeout together with --baseline-seconds' 'not both' --no-ledger --timeout 5 --baseline-seconds 5 -- a1
+[ "$(limit_of --baseline-seconds 10)" = 60 ] || { echo "FAIL: baseline 10 s did not give the 60 s floor: '$(limit_of --baseline-seconds 10)'" >&2; fail=1; }
+[ "$(limit_of --baseline-seconds 100)" = 300 ] || { echo "FAIL: baseline 100 s did not give 300 s: '$(limit_of --baseline-seconds 100)'" >&2; fail=1; }
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/witness-check.test.sh"
 else

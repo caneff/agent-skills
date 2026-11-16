@@ -10,8 +10,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+import fixture_identity  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDER = os.path.join(HERE, "render-brief.py")
@@ -252,14 +256,91 @@ def test_the_captures_stat_line_is_printed_under_inputs(wt, diff):
 
 
 # The worker cap binds the witness check, which has its own concurrency.
-def test_the_correctness_prompt_tells_the_witness_check_its_slot_cap(wt, diff):
+# #1855: only the correctness axis runs tests, so it gets the whole review's budget, one
+# worker per axis times three axes, and says why. The other two axes run nothing of the kind.
+def test_the_correctness_prompt_gives_the_witness_check_the_whole_review_budget(wt, diff):
     _, out, _ = render(wt, diff, "--workers", "2", axis="correctness")
-    assert "--slots 2" in out, out
+    assert "--slots 6" in out, out
+    assert "--slots 2" not in out, out
+    assert "spec and standards" in out, out  # the reason sits beside the line
 
 
-def test_a_prompt_with_no_witness_check_carries_no_slots(wt, diff):
-    _, out, _ = render(wt, diff, "--workers", "2")
-    assert "--slots" not in out, out
+def test_one_worker_per_axis_is_three_witness_slots(wt, diff):
+    _, out, _ = render(wt, diff, axis="correctness")
+    assert "--slots 3" in out, out
+
+
+@pytest.mark.parametrize("axis", ["standards", "spec"])
+def test_a_prompt_with_no_witness_check_carries_no_slots(wt, diff, axis):
+    _, out, _ = render(wt, diff, "--workers", "2", axis=axis)
+    assert "--slots" not in out and "witness-check.sh --" not in out, out
+
+
+def test_the_correctness_prompt_asks_for_the_unmutated_time_as_the_baseline(wt, diff):
+    _, out, _ = render(wt, diff, axis="correctness")
+    assert "--baseline-seconds" in out, out
+
+
+# #1856: the worker's seam run at the reviewed sha stands; the reviewer reruns only the files
+# its mutants target. No seam sha, or one that is not the reviewed sha, leaves it unsaid.
+@pytest.fixture
+def repo_wt(tmp_path):
+    path = tmp_path / "gitwt"
+    path.mkdir()
+    env = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, **fixture_identity.env()}
+    for cmd in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "base"]):
+        subprocess.run(["git", "-C", str(path), *cmd], check=True, env=env, capture_output=True)
+    head = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], check=True,
+                          capture_output=True, text=True).stdout.strip()
+    return str(path), head
+
+
+def test_a_seam_sha_equal_to_the_reviewed_sha_tells_the_reviewer_the_seam_run_stands(repo_wt, diff):
+    path, head = repo_wt
+    _, out, _ = render(path, diff, "--seam-sha", head, axis="correctness")
+    assert "worker's seam run" in out and "never the whole" in out, out
+
+
+def test_a_one_character_seam_sha_that_happens_to_prefix_head_gets_no_seam_instruction(repo_wt, diff):
+    path, head = repo_wt
+    code, out, _ = render(path, diff, "--seam-sha", head[0], axis="correctness")
+    assert code == 0 and "seam run" not in out, (code, out)
+
+
+def test_a_short_seam_sha_of_seven_characters_is_accepted(repo_wt, diff):
+    path, head = repo_wt
+    _, out, _ = render(path, diff, "--seam-sha", head[:7], axis="correctness")
+    assert "worker's seam run" in out, out
+
+
+def test_the_witness_slots_line_says_it_overrides_the_worker_count(wt, diff):
+    _, out, _ = render(wt, diff, axis="correctness")
+    assert "for the witness check this replaces the worker count above" in out, out
+
+
+def test_a_seam_sha_that_is_not_the_reviewed_sha_leaves_the_current_behaviour(repo_wt, diff):
+    path, head = repo_wt
+    code, out, _ = render(path, diff, "--seam-sha", "0" * 40, axis="correctness")
+    assert code == 0 and "seam run" not in out, (code, out)
+
+
+def test_no_seam_sha_leaves_the_current_behaviour(repo_wt, diff):
+    path, _ = repo_wt
+    code, out, _ = render(path, diff, axis="correctness")
+    assert code == 0 and "seam run" not in out, (code, out)
+
+
+def test_a_worktree_whose_head_cannot_be_read_gets_no_seam_instruction(wt, diff):
+    code, out, _ = render(wt, diff, "--seam-sha", "abc1234", axis="correctness")
+    assert code == 0 and "seam run" not in out, (code, out)
+
+
+@pytest.mark.parametrize("axis", ["standards", "spec"])
+def test_the_other_axes_carry_no_seam_instruction(repo_wt, diff, axis):
+    path, head = repo_wt
+    code, out, _ = render(path, diff, "--seam-sha", head, axis=axis)
+    assert code == 0 and "seam run" not in out, (code, out)
 
 
 @pytest.mark.parametrize("axis,needle", [("standards", "Over-engineering"), ("spec", "scope creep"),
@@ -448,3 +529,11 @@ def test_check_step_validates_without_rendering(tmp_path):
     assert mod.check(_args(mod, tmp_path)).lines == 1
     with pytest.raises(mod.BadInput, match="needs --spec"):
         mod.check(_args(mod, tmp_path, axis="spec"))
+
+
+# #1921: the reviewer's standing brief forbids a backgrounded witness run and names the line
+# it reports instead. A prose rule only; the file is what a reviewer reads.
+def test_the_diff_reviewer_runs_the_witness_check_in_the_foreground():
+    text = " ".join(open(os.path.join(HERE, "..", "flow", "claude", "agents", "diff-reviewer.md")).read().split())
+    assert "in the foreground, never `run_in_background`" in text, text
+    assert "witness not run (timeout)" in text, text

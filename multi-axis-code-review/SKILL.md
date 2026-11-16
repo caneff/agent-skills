@@ -420,7 +420,7 @@ python3 ~/.agents/skills/multi-axis-code-review/render-brief.py --axis <axis> \
   [--ruling "<text>"]... [--choice "<text>"]... [--claim "<id>: <text>"]... \
   [--round <K> [--first-id <ordinal>]] \\
   [--workers <k>] [--ceiling <seconds>] [--test-command "<cmd>"] \\
-  [--capture-stat "<the capture's printed stat line>"]
+  [--capture-stat "<the capture's printed stat line>"] [--seam-sha <the worker's "Seam run at" sha>]
 ```
 
 It reads the diff's line count from the file, prints the capture's stat line
@@ -433,7 +433,13 @@ check* — a heading that is absent when there are none. It writes no outcome of
 its own. It states the worker count (default 1) and wall-clock ceiling (default
 600 seconds) any solve, build or test run is held to, and that the reviewer
 spawns no nested subagent; the correctness prompt also passes the worker count
-to `witness-check.sh --slots`. Exit 2 means a bad input and nothing written.
+to `witness-check.sh --slots` as workers x 3 axes (#1855: only correctness runs
+tests, so it takes the review's whole budget; the spec and standards briefs
+carry no witness line). `--seam-sha` is the worker's `Seam run at:` sha: when it
+equals the worktree's HEAD the correctness brief says that run stands and the
+reviewer reruns only the files its mutants target, unmutated, never the whole
+narrowed suite (#1856); absent, different or unreadable, it says nothing and the
+reviewer's current behaviour stands. Exit 2 means a bad input and nothing written.
 
 It writes the brief to `<dir>/brief-<n>-<axis>.md` (`-2`, `-3` for a later wave
 of the same ticket and axis: an earlier wave's brief is never overwritten) and
@@ -556,9 +562,14 @@ and run it once, with every mutation id in the one call:
 ```
 bash ~/.agents/skills/multi-axis-code-review/witness-check.sh \
   --worktree <the worktree under review> --mutate <that file> \
-  --repo <repo> --ticket <n> \
+  --repo <repo> --ticket <n> [--baseline-seconds <s>] \
   [--call-site <id>]... -- <id>...
 ```
+
+*The time limit* (#1854). One mutant that hangs must not stall the review (a
+4739 s mutant once cost 88 minutes). Pass `--baseline-seconds <s>`, the
+unmutated run's own time of the target files; the header holds the rest (the
+3x rule, the 240 s default, `red (timeout)`).
 
 `--repo` and `--ticket` are the ledger's, as in § 4's append line; `--no-ledger`
 replaces them only outside a review. Each `--call-site` id is one of the ids.
@@ -589,7 +600,11 @@ run the way `tests/all.sh` would run it (`bash <name>.test.sh`, `python3
 <name>_test.py`) — not the whole gate. `bash tests/all.sh` runs every suite in
 the repo, so a diff adding five tests would pay it five times inside one
 axis, while the covering suite finishes in seconds. The whole gate belongs to
-the worker's own pre-report gate, where it already runs once.
+the worker's own pre-report gate, where it already runs once. The same holds
+before mutating (#1856): the worker's seam run at the reviewed commit stands, so
+run only the files the planned mutants target, unmutated, to confirm they start
+green, never the narrowed or full suite. With no worker seam sha in the brief
+(a review outside the implement lane) that is the reviewer's call.
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs: render it with `--no-spec`, which puts `Spec: no spec available` under its Inputs, so its part (b) reports that instead of judging scope.
 

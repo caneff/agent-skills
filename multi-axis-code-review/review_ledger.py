@@ -1285,6 +1285,9 @@ SKIPPABLE_AXES = ("standards", "spec", "correctness")
 AXIS_TYPES = ("standards", "spec", "correctness")
 REVIEWER_TYPES = APPEND_TYPES + ("over-engineering",)
 MUTATION_OUTCOMES = ("red", "green", "unknown")
+# A mutant killed at its time limit (#1854): the status file says `red (timeout)`; the row's
+# outcome is `red`, and `timeout: true` records why.
+TIMEOUT_WORD = "red (timeout)"
 _MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -1311,6 +1314,14 @@ def decode_status(text: str) -> str:
     return word if word in MUTATION_OUTCOMES else "unknown"
 
 
+def read_status(text: str) -> tuple[str, bool]:
+    """A status file's (outcome, timed_out): the witness check writes `red (timeout)` for a
+    mutant killed at its time limit (#1854), which is outcome `red` with `timeout: true`."""
+    if text.strip() == TIMEOUT_WORD:
+        return "red", True
+    return decode_status(text), False
+
+
 def cmd_append_mutation(args) -> int:
     """Write the one row of a mutation that just ran. Its outcome comes from a status file or
     `--outcome`, its wall clock from `--seconds`; there is no cache or transcript to read."""
@@ -1322,7 +1333,7 @@ def cmd_append_mutation(args) -> int:
         seconds = _finite_nonneg(args.seconds)
         if seconds is None:
             raise ValueError("a mutation row needs --seconds, its wall clock as a finite number of seconds")
-        outcome = args.outcome or decode_status(args.status_file.read_text())
+        outcome, timed_out = (args.outcome, False) if args.outcome else read_status(args.status_file.read_text())
     except (OSError, ValueError) as e:
         print(f"review_ledger append: {e}", file=sys.stderr)
         return 2
@@ -1334,7 +1345,8 @@ def cmd_append_mutation(args) -> int:
                   [], cost={"tokens": {"status": "not-applicable",
                                        "reason": "a mutation's tokens stay with the correctness reviewer, or with the worker for worker-mutation"},
                             "wall_clock": {"status": "known", "seconds": seconds}},
-                  origin="append", own_keys={"mutation_id": args.mutation_id, "outcome": outcome})
+                  origin="append", own_keys={"mutation_id": args.mutation_id, "outcome": outcome,
+                            **({"timeout": True} if timed_out else {})})
     try:
         update_ledger(args.ledger, lambda ledger: ledger.update({row_id: row}))
     except ValueError as e:
