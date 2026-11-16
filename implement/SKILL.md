@@ -542,26 +542,21 @@ SlashCommand tool never reaches it here, and calling the script directly
 bypasses the slash command's own markdown entirely — the `AskUserQuestion` gate
 lives there, not in the script; `handleReviewCommand` parses
 `--wait`/`--background` as booleans and never reads them, always running
-foreground. Keep `--wait` anyway to say what's intended; it's a harmless no-op
-on this path. The run goes in the background of your own shell (`run_in_background`),
+foreground. The script passes `--wait` anyway to say what's intended; it's a
+harmless no-op on this path. The run goes in the background of your own shell (`run_in_background`),
 which is what lets the axes run beside it:
 
 ```
-dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
-mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
-body_file=<absolute path you wrote the ticket body, comments and appendix to>
-out_file="$dir/codex-adversarial-<n>-gate.out"
-record="$dir/codex-adversarial-<n>-gate.json"
-plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
-cd <this workspace> && git fetch origin
-usage_before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
-launch_sha=$(git rev-parse HEAD); started=$(date -Is)
-node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
-status=$?
-usage_after=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
-printf '{"ticket": <n>, "phase": "gate", "status": %d, "launch_sha": "%s", "completion_sha": "%s", "started": "%s", "completed": "%s", "usage_before": "%s", "usage_after": "%s"}\n' \
-  "$status" "$launch_sha" "$(git rev-parse HEAD)" "$started" "$(date -Is)" "$usage_before" "$usage_after" >"$record"
+python3 ~/.agents/skills/implement/codex-gate-run.py --ticket <n> \
+  --body-file <absolute path you wrote the ticket body, comments and appendix to> \
+  --base origin/<default>
 ```
+
+Run it from this workspace after `git fetch origin`; `implement/codex-gate-run.py`'s
+docstring is the contract (cache directory, record fields, exit status). Its
+exit is non-zero only when nothing ran (no plugin entry, unreadable body
+file): no record exists then, so append the ledger row with `--refusal
+"<its stderr line>"`, as for a pass that errored, and name it in the PR body.
 
 The record carries the node call's exit status, the workspace HEAD at launch
 and again at completion, both timestamps and the usage readings. The launch sha
@@ -578,7 +573,7 @@ hand, `rm` or `rmdir`.
 **The gate is fail-closed.** The pass is collected only when `status` is 0 and
 the launch sha equals the completion sha. Absent, unreadable, errored (a
 non-zero `status` — not logged in, quota gone, a node that found no module; the
-`out_file` then holds that error, not a review) or raced (the two shas differ,
+`.out` then holds that error, not a review) or raced (the two shas differ,
 so the branch moved while Codex was reading) is a refusal, not a pass: its
 findings are not collected, and nothing is claimed about a diff nobody
 reviewed. Append its ledger row with `--refusal "<why>"` (below) and name the
@@ -586,7 +581,7 @@ refusal in the PR body. There is no retry. A refused verdict's findings are
 never reported as current — either one collected looks exactly like a pass that
 found nothing, the absent-answer-read-as-benign shape this lane exists to
 close. `fix-check.sh` reads the same record and treats a refused one
-the same way, said in its output; an `out_file` whose findings it cannot parse
+the same way, said in its output; an `.out` whose findings it cannot parse
 is a refusal of the check, never an empty pass.
 
 **Every pass is one ledger row** (#1269): its time and its usage, in
