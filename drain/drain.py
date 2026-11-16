@@ -23,7 +23,8 @@ which is an exit in `-p` mode, so the worker is an ordinary interactive one
 and `drain` waits for it: its PR appears and its pane goes idle, under a
 three-hour wall clock. A worker that sits idle or blocked with no PR for half
 an hour is a failed build (the ticket's own evidence of a healthy wait on a
-reviewer is 22 minutes). `drain` does no directory or closure grouping.
+reviewer is 22 minutes), unless it is idle beside a live `job-run` job of its
+own, which restarts the half hour (#1715). `drain` does no directory or closure grouping.
 
 A **spec parent** is a bundle of its own (#1477). The frontier's `spec` bucket
 holds the parents `implement-dispatch --spec` accepts (`ready-for-agent`, not
@@ -179,6 +180,8 @@ FRONTIER_RETRY_SECONDS = float(os.environ.get("DRAIN_FRONTIER_RETRY_SECONDS", 45
 # How long one `herdr agent get` may take: a herdr that hangs would otherwise stall
 # an unattended drain with no message. Test hook, not an option.
 HERDR_SECONDS = float(os.environ.get("DRAIN_HERDR_SECONDS", 30))
+# Where `job-run` keeps one directory per run; a test points it elsewhere.
+JOBS_DIR = os.environ.get("DRAIN_JOBS_DIR", os.path.expanduser("~/.cache/agent-jobs"))
 IDLE = ("idle", "done")
 # `blocked` is a permission or question dialog nobody here can answer.
 STALLED = ("blocked",)
@@ -371,8 +374,12 @@ def branch_of(n, kind):
     return f"{'spec' if kind == SPEC else 'implement'}-{n}"
 
 
+def workspace_of(ctx, branch):
+    return os.path.join(ctx.root, ".claude", "worktrees", branch)
+
+
 def workspace_path(ctx, n, kind):
-    return os.path.join(ctx.root, ".claude", "worktrees", branch_of(n, kind))
+    return workspace_of(ctx, branch_of(n, kind))
 
 
 def anchors(ctx, queue):
@@ -654,15 +661,46 @@ def slices_working(ctx, spec):
     return False
 
 
+def live_job(workspace):
+    """The name of a `job-run` job still alive whose wrapper runs in `workspace` (or below
+    it), else `None`. A worker that started one and ended its turn to wait for it sits idle
+    with no PR, which is no failed build (#1715). `job-run` records no directory of its own,
+    so the wrapper's pid is asked for its cwd. A run with an `exit` record, no readable pid, a
+    dead pid, a pid that is no `job-run` process (a run killed with no `exit` record keeps its
+    directory for days, and its pid may be reused) or a cwd we may not read is not live."""
+    root = os.path.realpath(workspace)
+    try:
+        names = sorted(os.listdir(JOBS_DIR))
+    except OSError:
+        return None
+    for name in names:
+        run = os.path.join(JOBS_DIR, name)
+        if os.path.exists(os.path.join(run, "exit")):
+            continue
+        try:
+            with open(os.path.join(run, "pid")) as f:
+                pid = int(f.read().strip())
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                if b"job-run" not in f.read():
+                    continue
+            cwd = os.path.realpath(os.readlink(f"/proc/{pid}/cwd"))
+        except (OSError, ValueError):
+            continue
+        if cwd == root or cwd.startswith(root + os.sep):
+            return name
+    return None
+
+
 def wait_for_worker(ctx, branch, agent, bundle, spec=None):
     """`"pr"` once the branch has an open PR and its worker has gone idle (or is
     gone), `"closed"` when it went idle with every ticket closed and no PR
     (the light tier lands on main itself, or a ticket was closed as moot). A
     worker idle or blocked with no PR past the grace, a vanished one with
-    neither, and the wall clock are failed builds. A look that errors (`gh`, herdr) is tried again; `LOOK_ERRORS` in a
-    row end the wait. `spec` is the spec number when the worker is a spec run:
+    neither, and the wall clock are failed builds. A look that errors (`gh`,
+    herdr) is tried again; `LOOK_ERRORS` in a row end the wait. `spec` is the spec number when the worker is a spec run:
     its wall clock is `SPEC_WALL_CLOCK_SECONDS`, and a slice worker at work
-    restarts its idle grace."""
+    restarts its idle grace, as does a live `job-run` job in the workspace of an
+    idle worker (`live_job`): the wall clock still ends the wait."""
     limit = SPEC_WALL_CLOCK_SECONDS if spec else WALL_CLOCK_SECONDS
     deadline, stalled_since, errors = time.monotonic() + limit, None, 0
     while True:
@@ -676,8 +714,11 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
                     outcome = "closed"
                 elif status is None:
                     raise WorkerGone(f"the worker {agent} is gone and the build has no PR")
-            if spec and not outcome and status is not None and (status in IDLE or status in STALLED):
-                busy = slices_working(ctx, spec)
+            if not outcome and status is not None and (status in IDLE or status in STALLED):
+                if spec:
+                    busy = slices_working(ctx, spec)
+                if status in IDLE and not busy:
+                    busy = live_job(workspace_of(ctx, branch)) is not None
             errors = 0
         except WorkerGone:
             raise

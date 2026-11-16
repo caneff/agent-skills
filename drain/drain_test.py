@@ -10,9 +10,12 @@ worker in-process, since a three-hour clock has no command-line witness, and one
 `excerpt` case, since the fake `gh` cannot offer a natively unblocked empty
 ticket.
 """
+import contextlib
 import json
 import os
+import pathlib
 import select
+import shutil
 import subprocess
 import sys
 import time
@@ -1650,10 +1653,14 @@ def test_anchor_may_name_a_spec(sb):
 
 
 @pytest.fixture
-def d(monkeypatch):
-    """The drain module with every wait knob shortened for one test; monkeypatch restores them."""
+def d(monkeypatch, tmp_path):
+    """The drain module with every wait knob shortened for one test; monkeypatch restores them.
+    `JOBS_DIR` is an empty directory, so no test reads this machine's live `job-run` jobs."""
     import drain
     monkeypatch.setattr(drain, "POLL_SECONDS", 0.05)
+    empty = tmp_path / "no-jobs"
+    empty.mkdir()
+    monkeypatch.setattr(drain, "JOBS_DIR", str(empty))
     return drain
 
 
@@ -1706,6 +1713,103 @@ def test_a_slice_worker_counts_as_working_only_while_it_is_working(d, ctx, monke
     monkeypatch.setattr(d, "claimed_slices", lambda ctx, spec: [2, 3])
     monkeypatch.setattr(d, "agent_status", statuses.get)
     assert d.slices_working(ctx, 1) is expected, statuses
+
+
+def _job(jobs, name, pid, ended=False):
+    """A `job-run` run directory: `pid`, and `exit` once it has ended. The wrapper's cwd is its
+    process's, which is what `live_job` reads."""
+    run = jobs / name
+    run.mkdir(parents=True)
+    (run / "pid").write_text(f"{pid}\n")
+    if ended:
+        (run / "exit").write_text("rc=1\ncause=exit\nended=x\n")
+
+
+@pytest.fixture
+def jobs(d):
+    """The empty job-run cache `d` points `JOBS_DIR` at."""
+    return pathlib.Path(d.JOBS_DIR)
+
+
+@contextlib.contextmanager
+def wrapper(cwd, name="job-run"):
+    """A live process standing in for a job's wrapper: `name` in its command line (a copy of
+    `sleep` named so), running in `cwd`."""
+    cwd.mkdir(exist_ok=True)
+    exe = cwd.parent / name
+    shutil.copy("/bin/sleep", exe)
+    proc = subprocess.Popen([str(exe), "30"], cwd=cwd)
+    try:
+        yield proc.pid
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+@pytest.mark.parametrize("sub", ["", "sub/deeper"])
+def test_a_live_job_in_the_workspace_or_below_it_is_found(d, jobs, tmp_path, sub):
+    ws = tmp_path / "ws"
+    cwd = ws / sub if sub else ws
+    cwd.mkdir(parents=True)
+    with wrapper(cwd) as pid:
+        _job(jobs, "sweep-725", pid)
+        assert d.live_job(str(ws)) == "sweep-725"
+
+
+@pytest.mark.parametrize("case", ["ended", "other-dir", "sibling-prefix", "dead-pid", "no-pid", "not-a-wrapper"])
+def test_a_job_that_is_not_live_in_the_workspace_is_not_found(d, jobs, tmp_path, case):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    cwd = {"other-dir": tmp_path / "other", "sibling-prefix": tmp_path / "ws0"}.get(case, ws)
+    with wrapper(cwd, name="sleep" if case == "not-a-wrapper" else "job-run") as pid:
+        if case == "no-pid":
+            (jobs / "j").mkdir()
+        else:
+            _job(jobs, "j", 2 ** 22 + 12345 if case == "dead-pid" else pid, ended=case == "ended")
+        assert d.live_job(str(ws)) is None, case
+
+
+def test_the_wait_asks_for_the_jobs_of_the_workers_own_workspace(d, ctx, monkeypatch):
+    asked = []
+    monkeypatch.setattr(d, "WALL_CLOCK_SECONDS", 0.2)
+    monkeypatch.setattr(d, "agent_status", lambda name: "idle")
+    monkeypatch.setattr(d, "live_job", lambda ws: asked.append(ws) or "j")
+    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: None)
+    with pytest.raises(d.DrainError):
+        d.wait_for_worker(ctx, "implement-1", "repo-1", [1])
+    assert set(asked) == {"/x/repo/.claude/worktrees/implement-1"}
+
+
+def test_a_blocked_worker_is_not_held_by_a_live_job(d, ctx, monkeypatch):
+    monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 0.2)
+    monkeypatch.setattr(d, "agent_status", lambda name: "blocked")
+    monkeypatch.setattr(d, "live_job", lambda ws: "j")
+    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: None)
+    with pytest.raises(d.DrainError) as caught:
+        d.wait_for_worker(ctx, "implement-1", "repo-1", [1])
+    assert "is blocked with no PR" in str(caught.value)
+
+
+def test_an_idle_worker_with_a_live_job_is_not_done_until_the_job_ends(d, ctx, monkeypatch):
+    # Idle from tick 0, grace 3: with the job alive until tick 6 the grace starts at tick 6, and
+    # the PR appears at tick 8. Without the job check the wait fails at tick 3.
+    clock = SteppedClock()
+    monkeypatch.setattr(d, "time", clock)
+    monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 3)
+    monkeypatch.setattr(d, "agent_status", lambda name: "idle")
+    monkeypatch.setattr(d, "live_job", lambda ws: "sweep-1" if clock.tick < 6 else None)
+    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: {"number": 1} if clock.tick >= 8 else None)
+    assert d.wait_for_worker(ctx, "implement-1", "repo-1", [1]) == "pr"
+
+
+def test_a_live_job_does_not_outlast_the_wall_clock(d, ctx, monkeypatch):
+    monkeypatch.setattr(d, "WALL_CLOCK_SECONDS", 0.3)
+    monkeypatch.setattr(d, "agent_status", lambda name: "idle")
+    monkeypatch.setattr(d, "live_job", lambda ws: "sweep-1")
+    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: None)
+    with pytest.raises(d.DrainError) as caught:
+        d.wait_for_worker(ctx, "implement-1", "repo-1", [1])
+    assert "passed the 0.3s wall clock" in str(caught.value)
 
 
 def test_the_same_idle_wait_with_no_slice_working_fails_at_the_grace(d, ctx, monkeypatch):
