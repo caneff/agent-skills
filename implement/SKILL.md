@@ -542,23 +542,21 @@ SlashCommand tool never reaches it here, and calling the script directly
 bypasses the slash command's own markdown entirely — the `AskUserQuestion` gate
 lives there, not in the script; `handleReviewCommand` parses
 `--wait`/`--background` as booleans and never reads them, always running
-foreground. Keep `--wait` anyway to say what's intended; it's a harmless no-op
-on this path. The run goes in the background of your own shell (`run_in_background`),
+foreground. The script passes `--wait` anyway to say what's intended; it's a
+harmless no-op on this path. The run goes in the background of your own shell (`run_in_background`),
 which is what lets the axes run beside it:
 
 ```
-python3 ~/.agents/skills/implement/codex-gate-run.py --repo <repo> --ticket <n> \
+python3 ~/.agents/skills/implement/codex-gate-run.py --ticket <n> \
   --body-file <absolute path you wrote the ticket body, comments and appendix to> \
   --base origin/<default>
 ```
 
-Run it from this workspace after `git fetch origin`. The script
-(`implement/codex-gate-run.py`) reads the plugin path from
-`~/.claude/plugins/installed_plugins.json`, takes the usage reading before and
-after, runs the adversarial review with the body as one literal argument, and
-writes `$HOME/.cache/agent-reviews/<repo>/codex-adversarial-<n>-gate.out` and
-`.json`. Node's failure goes into the record's `status`; the script's own exit
-is non-zero only when nothing ran (no plugin entry, unreadable body file).
+Run it from this workspace after `git fetch origin`; `implement/codex-gate-run.py`'s
+docstring is the contract (cache directory, record fields, exit status). Its
+exit is non-zero only when nothing ran (no plugin entry, unreadable body
+file): no record exists then, so append the ledger row with `--refusal
+"<its stderr line>"`, as for a pass that errored, and name it in the PR body.
 
 The record carries the node call's exit status, the workspace HEAD at launch
 and again at completion, both timestamps and the usage readings. The launch sha
@@ -575,7 +573,7 @@ hand, `rm` or `rmdir`.
 **The gate is fail-closed.** The pass is collected only when `status` is 0 and
 the launch sha equals the completion sha. Absent, unreadable, errored (a
 non-zero `status` — not logged in, quota gone, a node that found no module; the
-`out_file` then holds that error, not a review) or raced (the two shas differ,
+`.out` then holds that error, not a review) or raced (the two shas differ,
 so the branch moved while Codex was reading) is a refusal, not a pass: its
 findings are not collected, and nothing is claimed about a diff nobody
 reviewed. Append its ledger row with `--refusal "<why>"` (below) and name the
@@ -583,7 +581,7 @@ refusal in the PR body. There is no retry. A refused verdict's findings are
 never reported as current — either one collected looks exactly like a pass that
 found nothing, the absent-answer-read-as-benign shape this lane exists to
 close. `fix-check.sh` reads the same record and treats a refused one
-the same way, said in its output; an `out_file` whose findings it cannot parse
+the same way, said in its output; an `.out` whose findings it cannot parse
 is a refusal of the check, never an empty pass.
 
 **Every pass is one ledger row** (#1269): its time and its usage, in
