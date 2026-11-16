@@ -70,8 +70,7 @@ The brief carries what neither engine can infer:
 - The repo's gate, the command its `AGENTS.md` `## End-to-end seam` section
   names (`python3 ~/.agents/skills/implement/selector_check.py command --root .`
   prints it), and the
-  instruction to
-  run it green before finishing.
+  instruction to run it green before finishing.
 - `implement/SKILL.md` § Build's TDD rules: failing test first per criterion, no implementation
   ahead of a red test, no scope beyond the ticket.
 - Commit to this branch with `Closes #<n>` in the final commit body. Do not
