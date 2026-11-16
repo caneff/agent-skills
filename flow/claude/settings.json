@@ -154,6 +154,11 @@
           },
           {
             "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/block-footguns.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/teach-process-kill.sh",
             "timeout": 5
           },
