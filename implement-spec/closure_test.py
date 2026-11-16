@@ -291,9 +291,8 @@ def test_the_fallback_is_announced_in_stated_words(repo):
     got = C.clumps(root, [candidate(1, "docs/notes.md")])
     assert got["announcement"] == (
         "clumping: no closure \u2014 AGENTS.md declares no include closure, so "
-        "the hold reads only the files each candidate names and their "
-        "directories, the repo root left out; each candidate is its own "
-        "clump"), got
+        "the hold reads only the files each candidate names, and the "
+        "directories they name; each candidate is its own clump"), got
 
 
 def test_a_declared_grammar_is_announced_with_its_directive_and_generator(repo):

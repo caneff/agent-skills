@@ -20,7 +20,6 @@ Why each rule reads the way it does: `references/loop.md`.
 import argparse
 import json
 import os
-import posixpath
 import re
 import shlex
 import shutil
@@ -126,27 +125,23 @@ def check_declared(clump):
     owned(clump)
 
 
-def directories(clump):
-    """The directories, each as `dir/`, that a clump's files sit in. The
-    repo root is left out."""
-    return {posixpath.dirname(p) + "/" for p in paths(clump)
-            if posixpath.dirname(p)}
-
-
-def _nested(a, b):
-    """The directories two clumps share, one inside the other counting; the
-    repo root is left out (`directories`)."""
-    return sorted({min(x, y, key=len) for x in directories(a)
-                   for y in directories(b) if x.startswith(y) or y.startswith(x)})
+def _contained(a, b):
+    """The files of `b` that sit under a path `a` names as a directory: a
+    ticket that lists `examples/hit-counts` holds the files beneath it. A
+    path is read as a directory only when another path lies under it, so a
+    file never contains anything."""
+    return {q for p in paths(a) for q in paths(b)
+            if q.startswith(p.rstrip("/") + "/")}
 
 
 def overlap(a, b):
     """What holds one clump off a slot beside another: the files they share,
-    else the directories they share (`_nested`). One rule for a live
-    workspace and a same-tick pick; why directories count, and why the repo
-    root does not: `references/loop.md` § The exclusion rule and what it
-    costs."""
-    return sorted(paths(a) & paths(b)) or _nested(a, b)
+    and the files of one under a directory the other names. A shared parent
+    directory holds nothing (#1695): disjoint files under one directory ran
+    one slice at a time with the other slots idle. One rule for a live
+    workspace and a same-tick pick: `references/loop.md` § The exclusion rule
+    and what it costs."""
+    return sorted(paths(a) & paths(b) | _contained(a, b) | _contained(b, a))
 
 
 def key_of(clump):

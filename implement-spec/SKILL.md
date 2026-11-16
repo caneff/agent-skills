@@ -161,15 +161,15 @@ branch too.
    `origin/<default>` for a one-slice spec), its uncommitted edits and
    its untracked files into that closure (#1212, #1486), so a file the worker
    reached that no candidate list named still holds the clumps that share it;
-   a diff it cannot read refuses the tick. A clump sharing a file or a
-   directory with a live workspace, or with a clump picked earlier the same
+   a diff it cannot read refuses the tick. A clump sharing a file with a
+   live workspace, or with a clump picked earlier the same
    tick, is **off the frontier**
    (`references/loop.md` § The exclusion rule and what it costs):
    `loop.py dispatch` picks from what is left, **widest
    closure first** so a wide clump does not sit behind narrow ones and block
    them later (#1026), and prints a `held` line for the rest naming its live
    workspace or the earlier pick. That hold is what keeps clumps that
-   share a file apart: clumps sharing no file and no directory run at
+   share a file apart: clumps sharing no file run at
    once. Two consequences,
    because neither is visible from the frontier's own definition — a run drains
    **out of ticket order**, and one parked worker can hold every clump

@@ -407,7 +407,7 @@ ANNOUNCEMENTS = {
                          "candidate is its own clump"),
     "subtree": ("clumping: no closure \u2014 AGENTS.md declares no include "
                 "closure, so the hold reads only the files each candidate "
-                "names and their directories, the repo root left out; each "
+                "names, and the directories they name; each "
                 "candidate is its own clump"),
 }
 

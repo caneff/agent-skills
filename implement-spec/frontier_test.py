@@ -1331,3 +1331,47 @@ def test_three_readers_agree_on_an_indented_heading():
     assert F.blocked_by_section(body) == f"- #7\n{code}# ends nothing\nmore"
     assert C.declaration_section(body) == f"- None\n{code}# ends nothing\nmore"
     assert T.declaration(body) == {"seam": "`make` # wrapped", "blind to": "x"}
+
+
+class Flaky(T.MemoryTracker):
+    """A listing that answers `reads` in turn, one per call, the last one
+    repeating: a label edit just before the read made the listing miss a
+    ticket the issue read still shows (#1897)."""
+
+    def __init__(self, stored, reads, **kw):
+        super().__init__(stored, **kw)
+        self._reads, self.listed = reads, 0
+
+    def issues(self, label):
+        answer = self._reads[min(self.listed, len(self._reads) - 1)]
+        self.listed += 1
+        return [self._issues[n] for n in answer]
+
+
+def test_a_ticket_the_first_listing_drops_is_still_bucketed():
+    # #1897: slice #1149 vanished from every bucket on the read right after
+    # a label edit, then listed seconds later.
+    got = F.frontier("owner/repo", "ready-for-agent",
+                     tracker=Flaky([issue(1, blocked_by=0, total_blocked_by=2), issue(2, blocked_by=0, total_blocked_by=2)], [[2], [1, 2]]))
+    assert numbers(got["unblocked"]) == [1, 2], got
+
+
+def test_a_ticket_only_the_second_listing_drops_is_kept_while_still_open_and_labelled():
+    got = F.frontier("owner/repo", "ready-for-agent",
+                     tracker=Flaky([issue(1, blocked_by=0, total_blocked_by=2), issue(2, blocked_by=0, total_blocked_by=2)], [[1, 2], [2]]))
+    assert numbers(got["unblocked"]) == [1, 2], got
+
+
+def test_a_ticket_that_left_the_queue_between_the_reads_is_not_kept():
+    closed = issue(1, blocked_by=0, total_blocked_by=2)
+    closed["state"] = "closed"
+    relabelled = issue(3, blocked_by=0, total_blocked_by=2, labels=("needs-info",))
+    t = Flaky([issue(2, blocked_by=0, total_blocked_by=2), closed, relabelled], [[1, 2, 3], [2]])
+    got = F.frontier("owner/repo", "ready-for-agent", tracker=t)
+    assert numbers(got["unblocked"]) == [2], got
+
+
+def test_a_ticket_that_cannot_be_re_read_fails_the_frontier_rather_than_vanish():
+    t = Flaky([issue(1, blocked_by=0, total_blocked_by=2), issue(2, blocked_by=0, total_blocked_by=2)], [[1, 2], [2]], broken={"issue": "HTTP 502"})
+    with pytest.raises(T.TrackerError):
+        F.frontier("owner/repo", "ready-for-agent", tracker=t)

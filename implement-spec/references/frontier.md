@@ -21,6 +21,13 @@ existing bucket gets a bucket rather than the nearest wrong one. Silence is
 convenient one. That is the rule behind the fourth bucket below, and the
 reason not to collapse it back into `unresolved` for tidiness.
 
+**The queue is listed twice** (#1897): a listing read right after a label edit
+(a `merge-cleanup` clearing a claim) dropped a clear slice from every bucket,
+then listed it seconds later. `settled_listing` reads the label's issues twice;
+a ticket only the first read listed is read on its own and kept while still
+open and carrying the label. A read that fails stops the frontier, never
+counts as an absent ticket. The cost: one extra listing call per read.
+
 A claimed ticket — one with an assignee, or the `in-progress` label — is in
 no bucket at all. It is off the frontier because someone already has it.
 

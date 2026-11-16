@@ -514,6 +514,27 @@ def _parent_number(body, repo):
     return None
 
 
+def settled_listing(tracker, label):
+    """The queue's issues, read twice (#1897): a listing taken right after a
+    label edit has dropped a clear ticket from every bucket, then listed it
+    seconds later. The second read wins for every ticket it lists. A ticket
+    only the first listed is read on its own: it stays when still open and
+    carrying `label`, and is dropped when it left the queue between the
+    reads. A read that fails raises, so an unreadable ticket is never an
+    absent one."""
+    first = tracker.issues(label)
+    second = tracker.issues(label)
+    listed = {i["number"] for i in second}
+    kept = list(second)
+    for issue in first:
+        if issue["number"] in listed:
+            continue
+        now = tracker.issue(issue["number"])
+        if now.get("state") == "open" and label in tracker_mod.labels(now):
+            kept.append(now)
+    return sorted(kept, key=lambda i: i["number"])
+
+
 def frontier(repo, label, tracker=None):
     """`(repo, label) -> {unblocked, blocked, unresolved, spec, slice}`, read
     through `tracker` (default: `gh`). Each blocker's state is read once
@@ -524,7 +545,7 @@ def frontier(repo, label, tracker=None):
     state_of = functools.cache(tracker.state)
     issue_of = functools.cache(tracker.issue)  # a failed read raises and is not kept
     landed = functools.cache(lambda integration_branch: fetch_landed(tracker, integration_branch))
-    return classify(tracker.issues(label), state_of,
+    return classify(settled_listing(tracker, label), state_of,
                     lambda ticket: fetch_parent(tracker, ticket, issue_of),
                     landed, tracker.native_blockers, repo=repo)
 
