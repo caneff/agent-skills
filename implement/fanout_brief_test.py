@@ -53,7 +53,7 @@ def test_a_brief_lists_own_files_marks_others_off_limits_and_carries_test_and_mu
     off = re.search(r"^## Off limits[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S).group(1)
     assert "c.py" in off and "a.py" not in off, text
     assert TEST_COMMAND in text, text
-    assert "scratch copy" in text and "never mutate the live file" in text.lower(), text
+    assert "never mutate the live file" in text.lower(), text
 
 
 def test_two_workers_sharing_a_file_is_refused_and_nothing_is_written(wt, home):
@@ -90,18 +90,32 @@ def refused(wt, *assigns, **kw):
     return err
 
 
-def test_a_split_with_one_worker_is_refused(wt):
-    assert "two workers" in refused(wt, "alpha=a.py")
+def test_a_single_worker_renders_a_brief_with_no_off_limits_and_no_peers(wt):
+    code, out, err = run(wt, "alpha=a.py")
+    assert code == 0, err
+    text, _ = brief_at(out)
+    assert "- `a.py`" in text and "## Off limits" not in text, text
+    assert "one of 1 workers" not in text and "only worker" in text, text
+
+
+def test_a_single_worker_can_carry_findings(wt):
+    code, out, err = run(wt, "alpha=a.py", extra=("--finding", "alpha:S1=x", "--ruled", "alpha:C2=y"))
+    assert code == 0, err
+    body = section(brief_at(out)[0], "Findings to fix")
+    assert "S1" in body and "C2" in body, body
 
 
 def test_an_empty_test_command_is_refused(wt):
     assert "test command" in refused(wt, "alpha=a.py", "beta=c.py", test_command="  ")
 
 
-def test_the_mutation_rule_names_how_to_point_the_test_at_the_copy(wt):
+def test_the_mutation_rule_names_the_throwaway_worktree_and_its_removal(wt):
     _, out, _ = run(wt, "alpha=a.py", "beta=c.py")
     text, _ = brief_at(out)
-    assert f'cp -a {wt} "$(mktemp -d)/copy"' in text, text
+    assert f"git -C {wt} worktree add --detach {wt}/.scratch/mutation-" in text, text
+    assert "worktree remove --force" in text and "':!.scratch'" in text, text
+    assert "cp -a" not in text and "mktemp" not in text and "scratch copy" not in text, text
+    assert "CARGO_TARGET_DIR" in text and "target" in text, text
     assert "not run" in text, text
 
 
@@ -247,3 +261,31 @@ def test_a_zero_ceiling_is_refused(wt):
 def test_a_worker_name_holding_a_colon_is_refused_at_assign(wt):
     err = refused(wt, "a:b=x.py", "beta=c.py", worker="beta")
     assert "a:b" in err and "':'" in err, err
+
+
+def test_a_finding_given_as_both_finding_and_ruled_is_refused_with_the_way_out(wt):
+    err = refused_task(wt, "--finding", "alpha:S1=x", "--ruled", "alpha:S1=x", "--finding", "beta:P2=y")
+    assert "S1" in err and "twice" in err and "--ruled" in err and "not both" in err, err
+
+
+def test_a_ruled_id_with_no_finding_flag_is_accepted(wt):
+    text = task(wt, "--ruled", "alpha:C3=use a set", "--finding", "beta:P2=y")
+    assert "C3" in section(text, "Findings to fix"), text
+
+
+def test_help_states_the_findings_rules(wt):
+    out = subprocess.run(["python3", RENDER, "--help"], capture_output=True, text=True).stdout
+    assert "not both" in out and "every worker" in out, out
+
+
+@pytest.mark.parametrize("cmd", ["true", ":", "echo ok", "exit 0", "test -f a.py", "ls", "python3 -c pass"])
+def test_a_test_command_that_runs_no_tests_is_refused(wt, cmd):
+    err = refused(wt, "alpha=a.py", test_command=cmd)
+    assert "runs no tests" in err and cmd in err, err
+
+
+@pytest.mark.parametrize("cmd", ["uv run --locked pytest implement/x_test.py", "bash tests/all.sh", "cargo test -p lane",
+                                 "node --test", "TESTS_JOBS=1 bash tests/all.sh --changed origin/main"])
+def test_a_test_command_that_names_a_test_runner_is_accepted(wt, cmd):
+    code, out, err = run(wt, "alpha=a.py", test_command=cmd)
+    assert code == 0, err

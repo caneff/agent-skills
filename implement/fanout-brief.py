@@ -31,9 +31,9 @@ The no-git-write, no-subagent and mutation rules and the report shape live in
 report, which depends on the findings given, is built here.
 
 Exit 0 and the dispatch line on stdout; 2 on a bad input, with nothing written
-and nothing on stdout: a worktree that is not a directory, an empty test command, fewer than two
-workers, a worker with no files, a file (or a directory holding it) owned by two workers, a `--for` worker that was not assigned, a
-malformed `--assign` or `--finding`, an id given twice, a finding for a worker not
+and nothing on stdout: a worktree that is not a directory, an empty test command or one that runs
+no tests (a static check, see `runs_no_tests`), a worker with no files, a file (or a directory holding it) owned by two workers, a `--for` worker that was not assigned, a
+malformed `--assign` or `--finding`, an id given twice (with --finding and --ruled both counts), a finding for a worker not
 assigned, a worker with no finding when others have one.
 """
 import argparse
@@ -58,8 +58,8 @@ def overlaps(p, q):
 
 
 def parse_assignments(specs):
-    """{worker: [files]} in the order given, each path normalized; refuses a malformed, empty,
-    overlapping or one-worker split."""
+    """{worker: [files]} in the order given, each path normalized; refuses a malformed, empty or
+    overlapping split. One worker is a valid split (a fix round with a single sub-worker)."""
     owners = {}
     for spec in specs:
         name, sep, rest = spec.partition("=")
@@ -79,8 +79,6 @@ def parse_assignments(specs):
                     if overlaps(f, g):
                         raise BadInput(f"{f} is owned by both {other} and {name}" + ("" if f == g else f" (as {g})"))
         owners[name] = files
-    if len(owners) < 2:
-        raise BadInput("a fan-out needs at least two workers: pass every worker's --assign, not only this one's")
     return owners
 
 
@@ -109,7 +107,8 @@ def parse_findings(flagged, owners):
             if worker not in owners:
                 raise BadInput(f"finding {fid} is for {worker}, not among the assigned workers ({', '.join(owners)})")
             if fid in seen:
-                raise BadInput(f"finding {fid} is given twice (for {seen[fid]} and {worker})")
+                raise BadInput(f"finding {fid} is given twice (for {seen[fid]} and {worker}): "
+                               "pass a finding with --finding or with --ruled, not both")
             seen[fid] = worker
             found[worker].append(Finding(fid, text, ruled))
     if seen:
@@ -117,6 +116,19 @@ def parse_findings(flagged, owners):
             if not items:
                 raise BadInput(f"worker {worker} has no finding to fix: every worker in a fix round needs one")
     return found
+
+
+# A command whose first word is one of these runs no test, whatever its arguments say.
+NO_TEST_WORDS = {"true", "false", ":", "echo", "printf", "exit", "test", "[", "ls", "cat", "sleep", "pwd", "cd"}
+TEST_TOKEN = re.compile(r"test|spec|check", re.I)
+
+
+def runs_no_tests(cmd):
+    """A static answer, not a run: True when `cmd` cannot run a test — its first word (past any
+    `VAR=value` prefix) is a no-op such as `true` or `echo`, or no word of it names a test, spec or
+    check. A runner selecting nothing (`pytest -k nomatch`) is beyond a static check."""
+    words = [w for w in cmd.split() if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w)]
+    return not words or words[0] in NO_TEST_WORDS or not any(TEST_TOKEN.search(w) for w in words)
 
 
 def finding_bullet(f):
@@ -130,12 +142,18 @@ def render(a, owners, findings):
         raise BadInput(f"worktree {a.worktree} is not a directory")
     if not a.test_command.strip():
         raise BadInput("the test command is empty")
+    if runs_no_tests(a.test_command):
+        raise BadInput(f"the test command {a.test_command!r} runs no tests: it starts with a no-op or names no "
+                       "test, spec or check")
     if a.worker not in owners:
         raise BadInput(f"--for {a.worker}: not among the assigned workers ({', '.join(owners)})")
     with open(os.path.join(HERE, "briefs", "fanout-worker.md")) as fh:
         skeleton = fh.read().strip()
     mine = owners[a.worker]
     others = [f for w, fs in owners.items() if w != a.worker for f in fs]
+    n = len(owners)
+    intro = (f"You are one of {n} workers editing one shared worktree in parallel. You own the files below and nothing else."
+             if n > 1 else "You are the only worker on this ticket in this worktree. You own the files below and nothing else.")
     bullets = lambda items, empty: "\n".join(f"- `{i}`" for i in items) or empty  # noqa: E731
     caps = (f"## Limits\nAny solve, build or test run uses at most {a.workers} worker{'s' if a.workers != 1 else ''} "
             f"and finishes inside {a.ceiling} seconds of wall clock.")
@@ -150,14 +168,14 @@ def render(a, owners, findings):
                   "A finding marked as the controller's ruling is carried out, and your disagreement is stated on its line."]
     return "\n\n".join([
         f"# Sub-worker `{a.worker}` for #{a.ticket} in {a.repo}",
-        f"You are one of {len(owners)} workers editing one shared worktree in parallel. You own the files below and nothing else.",
+        intro,
         f"- Worktree: {a.worktree}\n- Ticket: #{a.ticket}",
         "Your files:\n" + bullets(mine, ""),
-        "## Off limits (owned by the other workers)\n" + bullets(others, ""),
+        *(["## Off limits (owned by the other workers)\n" + bullets(others, "")] if others else []),
         *task,
         f"## Covering test\n`{a.test_command}`",
         caps,
-        skeleton.replace("{worktree}", a.worktree),
+        skeleton.replace("{worktree}", a.worktree).replace("{worker}", a.worker),
         *report,
     ]) + "\n"
 
@@ -167,8 +185,18 @@ def write_brief(text, repo, ticket, worker):
     return review_cache.write_cache_file(repo, f"fanout-{ticket}-{worker}", text)
 
 
+RULES = """rules:
+  --assign   one worker is valid; several must own disjoint files.
+  --finding / --ruled   an id is given once: with --finding or with --ruled, not both. A --ruled
+             id needs no --finding. Once any finding is given, every worker needs at least one
+             (a worker with no finding is a worker with nothing to fix: leave it out).
+  --test-command   refused when it starts with a no-op (true, echo, ls...) or names no
+             test, spec or check; a runner that selects nothing is not caught."""
+
+
 def main(argv):
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], epilog=RULES,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--repo", required=True)
     p.add_argument("--worktree", required=True)
     p.add_argument("--ticket", required=True)
