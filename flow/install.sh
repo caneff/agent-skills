@@ -94,8 +94,9 @@ fi
 
 # The pre-push hook that ran tests/all.sh is retired: a push is not the gate,
 # the merge is (its gate: the command AGENTS.md's `## End-to-end seam` section
-# names), and the hook's own GIT_DIR leaked into the suite. Drop the symlink an earlier install left. Hooks are shared
-# across worktrees, so resolve the common git dir rather than ".git".
+# names), and the hook's own GIT_DIR leaked into the suite. Drop the symlink an
+# earlier install left. Hooks are shared across worktrees, so resolve the common
+# git dir rather than ".git".
 git_common_dir="$(git -C "$here/.." rev-parse --path-format=absolute --git-common-dir)"
 if [ -L "$git_common_dir/hooks/pre-push" ]; then
   rm -f "$git_common_dir/hooks/pre-push"
