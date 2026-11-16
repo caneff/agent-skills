@@ -85,7 +85,7 @@ repo's convention.
 |---|---|---|
 | declares a directive | `closure` | the candidate's files, plus every file that includes one of them |
 | states `None` | `no-include-graph` | the candidate's own files, and nothing else |
-| has no such section | `subtree` | not resolvable; the hold reads the named files and their directories, the repo root left out |
+| has no such section | `subtree` | not resolvable; the hold reads the named files, and the files under a directory a candidate names |
 
 In `subtree` mode a clump carries **no closure at all** — only the files its
 tickets named. Handing a consumer those files under the name `closure` would
@@ -96,7 +96,7 @@ stated words:
 
 - ``clumping: include closure, from AGENTS.md (directive `#include <path>`, generator `make examples`); each candidate is its own clump``
 - `clumping: include closure, from AGENTS.md (declared None: this repo has no include graph, so each candidate closes over its own files); each candidate is its own clump`
-- `clumping: no closure — AGENTS.md declares no include closure, so the hold reads only the files each candidate names and their directories, the repo root left out; each candidate is its own clump`
+- `clumping: no closure — AGENTS.md declares no include closure, so the hold reads only the files each candidate names, and the files under a directory a candidate names; each candidate is its own clump`
 
 A stated `None` and silence clump the same way on a repo that really has no
 include graph, and they are still two different answers. Silence is a gap
@@ -111,13 +111,13 @@ Spec #1634, ruling 1: nothing runs unrelated tickets side by side any more,
 so `closure.py` no longer groups. The `components`, `split` and `MAX_CLUMP`
 code and the `--one-each` flag are gone (the flag is refused, exit 2), and a
 candidate is a clump in every mode, identical closures included. The
-closure stays because `loop.py dispatch` holds a clump sharing a file or a
-directory with a live workspace or an earlier pick
+closure stays because `loop.py dispatch` holds a clump sharing a file with a
+live workspace or an earlier pick
 (`loop.md` § The exclusion rule and what it costs), and it reads each
 clump's `closure` for that. The invariant is "no two live workspaces share a
-file", within what the hold can see: a closure and a workspace's diff. The hold
-leaves the repo root out of its directories, so two candidates naming different
-root-level files run at once.
+file", within what the hold can see: a closure and a workspace's diff. A shared
+parent directory is no collision (#1695), so two candidates naming different
+files in one directory run at once.
 
 `--json` prints the clumps as one list, in the shape `loop.py
 dispatch --candidates` reads, and the announcement on stderr. That way a
@@ -176,13 +176,12 @@ Forward edges are not followed either: changing a component that includes a
 shared snippet does not regenerate the snippet, and does not reach the
 snippet's other includers.
 
-## The conservative fallback
+## The no-declaration fallback
 
-With no declaration there is no graph, so two candidates collide when either
-one's directory contains the other's — same directory, or one an ancestor of
-the other. A candidate touching a file at the repo root therefore collides
-with everything. That is the point: conservative means clumping too much,
-never too little. Clumping too little is what #781 cost.
+With no declaration there is no graph, so the hold reads only the files each
+candidate names, and the files under a directory a candidate names. A shared
+parent directory is not a collision (#1695): the fallback no longer widens
+to it.
 
 ## Never empirically
 

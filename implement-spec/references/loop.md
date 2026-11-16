@@ -94,7 +94,7 @@ frontier**. A controller reading only "open, unblocked, unclaimed" would
 dispatch straight into a collision — two workers editing one file, which is a
 merge conflict the controller caused. Overlap (`loop.overlap`) is one rule
 for a live workspace and for a clump picked earlier the same tick: a shared
-file, or a shared directory, one inside the other counting.
+file, or a file under a directory the other clump names.
 
 Among what is left, `picks` offers the free slots **widest closure first**
 (#1026, grill Q12): a sweep ticket touching many files would otherwise go out
@@ -112,15 +112,16 @@ clump came first. That is the same-tick guard's ordinary behaviour, not a
 bug in the sort — the run drains a slot behind schedule rather than into a
 collision.
 
-A shared **directory** holds, not only a shared file (#1342): a ticket body
+A shared **parent directory** does not hold (#1695, reversing #1342's
+directory hold): it ran spec runs one slice at a time on 3 to 5 slots, the
+worst about 7½ hours serially with four slots idle. Only a shared file holds,
+and a directory a ticket *names* holds the files under it (#1406): a clump
+listing `examples/hit-counts` must not go out beside a live worker editing
+`examples/hit-counts/build_size.py` (spec-649-smcc). The cost: a ticket body
 names fewer files than its diff reaches, so two clumps naming disjoint files
-under one directory collided in the merge tail anyway. The live hold reads
-directories too (#1406): held for one tick only, a clump listing
-`examples/hit-counts` went out next tick beside a live worker editing
-`examples/hit-counts/build_size.py` (spec-649-smcc). The repo root is not a
-shared directory, or every root file would hold every other. The cost is the
-same kind of idle slot, and larger in a repo that keeps its code in one
-directory.
+in one directory can still collide in the merge tail, as #1342 saw. That
+conflict is the worker's to resolve on rebase; the idle slots were the larger
+cost.
 
 Both consequences are stated in the skill because neither is visible from the
 frontier's own definition:

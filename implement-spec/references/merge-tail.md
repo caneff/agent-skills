@@ -97,8 +97,8 @@ it with no routing role — naming the two files, the two tickets, and which of
 the four shapes it was:
 
 - **No declaration.** The repo has no `## Include closure` section in its
-  `AGENTS.md`, so the run clumped conservatively by directory subtree and the
-  two files were in different subtrees. The ticket adds the section.
+  `AGENTS.md`, so the hold read only the files each ticket named and the
+  two files were not among them. The ticket adds the section.
 - **A directive that missed.** The section exists and the real include line
   does not match its template — a second spelling the repo also uses, or a
   generator that resolves paths some other way. The ticket fixes the

@@ -195,42 +195,59 @@ def test_picks_names_a_same_tick_collision_past_the_free_slot_cut():
     assert by_ticket[(458,)]["same_tick"] is True
 
 
-def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
-    # Two tickets named disjoint files in one directory and both diffs
-    # reached `implement-spec/loop.py`. A body under-names its targets, so
-    # two clumps whose lists share a directory are not picked in one tick.
+def test_picks_runs_clumps_naming_disjoint_files_in_one_directory_together():
+    # #1695: a shared parent directory is not a collision. Spec runs drained
+    # one slice at a time because every slice under `implement-spec/` held
+    # the others, with four slots idle.
     candidates = [
         {"tickets": [1311], "files": ["implement-spec/runfile.py", "implement-spec/SKILL.md"]},
         {"tickets": [1312, 1313], "files": ["implement-spec/loop.py"]},
         {"tickets": [1400], "files": ["implement/SKILL.md"]},
     ]
     picked, held = loop.picks(loop.frontier(candidates, []), 3)
-    assert [c["tickets"] for c in picked] == [[1311], [1400]]
-    assert len(held) == 1
-    assert held[0]["clump"]["tickets"] == [1312, 1313]
-    assert held[0]["holder"] == 1311
-    assert held[0]["over"] == ["implement-spec/"]
-    assert held[0]["same_tick"] is True
-
-
-def test_picks_holds_a_nested_directory():
-    c = [{"tickets": [1], "files": ["d/a.py", "d/b.py"]},
-         {"tickets": [2], "files": ["d/r/x.md"]}]
-    picked, held = loop.picks(loop.frontier(c, []), 2)
-    assert [x["tickets"] for x in picked] == [[1]] and held[0]["over"] == ["d/"]
-
-
-def test_picks_does_not_treat_the_repo_root_as_a_shared_directory():
-    candidates = [
-        {"tickets": [1], "files": ["AGENTS.md"]},
-        {"tickets": [2], "files": ["GLOSSARY.md"]},
-    ]
-    picked, held = loop.picks(loop.frontier(candidates, []), 2)
-    assert [c["tickets"] for c in picked] == [[1], [2]]
+    assert sorted(c["tickets"][0] for c in picked) == [1311, 1312, 1400]
     assert held == []
 
 
-def test_the_cli_names_a_same_tick_directory_hold_as_a_held_line(tmp):
+def test_picks_still_holds_a_shared_file():
+    c = [{"tickets": [1], "files": ["d/a.py", "d/b.py"]},
+         {"tickets": [2], "files": ["d/b.py"]}]
+    picked, held = loop.picks(loop.frontier(c, []), 2)
+    assert [x["tickets"] for x in picked] == [[1]]
+    assert held[0]["over"] == ["d/b.py"] and held[0]["same_tick"] is True
+
+
+def test_picks_runs_a_nested_directory_file_beside_its_parent_directory_file():
+    c = [{"tickets": [1], "files": ["d/a.py", "d/b.py"]},
+         {"tickets": [2], "files": ["d/r/x.md"]}]
+    picked, held = loop.picks(loop.frontier(c, []), 2)
+    assert len(picked) == 2 and held == []
+
+
+def test_picks_holds_a_clump_under_a_directory_an_earlier_pick_names():
+    c = [{"tickets": [1], "files": ["examples/hit-counts", "a.md"]},
+         {"tickets": [2], "files": ["examples/hit-counts/build_size.py"]}]
+    picked, held = loop.picks(loop.frontier(c, []), 2)
+    assert [x["tickets"] for x in picked] == [[1]]
+    assert held[0]["over"] == ["examples/hit-counts/build_size.py"]
+
+
+def test_picks_holds_a_directory_naming_clump_beside_an_earlier_pick_in_it():
+    # The wider clump is picked first, so the directory-naming one is second.
+    c = [{"tickets": [1], "files": ["examples/hit-counts/a.py", "examples/hit-counts/b.py"]},
+         {"tickets": [2], "files": ["examples/hit-counts"]}]
+    picked, held = loop.picks(loop.frontier(c, []), 2)
+    assert [x["tickets"] for x in picked] == [[1]]
+    assert held[0]["over"] == ["examples/hit-counts/a.py", "examples/hit-counts/b.py"]
+
+
+def test_a_live_workspace_naming_a_directory_holds_a_clump_under_it():
+    live = [{"tickets": [655], "workspace": "/w/implement-655", "files": ["examples/hit-counts"]}]
+    state = loop.frontier([{"tickets": [666], "files": ["examples/hit-counts/x.py"]}], live)
+    assert state["dispatchable"] == [] and state["held"][0]["holder"] == 655
+
+
+def test_the_cli_dispatches_two_clumps_sharing_only_a_directory(tmp):
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -242,15 +259,15 @@ def test_the_cli_names_a_same_tick_directory_hold_as_a_held_line(tmp):
                   "--free", "2", "--processes", "4", "--committed-gb", "4")
     assert got.returncode == 0, got
     assert "dispatch  #10" in got.stdout, got.stdout
-    assert "dispatch  #11" not in got.stdout, got.stdout
-    assert "held      #11  by #10 this tick  over d/" in got.stdout, got.stdout
+    assert "dispatch  #11" in got.stdout, got.stdout
+    assert "held" not in got.stdout, got.stdout
 
 
 def test_a_live_workspace_holds_a_clump_naming_its_directory():
     # #666 listed the directory `examples/hit-counts` and was dispatched
     # beside live #655, which was editing
-    # `examples/hit-counts/build_size.py`. The live hold reads directories as
-    # the same-tick guard does, so the directory hold outlasts its tick.
+    # `examples/hit-counts/build_size.py`. A named directory holds the files
+    # under it; a mere shared parent directory holds nothing (#1695).
     candidates = [{"tickets": [666], "files": ["examples/hit-counts"]},
                   {"tickets": [700], "files": ["docs/a.md"]}]
     live = [{"tickets": [655], "workspace": "/w/implement-655",
@@ -259,7 +276,7 @@ def test_a_live_workspace_holds_a_clump_naming_its_directory():
     assert [c["tickets"] for c in state["dispatchable"]] == [[700]]
     assert len(state["held"]) == 1, state["held"]
     assert state["held"][0]["holder"] == 655
-    assert state["held"][0]["over"] == ["examples/"]
+    assert state["held"][0]["over"] == ["examples/hit-counts/build_size.py"]
 
 
 def test_picks_takes_the_widest_closure_first():

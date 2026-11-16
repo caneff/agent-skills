@@ -291,8 +291,8 @@ def test_the_fallback_is_announced_in_stated_words(repo):
     got = C.clumps(root, [candidate(1, "docs/notes.md")])
     assert got["announcement"] == (
         "clumping: no closure \u2014 AGENTS.md declares no include closure, so "
-        "the hold reads only the files each candidate names and their "
-        "directories, the repo root left out; each candidate is its own "
+        "the hold reads only the files each candidate names, and the "
+        "files under a directory a candidate names; each candidate is its own "
         "clump"), got
 
 
@@ -372,7 +372,7 @@ def test_an_indented_quotation_is_not_a_declaration():
                          ids=["empty", "prose"])
 def test_a_section_that_states_nothing_readable_is_silence(repo, section):
     # An empty section, or prose naming no directive and not saying None,
-    # has declared nothing — and silence is the conservative fallback.
+    # has declared nothing — and silence is the no-declaration fallback.
     root = repo(SHARED, agents="## Include closure\n\n" + section)
     got = C.clumps(root, [candidate(1, "docs/notes.md")])
     assert got["mode"] == "subtree", (section, got)
