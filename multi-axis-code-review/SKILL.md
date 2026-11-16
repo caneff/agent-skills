@@ -420,7 +420,7 @@ python3 ~/.agents/skills/multi-axis-code-review/render-brief.py --axis <axis> \
   [--ruling "<text>"]... [--choice "<text>"]... [--claim "<id>: <text>"]... \
   [--round <K> [--first-id <ordinal>]] \\
   [--workers <k>] [--ceiling <seconds>] [--test-command "<cmd>"] \\
-  [--capture-stat "<the capture's printed stat line>"]
+  [--capture-stat "<the capture's printed stat line>"] [--seam-sha <the worker's "Seam run at" sha>]
 ```
 
 It reads the diff's line count from the file, prints the capture's stat line
@@ -433,7 +433,13 @@ check* — a heading that is absent when there are none. It writes no outcome of
 its own. It states the worker count (default 1) and wall-clock ceiling (default
 600 seconds) any solve, build or test run is held to, and that the reviewer
 spawns no nested subagent; the correctness prompt also passes the worker count
-to `witness-check.sh --slots`. Exit 2 means a bad input and nothing written.
+to `witness-check.sh --slots` as workers x 3 axes (#1855: only correctness runs
+tests, so it takes the review's whole budget; the spec and standards briefs
+carry no witness line). `--seam-sha` is the worker's `Seam run at:` sha: when it
+equals the worktree's HEAD the correctness brief says that run stands and the
+reviewer reruns only the files its mutants target, unmutated, never the whole
+narrowed suite (#1856); absent, different or unreadable, it says nothing and the
+reviewer's current behaviour stands. Exit 2 means a bad input and nothing written.
 
 It writes the brief to `<dir>/brief-<n>-<axis>.md` (`-2`, `-3` for a later wave
 of the same ticket and axis: an earlier wave's brief is never overwritten) and
@@ -556,9 +562,18 @@ and run it once, with every mutation id in the one call:
 ```
 bash ~/.agents/skills/multi-axis-code-review/witness-check.sh \
   --worktree <the worktree under review> --mutate <that file> \
-  --repo <repo> --ticket <n> \
+  --repo <repo> --ticket <n> [--baseline-seconds <s>] \
   [--call-site <id>]... -- <id>...
 ```
+
+*The time limit* (#1854). Each mutant's suite runs under a limit so one that
+hangs cannot stall the review (a 4739 s mutant took one review 88 minutes).
+`--baseline-seconds` is the unmutated run's own time of the target files: the
+limit is 3x it, 60 s at least; without it the limit is 600 s and the run says
+so. `--timeout <s>` sets it outright. A mutant that reached its suite and hit
+the limit reads `<id>: red (timeout)` (the tests noticed), its ledger row is
+`red` with `timeout: true`, and its whole process group is killed; one that
+never reached its suite is still `unknown`.
 
 `--repo` and `--ticket` are the ledger's, as in § 4's append line; `--no-ledger`
 replaces them only outside a review. Each `--call-site` id is one of the ids.

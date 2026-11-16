@@ -7,6 +7,7 @@
                     [--ruling <text>]... [--choice <text>]... [--claim "<id>: <text>"]...
                     [--round <K> [--first-id <series><ordinal>]...]
                     [--workers <k>] [--ceiling <seconds>] [--test-command <cmd>] [--capture-stat <line>]
+                    [--seam-sha <sha>]
 
 Writes the whole prompt for a `diff-reviewer` of that axis to
 `~/.cache/agent-reviews/<repo>/brief-<ticket>-<axis>[-<n>].md` (#1548) and prints
@@ -46,6 +47,7 @@ round K >= 2 whose earlier round is missing or unreadable and not covered by
 import argparse
 import os
 import re
+import subprocess
 import sys
 from typing import NamedTuple
 
@@ -215,8 +217,42 @@ def limits_section(a):
         "top-level session, not to you, and its work is lost. A task too large for one agent is reported as such and stopped.",
         f"- Any solve, build or test run uses at most {a.workers} worker{'s' if a.workers != 1 else ''} and "
         f"finishes inside {a.ceiling} seconds of wall clock."]
-        + ([f"- Run the witness check with `--slots {a.workers}`: it picks its own concurrency otherwise."]
-           if a.axis == "correctness" else []))
+        + (correctness_limits(a) if a.axis == "correctness" else []))
+
+
+AXIS_COUNT = len(AXES)
+
+
+def reviewed_sha(worktree):
+    """The worktree's HEAD, or None when git cannot say: a seam claim is never checked
+    against a guess."""
+    done = subprocess.run(["git", "-C", worktree, "rev-parse", "HEAD"], capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
+
+
+def seam_stands(a):
+    """True only when the brief names a worker's seam sha and it is the reviewed commit (a
+    prefix either way counts, for a short sha). Absent, unreadable or different: the
+    reviewer's current behaviour stands."""
+    head = reviewed_sha(a.worktree) if a.seam_sha else None
+    return bool(head) and (head.startswith(a.seam_sha) or a.seam_sha.startswith(head))
+
+
+def correctness_limits(a):
+    """The correctness axis alone runs tests, so it carries the budget of all three axes."""
+    lines = [
+        f"- Run the witness check with `--slots {a.workers * AXIS_COUNT}`: only this axis runs tests (the spec and "
+        f"standards reviewers run none), so it takes the whole review's budget of {AXIS_COUNT} axes x "
+        f"{a.workers} worker{'s' if a.workers != 1 else ''}; the script still lowers it when the box is busy.",
+        "- Time the unmutated run of the test files your mutants target and pass it as "
+        "`--baseline-seconds <s>`: each mutant is killed at 3x that (60 s at least) and reads "
+        "`red (timeout)`, so a hung mutant cannot stall the review."]
+    if seam_stands(a):
+        lines.append(
+            f"- The worker's seam run stands: it ran the repo's narrowed suite green at this commit ({a.seam_sha}). "
+            "Before mutating, run only the test files your planned mutants target, unmutated, to confirm they "
+            "start green; never the whole narrowed or full suite.")
+    return lines
 
 
 def optional_sections(a):
@@ -291,6 +327,7 @@ def main(argv):
     p.add_argument("--ceiling", type=int, default=600)
     p.add_argument("--test-command")
     p.add_argument("--capture-stat")
+    p.add_argument("--seam-sha")
     a = p.parse_args(argv)
     a.repo = review_cache.fold_repo(a.repo)  # once: every path and the ledger line below read it folded
     try:

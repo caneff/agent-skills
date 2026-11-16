@@ -89,3 +89,12 @@ mutations with `multi-axis-code-review/witness-check.sh`, which puts each in
 its own throwaway worktree: never in the checkout and never in a copy of it,
 since a byte copy of a linked worktree shares the checkout's index, so a
 staged mutation lands in the real repository.
+
+**Run `witness-check.sh` in the foreground, never `run_in_background`** (#1921).
+A backgrounded run whose completion notice never arrives leaves you waiting on
+nothing, and the whole review wave behind you. The Bash tool's own `timeout`
+(its maximum, 600000 ms) is your ceiling, and the script's per-mutant limit
+(`--baseline-seconds`, `multi-axis-code-review/SKILL.md` § 4) keeps that ceiling
+honest. A run that exceeds it is not waited on: record `witness not run
+(timeout)` for those mutations in your report, rate nothing from them, and
+finish the rest of the review.
