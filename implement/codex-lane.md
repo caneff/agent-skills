@@ -69,7 +69,8 @@ The brief carries what neither engine can infer:
   says the same of the Codex focus text).
 - The repo's gate, the command its `AGENTS.md` `## End-to-end seam` section
   names (`python3 ~/.agents/skills/implement/selector_check.py command --root .`
-  prints it), and the instruction to
+  prints it), and the
+  instruction to
   run it green before finishing.
 - `implement/SKILL.md` § Build's TDD rules: failing test first per criterion, no implementation
   ahead of a red test, no scope beyond the ticket.

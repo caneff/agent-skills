@@ -93,7 +93,8 @@ if ! grep -qxF "$repoint_line" "$HOME/.bashrc" 2>/dev/null; then
 fi
 
 # The pre-push hook that ran tests/all.sh is retired (#633): a push is not the
-# gate, the merge is (its gate is the AGENTS.md `## End-to-end seam` command), and the hook's own GIT_DIR
+# gate, the merge is (its gate: the command AGENTS.md's `## End-to-end seam`
+# section names), and the hook's own GIT_DIR
 # leaked into the suite. Drop the symlink an earlier install left. Hooks are
 # shared across worktrees, so resolve the common git dir rather than ".git".
 git_common_dir="$(git -C "$here/.." rev-parse --path-format=absolute --git-common-dir)"

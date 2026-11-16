@@ -52,7 +52,8 @@ bash mirror and `core.hooksPath`. One source of truth now.
 
 Every converted repo then gets the merge gate, whatever it had before: give
 `AGENTS.md` the template's `## End-to-end seam` section (step 6), which is the
-command the lane's merges run (`flow/claude/WORKFLOW.md` § CI). A GitHub Actions workflow the repo already has
+command the lane's merges run (`flow/claude/WORKFLOW.md` § CI). A GitHub
+Actions workflow the repo already has
 stays: add none, delete none.
 
 ## 6. Docs + task runner
