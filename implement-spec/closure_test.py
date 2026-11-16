@@ -1,8 +1,8 @@
-"""Tests for the include-closure clumper (#891). Two seams, both named on the
+"""Tests for the include-closure clumper. Two seams, both named on the
 ticket: `resolve_closure(root, files)` — the set of files a change to `files`
-regenerates — and `clumps(root, candidates)` — one clump per candidate
-(spec #1634, ruling 1), each carrying its closure for `loop.py dispatch`'s
-hold, plus the mode announcement the run's opening report carries.
+regenerates — and `clumps(root, candidates)` — one clump per candidate, each
+carrying its closure for `loop.py dispatch`'s hold, plus the mode
+announcement the run's opening report carries.
 
 Every case is a fixture repo written under pytest's `tmp_path`: a declaration
 in `AGENTS.md` and a few files that include each other. Nothing here runs a
@@ -66,8 +66,6 @@ def repo(tmp_path_factory):
     return make
 
 
-# --- The declaration -------------------------------------------------------
-
 def test_the_declaration_is_read_from_agents_md(repo):
     decl = C.declaration(repo({}))
     assert decl.directive == "#include <path>", decl
@@ -87,8 +85,6 @@ def test_a_bold_value_keeps_its_own_markers():
     text = "## Include closure\n- **Directive**:**#include <path>**\n"
     assert C.parse_declaration(text).directive == "**#include <path>**"
 
-
-# --- The closure: one hop from the candidate's own files -------------------
 
 SHARED = {
     "examples/_shared/line-kind.js": "// the shared snippet\n",
@@ -156,8 +152,6 @@ def test_a_directive_may_name_a_path_between_literals(repo):
     assert got == {"parts/head.html", "page.html"}, got
 
 
-# --- Clumps: one per candidate ---------------------------------------------
-
 def candidate(number, *files):
     return {"number": number, "files": list(files)}
 
@@ -167,10 +161,11 @@ def numbers(clumping):
 
 
 def test_two_candidates_sharing_an_include_are_two_clumps(repo):
-    # #781's costliest finding, as a fixture: #451 targets the shared
-    # snippet, #455 targets the skyscraper component, and nothing in either
-    # ticket names the other's file. Their closures differ, so they are two
-    # clumps, and `loop.py dispatch`'s hold keeps them apart.
+    # An earlier spec run's costliest finding, as a fixture: candidate 451
+    # targets the shared snippet, candidate 455 the skyscraper component,
+    # and nothing in either ticket names the other's file. Their closures
+    # differ, so they are two clumps, and `loop.py dispatch`'s hold keeps
+    # them apart.
     root = repo(SHARED)
     got = C.clumps(root, [candidate(451, "examples/_shared/line-kind.js"),
                           candidate(455, "examples/skyscraper/component.js")])
@@ -184,10 +179,8 @@ def test_a_candidate_colliding_with_nothing_clumps_alone(repo):
     assert numbers(got) == [[451], [501]], got
 
 
-# --- No grouping: unrelated or identical candidates stay apart (#1638) ----
-
-# `burn-2026-09-21-0930`, in small. That repo declares None, so a closure is
-# a candidate's own files; each of five candidates names its own file and the
+# A real run in small. That repo declares None, so a closure is a
+# candidate's own files; each of five candidates names its own file and the
 # same hub (`implement/SKILL.md` there).
 NONE_DECLARED = "## Include closure\n\nNone \u2014 nothing here is generated.\n"
 HUB = {"hub.md": "x\n", **{f"c{n}/own.md": "x\n" for n in range(1, 6)}}
@@ -202,7 +195,6 @@ def test_one_hub_file_gives_five_candidates_five_clumps(repo):
 
 
 def test_identical_closures_are_still_one_clump_each_in_every_mode(repo):
-    # Declared directive, declared None and silence: the three modes.
     shared = repo(SHARED)
     none = repo(HUB, agents=NONE_DECLARED)
     silent = repo({"hub.md": "x\n"}, agents=None)
@@ -258,9 +250,10 @@ def test_a_live_clump_holds_those_sharing_its_files_and_another_dispatches(repo)
 
 
 def test_the_hold_reads_a_closure_the_named_files_do_not_show(repo):
-    # #451 names only the shared snippet; its closure reaches the skyscraper
-    # component #455 names. The overlap exists only in the `closure` key, so
-    # this goes red if `closure.py --json` stops carrying it to `loop.py`.
+    # Candidate 451 names only the shared snippet; its closure reaches the
+    # skyscraper component candidate 455 names. The overlap exists only in
+    # the `closure` key, so this goes red if `closure.py --json` stops
+    # carrying it to `loop.py`.
     import loop
     root = repo(SHARED)
     path, _ = closure_json(root, "451=examples/_shared/line-kind.js",
@@ -273,8 +266,6 @@ def test_the_hold_reads_a_closure_the_named_files_do_not_show(repo):
     assert state["dispatchable"] == [], state
     assert [h["clump"]["tickets"] for h in state["held"]] == [[455]], state
 
-
-# --- The conservative fallback, and what the report says it got ------------
 
 def test_a_repo_declaring_nothing_keeps_each_candidate_its_own_clump(repo):
     root = repo({"a/one.js": "x\n", "a/two.js": "x\n", "b/three.js": "x\n"},
@@ -328,8 +319,6 @@ def test_a_declared_none_is_announced_as_its_own_third_answer(repo):
         "each candidate is its own clump"), got
 
 
-# --- The cost ceiling ------------------------------------------------------
-
 def test_the_whole_queue_is_resolved_against_one_repo_scan(repo, monkeypatch):
     # Per-candidate resolution is the expense the declaration exists to
     # avoid; a queue of ten candidates must not read the repo ten times.
@@ -354,10 +343,8 @@ def test_no_code_path_runs_the_declared_generator(repo):
     assert not os.path.exists(marker), "the declared generator ran"
 
 
-# --- A quoted declaration is not a declaration -----------------------------
-
 def test_a_fenced_declaration_is_quoted_never_declared(repo):
-    # #890's rule, reused rather than reimplemented: a doc that shows the
+    # The fence rule, reused rather than reimplemented: a doc that shows the
     # grammar inside a fence has declared nothing, and this repo's own
     # references/closure.md quotes exactly such a block.
     agents = ("# Fixture\n\n```\n## Include closure\n\n"
@@ -368,7 +355,7 @@ def test_a_fenced_declaration_is_quoted_never_declared(repo):
 
 
 def test_an_indented_quotation_is_not_a_declaration():
-    # #999's own risk, named in the ticket: `unfenced()` now opens a fence
+    # The risk of the bounded fence opener: `unfenced()` now opens a fence
     # only at CommonMark's <=3-space bound, so a 4-space-indented example is
     # no longer hidden by an (incorrect) fence match. `declaration_section`
     # reads raw `unfenced()` with no `_QUOTED` filter of its own, so without
@@ -390,8 +377,6 @@ def test_a_section_that_states_nothing_readable_is_silence(repo, section):
     got = C.clumps(root, [candidate(1, "docs/notes.md")])
     assert got["mode"] == "subtree", (section, got)
 
-
-# --- The command line ------------------------------------------------------
 
 def test_the_command_line_prints_the_mode_and_the_clumps(repo):
     root = repo(SHARED)
@@ -431,8 +416,6 @@ def test_a_malformed_candidate_is_one_stderr_line_not_a_traceback(repo):
     assert "Traceback" not in out.stderr, out.stderr
 
 
-# --- Two spellings of one file are one file (round 1: C1, C2) -------------
-
 def test_a_dot_slash_spelling_is_the_bare_file(repo):
     # `./a/one.js` is ordinary ticket-body and command-line spelling, and the
     # hold in `loop.py dispatch` compares paths as strings.
@@ -456,8 +439,6 @@ def test_a_candidate_file_outside_the_repo_is_refused_not_guessed_at(repo):
     assert "outside the repo" in str(exc.value), exc.value
 
 
-# --- What the scan reads, and what it refuses (round 1: C3, C5) -----------
-
 def test_a_fenced_directive_in_a_doc_is_an_example_not_an_edge(repo):
     # `references/closure.md` shows the repo's include line; so will any doc
     # explaining the grammar. A quoted example must not join that doc to the
@@ -479,10 +460,10 @@ def test_a_triple_backtick_in_source_does_not_hide_the_directives_after_it(repo)
 
 
 def test_an_indented_directive_in_a_doc_is_an_example_not_an_edge(repo):
-    # Codex on #999's PR: an indented block is a code block by the same
-    # CommonMark rule `declaration_section` now applies, and the same doc
-    # explaining the grammar is exactly as likely to show the include line
-    # indented as fenced.
+    # An indented block is a code block by the same CommonMark rule
+    # `declaration_section` now applies, and the same doc explaining the
+    # grammar is exactly as likely to show the include line indented as
+    # fenced.
     root = repo({"_shared/line-kind.js": "x\n",
                  "docs/guide.md": "example:\n\n    #include ../_shared/line-kind.js\n"})
     got = C.resolve_closure(root, ["_shared/line-kind.js"])
@@ -515,8 +496,6 @@ def test_a_skipped_directory_holds_no_edges(repo):
     got = C.resolve_closure(root, ["_shared/line-kind.js"])
     assert got == {"_shared/line-kind.js"}, got
 
-
-# --- The declaration's edges (round 1: C4, C7, C8, S4) --------------------
 
 def test_none_must_be_a_statement_not_the_first_word_of_prose(repo):
     # "None of the docs are generated, but examples/ are" declares nothing
@@ -563,8 +542,6 @@ def test_a_directive_with_no_path_slot_is_refused_by_name(repo):
     assert "<path>" in str(exc.value), exc.value
 
 
-# --- A subtree clump reports no closure (round 1: P3) ---------------------
-
 def test_a_subtree_clump_carries_no_closure_key(repo):
     # There is no closure in this mode, and a `closure` key holding the
     # tickets' declared files would hand a consumer back the declared seams
@@ -583,10 +560,8 @@ def test_a_resolved_clump_carries_both_its_files_and_its_closure(repo):
     assert "examples/thermo/component.js" in clump["closure"], clump
 
 
-# --- The scan fails closed (Codex pass on PR #920: F1, F2) ---------------
-
 def test_a_directive_past_the_old_megabyte_cutoff_is_still_an_edge(repo):
-    # `read_text` used to stop at 1 MB and report the closure as complete.
+    # A scan that stopped at 1 MB would report the closure as complete.
     # This repo tracks a 3.5 MB minified bundle, and a minified bundle is one
     # enormous line, so where a truncation lands has nothing to do with the
     # content. A missed edge is two workers in the same files.
@@ -723,8 +698,8 @@ def test_a_callers_git_environment_does_not_redirect_the_scan(repo, monkeypatch)
 
 def test_a_callers_git_config_environment_still_reaches_the_scan_1254(repo, tmp_path,
                                                                       monkeypatch):
-    # #1209 C7: GIT_CONFIG_* repoints nothing, and stripping it drops settings
-    # the scan needs (a `safe.directory` passed this way). An excludesFile
+    # GIT_CONFIG_* repoints nothing, and stripping it drops settings the
+    # scan needs (a `safe.directory` passed this way). An excludesFile
     # passed the same way shows it arrived.
     root = repo(SHARED)
     ignores = tmp_path / "ignores"
@@ -745,8 +720,8 @@ def test_an_unreadable_gitignored_directory_does_not_break_the_resolve(repo):
 
 
 def test_an_unreadable_skipped_directory_does_not_break_the_resolve_1254(repo):
-    # #1209 P6: the .gitignore case above also passes a design that filters
-    # git's list afterwards with no --exclude, because git never opens an
+    # The .gitignore case above also passes a design that filters git's
+    # list afterwards with no --exclude, because git never opens an
     # ignored directory. A SKIP_DIRS directory no .gitignore names is opened
     # unless the --exclude arguments keep git out of it.
     root = repo({**SHARED, "node_modules/pkg/index.js": "x\n"})
@@ -765,8 +740,6 @@ def test_a_file_that_cannot_be_opened_is_not_a_file_with_no_includes(repo):
         C.resolve_closure(root, ["examples/_shared/line-kind.js"])
     assert "cannot read" in str(exc.value), exc.value
 
-
-# --- Python imports as include edges (#1478) -------------------------------
 
 PY_ROOT = ("## Include closure\n\n- **Directive**: `python imports`\n"
            "- **Paths**: repo-root\n- **Generator**: `none`\n")
@@ -813,7 +786,6 @@ def test_a_from_import_of_a_submodule_is_an_edge_to_that_file(py_closure):
 
 
 def test_a_name_with_no_tracked_file_drops_out(py_closure):
-    # stdlib and third-party modules must not raise or invent an edge
     got = py_closure({"codec.py": "x\n", "a.py": "import json, numpy\nimport os.path\n"})
     assert got == {"codec.py"}, got
 

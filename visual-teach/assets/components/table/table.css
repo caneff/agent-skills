@@ -1,4 +1,3 @@
-/* table — base */
 .vt-table,
 table {
   width: 100%;
@@ -24,7 +23,6 @@ td {
   vertical-align: top;
 }
 
-/* table — responsive wrapper + zebra + density */
 .vt-table-wrap {
   overflow-x: auto;
   margin: 1rem 0;
@@ -41,7 +39,6 @@ td {
   padding: 0.3rem 0.5rem;
 }
 
-/* table — header column (first column = row headers) */
 .vt-table th[scope="row"] {
   text-align: start;
   text-transform: none;
@@ -53,13 +50,13 @@ td {
   /* match td's divider — the generic `th` rule's 2px underline is for thead only */
   border-bottom: 1px solid var(--vt-rule);
 }
-/* table — comparison-matrix: subdue the row-label column header so data columns read first */
+/* comparison-matrix: subdue the row-label column header so data columns read first */
 .vt-table thead th:first-child {
   color: var(--vt-muted);
   font-weight: 400;
 }
 
-/* table — cell status: ✓ / ✗ / ~ auto-rendered, tinted, themeable */
+/* cell status: ✓ / ✗ / ~ auto-rendered, tinted, themeable */
 .vt-ok,
 .vt-no,
 .vt-partial {
@@ -98,7 +95,7 @@ td {
   margin-top: 0.15rem;
 }
 
-/* table — comparison highlight: recommended column via <col> + .vt-th-pick header.
+/* comparison highlight: recommended column via <col> + .vt-th-pick header.
    The soft background tints text-cell tables, but loses to zebra stripes and to
    cell fills (.vt-ok/.vt-no) since <col> is the lowest paint layer. The accent
    side+bottom rails are box-shadow, which paints ABOVE cell/row backgrounds, so
@@ -126,7 +123,6 @@ td {
   margin-bottom: 0.18rem;
 }
 
-/* table — row emphasis */
 .vt-row-key {
   background: var(--vt-accent-soft);
 }
@@ -135,7 +131,6 @@ td {
   box-shadow: inset 3px 0 0 var(--vt-accent);
 }
 
-/* table — key/value reference */
 .vt-kv {
   width: 100%;
   border-collapse: collapse;

@@ -1,7 +1,6 @@
 //! Shared test support. This file is the implement-dispatch fixture: a
 //! scratch origin plus a clone under a temp dir, and the fake `gh`/`herdr`
-//! from `lane-fake` on a scratch PATH, mirroring the bash suite's own
-//! fixture. `cleanup` is the merge-cleanup fixture.
+//! from `lane-fake` on a scratch PATH. `cleanup` is the merge-cleanup fixture.
 #![allow(dead_code)]
 
 pub mod cleanup;
@@ -17,11 +16,10 @@ fn fake_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lane-fake"))
 }
 
-/// The real `git` binary's absolute path, resolved from the test harness's
-/// own (unmodified) `PATH` once per fixture (#849): `Fixture::path_env`
-/// prepends the fake dir ahead of it, so the `git` role in `lane-fake`
-/// cannot resolve "git" by name again without re-entering itself — it needs
-/// this absolute path to reach the real thing.
+/// The real `git` binary's absolute path, resolved from the harness's
+/// unmodified PATH: `Fixture::path_env` prepends the fake dir, so the `git`
+/// role in `lane-fake` cannot resolve "git" by name without re-entering
+/// itself.
 fn real_git_path() -> PathBuf {
     let path = std::env::var("PATH").unwrap_or_default();
     std::env::split_paths(&path)
@@ -79,15 +77,14 @@ impl Fixture {
         std::fs::create_dir_all(self.pr_status_dir()).unwrap();
         std::fs::write(self.pr_status_dir().join(branch.replace('/', "__")), format!("{line}\n")).unwrap();
     }
-    /// `herdr agent list`'s agents array, as JSON — what #819's session
-    /// lookup reads to find the sessionId herdr attached to the agent it
-    /// just started.
+    /// `herdr agent list`'s agents array, as JSON — what the session lookup
+    /// reads to find the sessionId herdr attached to the agent it just
+    /// started.
     pub fn set_agents(&self, agents: &str) {
         std::fs::write(self.agents_file(), format!(r#"{{"result":{{"agents":{agents}}}}}"#)).unwrap();
     }
 
-    /// Fresh ~/.claude.json with one other project, and an empty call log —
-    /// the bash suite's `reset_home`.
+    /// Fresh ~/.claude.json with one other project, and an empty call log.
     pub fn reset_home(&self, onboarding: bool) {
         std::fs::write(
             self.home().join(".claude.json"),
@@ -147,8 +144,6 @@ impl Fixture {
         format!("{}:{}", self.tmp.path().join("bin").display(), real)
     }
 
-    /// Runs implement-dispatch with the given args and scenario env vars,
-    /// against the fake on PATH and a scratch HOME.
     pub fn dispatch(&self, args: &[&str], scenario: &[(&str, &str)]) -> Output {
         let mut cmd = Command::new(bin_path());
         cmd.args(args);
@@ -163,14 +158,13 @@ impl Fixture {
         cmd.output().unwrap()
     }
 
-    /// `dispatch`, with `git` itself faked (#849): a passthrough proxy to
-    /// the real binary (`real_git_path`) placed on its own PATH entry ahead
-    /// of `path_env()`'s, except that a call whose args contain `hang`
-    /// never returns — standing in for a hung `git` subprocess so a test
-    /// can prove an OS-level bound actually fires rather than assuming it.
-    /// Kept off the plain `dispatch`'s PATH entirely: every other test's
-    /// `git` calls hit the real binary directly, exactly as before this
-    /// method existed.
+    /// `dispatch`, with `git` itself faked: a passthrough proxy to the real
+    /// binary (`real_git_path`) placed on its own PATH entry ahead of
+    /// `path_env()`'s, except that a call whose args contain `hang` never
+    /// returns — standing in for a hung `git` subprocess so a test can prove
+    /// an OS-level bound actually fires rather than assuming it. Kept off
+    /// the plain `dispatch`'s PATH entirely: every other test's `git` calls
+    /// hit the real binary directly, exactly as before this method existed.
     pub fn dispatch_with_git_hang(&self, args: &[&str], scenario: &[(&str, &str)], hang: &str) -> Output {
         let git_bin = self.tmp.path().join("git-bin");
         std::fs::create_dir_all(&git_bin).unwrap();
@@ -195,11 +189,10 @@ impl Fixture {
     }
 
     /// Runs implement-dispatch with its stdout closed before the process
-    /// gets to write anything — the limit of `| head -n1` closing early,
-    /// for #758's broken pipe. All of dispatch's real work (git, the fake
-    /// gh/herdr) happens before its first `println!`, so dropping the read
-    /// end right after spawn reliably beats it there. Returns the exit code
-    /// (`None` if killed by a signal) and stderr.
+    /// gets to write anything — the limit of `| head -n1` closing early.
+    /// Dropping the read end right after spawn reliably beats dispatch's first
+    /// `println!`: all its real work (git, the fake gh/herdr) happens before
+    /// it. Returns the exit code (`None` if killed by a signal) and stderr.
     pub fn dispatch_broken_pipe(&self, args: &[&str], scenario: &[(&str, &str)]) -> (Option<i32>, String) {
         use std::io::Read;
         let mut cmd = Command::new(bin_path());
@@ -228,7 +221,7 @@ impl Fixture {
     /// A primary checkout (`mkfixture`) with one linked worktree at
     /// `.claude/worktrees/<branch>`, the layout `implement-dispatch` builds.
     /// Returns both paths canonicalized, the spelling a `WorkerRecord`
-    /// stores (#1040).
+    /// stores.
     pub fn repo_with_workspace(&self, name: &str, branch: &str) -> (String, String) {
         let primary = self.mkfixture(name, "main");
         let wt = primary.join(".claude/worktrees").join(branch);
@@ -285,7 +278,6 @@ impl LiveProc {
     pub fn pid(&self) -> i32 {
         self.0.id() as i32
     }
-    /// Its own `/proc/<pid>/stat` starttime.
     pub fn proc_start(&self) -> String {
         lane::proc_info::read_stat(self.pid()).unwrap().start
     }

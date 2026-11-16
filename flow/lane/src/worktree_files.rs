@@ -21,23 +21,21 @@ pub struct WorktreeFiles {
     /// and the modified, untracked and ignored files of a nested worktree,
     /// prefixed by its path.
     pub ignored: Vec<String>,
-    /// Ignored entries `is_cache` accepts.
     pub caches: Vec<String>,
     /// Ignored directory paths, without the trailing slash, holding no file
     /// anywhere beneath them: the removal takes them and nothing is lost, so
-    /// they are not work (#946).
+    /// they are not work.
     pub empty_dirs: Vec<String>,
-    /// Ignored entries the repo's own AGENTS.md declares discardable (#1326),
+    /// Ignored entries the repo's own AGENTS.md declares discardable,
     /// listed apart from `caches` so the output says who approved the loss.
     pub declared: Vec<String>,
     /// Registered linked worktrees nested anywhere beneath this one, outer
     /// before inner. `git worktree remove --force` on the parent deletes their
     /// files and leaves each registered, so they are removed first, inner
-    /// first (#1326). Their own uncommitted work is in `ignored`, prefixed.
+    /// first. Their own uncommitted work is in `ignored`, prefixed.
     pub nested: Vec<NestedWorktree>,
 }
 
-/// A linked worktree found inside another worktree's files.
 pub struct NestedWorktree {
     pub path: String,
     /// The git directory of the repo it is registered with, which may not be
@@ -49,11 +47,11 @@ pub struct NestedWorktree {
 }
 
 /// One `!!` or `??` porcelain entry, decoded once at the boundary in
-/// `WorktreeFiles::read` (#949): the path git means, with the trailing `/`
-/// git appends to a directory taken off and recorded as `is_dir`. Nothing
+/// `WorktreeFiles::read`: the path git means, with the trailing `/` git
+/// appends to a directory taken off and recorded as `is_dir`. Nothing
 /// downstream re-derives either from the shape of a string — a quoted
 /// directory ends in `"` on the wire, so a slash test on the raw text
-/// misread it as a file (#946).
+/// misread it as a file.
 struct IgnoredEntry {
     path: String,
     is_dir: bool,
@@ -75,12 +73,11 @@ impl IgnoredEntry {
     }
 }
 
-/// How many names a message lists before "and <n> more".
 pub const NAMES_SHOWN: usize = 5;
 
 /// The ignored directory names a removal may discard unasked. Deny by
-/// default (#801): an unknown ignored name is kept, because a wrongly kept
-/// cache costs a --discard and a wrongly discarded note cannot be undone.
+/// default: an unknown ignored name is kept, because a wrongly kept cache
+/// costs a --discard and a wrongly discarded note cannot be undone.
 pub const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".hypothesis", ".pants.d"];
 
 /// An ignored entry in worktree `wt` is a cache when its own name is in
@@ -102,14 +99,14 @@ fn is_cache(wt: &str, entry: &IgnoredEntry) -> bool {
 /// path in `"` and C-escapes the inside, so a quoted directory entry ends
 /// with `"` rather than `/` and reads as a plain file to anything matching on
 /// the slash. Left encoded, an ignored `café/` holding hundreds of files was
-/// never walked and still refused as "1 ignored file(s)" — both of the bugs
-/// #946 fixes, surviving for every name git quotes. Decode once here, at the
+/// never walked and still refused as "1 ignored file(s)" — both failures
+/// persisting for every name git quotes. Decode once here, at the
 /// boundary, so `is_cache`, the walk and every printed name see the path git
 /// means rather than its transport encoding. Bytes that are not UTF-8 decode
 /// lossily: the replacement character names no file on disk, so the walk
 /// cannot open it and the entry stays `ignored` — fail closed, the same
-/// answer #801 wants for any directory we cannot read. A string git did not
-/// quote is returned untouched.
+/// answer deny-by-default wants for any directory we cannot read. A string
+/// git did not quote is returned untouched.
 fn unquote(entry: &str) -> String {
     let Some(inner) = entry.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
         return entry.to_string();
@@ -140,7 +137,6 @@ fn unquote(entry: &str) -> String {
                 }
                 out.push(v as u8);
             }
-            // An escaped quote or backslash, and anything else: the byte.
             Some(c) => out.push(c),
             // A trailing backslash is malformed; keep it rather than guess.
             None => out.push(b'\\'),
@@ -154,7 +150,7 @@ fn ignores_all(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join(".gitignore")).is_ok_and(|s| s.lines().any(|l| l.trim() == "*"))
 }
 
-/// The names the repo declares discardable (#1326): the backtick spans on the
+/// The names the repo declares discardable: the backtick spans on the
 /// `**Discardable**:` line of `primary`'s AGENTS.md, a trailing `/`
 /// dropped. One path component each, with at most a leading or trailing `*`;
 /// `.git`, `.scratch` and a bare `*` are never honoured, since a declaration
@@ -259,15 +255,15 @@ impl WorktreeFiles {
     /// the repo's AGENTS.md list), a nested worktree, work or empty. A directory entry
     /// stands for whatever is inside it:
     /// `--ignored=matching` collapses it to one line whether it holds nothing
-    /// or hundreds of files, and counting entries was wrong both ways (#946)
-    /// — an empty directory forced a needless `--discard`, and a full one
+    /// or hundreds of files, and counting entries was wrong both ways —
+    /// an empty directory forced a needless `--discard`, and a full one
     /// reported "1 file(s) would be lost" against hundreds, so `--discard`
     /// was approved against a count that understated the loss. Classify by
     /// contents, not by the entry: zero files is `empty` and not work; one or
     /// more land in `ignored` under their real names, so the refusal states
     /// the true count and the true loss. A non-directory entry, and a
     /// directory the walk cannot read, stay `ignored` as themselves — an
-    /// unreadable directory fails closed (#801), never read as "nothing in
+    /// unreadable directory fails closed, never read as "nothing in
     /// there".
     fn file_ignored(&mut self, wt: &str, declared_names: &[String], entry: IgnoredEntry) {
         if is_cache(wt, &entry) {
@@ -358,10 +354,10 @@ impl WorktreeFiles {
         )
     }
 
-    /// The standing fix for a regenerable ignored name that stopped the run
-    /// (#1545): declare it on the repo's `**Discardable**:` line. Empty when
-    /// nothing ignored sits outside `.scratch/`, which is evidence and is
-    /// never offered for declaring.
+    /// The standing fix for a regenerable ignored name that stopped the run:
+    /// declare it on the repo's `**Discardable**:` line. Empty when nothing
+    /// ignored sits outside `.scratch/`, which is evidence and is never
+    /// offered for declaring.
     pub fn declare_hint(&self) -> &'static str {
         if self.ignored.iter().any(|n| n.split('/').next() != Some(".scratch")) {
             "; if it is regenerable, a `**Discardable**:` line in the repo's AGENTS.md naming it stops this for good"
@@ -373,8 +369,8 @@ impl WorktreeFiles {
     /// "1 modified, 2 untracked file(s) would be lost: f, a, b" — the kinds
     /// that are present, then their first names. Ignored names are never
     /// capped, and lead the list: `--discard` destroys them unseen, so none
-    /// may fall into `first_names`' "and N more" (#838, and the six-or-more
-    /// case Codex caught on PR #847). Modified and untracked are capped.
+    /// may fall into `first_names`' "and N more" (including the six-or-more
+    /// case). Modified and untracked are capped.
     pub fn dirty_text(&self) -> String {
         let kinds: Vec<String> = [("modified", &self.modified), ("untracked", &self.untracked), ("ignored", &self.ignored)]
             .iter()
@@ -439,7 +435,7 @@ pub fn collapse_nested_worktrees(wt: &str, names: &[String]) -> Vec<String> {
 
 /// A kind of file a removal would lose, as the refusal and the dry run's
 /// blocker lines name it. An enum, not a string, so a new call site cannot
-/// misspell `Ignored` into the capped branch (#838).
+/// misspell `Ignored` into the capped branch.
 #[derive(Clone, Copy)]
 pub enum DirtyKind {
     Modified,
@@ -459,7 +455,7 @@ impl DirtyKind {
     }
 
     /// Whether `names_shown` may cut this kind's names to "and N more".
-    /// Ignored names never are: `--discard` destroys them unseen (#838). No
+    /// Ignored names never are: `--discard` destroys them unseen. No
     /// wildcard arm, so a new kind must answer this before it compiles.
     fn capped(self) -> bool {
         match self {

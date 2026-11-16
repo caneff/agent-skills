@@ -160,6 +160,13 @@ page from the submit fixture by the differences below. Rerun
   2026-11-13 Hot Property edit was of a live page and worked by hand, so it
   does not refuse.
 
+**Revision comment (#1890, read live on 000W1E, 2026-11-15).** The edit form's fields, in order, are `name`,
+`htmlcode`, `codedescr`, `htmlcode_en`, `codedescr_en`, `code`, `dif`, `freetags`, the `label_<n>` boxes, a
+`comment` textarea ("Revision comment:") and the `einstellen` submit. Changing an **active** puzzle with
+`comment` empty saves nothing: LMD answers on the edit page with "Please provide a comment that helps puzzle
+solvers understand the change you made." The textarea itself is not `required`, so only LMD's answer shows it.
+An inactive puzzle's edit saved with no comment (000W1E, 2026-11-14).
+
 ### Labels (`label_<n>`)
 
 1 Standard puzzle, 2 Puzzle combination, 3 Puzzle variant, 4 Variant combination,

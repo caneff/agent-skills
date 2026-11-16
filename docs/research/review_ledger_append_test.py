@@ -1,4 +1,4 @@
-"""Tests for `review_ledger.py append` (#1268). Every test runs the command line on
+"""Tests for `review_ledger.py append`. Every test runs the command line on
 the fixture trees `review_ledger_support.py` builds and reads the ledger it leaves;
 HOME is a temp dir, so no default path reaches the real ~/.cache or ~/.claude."""
 import fcntl
@@ -74,7 +74,7 @@ class TestAppendRow:
         assert len(got) == 4  # standards, over-engineering, spec, correctness
         for row_id, row in got.items():
             assert row["origin"] == "append"
-            # `sidecar_sha256` is the one field only `append` writes (#1555).
+            # `sidecar_sha256` is the one field only `append` writes.
             assert row.get("sidecar_sha256"), row_id
             assert {**{k: v for k, v in row.items() if k != "sidecar_sha256"},
                     "origin": "harvest"} == want[row_id], row_id
@@ -105,7 +105,7 @@ class TestAppendRow:
         assert sorted(ap.rows()) == sorted(ap.harvested())
 
     def test_a_harvest_after_the_sidecars_are_pruned_keeps_the_rows_and_adds_no_second_cost(self, ap):
-        # #1304: the prune takes ticket 400's sidecars; its transcripts outlive them.
+        # The prune takes ticket 400's sidecars; its transcripts outlive them.
         ap.ok(400, "spec")
         appended = ap.rows()
         ap.harvest()
@@ -151,7 +151,7 @@ class TestAppendRow:
         assert ap.rows()["skills/405/spec/1/findings-spec-405"]["cost"] == appended["cost"]
 
     def test_a_harvest_adds_a_retry_transcript_written_after_the_append(self, ap):
-        # codex-second-1 (#1406): the append counted one run; a retry of the same review lands later.
+        # The append counted one run; a retry of the same review lands later.
         ap.ok(400, "spec")
         transcript(ap.tr, wt(SKILLS_PROJ, 400), "spec2", "Spec review #400 retry", "Repo: x",
                    [("2026-09-20T12:00:00.000Z", "m1", usage(1000, 0, 0, 0))], session="s2")
@@ -363,7 +363,7 @@ class TestAppendRow:
 
 
 class TestAppendUnknownCost:
-    """#1374: a review axis whose cost cannot be attributed is recorded with the cost unknown."""
+    """A review axis whose cost cannot be attributed is recorded with the cost unknown."""
 
     def cost(self, ap, ticket, rtype="standards"):
         ap.ok(ticket, rtype)

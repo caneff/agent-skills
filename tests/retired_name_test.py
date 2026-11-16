@@ -1,4 +1,4 @@
-"""No tracked file says the retired skill's name (spec #1634, Testing Decisions).
+"""No tracked file says the retired skill's name.
 
 # all.sh: repo-wide (scans every tracked file)
 

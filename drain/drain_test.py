@@ -1,13 +1,14 @@
-"""Tests for `drain` (#1403, #1415). Seam: the command line, `drain.py [--once]
-[--max n] [--bundle-max k] [--anchor n] [--repo path]`, run as a subprocess
-against a real git repo with a bare origin, a fake `gh` (a JSON state file), a
-stub `claude` that answers the bundle chooser, a stub `implement-dispatch` that
-claims the bundle and builds as the worker would (commit, push, PR), a stub
-`herdr` that reports the worker's status, and a stub `merge-cleanup`. Each case
-is a queue in, labels / merges / summary out. `HOME` and the global git config
-are the test's own, so no case reads the real ones. A last group tests the wait
-on a worker in-process, since a three-hour clock has no command-line witness,
-and one `excerpt` case, since the fake `gh` cannot offer a natively unblocked empty ticket.
+"""Tests for `drain`. Seam: the command line, `drain.py [--once] [--max n]
+[--bundle-max k] [--anchor n] [--repo path]`, run as a subprocess against a real
+git repo with a bare origin, a fake `gh` (a JSON state file), a stub `claude`
+that answers the bundle chooser, a stub `implement-dispatch` that claims the
+bundle and builds as the worker would (commit, push, PR), a stub `herdr` that
+reports the worker's status, and a stub `merge-cleanup`. Each case is a queue
+in, labels / merges / summary out. `HOME` and the global git config are the
+test's own, so no case reads the real ones. A last group tests the wait on a
+worker in-process, since a three-hour clock has no command-line witness, and one
+`excerpt` case, since the fake `gh` cannot offer a natively unblocked empty
+ticket.
 """
 import json
 import os
@@ -412,9 +413,10 @@ class Sandbox:
         return [b for i, b in self.state()["comments"] if i == str(n) and "could not land" in b]
 
     def spec_state(self, slices=(2, 3), extra=None):
-        """A spec parent in the `spec` bucket is a bundle in its own right (#1477): drain starts
-        it with `implement-dispatch --spec` and merges the integration PR its run reports. The
-        stub dispatch claims `SPEC_SLICES` as the spec run would and its PR closes them with the spec."""
+        """A spec parent in the `spec` bucket is a bundle in its own right:
+        drain starts it with `implement-dispatch --spec` and merges the
+        integration PR its run reports. The stub dispatch claims `SPEC_SLICES`
+        as the spec run would and its PR closes them with the spec."""
         self.write_state({1: SPEC, **{n: {"parent": 1} for n in slices}, **(extra or {})})
 
 
@@ -1079,9 +1081,6 @@ def test_refuses_a_repo_the_user_does_not_own(sb):
     assert "someone-else" in r.stderr
 
 
-# --- #1597: each merge runs the per-change command; no full run, --anchor ---
-
-
 def test_each_merge_runs_the_per_change_command_and_no_run_follows_the_last_bundle(sb):
     sb.write_state({1: {}, 2: {}})
     sb.set_seam('echo run >> "$SEAM_LOG"')
@@ -1222,8 +1221,8 @@ def test_anchor_that_is_not_ready_or_is_blocked_is_refused_before_any_work(sb):
 
 
 def test_a_ready_slice_is_never_the_anchor_and_never_joins_a_bundle(sb):
-    # Ruling 7 of #1457: a slice is built inside its spec run only, even
-    # one older than every lone ticket and one the chooser asks for.
+    # A slice is built inside its spec run only, even one older than every
+    # lone ticket and one the chooser asks for.
     spec = {"labels": ["spec"], "body": "the spec"}
     sb.write_state({1: {"parent": 9}, 2: {}, 3: {"parent": 9}, 4: {}, 9: spec})
     r = sb.drain("--once", env={"TAKE": "3"})
@@ -1239,8 +1238,6 @@ def test_a_ready_slice_is_never_the_anchor_and_never_joins_a_bundle(sb):
     r = sb.drain("--anchor", "3")
     assert r.returncode == 1
     assert "--anchor #3 is not an open, ready, unblocked ticket" in r.stdout
-
-# --- review fixes (#1415) --------------------------------------------------
 
 
 def test_a_failed_check_prompts_the_worker_with_the_reason_and_waits_for_it_to_start_working(sb):
@@ -1537,7 +1534,7 @@ def test_a_spec_without_the_ready_label_is_not_dispatched(sb):
 
 
 def test_a_slice_of_a_closed_spec_is_named_not_left_behind(sb):
-    # #1485: the slice reads `stranded`, and drain says so beside `waiting:`.
+    # The slice reads `stranded`, and drain says so beside `waiting:`.
     sb.write_state({1: {**SPEC, "state": "closed"}, 2: {"parent": 1}})
     r = sb.drain()
     assert "nothing to drain" in r.stdout
@@ -1744,9 +1741,6 @@ def test_run_group_kills_what_a_command_started(d, tmp_path):
             return
         time.sleep(0.1)
     pytest.fail("the command's grandchild survived the wall clock")
-
-
-# --- #1537: selector evidence on every merge of a repo that declares a narrowed command ---
 
 
 LISTED = "selector: listed 1 suite from `bash tests/all.sh --changed origin/main --list`\n\n```\nalpha/a.test.sh\n```"

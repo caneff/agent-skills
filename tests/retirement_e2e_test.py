@@ -1,4 +1,4 @@
-"""End-to-end test for spec #1634: `implement-spec` owns the dispatch loop.
+"""End-to-end test: `implement-spec` owns the dispatch loop.
 
 The moved tools driven through their own command lines, under a temp HOME and
 in a throwaway repo, as a spec run's controller reaches them:

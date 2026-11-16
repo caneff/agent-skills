@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test for #1415: `tests/all.sh --changed <base>` keeps the suites under the
+# Test for `tests/all.sh --changed <base>`: it keeps the suites under the
 # directories the diff touches plus `tests/`, widens to everything for a diff it
 # cannot pin to a directory with suites, and the runner runs suites
 # concurrently, reports them in order, marks `all.sh: serial` suites to run
@@ -34,7 +34,7 @@ fresh() {
   git -C "$shadow/repo" commit -qm base
   base=$(git -C "$shadow/repo" rev-parse HEAD)
 }
-change() { # <path>: commit a change to <path>
+change() {
   mkdir -p "$(dirname "$shadow/repo/$1")"; echo "$RANDOM" >>"$shadow/repo/$1"
   git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm change
 }
@@ -71,7 +71,7 @@ out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1); rc=$?
 check "a --changed run passes and runs the narrowed set" "$([ "$rc" = 0 ] && has_pass a/a.test.sh && has_pass tests/t.test.sh && ! has_pass b/b.test.sh; echo $?)"
 check "...and says which scope it chose" "$(has 'changed suites: a + tests'; echo $?)"
 
-# A narrowed green says it was narrowed (#1495, defect class 1): the final line
+# A narrowed green says it was narrowed (defect class 1): the final line
 # carries both counts and the scope, where a full green keeps its plain line.
 check "a narrowed run's last line says N of M and what it narrowed to" "$(grep -qxF '2 of 3 suites passed (narrowed: a + tests)' <<<"$out"; echo $?)"
 fresh
@@ -81,8 +81,8 @@ fresh; echo "# touched" >>"$shadow/repo/tests/all.sh"; git -C "$shadow/repo" com
 out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1); rc=$?
 check "a --changed run that widened to the full suite prints the plain line" "$([ "$rc" = 0 ] && grep -qxF '3 suites passed' <<<"$out"; echo $?)"
 
-# Cross-directory edges (#1495): a change to the directory a suite loads from
-# keeps that suite's directory.
+# Cross-directory edges: a change to the directory a suite loads from keeps
+# that suite's directory.
 edge() { # <file> <line>: commit a tracked file whose line reaches another directory
   mkdir -p "$(dirname "$shadow/repo/$1")"; printf '%s\n' "$2" >"$shadow/repo/$1"
   git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm "edge $1"; base=$(git -C "$shadow/repo" rev-parse HEAD)
@@ -107,7 +107,7 @@ check "a sys.path call split over two lines (os.pardir) is still an edge" "$(has
 fresh; edge b/lib.py 'LABEL = "a"  # a word that names a directory, not a path to it'; change a/x.txt; list
 check "a bare quoted word naming a directory is not an edge" "$(has b/b.test.sh; echo $((1 - $?)))"
 
-# A suite that reads the whole tree says so and is always kept (#1495, C2).
+# A suite that reads the whole tree says so and is always kept.
 fresh; printf '#!/usr/bin/env bash\n# all.sh: repo-wide (scans every tracked file)\nexit 0\n' >"$shadow/repo/b/b.test.sh"
 git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm wide; base=$(git -C "$shadow/repo" rev-parse HEAD); change a/x.txt; list
 check "a '# all.sh: repo-wide' suite is kept whatever directory changed" "$(has b/b.test.sh; echo $?)"
@@ -115,7 +115,6 @@ fresh; printf '#!/usr/bin/env bash\n# a mid-file mention of all.sh: repo-wide do
 git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm notwide; base=$(git -C "$shadow/repo" rev-parse HEAD); change a/x.txt; list
 check "...and an unmarked suite is not" "$(has b/b.test.sh; echo $((1 - $?)))"
 
-# A scan that fails runs the full suite, never the narrowed one.
 fresh; printf '#!/usr/bin/env python3\nimport sys\nsys.exit(3)\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
 check "a failing edge scan lists everything" "$([ "$rc" = 0 ] && has a/a.test.sh && has b/b.test.sh; echo $?)"
 out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1)
@@ -196,7 +195,6 @@ out=$(cd "$shadow/repo" && PATH="$shadow/bin:$PATH" bash tests/all.sh 2>&1); rc=
 check "the primary checkout keeps the nproc default" "$([ "$rc" = 0 ]; echo $?)"
 git -C "$shadow/repo" worktree remove --force "$shadow/linked"
 
-# A failing suite stops new suites from starting.
 fresh
 printf '#!/usr/bin/env bash\nexit 1\n' >"$shadow/repo/a/a.test.sh"
 printf '#!/usr/bin/env bash\ntouch "%s/later-ran"\n' "$shadow" >"$shadow/repo/b/b.test.sh"
@@ -204,7 +202,6 @@ rm -f "$shadow/later-ran"
 out=$(cd "$shadow/repo" && TESTS_JOBS=1 bash tests/all.sh 2>&1); rc=$?
 check "a failing suite stops the suites after it from starting" "$([ "$rc" = 1 ] && [ ! -e "$shadow/later-ran" ]; echo $?)"
 
-# A failure prints that suite's output in full, in discovery order.
 fresh
 printf '#!/usr/bin/env bash\necho line-one; echo line-two; exit 1\n' >"$shadow/repo/a/a.test.sh"
 out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?

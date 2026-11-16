@@ -1,4 +1,4 @@
-"""Tests for the run file (#892). Two seams: the read/write contract,
+"""Tests for the run file. Two seams: the read/write contract,
 round-tripped through a re-read that stands in for a restart, and the resume
 path's re-announce step against a stub agent list.
 
@@ -168,7 +168,7 @@ def test_checkout_top_ignores_git_environment_that_repoints_git(git_checkout, mo
 @pytest.mark.parametrize("blank", ["", "  "])
 def test_start_refuses_a_blank_repo_instead_of_recording_the_cwds_repo(cache, blank):
     # `git -C ""` stays in the cwd: an unset `--repo "$TARGET"` would record
-    # the controller's own checkout, the #1093 hazard this field closes.
+    # the controller's own checkout, the hazard this field closes.
     with pytest.raises(runfile.RunFileError) as exc:
         runfile.start("run-1", slots=1, root=cache, repo=blank)
     assert "blank" in str(exc.value), exc.value
@@ -239,8 +239,6 @@ def test_loading_a_run_that_was_never_started_names_the_path(cache):
     assert "run-nope.json" in str(exc.value), exc.value
 
 
-# --- Clumps: the ticket list, the workspace, the herdr agent name ----------
-
 def test_a_clump_records_its_tickets_workspace_and_herdr_agent_name(cache):
     runfile.start("run-1", slots=2, root=cache, repo=REPO)
     runfile.clump("run-1", [902, 901], "/w/implement-901", "implement-901-42",
@@ -280,8 +278,6 @@ def test_a_clump_needs_at_least_one_ticket_number(cache, bad):
         runfile.clump("run-1", bad, "/w/a", "agent-a", root=cache)
     assert runfile.load("run-1", root=cache)["clumps"] == [], "a refusal wrote"
 
-
-# --- Landings -------------------------------------------------------------
 
 def test_a_landing_records_the_clumps_squash_sha(cache):
     runfile.start("run-1", slots=2, root=cache, repo=REPO)
@@ -329,8 +325,6 @@ def test_re_registering_a_landed_clump_keeps_its_sha(cache):
     assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] == "abc1234"
 
 
-# --- Resume: reconcile against the live agents, re-announce the controller -
-
 def test_resume_splits_live_from_vanished_workers_and_from_landings(three_clumps):
     root = three_clumps
     got = runfile.resume("run-1", ["agent-a", "someone-elses-agent"],
@@ -368,8 +362,8 @@ def test_a_landing_frees_the_slot_a_vanished_clump_was_holding(three_clumps):
 
 
 def test_a_closed_clump_is_reported_closed_and_frees_its_slot(three_clumps):
-    # #1236 was found already fixed on main and #1262 was a nested spec run:
-    # neither landed a PR here, and neither has a worker to re-announce to.
+    # A closed clump (found already fixed on main, or a nested spec run)
+    # landed no PR here and has no worker to re-announce to.
     root = three_clumps
     runfile.close("run-1", 903, "duplicate of #1202, already fixed on main",
                   root=root)
@@ -507,8 +501,6 @@ def test_resume_without_a_new_name_leaves_the_recorded_controller_alone(three_cl
     assert runfile.load("run-1", root=root)["controller"] == "run-ctl-1a"
 
 
-# --- Durability: the write the restart interrupts --------------------------
-
 def test_a_write_that_dies_before_it_finishes_leaves_the_old_run_intact(cache, monkeypatch):
     # The premise of the whole file: the machine can go down mid-run. A
     # half-written run file is worse than a stale one — it reads as a run
@@ -531,11 +523,9 @@ def test_a_write_that_dies_before_it_finishes_leaves_the_old_run_intact(cache, m
     assert not [n for n in os.listdir(root) if n.endswith(".tmp")], os.listdir(root)
 
 
-# --- The CLI: what a controller actually runs ------------------------------
-
 def test_a_run_killed_mid_flight_is_recovered_by_a_second_process(cli):
-    # The round trip the ticket asks for, across process boundaries: nothing
-    # of the run survives in memory, only the file.
+    # The round trip across process boundaries: nothing of the run survives
+    # in memory, only the file.
     assert cli("start", "--repo", REPO, "run-1", "--slots", "3",
                "--controller", "run-ctl-1a").returncode == 0
     assert cli("clump", "run-1", "--tickets", "901,902",
@@ -745,8 +735,6 @@ def test_the_cli_expands_a_tilde_in_the_cache_dir_override(tmp_path):
     assert "~" not in os.listdir(root), os.listdir(root)
 
 
-# --- F4: the shape check reaches every field --------------------------------
-
 def test_a_run_file_that_resume_cannot_arithmetic_on_never_reaches_resume(cache):
     write_run(cache, "run-1", {"run_id": "run-1", "slots": "2",
                                 "controller": None, "clumps": []})
@@ -754,8 +742,6 @@ def test_a_run_file_that_resume_cannot_arithmetic_on_never_reaches_resume(cache)
         runfile.resume("run-1", [], root=cache)
     assert "slot budget" in str(exc.value), exc.value
 
-
-# --- F3: one writer at a time, enforced ------------------------------------
 
 def test_two_concurrent_writers_do_not_lose_an_update(cache, cli):
     # Each process holds its critical section open past the other's read, so
@@ -804,8 +790,6 @@ def test_a_lock_someone_else_holds_times_out_as_a_refusal(cache, cli):
     assert runfile.load("run-1", root=cache)["clumps"] == []
 
 
-# --- The environment reads: the same clean-refusal boundary -----------------
-
 @pytest.mark.parametrize("name, value", [
     ("SPEC_RUN_RUNFILE_LOCK_TIMEOUT", "30s"),
     ("SPEC_RUN_RUNFILE_LOCK_TIMEOUT", "inf"),
@@ -815,10 +799,10 @@ def test_a_lock_someone_else_holds_times_out_as_a_refusal(cache, cli):
     ("SPEC_RUN_RUNFILE_DELAY_MS", "-1"),
     ("SPEC_RUN_RUNFILE_DELAY_MS", "nan")])
 def test_a_malformed_environment_value_is_a_refusal_not_a_traceback(cache, cli, name, value):
-    # Round 1's F4 was malformed persisted state escaping the clean-refusal
-    # path; an unguarded `float()` on an inherited env value is the same
-    # contract with a new surface. A bad value inherited from a parent shell
-    # must not turn a restart recovery into a stack trace.
+    # Malformed persisted state must not escape the clean-refusal path; an
+    # unguarded `float()` on an inherited env value is the same contract with
+    # a new surface. A bad value inherited from a parent shell must not turn
+    # a restart recovery into a stack trace.
     cli("start", "--repo", REPO, "run-1", "--slots", "2")
     got = subprocess.run(
         [sys.executable, RUNFILE, "clump", "run-1", "--tickets", "901",
@@ -865,7 +849,7 @@ def test_re_registering_a_clump_keeps_its_declared_job_1311(cache):
 def test_a_declared_job_survives_a_restart(cache):
     """The whole point: a controller that restarts mid-run recovers the hold.
     The declaration lived in one argv before, so a resume dispatched into the
-    contention #351 produced."""
+    resource contention the job had caused."""
     runfile.start("r-job2", 3, "dc", cache, repo=REPO)
     runfile.clump("r-job2", [351], "/w/351", "sm-351", cache)
     runfile.job("r-job2", 351, "running", 8, cache)
@@ -904,8 +888,9 @@ def test_a_job_must_name_a_clump_of_this_run(cache):
 
 
 def test_a_run_file_written_before_jobs_existed_still_reads(cache):
-    """#892's files have no `job` key. A controller resuming one of those
-    must get its run back, not a refusal about a field that did not exist."""
+    """The first run files have no `job` key. A controller resuming one of
+    those must get its run back, not a refusal about a field that did not
+    exist."""
     runfile.start("r-old", 2, "dc", cache, repo=REPO)
     runfile.clump("r-old", [401], "/w/401", "sm-401", cache)
     drop_job("r-old", cache, 401)
@@ -926,8 +911,6 @@ def test_the_cli_records_a_job_and_shows_it(cli):
     assert none.returncode == 0, none
     assert "no parallel job" in cli("show", "r-job5").stdout
 
-
-# --- "PR up" is on record, so the sweep can tell stalled from waiting (#1148)
 
 def test_a_clump_starts_with_no_pr_up_on_record(cache):
     runfile.start("r-pr", 3, "dc", cache, repo=REPO)
@@ -1014,7 +997,7 @@ def test_the_cli_records_pr_up_and_shows_it(cli):
 def test_a_cleared_pr_up_makes_a_done_pane_stalled_again(cache, cli):
     """The controller clears the record when it hands findings back, since
     the PR stays open through a fix round: a worker that then stops mid-fix
-    must read `stalled`, not `done` (Codex gate on PR #1166)."""
+    must read `stalled`, not `done`."""
     import loop
     assert cli("start", "--repo", REPO, "r-pr7", "--slots", "2").returncode == 0
     assert cli("clump", "r-pr7", "--tickets", "1095", "--workspace",
@@ -1044,7 +1027,7 @@ def test_pr_up_takes_a_pr_or_clear_but_not_both_and_not_neither(cache, cli):
 
 
 def test_run_file_md_usage_block_mirrors_the_runfile_docstring():
-    """run-file.md's usage block is runfile.py's docstring usage (#1258): a
+    """run-file.md's usage block is runfile.py's docstring usage: a
     subcommand in one and not the other is drift. Both must also list every
     subcommand the parser defines."""
     def usage(text):
@@ -1061,8 +1044,6 @@ def test_run_file_md_usage_block_mirrors_the_runfile_docstring():
     assert listed == defined, (listed, defined)
 
 
-# --- The dispositions sidecar reader (#1401) -------------------------------
-
 def test_read_dispositions_reads_the_three_outcomes(sidecar_file):
     sidecar = sidecar_file(
         '{"id": "S1", "outcome": "fixed", "sha": "abc1234"}',
@@ -1076,8 +1057,8 @@ def test_read_dispositions_reads_the_three_outcomes(sidecar_file):
                                      "mystery", None])
 def test_read_dispositions_refuses_a_removed_or_unknown_outcome_by_file_and_line(
         sidecar_file, outcome):
-    # `leftover`, `filed` and `handed-back` are gone (#1401); a reader that
-    # skipped them would count low and exit clean.
+    # `leftover`, `filed` and `handed-back` are gone; a reader that skipped
+    # them would count low and exit clean.
     sidecar = sidecar_file('{"id": "S1", "outcome": "fixed", "sha": "a"}',
                            json.dumps({"id": "S2", "outcome": outcome}))
     with pytest.raises(runfile.RunFileError) as exc:

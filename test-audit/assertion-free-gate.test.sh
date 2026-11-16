@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The assertion-free and duplicate-name checks as this repo's own merge gate
-# (#645, #1488). Both parsers run over the whole tree in --gate mode: those two
+# The assertion-free and duplicate-name checks as this repo's own merge gate.
+# Both parsers run over the whole tree in --gate mode: those two
 # smells only, fixtures excluded, non-zero exit on any hit. Every other smell
 # stays report-only -- see SKILL.md § Gate mode for why.
 #

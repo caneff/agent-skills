@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Posts one puzzle to Logic Masters Deutschland through a Chrome it drives over CDP (#1659, #1661).
+// Posts one puzzle to Logic Masters Deutschland through a Chrome it drives over CDP.
 //
 //   node lmd_driver.mjs --endpoint http://127.0.0.1:9334 --png <board.png> --template <page.html> \
 //     --values <values.json> [--image-id <id>] [--base-url https://logic-masters.de] [--timeout-ms 30000]
@@ -25,7 +25,8 @@
 // first as a create uploads it, under values.slug, which an edit takes only with --png. Every other field, the activation
 // choice and its date fields included, goes back as the form served it; it never visits the puzzle page, so
 // it never activates. --values holds any of "title", "code", "difficulty", "labels", "freetags",
-// "codedescr_en", checked as for a create; "sudoku" is refused, as the edit form has none. It prints
+// "codedescr_en", checked as for a create, and "comment", the revision comment (a non-empty string) LMD requires
+// to change an active puzzle (#1890); "sudoku" is refused, as the edit form has none. It prints
 // {"puzzle_id", "puzzle_url", "image_id" (only with a new image), "html"}. A failure once an image was
 // uploaded or "Change" was clicked prints the {"failed", "uploaded", "image_id", "submitted"} record below.
 // The caller re-archives the puzzle afterwards (create-lmd-page/SKILL.md § Edit a live page).
@@ -56,7 +57,7 @@ const MAX_UPLOAD_BYTES = 4194304; // the upload form's MAX_FILE_SIZE
 const CODE_ALLOWED = /^[A-Za-z0-9()<>~+\-*= /\\|!#$%&]*$/;
 const GERMAN_TEXT = ["htmlcode", "codedescr"];
 const DATE_FIELDS = ["day", "month", "year", "hour", "min", "sec"];
-const EDIT_KEYS = ["title", "code", "difficulty", "labels", "freetags", "codedescr_en"];
+const EDIT_KEYS = ["title", "code", "difficulty", "labels", "freetags", "codedescr_en", "comment"];
 const VALUE_KEYS = ["slug", "title", "code", "difficulty", "sudoku", "labels", "freetags", "codedescr_en"];
 
 class DriverError extends Error {}
@@ -70,7 +71,7 @@ function readText(file, what) {
 // The checks both modes share on one values key, each refusing what LMD would silently alter or reject.
 function checkValue(v, k) {
   switch (k) {
-    case "slug": case "title": case "code":
+    case "slug": case "title": case "code": case "comment":
       if (typeof v[k] !== "string" || !v[k].trim()) fail(`values.${k} must be a non-empty string`);
       if (k === "code" && !CODE_ALLOWED.test(v.code)) {
         const bad = [...new Set([...v.code].filter((c) => !CODE_ALLOWED.test(c)))].join("");
@@ -300,7 +301,7 @@ async function uploadImage(tab, base, png, name) {
   })()`, "the image upload");
   // The id is read from a fresh copy of the list; the POST's answer is kept for the error report, as it
   // carries LMD's reason for a refused upload. Right after an upload LMD serves /Dateien/ with the file list
-  // and no upload form (#1659's closing check), so the reload needs the list, not the form.
+  // and no upload form, so the reload needs the list, not the form.
   const answer = await pageReport(tab);
   await tab.navigate(page);
   await requirePage(tab, "table.upload_list_gross", "upload list");
@@ -340,9 +341,9 @@ async function submitPuzzle(tab, base, form, html) {
   posted.submitted = true;
   await tab.submit("document.querySelector('input[name=einstellen]').click()", "the puzzle submit");
   // Live LMD answers "Create" on einstellen.php itself: "The puzzle has been saved. Edit Puzzle <id> To the
-  // puzzle page", with the form shown again, emptied (#1659's closing check). The id is read from the
-  // "To the puzzle page" link (the site menu's own zeigen.php link has no id); a page without the notice, or
-  // without exactly one such id, is a refusal.
+  // puzzle page", with the form shown again, emptied. The id is read from the "To the puzzle page" link (the
+  // site menu's own zeigen.php link has no id); a page without the notice, or without exactly one such id,
+  // is a refusal.
   const { saved, ids } = await tab.evaluate(`({
     saved: (document.body?.innerText ?? '').includes(${JSON.stringify(SAVED_NOTICE)}),
     ids: [...new Set([...document.querySelectorAll('a[href]')].map((a) => new URL(a.href))
@@ -368,6 +369,7 @@ async function editPuzzle(tab, base, id, form, html) {
     if ('code' in v.form) el('code').value = v.form.code;
     if ('codedescr_en' in v.form) el('codedescr_en').value = v.form.codedescr_en;
     if ('freetags' in v.form) el('freetags').value = v.form.freetags;
+    if ('comment' in v.form) el('comment').value = v.form.comment;
     if ('difficulty' in v.form) {
       if (![...el('dif').options].some((o) => o.value === String(v.form.difficulty))) return 'the edit form has no difficulty ' + v.form.difficulty;
       el('dif').value = String(v.form.difficulty);

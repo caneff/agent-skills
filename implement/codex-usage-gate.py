@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codex usage preflight (#1204): may a Codex run start?
+"""Codex usage preflight: may a Codex run start?
 
 Run before every Codex launch — the review wave's adversarial pass
 (`SKILL.md` § The Codex pass) and the Codex lane (`codex-lane.md`). Reads
@@ -11,12 +11,12 @@ One line on stdout, and an exit status the caller branches on:
 
   0   proceed — usage is under RESERVE_PERCENT (under 100% with `--audit`); a PR's
       line ends with why: `churn <n> >= <threshold>` or `needs-codex label forced
-      it, churn <n> < <threshold>` (#1405)
-  20  capped — usage is at or above RESERVE_PERCENT (#1359; 100% included, so
-      the weekly audit reads the skip), at 100% under `--audit`, or the
-      kill-switch file is present (#1354); launch nothing, write no duration row
+      it, churn <n> < <threshold>`
+  20  capped — usage is at or above RESERVE_PERCENT (100% included, so the
+      weekly audit reads the skip), at 100% under `--audit`, or the
+      kill-switch file is present; launch nothing, write no duration row
   30  unknown — no fresh, well-formed reading; launch nothing
-  40  under the size threshold (#1358) — a PR pass only; launch nothing
+  40  under the size threshold — a PR pass only; launch nothing
 
 `--base <ref> --tickets <n>...` marks the launch as a PR's gate pass: from the
 PR's workspace, the gate sums the added plus deleted lines of `<ref>...HEAD`
@@ -69,10 +69,10 @@ from pathlib import Path
 REFRESH_TIMEOUT = 5.0
 HELPER = Path(__file__).resolve().parent.parent / "flow/ccstatusline-table/helpers/codex-usage.py"
 
-# A PR pass runs only on this much churn (#1358, basis
+# A PR pass runs only on this much churn (basis
 # docs/research/2026-10-03-codex-yield-by-pr-size.md), unless FORCE_LABEL forces it.
 SIZE_THRESHOLD = 300
-# Launches stop here so the weekly audit keeps the rest of the window (#1359);
+# Launches stop here so the weekly audit keeps the rest of the window;
 # `--audit` lifts it.
 RESERVE_PERCENT = 70
 FORCE_LABEL = "needs-codex"

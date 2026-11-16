@@ -9,17 +9,17 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 link_refused=""
 
-link() { # link <repo-relative-src> <live-dest>
+link() {
   local src="$here/$1" dest="$2"
   [ -e "$src" ] || { echo "missing in repo: $1" >&2; return 1; }
   mkdir -p "$(dirname "$dest")"
   if [ -L "$dest" ]; then
     rm "$dest"
   elif [ -e "$dest" ]; then
-    # A second real file must not overwrite the first backup (#1209).
+    # A second real file must not overwrite the first backup.
     if [ -e "$dest.pre-flow" ] || [ -L "$dest.pre-flow" ]; then
       # Not fatal: under `set -e` a return 1 would end the install here, and
-      # everything after this file would never be linked (#1209 C1).
+      # everything after this file would never be linked.
       echo "refusing: $dest is a real file and $dest.pre-flow already exists; move one aside" >&2
       link_refused=1
       return 0
@@ -37,12 +37,12 @@ link bin/job-run                "$HOME/.local/bin/job-run"
 link bin/drain                  "$HOME/.local/bin/drain"
 link bin/backstop-nightly       "$HOME/.local/bin/backstop-nightly"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
-# Symlinked, not copy-only (#1031): a probed harness write rewrote the live
-# file through the link without breaking it (`claude plugin disable --scope
-# user`); backup-sync.sh --commit still backs it up, straight off this link.
-# That is the only write path probed (controller, 2026-09-23, commit
-# 9c2244f). A `/config` change and an "always allow" permission write are
-# unprobed: either may yet replace the link with a regular file.
+# Symlinked, not copy-only: a probed harness write rewrote the live file
+# through the link without breaking it (`claude plugin disable --scope user`);
+# backup-sync.sh --commit still backs it up, straight off this link. That is
+# the only write path probed. A `/config` change and an "always allow"
+# permission write are unprobed: either may yet replace the link with a
+# regular file.
 link claude/settings.json       "$HOME/.claude/settings.json"
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
 # shellcheck source=hooks-manifest.sh
@@ -56,8 +56,8 @@ for a in "$here/claude/agents"/*.md; do
   [ -e "$a" ] || continue
   link "claude/agents/$(basename "$a")" "$HOME/.claude/agents/$(basename "$a")"
 done
-# Path-scoped rules (#1413): a `paths:` rule in ~/.claude/rules/ fires in every
-# repo, globbed against the session's cwd, and a per-file symlink loads
+# Path-scoped rules: a `paths:` rule in ~/.claude/rules/ fires in every repo,
+# globbed against the session's cwd, and a per-file symlink loads
 # (docs/research/2026-10-04-user-path-rules-probe.md).
 for r in "$here/claude/rules"/*.md; do
   [ -e "$r" ] || continue
@@ -69,8 +69,8 @@ if [ -L "$HOME/.claude/hooks/sync-primary-main.sh" ]; then
   rm -f "$HOME/.claude/hooks/sync-primary-main.sh"
 fi
 
-# require-agent-model.sh became the agent-model mod (flow/mods/, #1368): drop
-# the stale symlink it leaves behind.
+# require-agent-model.sh became the agent-model mod (flow/mods/): drop the
+# stale symlink it leaves behind.
 if [ -L "$HOME/.claude/hooks/require-agent-model.sh" ]; then
   rm -f "$HOME/.claude/hooks/require-agent-model.sh"
 fi
@@ -92,11 +92,10 @@ if ! grep -qxF "$repoint_line" "$HOME/.bashrc" 2>/dev/null; then
   echo "added the interop repoint to $HOME/.bashrc"
 fi
 
-# The pre-push hook that ran tests/all.sh is retired (#633): a push is not the
-# gate, the merge is (its gate: the command AGENTS.md's `## End-to-end seam`
-# section names), and the hook's own GIT_DIR
-# leaked into the suite. Drop the symlink an earlier install left. Hooks are
-# shared across worktrees, so resolve the common git dir rather than ".git".
+# The pre-push hook that ran tests/all.sh is retired: a push is not the gate,
+# the merge is (its gate: the command AGENTS.md's `## End-to-end seam` section
+# names), and the hook's own GIT_DIR leaked into the suite. Drop the symlink an earlier install left. Hooks are shared
+# across worktrees, so resolve the common git dir rather than ".git".
 git_common_dir="$(git -C "$here/.." rev-parse --path-format=absolute --git-common-dir)"
 if [ -L "$git_common_dir/hooks/pre-push" ]; then
   rm -f "$git_common_dir/hooks/pre-push"
@@ -129,18 +128,17 @@ if ! toast_out=$(bash "$here/bin/herdr-toast-install" 2>&1); then
   fi
 fi
 
-# implement-dispatch (#748) and merge-cleanup (#749) are Rust binaries:
-# cargo install replaces each in place, rather than a symlink into the repo,
-# and replaces the symlink an earlier install left for either. Runs last,
-# after every symlink above is in place, so a missing cargo or a compile
-# error never leaves the rest of the install half-done — the install was
-# never gated on a toolchain before #748, and still is not. Never installs
-# the test-only fake — lane-install.sh only names implement-dispatch and
-# merge-cleanup.
+# implement-dispatch and merge-cleanup are Rust binaries: cargo install
+# replaces each in place, rather than a symlink into the repo, and replaces
+# the symlink an earlier install left for either. Runs last, after every
+# symlink above is in place, so a missing cargo or a compile error never
+# leaves the rest of the install half-done — the install is not gated on a
+# toolchain. Never installs the test-only fake — lane-install.sh only names
+# implement-dispatch and merge-cleanup.
 mkdir -p "$HOME/.local/bin"
 bash "$here/lane-install.sh"
 
-# The nightly backstop (#1595): a user service and a timer in the shape of
+# The nightly backstop: a user service and a timer in the shape of
 # second-brain-v2's digest.timer. Persistent=true runs a night the machine
 # slept through at the next boot. The repos it runs over are the one file
 # flow/backstop-repos. Unit files are written fresh each run (nothing of the
@@ -187,7 +185,6 @@ if [ -n "$link_refused" ]; then
   status=1
 fi
 
-# The check names what a link or a settings entry still lacks (#1224).
 if ! bash "$here/install-check.sh"; then
   echo "install-check.sh found problems (see above); the install ran anyway" >&2
   status=1

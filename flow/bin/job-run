@@ -67,8 +67,7 @@ WAIT_INTERVAL=3
 
 die() { echo "job-run: $*" >&2; exit 1; }
 
-# Is the run in <dir> still running? Its recorded pid, and whether that pid is
-# still there. The one place that question is asked; prune, the name-collision
+# The one place "is this run still running" is asked; prune, the name-collision
 # refusal and --status all read it here.
 alive() { # alive <run dir>
   local p; p=$(cat "$1/pid" 2>/dev/null)
@@ -166,10 +165,8 @@ if [ -n "$wait_for" ]; then
   done
 fi
 
-# --- a run ------------------------------------------------------------------
 [ -n "$name" ] || die "--name is required and is never auto-generated (a path you cannot predict is a path you lose to a context summary)"
 check_name "$name"
-# A group name is a name like any other, and for the same reason.
 [ "$group_given" = 1 ] && { [ -n "$group" ] || die "--group may not be empty"; check_name "$group" --group; }
 [ $# -gt 0 ] || die "no command: put it after --"
 

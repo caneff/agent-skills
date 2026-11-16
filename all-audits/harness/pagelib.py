@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The one owner of the audit-report page shell (#613).
+"""The one owner of the audit-report page shell.
 
 Every page the harness renders — the sweep index, the mutation sub-index, a
 setup-failure page, landed — is the same document: doctype, a head linking

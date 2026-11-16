@@ -1,4 +1,4 @@
-"""fanout-brief.py (#1550): the one source of a parallel sub-worker's brief.
+"""fanout-brief.py: the one source of a parallel sub-worker's brief.
 Seam: the CLI, with HOME pointed at a temp dir so no render writes the real
 review cache. Each case asserts the line it is about, so a render that fails
 for another reason does not pass for the one under test (`AGENTS.md` §
@@ -137,8 +137,6 @@ def test_a_malformed_assign_is_refused(wt):
 def test_a_repo_that_would_leave_the_cache_is_refused(wt):
     assert "repo" in refused(wt, "alpha=a.py", "beta=c.py", repo="/abs/outside")
 
-
-# --- the fix-round task (#1620) ---------------------------------------------
 
 ASSIGNS = ("alpha=a.py", "beta=c.py")
 

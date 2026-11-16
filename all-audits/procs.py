@@ -1,5 +1,5 @@
 """How the sweep driver and its modules start a child process: never with
-a leaked git-redirecting variable in its environment (#625)."""
+a leaked git-redirecting variable in its environment."""
 import os
 import subprocess
 import sys
@@ -10,8 +10,8 @@ from shellcmd import GIT_REDIRECT_VARS, scrubbed_env  # noqa: E402,F401  (one de
 
 
 def claude_env():
-    """`scrubbed_env` plus an unlimited `claude -p` background-task wait
-    (#1278): an audit fans out shards that outlive `claude -p`'s 600 s
+    """`scrubbed_env` plus an unlimited `claude -p` background-task wait:
+    an audit fans out shards that outlive `claude -p`'s 600 s
     default wait ceiling, which terminates the process with no report; `0`
     waits forever."""
     return {**scrubbed_env(), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}

@@ -13,7 +13,6 @@ fails=0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# A clean fixture: an empty repo, an empty worktree dir, no AGENTS.md hits.
 clean="$tmp/clean"
 mkdir -p "$clean/repo" "$clean/home/.claude" "$clean/home/.local/bin" \
          "$clean/home/src/some-project" "$clean/home/$needle/workspaces"
@@ -34,8 +33,6 @@ else
   echo "FAIL clean fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A fixture with one planted hit in the repo scan, and a non-empty worktree
-# dir — both should be reported, and the exit should be non-zero.
 dirty="$tmp/dirty"
 mkdir -p "$dirty/repo" "$dirty/home/.claude" "$dirty/home/.local/bin" \
          "$dirty/home/src/some-project" "$dirty/home/$needle/workspaces/leftover-repo"
@@ -57,7 +54,6 @@ else
   echo "FAIL dirty fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A hit in ~/.claude/CLAUDE.md alone (repo and everything else clean).
 claude_md_hit="$tmp/claude_md_hit"
 mkdir -p "$claude_md_hit/repo" "$claude_md_hit/home/.claude" "$claude_md_hit/home/.local/bin" \
          "$claude_md_hit/home/src/some-project" "$claude_md_hit/home/$needle/workspaces"
@@ -78,7 +74,6 @@ else
   echo "FAIL CLAUDE.md fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A hit inside ~/.local/bin alone.
 local_bin_hit="$tmp/local_bin_hit"
 mkdir -p "$local_bin_hit/repo" "$local_bin_hit/home/.claude" "$local_bin_hit/home/.local/bin" \
          "$local_bin_hit/home/src/some-project" "$local_bin_hit/home/$needle/workspaces"
@@ -100,7 +95,6 @@ else
   echo "FAIL local_bin fixture: rc=$rc out=$out"; fails=1
 fi
 
-# A hit inside an AGENTS.md reached only through a symlinked ~/src.
 symlinked_src="$tmp/symlinked_src"
 mkdir -p "$symlinked_src/repo" "$symlinked_src/home/.claude" "$symlinked_src/home/.local/bin" \
          "$symlinked_src/real-src/some-project" "$symlinked_src/home/$needle/workspaces"

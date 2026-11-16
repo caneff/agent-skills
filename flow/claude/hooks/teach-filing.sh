@@ -21,7 +21,7 @@
 
 runs gh issue create || teach_emit
 # The section once per session; the search below on every filing, since its
-# matches belong to the ticket being filed (#1409 story 6).
+# matches belong to the ticket being filed.
 teach WORKFLOW.md "Before filing a ticket" "\`gh issue create\` files a ticket"
 
 # The `gh issue create` command as the shell runs it (quoted text dropped),

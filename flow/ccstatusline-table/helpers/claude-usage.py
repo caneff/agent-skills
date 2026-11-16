@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude plan-usage cache (#1436): the status line's `rate_limits` block, kept for scripts.
+"""Claude plan-usage cache: the status line's `rate_limits` block, kept for scripts.
 
 Claude Code hands `rate_limits.five_hour` / `.seven_day` (`used_percentage`, `resets_at`
 epoch seconds) only to the status-line command, never to a script. `table-statusline.py`

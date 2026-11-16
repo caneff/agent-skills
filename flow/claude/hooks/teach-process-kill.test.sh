@@ -78,7 +78,7 @@ copy_tree
 rm "$tmp/tree/claude/hooks/teach-lib.sh"
 expect_has "missing teach-lib.sh is reported" \
   "$(context "$tmp/tree/claude/hooks/teach-process-kill.sh" l1 "ps aux")" "teach-lib.sh is missing"
-# A command bigger than the pipe buffer makes the SIGPIPE race of #1456
+# A command bigger than the pipe buffer makes the SIGPIPE race
 # deterministic (see teach-testlib.sh context): it was 141 under load.
 big=$(head -c 300000 /dev/zero | tr '\0' 'x')
 expect_has "an error path that ignores a large stdin is still reported" \

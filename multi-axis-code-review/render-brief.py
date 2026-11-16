@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render one review axis's brief (#1216).
+"""Render one review axis's brief.
 
     render-brief.py --axis standards|spec|correctness --repo <name> --worktree <path>
                     --ticket <n> --base <fixed point> --diff <capture> --diff-command <cmd>

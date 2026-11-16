@@ -1,4 +1,4 @@
-"""Tests for the exploration pass's contradiction check (#897).
+"""Tests for the exploration pass's contradiction check.
 
 One seam, named on the ticket: `check(decisions, tickets)` over a fixture
 spec holding a decision a ticket of that spec builds, a decision the code
@@ -20,10 +20,9 @@ import contradictions as C  # noqa: E402
 CHECKER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "contradictions.py")
 
-# The fixture spec: #366 is the slice under exploration, #367 the prefactor
-# that builds what #366's decision assumes, #368 an unrelated slice. Shaped
-# after the run the rule came from — #781's spec run on
-# sudokumaker-custom-constraints#366.
+# The fixture spec: 366 is the slice under exploration, 367 the prefactor
+# that builds what 366's decision assumes, 368 an unrelated slice. Shaped
+# after the earlier spec run the rule came from.
 TICKETS = [366, 367, 368]
 
 BUILT_BY_A_SLICE = {

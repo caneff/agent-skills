@@ -1,9 +1,9 @@
-"""Tests for pointer_reads.py (#1413): the pointer-doc read count from
+"""Tests for pointer_reads.py: the pointer-doc read count from
 docs/research/2026-10-04-claude-md-pointer-reads.md, and the one-shot cron
-re-count 14 days after #1413 closes. Every test runs the script's command
-line. `gh` and `crontab` are fakes on PATH, the repo is a scratch clone with a
-bare origin, and the transcripts are synthetic, so nothing here reads the
-real ~/.claude/projects or the real crontab."""
+re-count 14 days after the tracking ticket closes. Every test runs the
+script's command line. `gh` and `crontab` are fakes on PATH, the repo is a
+scratch clone with a bare origin, and the transcripts are synthetic, so
+nothing here reads the real ~/.claude/projects or the real crontab."""
 import importlib.util
 import json
 import os

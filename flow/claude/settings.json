@@ -56,6 +56,8 @@
       "Read(//home/caneff/.codex/**)",
       "Read(//home/caneff/.codex/skills/**)",
       "Read(//tmp/**)",
+      "Read(//home/caneff/src/**/node_modules/**)",
+      "Read(//home/caneff/.agents/**/node_modules/**)",
       "mcp__exa__web_search_exa",
       "mcp__c4ai__md",
       "mcp__c4ai__execute_js",
@@ -101,10 +103,7 @@
       "Bash(/home/caneff/src/.claude/worktrees/twitch-rules-scroller/*e2e.sh *--main-monitor*)",
       "Bash(bash /home/caneff/src/.claude/worktrees/twitch-rules-scroller/*e2e.sh *--main-monitor*)"
     ],
-    "defaultMode": "auto",
-    "additionalDirectories": [
-      "/home/caneff/src/sudokupad-scripts/node_modules"
-    ]
+    "defaultMode": "auto"
   },
   "model": "opus",
   "disableClaudeAiConnectors": true,

@@ -76,7 +76,7 @@ suites() { # prints "<label>\t<command>" per discovered suite
 # own (nothing then says which suites cover it), or an edge scan that fails
 # (#1495). An empty diff keeps only the repo-wide checks. Prints the kept labels' directories as a space-separated
 # word list on stdout, or `*` for the full suite; the reason goes to stderr.
-scope_changed() { # <base>
+scope_changed() {
   local base=$1 files file dir all_dirs dirs="" widened
   files=$(git diff --name-only --no-renames "$base...HEAD") || {
     echo "tests/all.sh: cannot diff $base...HEAD" >&2; exit 2; }
@@ -290,7 +290,7 @@ report_failure() { # <label> <output> [<note>...]
 # read as a kill. It is an inference: a suite can exit with such a number
 # itself, or pass on the status of a child that was killed. A number no signal
 # bears (255) is named as a bare status.
-status_note() { # <status>
+status_note() {
   local status=$1 sig name
   if [ "$status" -gt 128 ]; then
     sig=$((status - 128))
@@ -398,7 +398,7 @@ cpu_budget() { # <label>: prints the suite's budget in seconds
 }
 # The budget actually applied: the named one, lowered (never raised) by the
 # environment's `TESTS_CPU_BUDGET`.
-effective_cpu_budget() { # <label>
+effective_cpu_budget() {
   local b; b=$(cpu_budget "$1")
   case ${TESTS_CPU_BUDGET:-} in ''|*[!0-9]*) echo "$b" ;; *) [ "$TESTS_CPU_BUDGET" -lt "$b" ] && echo "$TESTS_CPU_BUDGET" || echo "$b" ;; esac
 }

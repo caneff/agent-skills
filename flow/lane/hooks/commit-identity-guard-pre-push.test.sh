@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Test for the commit-identity pre-push guard (#1006): the pre-commit guard
-# (#934) only fires on `git commit`, so a rebase or cherry-pick that replays
-# a commit under a different identity slips past it entirely and is only
-# caught at GitHub's email-privacy edge (#909) — after the lane's mandated
-# rebase-then-push. This hook re-checks every commit about to be pushed.
-# Runs the real hook under a real `git push` to a local bare remote.
+# Test for the commit-identity pre-push guard: the pre-commit guard only
+# fires on `git commit`, so a rebase or cherry-pick that replays a commit
+# under a different identity slips past it entirely and is only caught at
+# GitHub's email-privacy edge — after the lane's mandated rebase-then-push.
+# This hook re-checks every commit about to be pushed. Runs the real hook
+# under a real `git push` to a local bare remote.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 hook="$here/commit-identity-guard-pre-push.sh"
@@ -39,25 +39,22 @@ push() { # branch
 echo one >f; git add f; git commit -qm one
 push main; check "configured identity pushes" 0 $?
 
-# a replayed commit (simulating a rebase run with a foreign -c user.email,
-# as #909/#1006 describes) landing on top, still under the configured branch
+# a replayed commit (simulating a rebase run with a foreign -c user.email)
+# landing on top, still under the configured branch
 git -c user.email=real@gmail.com commit -q --allow-empty -m replayed
 push main; check "a replayed foreign-email commit is refused" 1 $?
 grep -q "real@gmail.com" "$tmp/out" && grep -q "t@example.com" "$tmp/out"
 check "refusal names both emails" 0 $?
 
-# fix it and retry
 git commit -q --allow-empty --amend --reset-author -m replayed
 push main; check "amended back to the configured identity pushes" 0 $?
 
-# a brand-new branch (remote side has no ref yet) with a foreign-email commit
 git checkout -qb feature
 git -c user.email=real@gmail.com commit -q --allow-empty -m featurework
 push feature; check "a foreign-email commit on a brand-new branch is refused" 1 $?
 git checkout -q main
 git branch -qD feature
 
-# the override escape
 env COMMIT_IDENTITY_OVERRIDE="release bot" git -c user.email=bot@x.org commit -q --allow-empty -m ov
 COMMIT_IDENTITY_OVERRIDE="release bot" push main
 check "override with a reason passes" 0 $?
@@ -76,8 +73,8 @@ push main; check "no configured user.email is refused" 1 $?
 grep -q "no user.email is configured" "$tmp/out"; check "the no-configured-email refusal names itself" 0 $?
 git -C "$repo" config user.email t@example.com
 
-# zero ref updates on stdin (#1618): the guard passes an empty push and says
-# why (rationale: the hook's own comment), rather than failing the lane step.
+# zero ref updates on stdin: the guard passes an empty push and says why
+# (rationale: the hook's own comment), rather than failing the lane step.
 : | "$here/commit-identity-guard-pre-push.sh" origin "$remote" >"$tmp/out" 2>&1
 check "zero ref updates on stdin passes" 0 $?
 grep -q "nothing to push" "$tmp/out"; check "the empty-push pass names itself" 0 $?
@@ -108,10 +105,9 @@ check "a non-fast-forward push fails" 1 $?
 grep -qi "non-fast-forward\|fetch first" "$tmp/out"; check "the failure names the non-fast-forward, git's own reason" 0 $?
 grep -q "commit-identity guard (pre-push): refused" "$tmp/out"; check "the identity guard is not the one refusing a non-fast-forward" 1 $?
 
-# the same branch, but the remote's new commit was made in another clone and
-# never fetched here (#1618 C1): git lists the ref, so the guard cannot read
-# the remote sha. It must refuse and say the branch is behind or diverged,
-# not leak a rev-list "bad object".
+# The remote's new commit was made in another clone and never fetched here:
+# git lists the ref, so the guard cannot read the remote sha. It must refuse
+# and say the branch is behind or diverged, not leak a rev-list "bad object".
 other_clone="$tmp/other-clone"
 git clone -q "$remote" "$other_clone" >/dev/null 2>&1
 ( cd "$other_clone" && git checkout -q stale-base && git -c user.name=o -c user.email=o@example.com commit -q --allow-empty -m elsewhere \
@@ -149,11 +145,10 @@ check "a commit already on origin's tracking ref is still checked when pushed ne
 git checkout -q main
 git branch -qD other-feature
 
-# an existing branch rebased onto a remote trunk that holds a foreign-identity
-# commit (GitHub's own squash-merge: author the owner's noreply, committer
-# noreply@github.com, #1149). `remote_sha..local_sha` then lists the trunk's
-# commit, already on origin, and the guard refused the --force-with-lease push
-# of a correctly rebased worker branch. Only commits new to the remote count.
+# An existing branch rebased onto a remote trunk holding a foreign-identity
+# commit (GitHub squash-merge: noreply committer). `remote_sha..local_sha`
+# lists the trunk's commit, already on origin, and refused a correct
+# --force-with-lease push. Only commits new to the remote count.
 base=$(git rev-parse HEAD)
 git checkout -qb work "$base"
 git commit -q --allow-empty -m workcommit
@@ -171,7 +166,6 @@ check "fixture: the work branch rebases onto origin/trunk" 0 $?
 git push --force-with-lease origin "HEAD:refs/heads/work" >"$tmp/out" 2>&1
 check "a branch rebased onto a remote commit with a foreign committer pushes with lease" 0 $?
 
-# the same push must still refuse a foreign commit replayed locally on top
 git -c user.email=real@gmail.com commit -q --allow-empty -m replayedagain
 git push --force-with-lease origin "HEAD:refs/heads/work" >"$tmp/out" 2>&1
 check "a locally replayed foreign commit on an existing branch is still refused" 1 $?

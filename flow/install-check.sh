@@ -27,7 +27,7 @@ problem() { echo "PROBLEM: $*"; problems=$((problems + 1)); }
 
 # A link counts only when it resolves to the repo file; a plain file is the
 # #1412 drift, where repo edits stopped reaching live sessions.
-linked_to() { # <live path> <repo file>
+linked_to() {
   [ -L "$1" ] && [ "$(readlink -f "$1")" = "$(readlink -f "$2")" ]
 }
 

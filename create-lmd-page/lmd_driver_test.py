@@ -1,10 +1,10 @@
 """`lmd_driver.mjs` posts a puzzle to LMD: what a fake LMD receives, and what the driver reads back.
 
-This is #1659's end-to-end test: it drives the driver, the half of the skill that posts, through every
+This is the end-to-end test: it drives the driver, the half of the skill that posts, through every
 acceptance criterion it carries, and `bash tests/all.sh` runs it. WSL `node` runs the driver against a
 headless Chromium, as Windows `node.exe` runs it against the stream browser in real use. Chromium loads a
-fake LMD: the saved copies of the real upload and submit forms (`fixtures/`, #1660), served by a local
-HTTP server that records every request and form it gets and answers with pages carrying the ids. Each
+fake LMD: the saved copies of the real upload and submit forms (`fixtures/`), served by a local HTTP
+server that records every request and form it gets and answers with pages carrying the ids. Each
 field the driver must set starts in the fake's forms at the value it must not send, so a field the
 driver leaves alone shows in what the fake receives. Chromium is Playwright's headless shell, found in
 Playwright's browser cache under the user's home directory as `node` is found on PATH: a tool the
@@ -78,7 +78,7 @@ SAVED = "The puzzle has been saved."
 
 
 def _saved_page(link=True):
-    """What live LMD answered "Create" with (#1659's closing check, Check-In, puzzle 000VX4): it stays on
+    """What live LMD answered "Create" with (seen on live LMD for Check-In, puzzle 000VX4): it stays on
     einstellen.php, says the puzzle was saved, links its edit and puzzle pages, and shows the form again."""
     to_page = f'<a href="{PUZZLE_PATH}?id={NEW_PUZZLE_ID}">To the puzzle page</a>' if link else ""
     notice = (f'<p>{SAVED}</p><p><a href="{SUBMIT_PATH}?id={NEW_PUZZLE_ID}">Edit Puzzle '
@@ -103,6 +103,8 @@ def _edit_page():
         ('name="code" value=""', 'name="code" value="OLDCODE"'),
         ('name="freetags" value=""', 'name="freetags" value="Old Tag"'),
         ('name="einstellen" value="Create"', 'name="einstellen" value="Change"'),
+        # the revision comment an active puzzle's change requires (#1890, read live 2026-11-15), served empty
+        ('<input type="submit" name="einstellen"', '<textarea name="comment" cols="60" rows="3"></textarea>\n<input type="submit" name="einstellen"'),
         # served already scheduled, so a driver that forced "nein" or emptied the dates shows in what it posts
         ('<textarea name="codedescr_en" cols="60" rows="5"></textarea>', '<textarea name="codedescr_en" cols="60" rows="5">Old description.</textarea>'),
         ('type="checkbox" name="label_3" value="1">', 'type="checkbox" name="label_3" value="1" checked>'),
@@ -150,8 +152,8 @@ assert len(UPLOAD_FORM.findall(UPLOAD_PAGE)) == 1
 
 def _upload_page(rows, form=True):
     """The upload fixture with `rows` (newest first, `(id, name)`) above its two made-up entries; without
-    its upload form when `form` is false, as live LMD serves /Dateien/ right after an upload (#1659's
-    closing check, Check-In: the reload showed only the file list)."""
+    its upload form when `form` is false, as live LMD serves /Dateien/ right after an upload (seen on
+    live LMD for Check-In: the reload showed only the file list)."""
     html = "".join(
         f'<tr><td><a href="/Dateien/index.php?id={i}">img</a></td><td>'
         f'<span class="upload_list_gross_name"><a href="/Dateien/index.php?id={i}">{n}</a></span><br>'
@@ -621,6 +623,13 @@ def test_edit_changes_the_optional_fields_it_is_given(endpoint, lmd, tmp_path):
     assert sorted(k for k in submit if k.startswith("label_")) == ["label_25", "label_3"]
 
 
+def test_edit_fills_the_revision_comment_it_is_given(endpoint, lmd, tmp_path):
+    result = run_edit(endpoint, lmd, tmp_path, values={"comment": "Added an example image."})
+    assert result.returncode == 0, result.stderr
+    _, one = _edit_posted(lmd)
+    assert one["comment"] == "Added an example image."
+
+
 def test_edit_leaves_a_field_it_is_not_given_as_served(endpoint, lmd, tmp_path):
     result = run_edit(endpoint, lmd, tmp_path, values={"title": "Only Title"})
     assert result.returncode == 0, result.stderr
@@ -705,6 +714,7 @@ def test_edit_whose_upload_yields_no_id_reports_the_upload_and_changes_nothing(e
     ({"difficulty": 9}, "values.difficulty must be 1-5"),
     ({"code": "a_b"}, "would strip"),
     ({"title": " "}, "values.title"),
+    ({"comment": " "}, "values.comment"),
 ])
 def test_edit_refuses_bad_or_create_only_values_before_any_request(endpoint, lmd, tmp_path, values, message):
     _assert_refused(run_edit(endpoint, lmd, tmp_path, values=values), message)

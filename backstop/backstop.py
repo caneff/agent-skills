@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """`backstop.py --repo <checkout> --jobs <k> [--workflow <file>] [--notify
-<cmd>]`: the nightly full run of one repo's seam (#1594, spec #1592).
+<cmd>]`: the nightly full run of one repo's seam.
 
 Per change the lane runs only the repo's narrowed command; this is the one
 full run, once a night. It fetches origin and reads the tip of
 `origin/<default>`. A repo with CI is one whose caller names its full-gate
 workflow with `--workflow <file>` (`ci.yml`): that workflow already ran the
-full gate on GitHub on a daily schedule (#1596), so no seam runs locally and
-the night is the latest scheduled run of that workflow on `<default>` (`gh run
-list --workflow <file> --event schedule`), whatever its status. Without
+full gate on GitHub on a daily schedule, so no seam runs locally and the night
+is the latest scheduled run of that workflow on `<default>` (`gh run list
+--workflow <file> --event schedule`), whatever its status. Without
 `--workflow` the repo runs locally, whatever its workflows hold: its `**Seam**`
 command, as `AGENTS.md` § End-to-end seam declares it, runs on the tip in a
 throwaway worktree. Either way the night is one of three outcomes:
@@ -17,9 +17,9 @@ throwaway worktree. Either way the night is one of three outcomes:
                    output before it does not count), and no line starts
                    `FAIL `: the tip is recorded as the last green sha.
                    A suite whose PASS line says it ran over its CPU budget
-                   (#1606: `tests/all.sh` measures it and no longer fails on
-                   it) is printed and notified as such; the night stays green.
-                   A red night prints them too, without a second notice
+                   (`tests/all.sh` measures it and does not fail on it) is
+                   printed and notified as such; the night stays green. A red
+                   night prints them too, without a second notice
     red            the seam exited non-zero and named its failing suites with
                    `FAIL <suite>` lines
     inconclusive   anything else: the repo's origin, its owner or its
@@ -51,9 +51,9 @@ each merge's PR:
     hit       the suite is in at least one merge's listing
     miss      every merge has a listing and the suite is in none of them
     unknown   it is in no listing, but a merge has none (no comment, a
-              `not checked` one, the old pre-#1593 verdict format, comments
-              that could not be read), there is no green sha to list merges
-              from, or no PR merge landed since it
+              `not checked` one, the old verdict format, comments that could
+              not be read), there is no green sha to list merges from, or no
+              PR merge landed since it
 
 A direct commit is the non-code lane (only non-code ships directly on the
 default branch), which runs no narrowed command, so it owes no listing and
@@ -278,8 +278,8 @@ def seam_printed(log):
     return bool(marker) and bool(own.strip())
 
 
-# `tests/all.sh` marks a suite that passed over its CPU budget on its PASS line
-# (#1606); that line is the whole interface.
+# `tests/all.sh` marks a suite that passed over its CPU budget on its PASS
+# line; that line is the whole interface.
 _OVER_BUDGET = re.compile(r"^PASS (\S.*?) \(([0-9.]+)s cpu, over its ([0-9.]+)s budget\)$")
 
 
@@ -295,7 +295,6 @@ def over_budget(log):
 
 
 def local_night(ctx, tip, jobs):
-    """The `Night` of a repo with no CI: its seam run here on `tip`."""
     try:
         cmd = seam_command(ctx.root, tip)
     except BackstopError as exc:
@@ -323,8 +322,6 @@ def local_night(ctx, tip, jobs):
 
 
 def night(ctx, jobs, workflow):
-    """The night's `Night`: the named workflow's scheduled run, else the seam
-    run here."""
     try:
         git(["fetch", "-q", "origin"], cwd=ctx.root)
         tip = git(["rev-parse", ctx.default], cwd=ctx.root)

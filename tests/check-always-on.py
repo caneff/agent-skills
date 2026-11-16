@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Always-on budget gate (#1413): the global CLAUDE.md plus every file it
-`@`-imports is the text every session loads, so its word count is a cost paid
-everywhere. Fails when that total passes BUDGET, when an import cannot be read
-(an unread import is not zero words), and when a pointer line names a path
-that does not exist or names no action.
+"""Always-on budget gate: the global CLAUDE.md plus every file it `@`-imports
+is the text every session loads, so its word count is a cost paid everywhere.
+Fails when that total passes BUDGET, when an import cannot be read (an unread
+import is not zero words), and when a pointer line names a path that does not
+exist or names no action.
 
 A pointer line is any line naming a backticked absolute or `~/` path to a
 Markdown doc; it must read "Before you <action>: read `<path>`". Every

@@ -133,7 +133,7 @@ def earlier_record(name):
     """(url, None) when `name`'s newest audit record is still open on GitHub,
     ("", None) when there is none or it is closed, and (None, why) when that
     cannot be told: an unreadable record or an unanswered state is a refusal,
-    never "closed" (#1681)."""
+    never "closed"."""
     records = list(stored_records(name))
     if not records:
         return "", None
@@ -214,15 +214,15 @@ def open_specs_of(sweep, rec):
 
 def prune_closed_sweeps(ttl_days):
     """Delete each stored sweep whose audit record is CLOSED on GitHub and
-    whose filed specs are all closed too (#1682, #1851): the record closes
-    when triage files the specs, and each spec cites the sweep as its
-    evidence. One whose record is open, unreadable, whose state `gh` does not
-    answer, or that an open spec still names (or whose spec lookup fails) is
-    kept, and a failed lookup is printed, never read as closed. A stored
-    sweep with no record at all (its issue was never filed) is deleted once it
-    is older than `ttl_days`, so nothing grows without bound. A multi-repo
-    index (#1721) is deleted once it is that old and no stored sweep carrying
-    its sweep id is left for it to link."""
+    whose filed specs are all closed too: the record closes when triage files
+    the specs, and each spec cites the sweep as its evidence. One whose
+    record is open, unreadable, whose state `gh` does not answer, or that an
+    open spec still names (or whose spec lookup fails) is kept, and a failed
+    lookup is printed, never read as closed. A stored sweep with no record at
+    all (its issue was never filed) is deleted once it is older than
+    `ttl_days`, so nothing grows without bound. A multi-repo index is deleted
+    once it is that old and no stored sweep carrying its sweep id is left for
+    it to link."""
     for sweep, rec in stored_records():
         if rec is None:
             print(f"stored sweep {sweep}: kept ({RECORD_FILE} unreadable)", file=sys.stderr)

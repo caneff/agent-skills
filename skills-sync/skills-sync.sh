@@ -12,7 +12,7 @@ shopt -s nullglob
 : "${CLAUDE:=$HOME/.claude/skills}"
 
 # A body Claude Code loads from the skills dir: a skill (SKILL.md) or a
-# function-hook plugin (.claude-plugin/plugin.json) (#740).
+# function-hook plugin (.claude-plugin/plugin.json).
 is_body() { [ -d "$1" ] && { [ -f "$1/SKILL.md" ] || [ -f "$1/.claude-plugin/plugin.json" ]; }; }
 
 scan() {
@@ -29,7 +29,7 @@ scan() {
           [ "$fix" = fix ] && ln -sfn "$want" "$d"
         elif [ -d "$AGENTS/$n" ]; then
           # canonical name exists but isn't a body (no marker, or a dangling
-          # plugin.json symlink) — relinking to it never converges (#741)
+          # plugin.json symlink) — relinking to it never converges
           echo "NOT_A_BODY $n"
         else
           echo "BROKEN_LINK $n"
@@ -58,7 +58,6 @@ scan() {
     fi
   done
 
-  # agents/ bodies with no claude symlink
   for d in "$AGENTS"/*; do
     is_body "$d" || continue; n=$(basename "$d")
     if [ ! -e "$CLAUDE/$n" ] && [ ! -L "$CLAUDE/$n" ]; then
@@ -86,20 +85,20 @@ self_test() {
   # BROKEN_LINK: claude link to missing body
   ln -s "../../.agents/skills/dead" "$CLAUDE/dead"
   # clean: a function-hook plugin body (plugin.json, no SKILL.md) + correct
-  # symlink; Claude Code loads these from the skills dir (#740)
+  # symlink; Claude Code loads these from the skills dir
   mkplug "$AGENTS/hookplug"; ln -s "../../.agents/skills/hookplug" "$CLAUDE/hookplug"
   # NO_SYMLINK for a plugin body too
   mkplug "$AGENTS/hooknolink"
-  # NOT_A_BODY: claude link resolves to a directory with no marker file (#741)
+  # NOT_A_BODY: claude link resolves to a directory with no marker file
   mkdir -p "$AGENTS/nomarker"; ln -s "../../.agents/skills/nomarker" "$CLAUDE/nomarker"
   # NOT_A_BODY: claude link resolves to a directory whose plugin.json is a
-  # dangling symlink (#741)
+  # dangling symlink
   mkdir -p "$AGENTS/danglejson/.claude-plugin"
   ln -s "/no/such/target" "$AGENTS/danglejson/.claude-plugin/plugin.json"
   ln -s "../../.agents/skills/danglejson" "$CLAUDE/danglejson"
   # BROKEN_LINK, still fixable: link misaimed at a nonexistent name, but the
   # canonical body under its own real name is healthy — relinking converges,
-  # so this must not be swept into NOT_A_BODY (#741 regression risk)
+  # so this must not be swept into NOT_A_BODY
   mk "$AGENTS/misaimed"; ln -s "../../.agents/skills/typo-nonexistent" "$CLAUDE/misaimed"
 
   local out; out=$(scan nofix)
@@ -116,22 +115,19 @@ self_test() {
   check "NOT_A_BODY danglejson"
   check "BROKEN_LINK misaimed"
 
-  # apply --fix, then assert the fixable cases are gone on a re-scan
   scan fix >/dev/null
   local out2; out2=$(scan nofix)
   for code in "NO_SYMLINK nolink" "NOT_SYMLINK realdir" "WRONG_TARGET wrong (../../.agents/skills/ok)" "BROKEN_LINK misaimed"; do
     grep -q "^$code\$" <<<"$out2" && { echo "FAIL: '$code' survived --fix"; fail=1; }
   done
-  # verify the structural repairs actually happened
   [ -L "$CLAUDE/nolink" ] || { echo "FAIL: nolink symlink not created"; fail=1; }
   [ -L "$CLAUDE/realdir" ] && [ -d "$AGENTS/realdir" ] || { echo "FAIL: realdir not moved+linked"; fail=1; }
   [ "$(readlink "$CLAUDE/wrong")" = "../../.agents/skills/wrong" ] || { echo "FAIL: wrong not relinked"; fail=1; }
-  # dangling link (no body) is removed, not left behind
   [ ! -L "$CLAUDE/dead" ] || { echo "FAIL: dead symlink not removed by --fix"; fail=1; }
   grep -q " hookplug\$" <<<"$out2" && { echo "FAIL: plugin 'hookplug' reported after --fix"; fail=1; }
   [ -L "$CLAUDE/hooknolink" ] || { echo "FAIL: hooknolink symlink not created"; fail=1; }
   [ "$(readlink "$CLAUDE/misaimed")" = "../../.agents/skills/misaimed" ] || { echo "FAIL: misaimed not relinked to its healthy canonical body"; fail=1; }
-  # --fix must never converge on a non-body by relinking to itself (#741)
+  # --fix must never converge on a non-body by relinking to itself
   grep -q "^NOT_A_BODY nomarker\$" <<<"$out2" || { echo "FAIL: 'NOT_A_BODY nomarker' missing after --fix"; fail=1; }
   grep -q "^NOT_A_BODY danglejson\$" <<<"$out2" || { echo "FAIL: 'NOT_A_BODY danglejson' missing after --fix"; fail=1; }
   [ -L "$CLAUDE/nomarker" ] || { echo "FAIL: nomarker link removed by --fix"; fail=1; }

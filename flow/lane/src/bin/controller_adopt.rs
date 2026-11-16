@@ -1,5 +1,5 @@
 //! `controller-adopt <agent>`: makes this session the controller of a worker
-//! whose controller session is gone (#1098). A controller that exits (not a
+//! whose controller session is gone. A controller that exits (not a
 //! `/clear`, which keeps the process) leaves its workers with no one to
 //! report to and no one allowed to merge their PRs; `controller-restore`
 //! restores only into the same process, so nothing else picks them up.

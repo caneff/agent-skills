@@ -1,4 +1,4 @@
-"""Tests for skill-audit's frontmatter helpers (#1744; was `audit.py`'s `_selfcheck`)."""
+"""Tests for skill-audit's frontmatter helpers."""
 import os
 import sys
 from datetime import datetime, timezone
@@ -56,8 +56,6 @@ def test_skill_make_staleness(model_invocable, last_used, age, stale):
     skill = Skill.make("s", "/x", model_invocable, last_used, NOW, 45)
     assert (skill.age_days, skill.stale) == (age, stale)
 
-
-# --- CLI over a temp skills dir (#1745) -------------------------------------
 
 def _make_skill(skills_dir, name, *, slash_only=False, frontmatter_name=True):
     d = skills_dir / name

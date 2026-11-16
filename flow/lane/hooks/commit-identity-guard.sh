@@ -1,8 +1,9 @@
 #!/bin/sh
-# lane commit-identity guard (#934). Installed as hooks/commit-identity-guard by
+# lane commit-identity guard. Installed as hooks/commit-identity-guard by
 # implement-dispatch, which also makes pre-commit call it. Refuses a commit
-# whose author or committer email is not the checkout's configured user.email, so the failure lands at commit time
-# with the work still uncommitted, not at GitHub's email-privacy block after.
+# whose author or committer email is not the checkout's configured
+# user.email, so the failure lands at commit time with the work still
+# uncommitted, not at GitHub's email-privacy block after.
 # Legitimate other identity: COMMIT_IDENTITY_OVERRIDE="<why>" git commit ...
 # (the reason is required and is printed).
 # The configured value is read with `-c` overrides stripped, since those are

@@ -1,6 +1,6 @@
-"""The audit record's body (#1680): what `driver.py multi` files as one issue
-per repo, built from facts the sweep left on disk. No model writes or merges
-any of it; this module only formats and splits.
+"""The audit record's body: what `driver.py multi` files as one issue per repo,
+built from facts the sweep left on disk. No model writes or merges any of it;
+this module only formats and splits.
 
 `build` returns the issue body followed by the comments that continue it. Every
 chunk is at most GitHub's 65,536-character limit, a finding is never cut in two
@@ -109,7 +109,7 @@ def render_finding(row):
 
 
 def _blocks(model):
-    """The body as atomic blocks: the packer never cuts inside one."""
+    """The body as blocks the packer keeps whole unless one alone exceeds a chunk."""
     out = [
         "# Audit record\n\n"
         f"- Sweep: {model.sweep_id}\n- Time: {model.timestamp}\n- Audited commit: {model.sha}\n"

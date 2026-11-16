@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Contract test for settings-lint.sh (#1225): one settings file per case.
 # Run: bash flow/settings-lint.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
