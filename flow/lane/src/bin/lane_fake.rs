@@ -320,6 +320,20 @@ fn run_gh(args: &[String]) -> ExitCode {
         // label or login can hold a space but never a tab.
         println!("{row}");
     }
+    // `api repos/<o>/<r>/issues/<n>/dependencies/blocked_by`: the open
+    // blockers' numbers, one per line, from GH_BLOCKED_BY_<n> (space-
+    // separated); GH_BLOCKED_BY_FAIL_<n> fails the read.
+    let blockers_of = if a0 == "api" { a1.strip_suffix("/dependencies/blocked_by").and_then(|p| p.rsplit('/').next()) } else { None };
+    if let Some(n) = blockers_of {
+        if env::var(format!("GH_BLOCKED_BY_FAIL_{n}")).is_ok() {
+            eprintln!("gh: Server Error (HTTP 502)");
+            return ExitCode::FAILURE;
+        }
+        for b in env::var(format!("GH_BLOCKED_BY_{n}")).unwrap_or_default().split_whitespace() {
+            println!("{b}");
+        }
+        return ExitCode::SUCCESS;
+    }
     // `api repos/<o>/<r>/issues/<n>/parent`: GH_PARENT_<n> is the parent's
     // number; unset is gh's own 404 for a ticket with no parent, and
     // GH_PARENT_FAIL_<n> any other failure.
@@ -580,7 +594,23 @@ fn run_herdr(args: &[String]) -> ExitCode {
         ("pane", "list") => {
             println!("{{\"result\":{{\"panes\":[{{\"pane_id\":\"w8:p3\"}}]}}}}");
         }
+        // The pane's text: the last prompt sent, as a pane that took the brief
+        // shows it; HERDR_READ_EMPTY is a pane the brief never reached,
+        // HERDR_READ_FAIL a read that fails.
+        ("agent", "read") => {
+            if env_flag("HERDR_READ_FAIL") {
+                return ExitCode::FAILURE;
+            }
+            if !env_flag("HERDR_READ_EMPTY") {
+                if let Ok(log) = env::var("CALL_LOG") {
+                    print!("{}", std::fs::read_to_string(format!("{log}.prompt")).unwrap_or_default());
+                }
+            }
+        }
         ("agent", "prompt") => {
+            if let (Ok(log), Some(text)) = (env::var("CALL_LOG"), args.get(3)) {
+                let _ = std::fs::write(format!("{log}.prompt"), text);
+            }
             if env_flag("HERDR_STALL") {
                 println!(
                     "{{\"error\":{{\"code\":\"agent_prompt_stalled\",\"message\":\"no activity observed\"}},\"id\":\"cli:agent:prompt\"}}"

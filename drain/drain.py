@@ -629,7 +629,8 @@ def dispatch(ctx, bundle, kind):
     drain rather than looping over one ticket. A failure after the claim (herdr
     failing once the workspace exists) leaves the claim and the workspace in
     place: that is this bundle's failed build, not the environment's."""
-    which = ["--spec", str(bundle[0])] if kind == SPEC else [str(n) for n in bundle]
+    # Several numbers are one clump only when the caller says so (#1701).
+    which = ["--spec", str(bundle[0])] if kind == SPEC else (["--clump"] if len(bundle) > 1 else []) + [str(n) for n in bundle]
     out = subprocess.run(["implement-dispatch", "--repo", ctx.root, "--controller", CONTROLLER, *which],
                          capture_output=True, text=True)
     if out.returncode:

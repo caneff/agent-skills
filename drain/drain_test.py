@@ -477,7 +477,7 @@ def test_the_agents_bundle_is_one_pr_and_the_rest_stay_ready(sb):
     assert st["merged"][0][0] == [1, 2, 3]
     assert [i["state"] for i in st["issues"].values()] == ["closed"] * 3 + ["open"]
     assert sb.labels(4) == ["ready-for-agent"]
-    assert sb.dispatch_runs()[0]["argv"][-3:] == ["1", "2", "3"]
+    assert sb.dispatch_runs()[0]["argv"][-4:] == ["--clump", "1", "2", "3"]
     assert ["1", "drain bundle: 1 2 3 (of 3 candidates)"] in sb.state()["comments"][-1:]
     assert "#1 #2 #3" in r.stdout
 

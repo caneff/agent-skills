@@ -44,7 +44,9 @@ worker running in its own workspace inside herdr, report, and stop. It never
 waits on the worker.
 
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
-                     [--run <run-id>] <issue number> [<issue number>...]
+                     [--run <run-id>] <issue number>
+  implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
+                     [--run <run-id>] --clump <issue number> <issue number>...
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
                      --spec <n> [--slots <k>]
 
@@ -70,7 +72,9 @@ reads it; either failing is refused before the claim. Spec mode
 refuses --run, since a spec run keeps its own run file.
 
 Several issue numbers are one clump: one worker, one workspace, one branch
-and one PR that closes all of them. Branch and workspace are implement-<n>
+and one PR that closes all of them. They need --clump, so a stray second
+number is refused rather than silently making a clump; --clump with one
+number, or with --spec, is refused too. Branch and workspace are implement-<n>
 for the lowest number named, whatever order they are typed in, and the brief
 carries the whole list, lowest first. The same number twice is refused.
 
@@ -121,6 +125,23 @@ lock is under $HOME, so it serializes dispatches sharing a HOME; a hand claim
 or a run under another HOME is caught only by that re-read, which narrows the
 window and does not close it.
 
+A ticket with an open blocker is refused: GitHub's own blocked-by edges, and
+each #<n> under the ticket's `## Blocked by` heading, open now. A blocker that
+is another ticket of the clump is not one. A blocker that cannot be read
+refuses; so does a body that cannot be read, except on a documentation-labelled
+ticket, which keeps its heavy-and-label-kept reading and is checked on GitHub's
+edges alone.
+
+After the brief is sent, the pane is read back (`herdr agent read`, up to 5
+reads, LANE_BRIEF_POLL_MS apart, 1000 by default) for the `/implement <n>` or
+`/implement-spec <n>` line. A pane that never shows it fails the dispatch after
+the claim, naming the release commands, like any other post-claim failure.
+
+Spec mode refuses when 8 or more spec runs are live in herdr (agents named
+`<repo>-spec-<n>`; LANE_SPEC_RUN_CAP overrides the 8). A burst of dispatches
+each pass any per-dispatch load check before the first run starts, so the
+count is the only thing that stops it. An agent list that fails refuses.
+
 Refuses, with nothing claimed or created, when any named issue is not open and
 labelled exactly one of ready-for-agent and ready-for-human, it carries a held
 label (in-progress, needs-info), the same number is named twice, spec mode
@@ -158,6 +179,8 @@ struct Args {
     ns: Vec<String>,
     spec: bool,
     slots: Option<String>,
+    /// `--clump`: the caller means several numbers to be one worker's work.
+    clump: bool,
 }
 
 /// Which run the worker is briefed for: a plain `/implement` ticket, or a
@@ -198,6 +221,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
     let mut ns: Vec<String> = Vec::new();
     let mut spec = false;
     let mut slots = None;
+    let mut clump = false;
     let mut it = argv.into_iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -229,6 +253,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
                 Some(v) => slots = Some(v),
                 None => return Parsed::Err("--slots needs a value".into()),
             },
+            "--clump" => clump = true,
             "-h" | "--help" => return Parsed::Help,
             s if s.starts_with('-') => return Parsed::Err(format!("unknown flag: {s}")),
             _ => {
@@ -241,7 +266,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
             }
         }
     }
-    Parsed::Args(Args { repo, model, controller, run, ns, spec, slots })
+    Parsed::Args(Args { repo, model, controller, run, ns, spec, slots, clump })
 }
 
 /// Handles the hidden `--seed-trust <claude.json path> <workspace path>`
@@ -908,6 +933,91 @@ fn slice_base(primary: &str, slug: &str, ns: &[String]) -> Result<Base, String> 
     })
 }
 
+/// The `#<n>` references under a ticket's `## Blocked by` heading, up to the
+/// next heading. A reference counts only as a bare `#<n>` (not `a/b#7`, not
+/// inside a word), the form `/to-tickets` writes and
+/// `implement-spec/frontier.py` reads. No such heading names none.
+fn blocked_by_refs(body: &str) -> Vec<String> {
+    let heading = |l: &str| -> Option<String> {
+        let t = l.trim_start_matches(' ');
+        let hashes = t.chars().take_while(|c| *c == '#').count();
+        (1..=6).contains(&hashes).then(|| t[hashes..].trim().trim_end_matches(':').trim().to_lowercase()).filter(|_| t[hashes..].starts_with([' ', '\t']))
+    };
+    let mut refs: Vec<String> = Vec::new();
+    let mut inside = false;
+    for line in body.lines() {
+        if let Some(h) = heading(line) {
+            inside = h == "blocked by";
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let bytes = line.as_bytes();
+        for (i, b) in bytes.iter().enumerate() {
+            if *b != b'#' {
+                continue;
+            }
+            let prev_ok = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || matches!(bytes[i - 1], b'_' | b'/' | b'#' | b'-'));
+            let digits: String = line[i + 1..].chars().take_while(char::is_ascii_digit).collect();
+            if prev_ok && !digits.is_empty() && !refs.contains(&digits) {
+                refs.push(digits);
+            }
+        }
+    }
+    refs
+}
+
+/// The open issues that block `n`: GitHub's own dependency edges (open
+/// blockers only), and each `#<m>` its `## Blocked by` section names that is
+/// open now. A blocker that is another ticket of this clump is no blocker,
+/// as the clump's brief says. Any read that fails is an `Err`: a blocker
+/// nobody could read is not "none".
+fn open_blockers(slug: &str, n: &str, body: Option<&str>, clump: &[String]) -> Result<Vec<String>, String> {
+    let native = quiet_stdout_bounded(
+        "gh",
+        &["api", &format!("repos/{slug}/issues/{n}/dependencies/blocked_by"), "--jq", ".[] | select(.state == \"open\") | .number"],
+        gh_query_timeout(),
+    )?
+    .ok_or_else(|| format!("could not read #{n}'s blockers from GitHub"))?;
+    let mut open: Vec<String> = native.split_whitespace().map(str::to_string).collect();
+    for r in body.map(blocked_by_refs).unwrap_or_default() {
+        if open.contains(&r) {
+            continue;
+        }
+        match lane::issue_state::read_timeout(slug, &r, gh_query_timeout())? {
+            Some(i) if i.state == "OPEN" => open.push(r),
+            Some(_) => {}
+            None => return Err(format!("#{n} names blocker #{r}, which could not be read")),
+        }
+    }
+    open.retain(|b| b != n && !clump.contains(b));
+    Ok(open)
+}
+
+/// How many spec runs the box may hold before a new `--spec` dispatch
+/// refuses. Each is an opus session that fans out its own workers; 23 at once
+/// took load to 59 on 32 cores (#1904). `LANE_SPEC_RUN_CAP` overrides it.
+const DEFAULT_SPEC_RUN_CAP: usize = 8;
+
+fn spec_run_cap() -> usize {
+    env::var("LANE_SPEC_RUN_CAP").ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_SPEC_RUN_CAP)
+}
+
+/// Whether a herdr agent name is a spec run's: `<repo>-spec-<n>`.
+fn is_spec_run_name(name: &str) -> bool {
+    name.rsplit_once("-spec-").is_some_and(|(_, n)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// The spec runs live in herdr now, from a fresh `agent list`. A listing that
+/// fails is an `Err`, never zero.
+fn live_spec_runs() -> Result<usize, String> {
+    let out = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT)
+        .ok_or("herdr agent list failed or timed out, so the live spec runs cannot be counted")?;
+    let agents = herdr::parse_agents(&out).ok_or("herdr agent list gave output of an unexpected shape, so the live spec runs cannot be counted")?;
+    Ok(agents.iter().filter(|a| is_spec_run_name(a.name())).count())
+}
+
 fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
     let mut cur = v;
     for p in path {
@@ -1043,6 +1153,20 @@ fn run() -> Result<(), ExitCode> {
     }
     let ns: Vec<String> = numbers.iter().map(u64::to_string).collect();
     let n = ns[0].clone();
+    // Several numbers are one worker, one branch and one PR: a choice the
+    // caller makes out loud, never one a stray second number makes for it.
+    if args.clump && args.spec {
+        return Err(die("--clump only goes with a plain dispatch, not --spec"));
+    }
+    if args.clump && ns.len() < 2 {
+        return Err(die("--clump names several issues; this names one"));
+    }
+    if !args.clump && ns.len() > 1 {
+        return Err(die(format!(
+            "{} issues named without --clump: several numbers are one worker and one PR; pass --clump to mean that, or dispatch them one at a time",
+            ns.len()
+        )));
+    }
     let mode = match (&args.slots, args.spec) {
         (None, false) => Mode::Plain,
         (None, true) => Mode::Spec { slots: DEFAULT_SPEC_SLOTS },
@@ -1155,14 +1279,23 @@ fn run() -> Result<(), ExitCode> {
         // the evidence. An unreadable body cannot show the ticket is prose, so
         // it goes heavy — but nothing shows the label wrong, so it is kept.
         let labelled = issue.has_label("documentation");
-        let body = if labelled {
-            match lane::issue_state::body_timeout(&slug, n, gh_query_timeout()) {
-                Ok(b) => b,
-                Err(e) => return Err(die(e)),
-            }
-        } else {
-            None
+        // Read for every ticket: its `Blocked by` section is checked below.
+        let body = match lane::issue_state::body_timeout(&slug, n, gh_query_timeout()) {
+            Ok(b) => b,
+            Err(e) => return Err(die(e)),
         };
+        // A ticket labelled documentation keeps its old reading of an
+        // unreadable body (heavy, label kept); any other ticket cannot say
+        // what blocks it, so it is refused, never read as unblocked.
+        if body.is_none() && !labelled {
+            return Err(die(format!("could not read #{n}'s body to check its blockers")));
+        }
+        let blockers = open_blockers(&slug, n, body.as_deref(), &ns).map_err(die)?;
+        if !blockers.is_empty() {
+            let each: Vec<String> = blockers.iter().map(|b| format!("#{b}")).collect();
+            return Err(die(format!("#{n} is blocked by open {}", each.join(", "))));
+        }
+        let body = if labelled { body } else { None };
         let body_unreadable = labelled && body.is_none();
         let stripped_for = body.as_deref().and_then(lane::targets::first_code_target);
         tickets.push(Ticket {
@@ -1209,6 +1342,15 @@ fn run() -> Result<(), ExitCode> {
         .unwrap_or(false);
     if !running {
         return Err(die("no herdr server is running (herdr status)"));
+    }
+    // A burst of spec dispatches all pass a per-dispatch load check before
+    // any run starts; the live count is what stops the burst (#1904).
+    if let Mode::Spec { .. } = mode {
+        let live = live_spec_runs().map_err(die)?;
+        let cap = spec_run_cap();
+        if live >= cap {
+            return Err(die(format!("{live} spec runs are live, at the cap of {cap} (LANE_SPEC_RUN_CAP); dispatch again when one lands")));
+        }
     }
 
     // A derived controller is briefed by its herdr agent name when it has one:
@@ -1508,6 +1650,28 @@ fn run() -> Result<(), ExitCode> {
         run_timeout("herdr", &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"], HERDR_PROMPT_TIMEOUT),
         None,
     )?;
+
+    // `--until working` says the agent started doing something, not that
+    // the brief is the thing it is doing: read the pane back for the line.
+    let slash = match mode {
+        Mode::Plain => format!("/implement {n}"),
+        Mode::Spec { .. } => format!("/implement-spec {n}"),
+    };
+    let tries = 5;
+    let mut seen = false;
+    for i in 0..tries {
+        if i > 0 {
+            std::thread::sleep(env_ms_or("LANE_BRIEF_POLL_MS", 1000));
+        }
+        let pane_text = run_timeout("herdr", &["agent", "read", &agent, "--source", "recent-unwrapped", "--lines", "200"], HERDR_QUERY_TIMEOUT);
+        if matches!(&pane_text, Ok(o) if o.success && o.combined.contains(&slash)) {
+            seen = true;
+            break;
+        }
+    }
+    if !seen {
+        return Err(claim.fail("confirming the brief", &format!("the brief did not arrive: no `{slash}` line in {agent}'s pane after {tries} reads")));
+    }
 
     let session = worker_session_name(&home, wt.to_str().unwrap_or(""), &agent);
 

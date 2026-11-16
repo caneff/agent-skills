@@ -345,7 +345,7 @@ def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run(tmp):
     commands = [line for line in got.stdout.splitlines()
                 if line.startswith("command")]
     assert commands == [
-        f"command   implement-dispatch 500 502 --run run-t --repo {target}"
+        f"command   implement-dispatch 500 502 --clump --run run-t --repo {target}"
     ], got.stdout
 
 

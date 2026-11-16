@@ -14,7 +14,8 @@ neither door: say so and stop.
 ## Dispatch
 
 ```
-implement-dispatch <n> [<n>...] [--model sonnet|opus] [--run <run-id>]
+implement-dispatch <n> [--model sonnet|opus] [--run <run-id>]
+implement-dispatch --clump <n> <n>... [--model sonnet|opus] [--run <run-id>]
 implement-dispatch --spec <n> [--slots <k>] [--model sonnet|opus]
 ```
 
@@ -24,6 +25,13 @@ a slice, and it goes into the brief: that is how the worker knows a run file
 is under it, where § Control's job record goes. A dispatch outside any run
 passes none. `--spec` refuses the flag,
 since the spec run keeps its own run file.
+
+Several numbers need `--clump`: without it the dispatch is refused, so a stray
+second number never makes a clump. It also refuses a ticket with an open
+blocker (GitHub's blocked-by edges, or an open `#<n>` under `## Blocked by`;
+a blocker inside the clump does not count), and a `--spec` dispatch while 8
+spec runs are live. After the brief is typed it reads the pane back for the
+`/implement` line and fails, naming the release commands, when it is not there.
 
 `sonnet` for an ordinary ticket, `opus` for a subtle seam — `--spec` mode
 defaults to `opus` instead. Plain mode refuses an issue labelled `spec`,
