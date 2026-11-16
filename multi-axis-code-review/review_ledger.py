@@ -1285,6 +1285,9 @@ SKIPPABLE_AXES = ("standards", "spec", "correctness")
 AXIS_TYPES = ("standards", "spec", "correctness")
 REVIEWER_TYPES = APPEND_TYPES + ("over-engineering",)
 MUTATION_OUTCOMES = ("red", "green", "unknown")
+# A mutant killed at its time limit (#1854): the status file says `red (timeout)`; the row's
+# outcome is `red`, and `timeout: true` records why.
+TIMEOUT_WORD = "red (timeout)"
 _MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -1308,6 +1311,8 @@ def decode_status(text: str) -> str:
     recipe writes the word, the one home of the exit-status mapping; anything else, an empty
     file and a raw exit status included, is `unknown`, never a pass or a red."""
     word = text.strip()
+    if word == TIMEOUT_WORD:
+        word = "red"
     return word if word in MUTATION_OUTCOMES else "unknown"
 
 
@@ -1334,7 +1339,8 @@ def cmd_append_mutation(args) -> int:
                   [], cost={"tokens": {"status": "not-applicable",
                                        "reason": "a mutation's tokens stay with the correctness reviewer, or with the worker for worker-mutation"},
                             "wall_clock": {"status": "known", "seconds": seconds}},
-                  origin="append", own_keys={"mutation_id": args.mutation_id, "outcome": outcome})
+                  origin="append", own_keys={"mutation_id": args.mutation_id, "outcome": outcome,
+                            **({"timeout": True} if args.status_file and args.status_file.read_text().strip() == TIMEOUT_WORD else {})})
     try:
         update_ledger(args.ledger, lambda ledger: ledger.update({row_id: row}))
     except ValueError as e:
