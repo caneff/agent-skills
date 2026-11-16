@@ -1708,6 +1708,86 @@ def test_a_slice_worker_counts_as_working_only_while_it_is_working(d, ctx, monke
     assert d.slices_working(ctx, 1) is expected, statuses
 
 
+def _job(jobs, name, pid, _cwd=None, ended=False):
+    """A `job-run` run directory: `pid`, and `exit` once it has ended. The wrapper's cwd is its
+    process's, which is what `live_job` reads."""
+    run = jobs / name
+    run.mkdir(parents=True)
+    (run / "pid").write_text(f"{pid}\n")
+    if ended:
+        (run / "exit").write_text("rc=1\ncause=exit\nended=x\n")
+
+
+@pytest.fixture
+def jobs(d, tmp_path, monkeypatch):
+    """An empty job-run cache and a live process standing in for a job's wrapper."""
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    monkeypatch.setattr(d, "JOBS_DIR", str(jobs))
+    return jobs
+
+
+@pytest.fixture
+def live_pid(tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    proc = subprocess.Popen(["sleep", "30"], cwd=ws)
+    yield proc.pid, str(ws)
+    proc.kill()
+    proc.wait()
+
+
+def test_a_live_job_in_the_workspace_is_found(d, jobs, live_pid):
+    pid, ws = live_pid
+    _job(jobs, "sweep-725", pid, ws)
+    assert d.live_job(ws) == "sweep-725"
+
+
+@pytest.mark.parametrize("case", ["ended", "other-dir", "dead-pid", "no-pid"])
+def test_a_job_that_is_not_live_in_the_workspace_is_not_found(d, jobs, live_pid, tmp_path, case):
+    pid, ws = live_pid
+    if case == "ended":
+        _job(jobs, "j", pid, ws, ended=True)
+    elif case == "other-dir":
+        other = tmp_path / "other"
+        other.mkdir()
+        proc = subprocess.Popen(["sleep", "30"], cwd=other)
+        try:
+            _job(jobs, "j", proc.pid, other)
+            assert d.live_job(ws) is None
+        finally:
+            proc.kill()
+            proc.wait()
+        return
+    elif case == "dead-pid":
+        _job(jobs, "j", 2 ** 22 + 12345, ws)
+    else:
+        (jobs / "j").mkdir()
+    assert d.live_job(ws) is None, case
+
+
+def test_an_idle_worker_with_a_live_job_is_not_done_until_the_job_ends(d, ctx, monkeypatch):
+    # Idle from tick 0, grace 3: with the job alive until tick 6 the grace starts at tick 6, and
+    # the PR appears at tick 8. Without the job check the wait fails at tick 3.
+    clock = SteppedClock()
+    monkeypatch.setattr(d, "time", clock)
+    monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 3)
+    monkeypatch.setattr(d, "agent_status", lambda name: "idle")
+    monkeypatch.setattr(d, "live_job", lambda ws: "sweep-1" if clock.tick < 6 else None)
+    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: {"number": 1} if clock.tick >= 8 else None)
+    assert d.wait_for_worker(ctx, "implement-1", "repo-1", [1]) == "pr"
+
+
+def test_a_live_job_does_not_outlast_the_wall_clock(d, ctx, monkeypatch):
+    monkeypatch.setattr(d, "WALL_CLOCK_SECONDS", 0.3)
+    monkeypatch.setattr(d, "agent_status", lambda name: "idle")
+    monkeypatch.setattr(d, "live_job", lambda ws: "sweep-1")
+    monkeypatch.setattr(d, "open_pr", lambda ctx, branch: None)
+    with pytest.raises(d.DrainError) as caught:
+        d.wait_for_worker(ctx, "implement-1", "repo-1", [1])
+    assert "passed the 0.3s wall clock" in str(caught.value)
+
+
 def test_the_same_idle_wait_with_no_slice_working_fails_at_the_grace(d, ctx, monkeypatch):
     monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", 0.2)
     monkeypatch.setattr(d, "agent_status", lambda name: "idle")
