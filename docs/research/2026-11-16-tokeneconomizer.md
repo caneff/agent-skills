@@ -54,3 +54,9 @@ worktrees.
 Do not install the whole plugin. If anything, trial the loop guard alone
 (micro-skills and tool pruning off) on one repo, after reading how it
 writes settings.
+
+## Ruling (Chris, 2026-11-16)
+
+Not installed. Two lessons adapted instead: repeated tool failures as
+retro evidence (caneff/second-brain-v2#175), and a model-free loop-guard
+hook (#1914, `ready-for-human` as harness work).
