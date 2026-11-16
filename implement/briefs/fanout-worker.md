@@ -7,16 +7,17 @@
 
   ```
   git -C {worktree} worktree add --detach {worktree}/.scratch/mutation-{worker}-<id> HEAD
-  git -C {worktree} ls-files -m -o --exclude-standard -z -- . ':!.scratch' | xargs -0 -I% cp --parents % {worktree}/.scratch/mutation-{worker}-<id>/
+  (cd {worktree} && git diff HEAD --binary) | git -C {worktree}/.scratch/mutation-{worker}-<id> apply
+  (cd {worktree} && git ls-files -o --exclude-standard -z -- . ':!.scratch' | xargs -0 -I% cp --parents % {worktree}/.scratch/mutation-{worker}-<id>/)
   ```
 
-  The first line checks out committed `HEAD`; the second carries the other workers' uncommitted edits over, so the covering test sees the tree as it stands. Mutate your file there, run the covering test from inside it, read the red message (it must be your assertion, not a missing file), then undo the mutation by removing the worktree:
+  The first line checks out committed `HEAD`; the second carries every uncommitted edit over, deletions included, and the third the untracked files, so the covering test sees the tree as it stands. If any of the three exits non-zero, the worktree is not the tree as it stands: report `Mutation: not run — <why>`. A suite that needs ignored state the worktree lacks (`node_modules`, a `.venv`) gets it by a symlink or a sync inside the worktree before the run. Mutate your file there, run the covering test from inside it, read the red message (it must be your assertion, not a missing file), then undo the mutation by removing the worktree:
 
   ```
   git -C {worktree} worktree remove --force {worktree}/.scratch/mutation-{worker}-<id>
   ```
 
-  A Rust mutation sets `CARGO_TARGET_DIR={worktree}/.scratch/mutation-{worker}-<id>/target` on its test run, so cargo never reuses the live build dir and leaves a mutated build behind. Never mutate the live file and re-edit it, and never undo a mutation with `git checkout`, `git restore` or `git show HEAD:<file>`: removing the worktree is the only undo. If the removal is refused, report that verbatim and stop. If the test cannot run from the worktree, report `Mutation: not run — <why>` and leave the check to the controller. (Chris, 2026-10-14, #1550; #1696.)
+  A Rust mutation sets `CARGO_TARGET_DIR={worktree}/.scratch/mutation-{worker}-<id>/target` on its test run (the mutation worktree's own `target`), so cargo never reuses the live build dir and leaves a mutated build behind. Never mutate the live file and re-edit it, and never undo a mutation with `git checkout`, `git restore` or `git show HEAD:<file>`: removing the worktree is the only undo. If the removal is refused, report that verbatim and stop. If the test cannot run from the worktree, report `Mutation: not run — <why>` and leave the check to the controller. (Chris, 2026-10-14, #1550; #1696.)
 
 ## Report
 

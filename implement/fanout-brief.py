@@ -18,23 +18,19 @@ exclusively, so a second render of the same ticket and worker takes `-2`,
 
 `--finding` and `--ruled` hand a fix-round worker its task: one finding by
 id, for the worker it names, listed only in that worker's brief. `--ruled`
-marks a finding the controller has ruled on, flag-if-you-disagree. An id given
-twice, a finding for an unassigned worker, and (once any finding is given) a
-worker left with none are refused, so a typed finding is never dropped by a
-split (the renderer cannot see the review sidecars: passing every id is the
-caller's). The brief then asks for `fixed` or `disputed` per id, in a section of
-its own that item 5 of the skeleton's report points to, and caps any test run
-at `--workers` workers (default 1) and `--ceiling` seconds (default 600).
+marks a finding the controller has ruled on, flag-if-you-disagree. The brief
+then asks for `fixed` or `disputed` per id, in a section of its own that item 5
+of the skeleton's report points to, and caps any test run at `--workers`
+workers (default 1) and `--ceiling` seconds (default 600). The renderer cannot
+see the review sidecars: passing every id is the caller's. What it refuses is
+listed once, in `RULES` (the `--help` epilog).
 
 The no-git-write, no-subagent and mutation rules and the report shape live in
 `briefs/fanout-worker.md`, read here, never retyped; only the per-id findings
 report, which depends on the findings given, is built here.
 
 Exit 0 and the dispatch line on stdout; 2 on a bad input, with nothing written
-and nothing on stdout: a worktree that is not a directory, an empty test command or one that runs
-no tests (a static check, see `runs_no_tests`), a worker with no files, a file (or a directory holding it) owned by two workers, a `--for` worker that was not assigned, a
-malformed `--assign` or `--finding`, an id given twice (with --finding and --ruled both counts), a finding for a worker not
-assigned, a worker with no finding when others have one.
+and nothing on stdout.
 """
 import argparse
 import os
@@ -107,9 +103,11 @@ def parse_findings(flagged, owners):
             if worker not in owners:
                 raise BadInput(f"finding {fid} is for {worker}, not among the assigned workers ({', '.join(owners)})")
             if fid in seen:
-                raise BadInput(f"finding {fid} is given twice (for {seen[fid]} and {worker}): "
-                               "pass a finding with --finding or with --ruled, not both")
-            seen[fid] = worker
+                first, first_ruled = seen[fid]
+                hint = (" — once with --finding and once with --ruled: pass it with one of them, not both"
+                        if first_ruled != ruled else "")
+                raise BadInput(f"finding {fid} is given twice (for {first} and {worker}){hint}")
+            seen[fid] = (worker, ruled)
             found[worker].append(Finding(fid, text, ruled))
     if seen:
         for worker, items in found.items():
@@ -118,17 +116,19 @@ def parse_findings(flagged, owners):
     return found
 
 
-# A command whose first word is one of these runs no test, whatever its arguments say.
+# A command segment whose first word is one of these runs no test, whatever its arguments say.
 NO_TEST_WORDS = {"true", "false", ":", "echo", "printf", "exit", "test", "[", "ls", "cat", "sleep", "pwd", "cd"}
-TEST_TOKEN = re.compile(r"test|spec|check", re.I)
 
 
 def runs_no_tests(cmd):
-    """A static answer, not a run: True when `cmd` cannot run a test — its first word (past any
-    `VAR=value` prefix) is a no-op such as `true` or `echo`, or no word of it names a test, spec or
-    check. A runner selecting nothing (`pytest -k nomatch`) is beyond a static check."""
-    words = [w for w in cmd.split() if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w)]
-    return not words or words[0] in NO_TEST_WORDS or not any(TEST_TOKEN.search(w) for w in words)
+    """A static answer, not a run: True when every segment of `cmd` (split on `&&`, `||`, `;` and
+    `|`) starts, past any `VAR=value` prefix, with a no-op such as `true`, `echo` or `cd`. A runner
+    that selects nothing (`pytest -k nomatch`) or a non-test command (`ruff check`) is beyond it."""
+    for segment in re.split(r"&&|\|\||;|\|", cmd):
+        words = [w for w in segment.split() if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w)]
+        if words and words[0] not in NO_TEST_WORDS:
+            return False
+    return True
 
 
 def finding_bullet(f):
@@ -143,8 +143,8 @@ def render(a, owners, findings):
     if not a.test_command.strip():
         raise BadInput("the test command is empty")
     if runs_no_tests(a.test_command):
-        raise BadInput(f"the test command {a.test_command!r} runs no tests: it starts with a no-op or names no "
-                       "test, spec or check")
+        raise BadInput(f"the test command {a.test_command!r} runs no tests: every command in it is a no-op "
+                       f"({', '.join(sorted(NO_TEST_WORDS))})")
     if a.worker not in owners:
         raise BadInput(f"--for {a.worker}: not among the assigned workers ({', '.join(owners)})")
     with open(os.path.join(HERE, "briefs", "fanout-worker.md")) as fh:
@@ -185,13 +185,14 @@ def write_brief(text, repo, ticket, worker):
     return review_cache.write_cache_file(repo, f"fanout-{ticket}-{worker}", text)
 
 
-RULES = """rules:
-  --assign   one worker is valid; several must own disjoint files.
+RULES = """rules (exit 2, nothing written, on any of these):
+  --worktree   must be a directory. --for must be one of the assigned workers.
+  --assign   one worker is valid; several must own disjoint files; a worker owns at least one.
   --finding / --ruled   an id is given once: with --finding or with --ruled, not both. A --ruled
              id needs no --finding. Once any finding is given, every worker needs at least one
              (a worker with no finding is a worker with nothing to fix: leave it out).
-  --test-command   refused when it starts with a no-op (true, echo, ls...) or names no
-             test, spec or check; a runner that selects nothing is not caught."""
+  --test-command   refused when empty or when every command in it is a no-op (true, echo,
+             cd...); a runner that selects nothing is not caught."""
 
 
 def main(argv):

@@ -636,6 +636,16 @@ fi
 [ -e "$target/node_modules/marker" ] ||
   { echo "FAIL: removing the witness deleted the reviewed tree's node_modules contents" >&2; fail=1; }
 
+# A Rust suite in the witness must build into the witness's own target dir, never
+# the reviewed tree's (#1696).
+target="$(make_repo cargorepo "$py_setup")" || exit 1
+substitute 'cg1' ': >"$3"; echo "CARGO-TARGET: ${CARGO_TARGET_DIR:-unset}"; exit 1' "$target" >"$scratch/launcher-cargo.sh"
+hygiene_run cargo "$target" "$scratch/launcher-cargo.sh"
+if ! grep -Eq 'CARGO-TARGET: .*/worktrees/cg1/target' "$scratch/cargo.out"; then
+  echo "FAIL: the witness did not get its own CARGO_TARGET_DIR" >&2
+  cat "$scratch/cargo.out" >&2; fail=1
+fi
+
 # The link exists only when the reviewed tree has a node_modules: a dangling or
 # invented one would make every Python or Rust witness carry a stray entry. The
 # body goes red only if a link is there, so the run must report it HOLLOW.

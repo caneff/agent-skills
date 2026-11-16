@@ -258,7 +258,7 @@ No PR and no reviewer; Chris reads the log after.
   or not. The worktree holds only tracked files, so set up there whatever
   the suite needs from the checkout's untracked or ignored state, such as
   `node_modules` or a clean bytecode cache (#1219). A Rust suite there sets
-  `CARGO_TARGET_DIR=.scratch/mutation-<id>/target`: the worktree isolates the
+  `CARGO_TARGET_DIR=<mutation worktree>/target`: the worktree isolates the
   tree, not cargo's build, and a shared target dir keeps the mutated build for
   the next seam run (#1696). Then read the red
   message: it must be your stripped assertion, not a missing file or a

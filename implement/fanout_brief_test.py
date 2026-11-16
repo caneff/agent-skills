@@ -115,7 +115,8 @@ def test_the_mutation_rule_names_the_throwaway_worktree_and_its_removal(wt):
     assert f"git -C {wt} worktree add --detach {wt}/.scratch/mutation-" in text, text
     assert "worktree remove --force" in text and "':!.scratch'" in text, text
     assert "cp -a" not in text and "mktemp" not in text and "scratch copy" not in text, text
-    assert "CARGO_TARGET_DIR" in text and "target" in text, text
+    assert f"CARGO_TARGET_DIR={wt}/.scratch/mutation-alpha-<id>/target" in text, text
+    assert "{worker}" not in text and "{worktree}" not in text, text
     assert "not run" in text, text
 
 
@@ -268,9 +269,9 @@ def test_a_finding_given_as_both_finding_and_ruled_is_refused_with_the_way_out(w
     assert "S1" in err and "twice" in err and "--ruled" in err and "not both" in err, err
 
 
-def test_a_ruled_id_with_no_finding_flag_is_accepted(wt):
-    text = task(wt, "--ruled", "alpha:C3=use a set", "--finding", "beta:P2=y")
-    assert "C3" in section(text, "Findings to fix"), text
+def test_the_same_flag_twice_is_refused_without_the_finding_ruled_hint(wt):
+    err = refused_task(wt, "--finding", "alpha:S1=x", "--finding", "beta:S1=y")
+    assert "S1" in err and "twice" in err and "not both" not in err, err
 
 
 def test_help_states_the_findings_rules(wt):
@@ -278,14 +279,15 @@ def test_help_states_the_findings_rules(wt):
     assert "not both" in out and "every worker" in out, out
 
 
-@pytest.mark.parametrize("cmd", ["true", ":", "echo ok", "exit 0", "test -f a.py", "ls", "python3 -c pass"])
+@pytest.mark.parametrize("cmd", ["true", ":", "echo ok", "exit 0", "test -f a.py", "ls", "TESTS_JOBS=1 true", "cd sub && echo ok"])
 def test_a_test_command_that_runs_no_tests_is_refused(wt, cmd):
     err = refused(wt, "alpha=a.py", test_command=cmd)
     assert "runs no tests" in err and cmd in err, err
 
 
 @pytest.mark.parametrize("cmd", ["uv run --locked pytest implement/x_test.py", "bash tests/all.sh", "cargo test -p lane",
-                                 "node --test", "TESTS_JOBS=1 bash tests/all.sh --changed origin/main"])
-def test_a_test_command_that_names_a_test_runner_is_accepted(wt, cmd):
+                                 "node --test", "TESTS_JOBS=1 bash tests/all.sh --changed origin/main",
+                                 "cd implement && uv run pytest x_test.py", "npx jest", "make ci"])
+def test_a_test_command_that_runs_something_is_accepted(wt, cmd):
     code, out, err = run(wt, "alpha=a.py", test_command=cmd)
     assert code == 0, err
