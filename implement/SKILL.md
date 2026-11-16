@@ -547,21 +547,18 @@ on this path. The run goes in the background of your own shell (`run_in_backgrou
 which is what lets the axes run beside it:
 
 ```
-dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
-mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
-body_file=<absolute path you wrote the ticket body, comments and appendix to>
-out_file="$dir/codex-adversarial-<n>-gate.out"
-record="$dir/codex-adversarial-<n>-gate.json"
-plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
-cd <this workspace> && git fetch origin
-usage_before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
-launch_sha=$(git rev-parse HEAD); started=$(date -Is)
-node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
-status=$?
-usage_after=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
-printf '{"ticket": <n>, "phase": "gate", "status": %d, "launch_sha": "%s", "completion_sha": "%s", "started": "%s", "completed": "%s", "usage_before": "%s", "usage_after": "%s"}\n' \
-  "$status" "$launch_sha" "$(git rev-parse HEAD)" "$started" "$(date -Is)" "$usage_before" "$usage_after" >"$record"
+python3 ~/.agents/skills/implement/codex-gate-run.py --repo <repo> --ticket <n> \
+  --body-file <absolute path you wrote the ticket body, comments and appendix to> \
+  --base origin/<default>
 ```
+
+Run it from this workspace after `git fetch origin`. The script
+(`implement/codex-gate-run.py`) reads the plugin path from
+`~/.claude/plugins/installed_plugins.json`, takes the usage reading before and
+after, runs the adversarial review with the body as one literal argument, and
+writes `$HOME/.cache/agent-reviews/<repo>/codex-adversarial-<n>-gate.out` and
+`.json`. Node's failure goes into the record's `status`; the script's own exit
+is non-zero only when nothing ran (no plugin entry, unreadable body file).
 
 The record carries the node call's exit status, the workspace HEAD at launch
 and again at completion, both timestamps and the usage readings. The launch sha
