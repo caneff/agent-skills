@@ -218,8 +218,7 @@ class Branch:
         except shellcmd.CmdError as e:
             raise Unanswerable(str(e)) from None
         self.commits = set(git("rev-list", f"{self.base}..{name}").split())
-        log = git("log", f"{self.base}..{name}", "--format=%at%n%B%n==end==").split("==end==")
-        stamps = [int(chunk.strip().split("\n", 1)[0]) for chunk in log if chunk.strip()]
+        stamps = [int(t) for t in git("log", f"{self.base}..{name}", "--format=%at").split()]
         self.started = min(stamps) if stamps else None
 
     def fresh(self, path):
