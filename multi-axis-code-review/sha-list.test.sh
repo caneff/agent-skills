@@ -62,13 +62,13 @@ empty="$(sha 'an empty commit')"; merge="$(sha 'a merge')"
 # and its directory are the test's own. This block's own refusal when the
 # preamble was not run is checked below.
 preamble="$(awk '
-  /^```/ { if (inb) { if (index(buf, "publish_capture()")) printf "%s", buf; buf = ""; inb = 0 }
+  /^```/ { if (inb) { if (index(buf, "capture-lib.sh")) printf "%s", buf; buf = ""; inb = 0 }
            else inb = 1
            next }
   inb { buf = buf $0 "\n" }
 ' "$skill")"
 case "$preamble" in
-  *'publish_capture()'*) ;;
+  *'capture-lib.sh'*) ;;
   *) echo "FAIL: could not extract the report-directory preamble from $skill" >&2; exit 1 ;;
 esac
 # The preamble names the installed script and HOME is scratched below: run this

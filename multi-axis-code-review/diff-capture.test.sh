@@ -44,7 +44,7 @@ installed='~/.agents/skills/multi-axis-code-review'
 preamble="${preamble//"$installed"/$here}"
 block="$(fenced 'diff "$fixed_point"...HEAD')"
 case "$preamble" in
-  *'publish_capture()'*) ;;
+  *'capture-lib.sh'*) ;;
   *) echo "FAIL: could not extract § 4's report-directory preamble from multi-axis-code-review/SKILL.md" >&2; exit 1 ;;
 esac
 [ -n "$block" ] || { echo "FAIL: could not extract § 4's capture block from multi-axis-code-review/SKILL.md" >&2; exit 1; }
