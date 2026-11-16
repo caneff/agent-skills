@@ -483,7 +483,7 @@ the refusal verbatim and stops, never reaching the removal another way.
 
 *Isolation.* `git worktree add --detach` a throwaway worktree per mutation,
 undone with `git worktree remove --force`: that is the one rule, the same in
-`implement/briefs/fanout-worker.md` and `implement/SKILL.md` § Build (#1696).
+`implement/briefs/fanout-worker.md` and `implement/SKILL.md` § Build, #1696.
 `witness-check.sh` sets `CARGO_TARGET_DIR=<mutation worktree>/target` in each
 witness, since the worktree isolates the tree and not cargo's build dir. **Never
 `cp -a`**, or any other byte copy of the reviewed tree: a linked worktree's
