@@ -322,7 +322,7 @@ fn calls_open_start_prompt_in_order_with_the_truncated_agent_name() {
     let calls = f.calls();
     let herdr_calls: Vec<&str> = calls
         .lines()
-        .filter(|l| l.starts_with("herdr worktree open") || l.starts_with("herdr agent start") || l.starts_with("herdr agent prompt"))
+        .filter(|l| l.starts_with("herdr worktree open") || l.starts_with("herdr agent start") || l.starts_with("herdr agent prompt") || l.starts_with("herdr agent read"))
         .collect();
     let name = "sudokumaker-custom-constrain-395";
     let expected = vec![
@@ -333,6 +333,7 @@ fn calls_open_start_prompt_in_order_with_the_truncated_agent_name() {
         ),
         format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model sonnet --plugin-dir {}", mods(&f)),
         format!("herdr agent prompt {name} /implement 395 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"),
+        format!("herdr agent read {name} --source visible --lines 200"),
     ];
     assert_eq!(herdr_calls, expected, "herdr calls wrong:\n{herdr_calls:?}");
 }
@@ -346,7 +347,11 @@ fn every_gh_call_names_the_repo_from_origin_and_claims_the_ticket() {
     assert!(out.status.success(), "{}", out_text(&out));
     let calls = f.calls();
     for line in calls.lines().filter(|l| l.starts_with("gh ")) {
-        assert!(line.contains("--repo caneff/sudokumaker-custom-constraints"), "a gh call relied on the cwd: {line}");
+        // `gh api` names the repo in its path, not a `--repo` flag.
+        assert!(
+            line.contains("--repo caneff/sudokumaker-custom-constraints") || line.starts_with("gh api --paginate repos/caneff/sudokumaker-custom-constraints/"),
+            "a gh call relied on the cwd: {line}"
+        );
     }
     assert!(
         calls.contains("gh issue edit 395 --repo caneff/sudokumaker-custom-constraints --remove-label ready-for-agent --add-label in-progress --add-assignee @me"),
@@ -811,7 +816,7 @@ fn help_documents_both_modes() {
     assert!(out.status.success(), "{}", out_text(&out));
     let text = out_text(&out);
     for want in [
-        "<issue number> [<issue number>...]",
+        "--clump <issue number> <issue number>...",
         "/implement <n>... --tier",
         "--spec <n> [--slots <k>]",
         "/implement-spec <n> --slots <k>",
@@ -819,6 +824,10 @@ fn help_documents_both_modes() {
         "ready-for-human",
         "--chris-merges",
         "Several issue numbers are one clump",
+        "They need --clump",
+        "A ticket with an open blocker is refused",
+        "the pane is read back",
+        "Spec mode refuses when 8 or more spec runs are live",
         "a clump is always heavy",
         "for the lowest number named",
         "Integration branch: a spec with more than one slice",
@@ -937,7 +946,7 @@ fn a_clump_claims_every_ticket_and_names_one_workspace_for_the_lowest() {
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     // Named out of order on purpose: the lowest names the workspace, not
     // the first one typed.
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "421", "420", "422"], &default_scenario());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "421", "420", "422"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let calls = f.calls();
     for n in ["420", "421", "422"] {
@@ -956,7 +965,7 @@ fn a_clumps_brief_carries_every_ticket_in_it() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "424", "423"], &default_scenario());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "424", "423"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let prefix = "herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 424 --tier heavy --controller \"skills-ctl\"";
     let tail = " --wait --until working --timeout 120000";
@@ -972,7 +981,7 @@ fn a_clumps_brief_says_internal_blockers_are_ignored_shas_do_not_survive_a_squas
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "424", "423"], &default_scenario());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "424", "423"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let line = prompt_line(&f);
     for needle in [
@@ -1005,7 +1014,7 @@ fn a_clump_holding_one_unclaimable_ticket_claims_nothing() {
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let scenario = with(&default_scenario(), &[("GH_ISSUE_427", "OPEN\tready-for-agent,in-progress\t")]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "425", "426", "427"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "425", "426", "427"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "425", "#427 is labelled in-progress"), "{}", out_text(&out));
 }
 
@@ -1018,7 +1027,7 @@ fn a_claim_that_fails_partway_releases_the_tickets_already_claimed() {
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let scenario = with(&default_scenario(), &[("GH_ISSUE_EDIT_FAIL", "430")]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "428", "429", "430"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "428", "429", "430"], &scenario);
     assert!(!out.status.success(), "{}", out_text(&out));
     assert!(out_text(&out).contains("could not claim #430"), "{}", out_text(&out));
     let calls = f.calls();
@@ -1044,7 +1053,7 @@ fn a_clump_is_always_heavy_even_when_every_ticket_is_documentation() {
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let docs = "OPEN\tdocumentation,ready-for-agent\t";
     let all_docs = with(&default_scenario(), &[("GH_ISSUE_431", docs), ("GH_ISSUE_432", docs)]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "431", "432"], &all_docs);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "431", "432"], &all_docs);
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(f.calls().contains("/implement 431 432 --tier heavy"), "{}", f.calls());
     assert!(!f.calls().contains("--tier light"), "{}", f.calls());
@@ -1065,7 +1074,7 @@ fn a_clump_holding_a_ready_for_human_ticket_is_briefed_chris_merges() {
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let scenario = with(&default_scenario(), &[("GH_ISSUE_436", "OPEN\tenhancement,ready-for-human\t")]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "435", "436"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "435", "436"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
     let calls = f.calls();
     assert!(calls.lines().any(|l| l == claim_line("435")), "{calls}");
@@ -1082,7 +1091,7 @@ fn the_same_ticket_named_twice_is_refused() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "437", "437"], &default_scenario());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "437", "437"], &default_scenario());
     assert!(refused(&out, &f.calls(), &repo, "437", "#437 is named twice"), "{}", out_text(&out));
 }
 
@@ -1094,7 +1103,7 @@ fn a_leading_zero_does_not_make_a_second_ticket() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "0437", "437"], &default_scenario());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "0437", "437"], &default_scenario());
     assert!(refused(&out, &f.calls(), &repo, "437", "#437 is named twice"), "{}", out_text(&out));
 
     let f2 = Fixture::new();
@@ -1196,7 +1205,7 @@ fn a_ticket_claimed_between_the_read_and_the_edit_is_refused_and_never_released(
         &default_scenario(),
         &[("GH_CLAIM_DIR", claims.to_str().unwrap()), ("GH_ISSUE_602", "OPEN\tenhancement,ready-for-agent\t"), ("GH_CLAIM_HIDE_UNTIL_EDIT", "602")],
     );
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "601", "602"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "601", "602"], &scenario);
     assert!(!out.status.success(), "{}", out_text(&out));
     let calls = f.calls();
     assert_eq!(claim_edits(&calls, "602"), 0, "{calls}");
@@ -1974,7 +1983,7 @@ fn a_clumps_worker_record_carries_every_ticket_lowest_first() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "420", "416"], &default_scenario());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "420", "416"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let records = lane::workers::read(&f.home(), &std::process::id().to_string());
     assert_eq!(records.len(), 1);
@@ -2208,7 +2217,7 @@ fn a_clumps_run_id_sits_before_the_clump_note() {
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     seed_run_file(&f, None, "run-2026-09-23-0700");
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "run-2026-09-23-0700", "424", "423"], &default_scenario());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "run-2026-09-23-0700", "--clump", "424", "423"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let line = prompt_line(&f);
     assert!(
@@ -2548,7 +2557,7 @@ fn a_clump_mixing_a_slice_with_a_lone_ticket_is_refused() {
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500")]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395", "396"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "395", "396"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "395", "one base"), "{}", out_text(&out));
 }
 
@@ -2559,7 +2568,7 @@ fn a_clump_of_slices_of_one_spec_builds_on_its_integration_branch() {
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let landed = push_integration_branch(&repo, "spec-500");
     let scenario = with(&default_scenario(), &[("GH_PARENT_395", "500"), ("GH_PARENT_396", "500")]);
-    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395", "396"], &scenario);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "395", "396"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(git_out(&repo.join(".claude/worktrees/implement-395"), &["rev-parse", "HEAD"]), landed);
     assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "spec-500");
@@ -2599,7 +2608,7 @@ fn a_ticket_whose_body_says_its_parent_is_none_dispatches_as_a_lone_ticket() {
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     push_integration_branch(&repo, "spec-500");
-    let scenario = with(&default_scenario(), &[("GH_BODY_395", "## Parent\n\nNone\n\n## Blocked by\n\n- #12\n")]);
+    let scenario = with(&default_scenario(), &[("GH_BODY_395", "## Parent\n\nNone\n\n## Blocked by\n\n- #12\n"), ("GH_ISSUE_12", "CLOSED\tenhancement\t")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.base"]), "");
@@ -2673,4 +2682,340 @@ fn dispatch_records_the_sha_a_slice_branched_from_as_its_fork_point() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(git_out(&repo, &["config", "--get", "branch.implement-395.forkpoint"]), landed, "{}", out_text(&out));
+}
+
+// ---- #1701: an explicit clump, open blockers, a confirmed brief, a spec-run cap
+
+#[test]
+fn several_numbers_without_clump_are_refused_and_nothing_is_claimed() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "421", "420"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "420", "--clump"), "{}", out_text(&out));
+}
+
+#[test]
+fn clump_with_one_number_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "420"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "420", "--clump"), "{}", out_text(&out));
+}
+
+#[test]
+fn clump_goes_only_with_plain_mode() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "--spec", "420"], &scenario);
+    // The one-number refusal also says "--clump": only this wording is the spec guard's.
+    assert!(refused(&out, &f.calls(), &repo, "420", "only goes with a plain dispatch"), "{}", out_text(&out));
+}
+
+const BLOCKED_BODY: &str = "Do the thing.\n\n## Blocked by\n\n- #77\n";
+
+#[test]
+fn a_ticket_whose_blocked_by_section_names_an_open_issue_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_BODY_395", BLOCKED_BODY), ("GH_ISSUE_77", "OPEN\tenhancement\t")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "#77"), "{}", out_text(&out));
+    assert!(out_text(&out).contains("blocked"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_blocked_by_section_naming_only_closed_issues_dispatches() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_BODY_395", BLOCKED_BODY), ("GH_ISSUE_77", "CLOSED\tenhancement\t")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+}
+
+#[test]
+fn a_blocker_that_is_another_ticket_of_the_clump_is_not_a_refusal() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_BODY_396", "x\n\n## Blocked by\n\n- #395\n"), ("GH_BLOCKED_BY_396", "395")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--clump", "395", "396"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+}
+
+#[test]
+fn an_open_native_blocker_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_BLOCKED_BY_395", "88")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "#88"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_native_blocker_read_that_fails_is_a_refusal_not_no_blockers() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_BLOCKED_BY_FAIL_395", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "blockers"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_blocker_that_cannot_be_read_is_a_refusal() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // No GH_ISSUE_77 row and the default trio would answer it: an empty row is the fake's "no issue".
+    let scenario = with(&default_scenario(), &[("GH_BODY_395", BLOCKED_BODY), ("GH_ISSUE_77", "")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "#77"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_brief_that_never_reached_the_pane_fails_the_dispatch_without_release_commands() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("HERDR_READ_EMPTY", "1"), ("LANE_BRIEF_POLL_MS", "5")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    let text = out_text(&out);
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("did not arrive"), "{text}");
+    // The agent is already working: a release line would unclaim a live worker.
+    assert!(!text.contains("release the ticket"), "{text}");
+    assert!(text.contains("may be running"), "{text}");
+    assert_eq!(f.calls().lines().filter(|l| l.starts_with("herdr agent read")).count(), 5, "{}", f.calls());
+}
+
+#[test]
+fn a_pane_read_that_fails_is_reported_as_unread_not_as_a_brief_that_did_not_arrive() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // The fake prints the brief on a failing read too: only the exit status says it failed.
+    let scenario = with(&default_scenario(), &[("HERDR_READ_FAIL", "1"), ("LANE_BRIEF_POLL_MS", "5")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    let text = out_text(&out);
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("could not read"), "{text}");
+    assert!(!text.contains("did not arrive"), "{text}");
+    assert!(!text.contains("release the ticket"), "{text}");
+}
+
+#[test]
+fn a_confirmed_brief_reports_the_dispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(f.calls().lines().any(|l| l.starts_with("herdr agent read")), "{}", f.calls());
+}
+
+fn spec_agents(k: usize) -> String {
+    let rows: Vec<String> = (0..k).map(|i| format!(r#"{{"name":"repo-spec-{}","agent_status":"working"}}"#, 900 + i)).collect();
+    format!("[{}]", rows.join(","))
+}
+
+fn spec_scenario() -> Vec<(&'static str, &'static str)> {
+    with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent"), ("GH_SUBISSUES", "2")])
+}
+
+#[test]
+fn a_spec_dispatch_past_the_live_spec_run_cap_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    f.set_agents(&spec_agents(8));
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &spec_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "395", "spec runs"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_spec_dispatch_under_the_cap_goes_through() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    f.set_agents(&spec_agents(7));
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &spec_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+}
+
+#[test]
+fn a_done_spec_run_does_not_count_against_the_cap() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let rows: Vec<String> = (0..8).map(|i| format!(r#"{{"name":"repo-spec-{}","agent_status":"done"}}"#, 900 + i)).collect();
+    f.set_agents(&format!("[{}]", rows.join(",")));
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &spec_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+}
+
+#[test]
+fn an_idle_spec_run_counts_against_the_cap() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let rows: Vec<String> = (0..8).map(|i| format!(r#"{{"name":"repo-spec-{}","agent_status":"idle"}}"#, 900 + i)).collect();
+    f.set_agents(&format!("[{}]", rows.join(",")));
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &spec_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "395", "spec runs"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_plain_dispatch_ignores_the_spec_run_cap() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    f.set_agents(&spec_agents(20));
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+}
+
+#[test]
+fn an_agent_listing_that_fails_refuses_a_spec_dispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&spec_scenario(), &[("HERDR_LIST_FAIL", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--controller", "skills-ctl", "--spec", "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "agent list"), "{}", out_text(&out));
+}
+
+// C8: a ticket whose body cannot be read cannot say what blocks it.
+#[test]
+fn a_non_documentation_ticket_whose_body_cannot_be_read_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_BODY_FAIL_395", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "body to check its blockers"), "{}", out_text(&out));
+}
+
+// The blocked-by grammar is implement-spec/frontier.py's: each form it reads is a blocker here too.
+#[test]
+fn an_inline_blocked_by_line_names_a_blocker() {
+    for body in ["Blocked by: #77\n\nDo it.\n", "**Blocked by:** #77\n\nDo it.\n"] {
+        let f = Fixture::new();
+        f.reset_home(true);
+        let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+        let scenario = with(&default_scenario(), &[("GH_BODY_395", body), ("GH_ISSUE_77", "OPEN\tenhancement\t")]);
+        let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+        assert!(refused(&out, &f.calls(), &repo, "395", "#77"), "{body:?}: {}", out_text(&out));
+    }
+}
+
+#[test]
+fn a_fenced_or_quoted_blocked_by_is_not_a_declaration() {
+    for body in ["```\n## Blocked by\n\n- #77\n```\n", "> ## Blocked by\n> - #77\n", "    ## Blocked by\n    - #77\n"] {
+        let f = Fixture::new();
+        f.reset_home(true);
+        let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+        let scenario = with(&default_scenario(), &[("GH_BODY_395", body), ("GH_ISSUE_77", "OPEN\tenhancement\t")]);
+        let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+        assert!(out.status.success(), "{body:?}: {}", out_text(&out));
+    }
+}
+
+#[test]
+fn a_hash_line_inside_a_fence_does_not_end_the_blocked_by_section() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let body = "## Blocked by\n\n```\n# a comment\n```\n\n- #77\n";
+    let scenario = with(&default_scenario(), &[("GH_BODY_395", body), ("GH_ISSUE_77", "OPEN\tenhancement\t")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "#77"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_ticket_declaring_its_blockers_twice_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let body = "Blocked by: #77\n\n## Blocked by\n\n- None\n";
+    let scenario = with(&default_scenario(), &[("GH_BODY_395", body), ("GH_ISSUE_77", "CLOSED\tenhancement\t")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "more than once"), "{}", out_text(&out));
+}
+
+#[test]
+fn an_open_blocker_in_another_repo_is_refused_by_its_full_name() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_BLOCKED_BY_395", "caneff/elsewhere#395")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "caneff/elsewhere#395"), "{}", out_text(&out));
+}
+
+#[test]
+fn the_native_blocker_read_pages_through_every_page() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    let api = f.calls().lines().find(|l| l.starts_with("gh api")).unwrap_or_default().to_string();
+    assert!(api.contains("--paginate"), "{api}");
+}
+
+// C2: a blocker that landed on the slice's integration branch is met though its issue stays open.
+#[test]
+fn a_slice_whose_blocker_landed_on_its_integration_branch_dispatches() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_integration_branch(&repo, "spec-500");
+    let scenario = with(
+        &default_scenario(),
+        &[
+            ("GH_PARENT_396", "500"),
+            ("GH_BODY_396", "## Blocked by\n\n- #395\n"),
+            ("GH_ISSUE_395", "OPEN\tenhancement\t"),
+            ("GH_BLOCKED_BY_396", "395"),
+            ("GH_MERGED_BODIES", "What changed\n\nCloses #395\n"),
+        ],
+    );
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "396"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+}
+
+#[test]
+fn a_slice_whose_blocker_has_not_landed_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_integration_branch(&repo, "spec-500");
+    let scenario = with(
+        &default_scenario(),
+        &[
+            ("GH_PARENT_396", "500"),
+            ("GH_BODY_396", "## Blocked by\n\n- #395\n"),
+            ("GH_ISSUE_395", "OPEN\tenhancement\t"),
+            ("GH_MERGED_BODIES", "Closes #12\n"),
+        ],
+    );
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "396"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "396", "#395"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_landed_list_that_cannot_be_read_refuses_a_slice() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    push_integration_branch(&repo, "spec-500");
+    let scenario = with(&default_scenario(), &[("GH_PARENT_396", "500"), ("GH_MERGED_FAIL", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "396"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "396", "landed"), "{}", out_text(&out));
 }

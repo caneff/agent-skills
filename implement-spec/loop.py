@@ -681,8 +681,10 @@ def render_dispatch(picked, held, run_id, repo):
     for c in picked:
         lines.append(f"dispatch  #{key_of(c)}  "
                      + ",".join(f"#{n}" for n in c["tickets"]))
+        # Several numbers are one clump only when the caller says so (#1701).
+        clump = " --clump" if len(c["tickets"]) > 1 else ""
         lines.append("command   implement-dispatch "
-                     + " ".join(str(n) for n in c["tickets"])
+                     + " ".join(str(n) for n in c["tickets"]) + clump
                      + f" --run {run_id} --repo {shlex.quote(repo)}")
     for entry in held:
         # `same_tick` names the other candidate this tick picked ahead of it;
