@@ -10,8 +10,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+import fixture_identity  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDER = os.path.join(HERE, "render-brief.py")
@@ -284,8 +288,7 @@ def repo_wt(tmp_path):
     path = tmp_path / "gitwt"
     path.mkdir()
     env = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
-           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, **fixture_identity.env()}
     for cmd in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "base"]):
         subprocess.run(["git", "-C", str(path), *cmd], check=True, env=env, capture_output=True)
     head = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], check=True,
