@@ -31,8 +31,8 @@
 # The nightly backstop reports every such line. `TESTS_CPU_BUDGET=<seconds>`
 # can only lower every budget (a test uses it to make a fixture suite go
 # over); raising one is an edit to `cpu_budget`, a visible diff line.
-# This is the merge gate (`git config land.testcmd`), not a push hook — see
-# #633.
+# This is the merge gate (the command AGENTS.md's `## End-to-end seam` names),
+# not a push hook — see #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
 # the shell from globbing a path that happens to contain a wildcard.
 set -uf

@@ -67,8 +67,10 @@ The brief carries what neither engine can infer:
   a shell string: a comment is the less trusted half of the ticket, since
   anyone with repo access can add one (`implement/SKILL.md` § The Codex pass
   says the same of the Codex focus text).
-- The repo's gate, read from `git config land.testcmd`, and the instruction to
-  run it green before finishing.
+- The repo's gate, the command its `AGENTS.md` `## End-to-end seam` section
+  names (`python3 ~/.agents/skills/implement/selector_check.py command --root .`
+  prints it), and the
+  instruction to run it green before finishing.
 - `implement/SKILL.md` § Build's TDD rules: failing test first per criterion, no implementation
   ahead of a red test, no scope beyond the ticket.
 - Commit to this branch with `Closes #<n>` in the final commit body. Do not

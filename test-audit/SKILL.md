@@ -118,8 +118,9 @@ finding(s) suppressed under fixtures/.`, `N duplicate-name finding(s) suppressed
 under fixtures/.`) even when it passes — otherwise a repo could park hollow
 tests under a directory it named `fixtures` and never notice.
 
-Wire it into a repo by adding it to that repo's local gate (`git config
-land.testcmd`). In this repo that is `test-audit/assertion-free-gate.test.sh`,
+Wire it into a repo by adding it to the command that repo's `AGENTS.md`
+`## End-to-end seam` section names. In this repo that is
+`test-audit/assertion-free-gate.test.sh`,
 picked up automatically by `tests/all.sh`'s `*.test.sh` discovery.
 
 **The JS gate's remaining blind spot.** A file whose every test is

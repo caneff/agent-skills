@@ -105,13 +105,13 @@ reasonable tradeoff for faster JS/TS suites.)
 ## 6. Gates: merge gate
 
 CI is local, not GitHub Actions
-(`~/.agents/skills/flow/claude/WORKFLOW.md` § CI): set the merge gate with
-`git config land.testcmd 'just check'` and copy no workflow files. The lane's
-merges (`drain`, `implement`) run the command in `AGENTS.md`'s
-`## End-to-end seam` section, which the `AGENTS.md` template in step 7
-declares as `just check`.
+(`~/.agents/skills/flow/claude/WORKFLOW.md` § CI): the merge gate is the
+command `AGENTS.md`'s `## End-to-end seam` section names, and no workflow files
+get copied. The lane's merges (`drain`, `implement`) run it; the `AGENTS.md`
+template in step 7 declares it as `just check`. Nothing reads `git config
+land.testcmd`, so set none.
 
-**Done when:** `git config land.testcmd` prints `just check`, and after step 7
+**Done when:** after step 7
 `python3 ~/.agents/skills/implement/selector_check.py command --root .` prints
 `just check`.
 
