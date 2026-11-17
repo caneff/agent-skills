@@ -61,11 +61,10 @@ per call** (Chris, 2026-11-15: "we shouldnt batch more than 1 at a time"):
 uv run --directory ~/src/sudoku-kit python -m sudoku_kit.link_codec shorten '<link-or-file>'
 ```
 
-One link per call, and the next call only after the previous one has returned.
-Never pass several sources to one `shorten`: SudokuMaker rate-limits
-`POST /api/puzzles`, and a 22-link batch got a `429 Too Many Requests` on the
-4th. The app posts one puzzle per request, so batching saves SudokuMaker
-nothing.
+The next call starts only after the previous one has returned. SudokuMaker
+rate-limits `POST /api/puzzles`: a 22-link batch got a
+`429 Too Many Requests` on the 4th. The app posts one puzzle per request, so
+batching saves SudokuMaker nothing.
 
 - **Interval:** wait 10 seconds between `shorten` calls.
 - **On a 429:** wait 60 seconds and retry that one link once. If it fails
@@ -75,8 +74,8 @@ nothing.
 Each call prints one short link and checks that the new id resolves back to
 the payload it sent. A non-zero exit prints the reason to stderr: report it,
 and hand over no link for that source. Links from earlier calls are already
-minted: keep them, and re-run only the failing source, since a second run
-mints a second record. Never type a short link from memory.
+minted: keep them. Except for the one 429 retry above, never re-run a failed
+source on your own, since a second run mints a second record. Never type a short link from memory.
 
 Which link files a repo commits, and whether they hold full or short links, is
 that repo's own `AGENTS.md` rule, not this skill's.
