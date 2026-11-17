@@ -156,6 +156,14 @@ both, and a restart is the event this file exists for. It is also not repo
 content: the workers branch from the target tree, and the controller may be
 driving a repo it is not sitting on.
 
+**The controller's other two files live in `~/.cache/spec-run/<run-id>/`**
+(#1896): `candidates.json`, the run's frozen candidate set, and
+`in-flight.json`, the in-flight list `loop.py dispatch` reads. They sit in a
+directory named for the run, under the run file's own cache directory
+(`SPEC_RUN_CACHE_DIR` moves both), and not beside it as
+`<run-id>.candidates.json`: a run id may contain dots, so that name could be
+another run's run file. Nothing in `runfile.py` lists the directory.
+
 **Machine-readable.** Resume, the liveness sweep and the run's closing report
 all read the same file, so none of them re-derives the run from prose.
 
