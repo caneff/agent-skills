@@ -129,6 +129,15 @@ branch too.
    two lists into the candidates file:
    `closure.py --json <repo-root> <n>=<paths> > <new>`, then
    `jq -s add <candidates> <new> > <candidates>.tmp && mv <candidates>.tmp <candidates>`.
+   **The candidates file lives at
+   `~/.cache/spec-run/<run-id>/candidates.json` and step 5's in-flight file at
+   `~/.cache/spec-run/<run-id>/in-flight.json`** — `mkdir -p` the directory
+   first, never `/tmp` (`references/run-file.md` § Why
+   `~/.cache/spec-run/<run-id>.json` says why, and why a directory: a run id may
+   contain dots, so a `<run-id>.candidates.json` could be another run's run
+   file). The candidates file is the run's frozen set; a lost one is rebuilt by
+   hand, as two runs found (#1896).
+
 3. The **opening report** carries `closure.py`'s announcement line verbatim,
    so the reader can tell all three declaration states apart: a declared
    directive, a **declared None** — the repo has no include graph — and
