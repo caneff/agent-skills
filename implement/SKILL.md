@@ -440,8 +440,13 @@ round follows steps 2–3 below keyed on the spec number:
    #1581). A scope is a sentence there that names the command or tests to
    run for a class of change, as sudokupad-art's "a puzzle update runs only
    that puzzle's tests"; a `**Narrowed**` line is the per-change command for
-   every change no scope sentence names. This is the ticket's one suite run,
-   just before "PR up"; the merger runs the same command again on the PR
+   every change no scope sentence names. A scope replaces the default; an
+   **extra run** adds to it (#1898): a sentence there that names a command to
+   run in addition to the selector or scope run when the change touches
+   something (sudokupad-scripts' `npm run test:tampermonkey` on an `@version`
+   header change). Run every extra run the diff triggers after that run, in
+   the same checkout, and each must be green. This is the ticket's one suite
+   run, just before "PR up"; the merger runs the same command again on the PR
    merged into current `<default>` before it merges (§ The merge step 3).
    The run is a parallel job (§ Control): set `TESTS_JOBS=<k>` on it and
    declare `<k>` cores before you launch. `tests/all.sh` caps an unset
@@ -960,6 +965,34 @@ closed.
    fix is read and re-run like any other commit. Remove the worktree
    afterwards with `git worktree remove --force`, since a conflicted merge
    leaves it dirty.
+
+   **Extra runs** (#1898). A sentence in the repo's `AGENTS.md` § End-to-end
+   seam that names a command to run in addition when the change touches
+   something is an extra run, and it is never a replacement for the
+   selector or scope run above. After that run goes green, read the PR's
+   changed files (`gh pr diff <pr> --name-only`) against each such sentence
+   and run every extra run it triggers in the same worktree, with the same
+   `--rev` rule: read the sentence from `origin/<default>`. A red extra run
+   blocks the merge as a red selector run does. The skip rule below skips
+   the extra runs too, but only when the worker's "PR up" `Seam run at:`
+   line names them as run, so the worker's report says which it ran; a
+   report that is silent on a triggered extra run keeps the rerun.
+
+   **Visual PRs** (#1903). A green suite has merged a visual regression at
+   least three times (a toolbar icon rendered as a solid square, a misplaced
+   checkbox, inconsistent dialog buttons), because no test reads the page. A
+   PR that changes what a script shows (its DOM, CSS, icons, dialogs, or the
+   strings it renders) gets a real-page screenshot before the merge: load the
+   PR's head in the page the script runs on, `shot-scraper` the changed
+   surface, and open the image and judge it, per
+   `~/.agents/skills/flow/claude/VISUAL-INSPECTION.md` § Judging visual work.
+   A green log is not that check. A regression (a blank or solid icon, a
+   misplaced control, a control that differs from its siblings) blocks the
+   merge and goes to the worker with the image's path. A page the controller
+   cannot load, because it needs a login or a browser extension, is said in
+   the merge report as `screenshot not taken: <why>` and handed to Chris
+   before the merge, never skipped silently. A PR that changes no visible
+   surface needs no shot; say `no visual change` when it is a script repo.
 
    **Skip when the base is already in the head** (#1616, Chris 2026-10-22).
    After `git fetch origin`, skip the worktree and the run when all three
