@@ -394,8 +394,26 @@ RUN_CWD="$fork" run "push: a word that is no remote, URL or path is refused" 2 \
   "git push nosuchremote master" "no remote configured"
 RUN_CWD="$fork" run "push: a comment on the push line is refused" 2 \
   "git push origin master # note" "cannot tell where to"
-RUN_CWD="$solo" run "push: a cd into another checkout is refused, naming -C" 2 \
-  "cd $fork && git push upstream master" "git -C <absolute path> push"
+# A literal leading `cd <absolute path> &&` names the checkout (#1900): the push
+# is judged there, not refused for the cd.
+RUN_CWD="$solo" run "push: a leading cd into a non-owned checkout is judged there, blocked as foreign" 2 \
+  "cd $fork && git push upstream master" "swaroopg92/penpa-edit"
+RUN_FORBID="cannot tell where to" RUN_CWD="$fork" run "push: a leading cd into an owned checkout is allowed" 0 \
+  "cd $solo && git push origin main"
+RUN_FORBID="cannot tell where to" RUN_CWD="$fork" run "push: a quoted leading cd path is allowed" 0 \
+  "cd \"$solo\" && git push origin main"
+RUN_CWD="$solo" run "push: a leading cd to a path that is no checkout is refused" 2 \
+  "cd $tmp/nonexistent && git push origin main" "cannot tell where to"
+RUN_CWD="$solo" run "push: a relative leading cd is refused" 2 \
+  "cd ../repo && git push origin main" "cannot tell where to"
+RUN_CWD="$solo" run "push: a second cd after the leading one is refused" 2 \
+  "cd $repo && cd $fork && git push upstream master" "cannot tell where to"
+RUN_CWD="$solo" run "push: a cd that is not leading is refused" 2 \
+  "git status && cd $repo && git push origin main" "cannot tell where to"
+RUN_CWD="$solo" run "push: a leading cd joined by ; is refused" 2 \
+  "cd $repo ; git push origin main" "cannot tell where to"
+RUN_CWD="$solo" run "push: a leading cd with a variable path is refused" 2 \
+  'cd $D && git push origin main' "cannot tell where to"
 RUN_CWD="$fork" run "push: -o's value is not read as the remote" 2 \
   "git push -o ci.skip upstream master" "swaroopg92/penpa-edit"
 RUN_CWD="$fork" run "push: -o's value is skipped on an owned remote too" 0 \
@@ -709,8 +727,11 @@ RUN_FORBID="from a linked worktree" run "stash: unresolved -C path blocked, caus
   "git -C $repo/.claude/worktrees/nope stash pop" "$unres"
 run "stash: -C a shell variable blocked, cause named" 2 \
   'W=x; git -C "$W" stash pop' "$unres"
-RUN_FORBID="from a linked worktree" run "stash: cd from the primary blocked, cause named" 2 \
-  "cd $repo && git stash" "a cd or pushd"
+RUN_FORBID="from a linked worktree" run "stash: a cd that is not leading blocked, cause named" 2 \
+  "git status && cd $repo && git stash" "a cd or pushd"
+run "stash: a leading cd to the primary allowed (#1900)" 0 "cd $repo && git stash"
+RUN_CWD="$repo" run "stash: a leading cd into a worker worktree blocked (#1900)" 2 \
+  "cd $wt && git stash" "linked worktree"
 RUN_FORBID="from a linked worktree" run "stash: GIT_DIR from the primary blocked, cause named" 2 \
   "GIT_DIR=$repo/.git git stash push" "GIT_DIR-style"
 RUN_FORBID="from a linked worktree" run "stash: comment from the primary blocked, cause named" 2 \

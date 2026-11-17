@@ -132,10 +132,18 @@ git_verb() {
 # level and TARGET_LINKED 1 when it is a linked worktree (git-dir differs from
 # the common dir).
 git_target() {
-  local dir real gitdir common
+  local dir real gitdir common lead rest
   TARGET_TOP="" TARGET_LINKED=0
   TARGET_WHY="a cd or pushd in the command"
-  echo "$SCAN" | grep -qE "$cd_re" && return 1
+  # A literal leading `cd <absolute path> &&` (#1900) sets the directory every
+  # later segment runs in; any other cd, or a path with an expansion in it,
+  # stays refused.
+  lead="" rest=$SCAN
+  if [[ "$SCAN" =~ ^[[:space:]]*cd[[:space:]]+(\"(/[^\"\$\`\\]*)\"|\'(/[^\'\$\`\\]*)\'|(/[^[:space:]\"\'\$\`\\\;\&\|\(\)]*))[[:space:]]*\&\&(.*)$ ]]; then
+    lead=${BASH_REMATCH[2]}${BASH_REMATCH[3]}${BASH_REMATCH[4]}
+    rest=${BASH_REMATCH[5]}
+  fi
+  echo "$rest" | grep -qE "$cd_re" && return 1
   TARGET_WHY="a GIT_DIR-style variable or flag"
   echo "$SCAN" | grep -qE 'GIT_(DIR|WORK_TREE|COMMON_DIR)=|--(git-dir|work-tree)' && return 1
   TARGET_WHY="a '#' in the command"
@@ -144,6 +152,7 @@ git_target() {
   [ "$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]' | wc -l)" -le 1 ] || return 1
   dir=$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]+[^[:space:]]+' | sed -E 's/^[[:space:]]*-C[[:space:]]+//')
   dir=$(printf '%s' "${dir:-.}" | tr -d "'\"")
+  [ -z "$lead" ] || case "$dir" in /*) ;; *) dir=$lead/$dir ;; esac
   TARGET_WHY="a -C path that does not resolve to a checkout ('$dir')"
   real=$(realpath -- "$dir" 2>/dev/null) || return 1
   TARGET_TOP=$(git -C "$real" rev-parse --show-toplevel 2>/dev/null) || return 1
