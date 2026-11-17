@@ -49,6 +49,6 @@ def test_visual_pr_gets_a_real_page_screenshot_before_the_merge():
     assert "before the merge, and the merge waits for it" in para
     assert "shot-scraper" in para
     assert "VISUAL-INSPECTION.md" in para
-    assert "A regression" in para and "blocks the merge" in para
+    assert "blocks the merge and goes to the worker" in para
     assert "screenshot not taken: <why>" in para
     assert "never skipped silently" in para
