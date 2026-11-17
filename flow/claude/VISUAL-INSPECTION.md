@@ -211,6 +211,14 @@ after 10 s.
   of interest before answering — don't squint at the full frame. Pillow and
   OpenCV are installed for bare `python3` (`import PIL, cv2`). Why: detail in
   a full frame is downscaled past reading.
+- Any SudokuPad page an agent loads, drives, records or screenshots, in any
+  repo, has SudokuPad's peeking Sven turned off: the `hidesvenpeek` setting,
+  persisted in the browser profile so it holds however the page is reached (a
+  link click, Back, Forward), not only on URLs that carry
+  `?setting-hidesvenpeek=1`. Why: Sven peeks from a board corner and lands in
+  every crop, frame and golden; I have asked for it off in every repo
+  (2026-11-17, twitch-rules-scroller #1339's recording; #701 hid it only on
+  fixture URLs).
 
 ### Tuning toward a mockup
 
