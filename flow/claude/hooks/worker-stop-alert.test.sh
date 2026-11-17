@@ -239,6 +239,15 @@ run "third-party peer after report" "$t"
 expect_reported "a peer message from a third session starts no turn, so the earlier report stands"
 
 reset_log
+t="$tmp/subworker-alert-after-report.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1;
+  human "[worker-stop-alert] worker #231 stopped without reporting to skills-b6"; work; assistant_text "noted"; } > "$t"
+run "sub-worker stop alert after report" "$t"
+expect_reported "a sub-worker's stop alert (a human prompt) starts no turn owed to the controller"
+
+reset_log
+# Guard only: this one also passes on the pre-#1945 hook; the test above is
+# the one that fails without the fix.
 t="$tmp/third-party-never-reported.jsonl"
 { human "$brief"; work; peer_from "uds:/run/other.sock" "implement-231-88" "idle"; assistant_text "noted"; } > "$t"
 run "third-party peer, never reported" "$t"
