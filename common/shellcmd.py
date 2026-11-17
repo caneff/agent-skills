@@ -54,6 +54,11 @@ def gh(args, ok=(0,), cwd=None, timeout=TIMEOUT):
     return _run(["gh", *args], ok, cwd, timeout)
 
 
+def herdr(args, ok=(0,), cwd=None, timeout=TIMEOUT):
+    """`herdr <args>`'s CompletedProcess, with the same contract as `git` and `gh`."""
+    return _run(["herdr", *args], ok, cwd, timeout)
+
+
 def herdr_agent(name, timeout=TIMEOUT):
     """The herdr record of agent `name` (`agent_status`, `pane_id`, ...), or None when herdr has no
     such agent. Any other failure, a timeout included, raises CmdError: a herdr that cannot be

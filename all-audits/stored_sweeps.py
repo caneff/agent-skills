@@ -6,9 +6,8 @@ GitHub issue, in the swept repo. This module owns that layout and every `gh`
 call about it: who owns the repo, its triage label, filing the record,
 posting its missing comments, reading its state, and pruning the sweeps whose
 record is closed. The sweep driver calls it; it never spawns `claude`.
-Every `gh` call goes through `common/` (#1730): the tracker where it has the
-operation, else `shellcmd.gh`, so each is bounded by a timeout and a failed
-call raises rather than reading as an answer.
+Every `gh` call goes through `common/tracker.py` (#1730, #1879), so each is
+bounded by a timeout and a failed call raises rather than reading as an answer.
 """
 import datetime as _dt
 import glob
@@ -20,7 +19,6 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 
-import shellcmd  # noqa: E402
 import tracker  # noqa: E402
 
 MULTI_DIR = "multi"  # under stored_sweeps_base(): one folder per sweep id, never a repo's
@@ -40,14 +38,9 @@ def repo_identity(repo):
     if not os.path.isdir(repo):
         return None, "no such directory"
     try:
-        out = shellcmd.gh(["repo", "view", "--json", "owner,name"], cwd=repo).stdout
-    except shellcmd.CmdError as e:
+        owner, name = tracker.GhTracker().repo_identity(repo)
+    except tracker.TrackerError as e:
         return None, f"owner check failed ({e})"
-    try:
-        reply = json.loads(out)
-        owner, name = reply["owner"]["login"], reply["name"]
-    except (ValueError, KeyError, TypeError):
-        return None, "owner check failed (gh reply unreadable)"
     if owner != OWNER:
         return None, f"owner is {owner}, not {OWNER}"
     return f"{owner}/{name}", None
@@ -73,13 +66,9 @@ def label_refusal(slug, label):
     is refused. A `gh` that cannot answer is a refusal, never a pass; no label
     is ever created."""
     try:
-        rows = tracker.gh_json(["label", "list", "--repo", slug, "--limit", "1000", "--json", "name"])
+        names = tracker.GhTracker(slug).label_names()
     except tracker.TrackerError as e:
         return f"label check failed ({e})"
-    try:
-        names = {row["name"] for row in rows}
-    except (KeyError, TypeError):
-        return "label check failed (gh reply unreadable)"
     return None if label in names else f"label `{label}` is missing"
 
 
@@ -162,9 +151,9 @@ def resume_unposted(name):
     sweep, rec = records[-1]
     while rec["unposted"]:
         try:
-            shellcmd.gh(["issue", "comment", str(rec["issue"]), "--repo", record_repo(sweep, rec),
-                         "--body-file", os.path.join(sweep, rec["unposted"][0])])
-        except shellcmd.CmdError as e:
+            tracker.GhTracker(record_repo(sweep, rec)).comment_from_file(
+                rec["issue"], os.path.join(sweep, rec["unposted"][0]))
+        except tracker.TrackerError as e:
             return f"audit record {rec['url']} still misses comments {', '.join(rec['unposted'])} ({e})"
         rec["unposted"].pop(0)
         write_json(os.path.join(sweep, RECORD_FILE), rec)
@@ -197,8 +186,7 @@ def open_specs_of(sweep, rec):
     comment. A listing that fails, is not a list of bodies, or fills the
     limit (so may hide an open spec) is a refusal, never "none open"."""
     try:
-        listed = tracker.gh_json(["issue", "list", "--repo", record_repo(sweep, rec), "--state", "open",
-                                  "--limit", str(SPEC_LIST_LIMIT), "--json", "number,body"])
+        listed = tracker.GhTracker(record_repo(sweep, rec)).open_issues("number,body", SPEC_LIST_LIMIT)
     except tracker.TrackerError as e:
         return None, f"open-spec lookup failed ({e})"
     try:
@@ -268,10 +256,10 @@ def file_audit_record(repo, stored, title, label, chunks, meta):
         paths.append(os.path.join(stored, f"audit-record-{i}.md"))
         with open(paths[-1], "w", encoding="utf-8") as f:
             f.write(text)
+    gh = tracker.GhTracker(meta["repo"])
     try:
-        out = shellcmd.gh(["issue", "create", "--title", title, "--label", label, "--body-file", paths[0]],
-                          cwd=repo).stdout
-    except shellcmd.CmdError as e:
+        out = gh.create_issue_from_file(title, paths[0], [label])
+    except tracker.TrackerError as e:
         return "", f"audit record not filed ({e}); its text is in {stored}"
     match = re.search(r"/issues/(\d+)", out)
     if not match:
@@ -286,8 +274,8 @@ def file_audit_record(repo, stored, title, label, chunks, meta):
         f.write(json.dumps({"sweep": os.path.basename(stored), "url": url}) + "\n")
     for path in paths[1:]:
         try:
-            shellcmd.gh(["issue", "comment", number, "--body-file", path], cwd=repo)
-        except shellcmd.CmdError as e:
+            gh.comment_from_file(number, path)
+        except tracker.TrackerError as e:
             return url, (f"audit record {url} is missing continuation comments {', '.join(meta['unposted'])} "
                          f"({e}); their text is in {stored}")
         meta["unposted"].pop(0)

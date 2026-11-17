@@ -27,11 +27,11 @@ def labels(issue):
     return {x["name"] for x in listed}
 
 
-def gh_text(args):
-    """`gh <args>`'s stdout. Raises TrackerError when gh cannot answer: the one place a `CmdError`
-    becomes a `TrackerError`."""
+def gh_text(args, cwd=None):
+    """`gh <args>`'s stdout, run in `cwd` when given. Raises TrackerError when gh cannot answer: the
+    one place a `CmdError` becomes a `TrackerError`."""
     try:
-        return shellcmd.gh(list(args)).stdout
+        return shellcmd.gh(list(args), cwd=cwd).stdout
     except shellcmd.CmdError as exc:
         raise TrackerError(str(exc)) from None
 
@@ -188,6 +188,64 @@ class GhTracker:
             raise TrackerError("gh issue create printed no URL")
         return url
 
+    def create_issue_from_file(self, title, body_file, labels):
+        """`create_issue` with the body read by gh from `body_file`; returns the URL."""
+        args = ["issue", "create", "--repo", self.repo, "--title", title]
+        for label in labels:
+            args += ["--label", label]
+        url = self._run(args + ["--body-file", body_file]).strip()
+        if not url:
+            raise TrackerError("gh issue create printed no URL")
+        return url
+
+    def comment_from_file(self, number, body_file):
+        """`comment` with the body read by gh from `body_file`."""
+        self._run(["issue", "comment", str(number), "--repo", self.repo, "--body-file", body_file])
+
+    def relabel(self, number, add, remove, unassign=None):
+        """Add the labels `add`, remove the labels `remove` and, when `unassign` names a login
+        (`@me` included), drop that assignee, in one `gh issue edit`."""
+        args = ["issue", "edit", str(number), "--repo", self.repo]
+        for label in remove:
+            args += ["--remove-label", label]
+        for label in add:
+            args += ["--add-label", label]
+        if unassign:
+            args += ["--remove-assignee", unassign]
+        self._run(args)
+
+    def closed_events(self, number):
+        """The `closed` events of issue `number`, every page, oldest first."""
+        return [e for e in self._pages(self._path(f"issues/{int(number)}/events"), "events")
+                if isinstance(e, dict) and e.get("event") == "closed"]
+
+    def repo_identity(self, checkout):
+        """`(owner login, name)` of the GitHub repo the checkout `checkout` is a clone of. A reply
+        that does not name both raises."""
+        try:
+            reply = _parsed(["repo", "view"], self._run(["repo", "view", "--json", "owner,name"], cwd=checkout))
+            owner, name = reply["owner"]["login"], reply["name"]
+        except (KeyError, TypeError):
+            raise TrackerError("gh repo view: the reply does not name an owner and a repo") from None
+        if not isinstance(owner, str) or not isinstance(name, str):
+            raise TrackerError("gh repo view: the reply does not name an owner and a repo")
+        return owner, name
+
+    def label_names(self):
+        """The set of the repo's label names (up to 1000)."""
+        rows = self._json(["label", "list", "--repo", self.repo, "--limit", "1000", "--json", "name"])
+        if not isinstance(rows, list) or not all(isinstance(r, dict) and "name" in r for r in rows):
+            raise TrackerError("gh label list answered with something other than named labels")
+        return {r["name"] for r in rows}
+
+    def open_issues(self, fields, limit):
+        """The open issues as `gh issue list --json <fields>` prints them, at most `limit`."""
+        rows = self._json(["issue", "list", "--repo", self.repo, "--state", "open", "--limit", str(limit),
+                           "--json", fields])
+        if not isinstance(rows, list):
+            raise TrackerError("gh issue list answered with something other than a list")
+        return rows
+
     def search_prs(self, since, limit):
         """The `repository` of up to `limit` PRs the viewer authored since `since` (`YYYY-MM-DD`),
         across every repo; the caller owns the cut-off check, since `limit` is gh's own cap."""
@@ -220,10 +278,13 @@ class MemoryTracker:
     key a ticket number or base branch) to the message it raises.
     `pr_views` maps a PR number to its `gh pr view` object, `pr_comments` to its comment bodies,
     `runs` is the workflow-run list and `logs` maps a run id to its failed log.
-    `comments`, `merges` and the issues `create_issue` adds record what was written."""
+    `comments`, `merges` and the issues `create_issue` adds record what was written; a comment is
+    also appended to its issue's own `comments`, as `issue_view` reads it back. An issue may carry
+    `events` (its timeline). `identity` is the `(owner, name)` every checkout answers, and
+    `labels_defined` the repo's label names."""
 
     def __init__(self, issues=(), prs=(), viewer="me", merged=None, broken=None, repo="owner/repo",
-                 pr_views=None, pr_comments=None, runs=(), logs=None):
+                 pr_views=None, pr_comments=None, runs=(), logs=None, identity=None, labels_defined=()):
         self.repo = repo
         self._issues = {i["number"]: i for i in issues}
         self._prs = list(prs)
@@ -234,6 +295,8 @@ class MemoryTracker:
         self._pr_comments = pr_comments or {}
         self._runs = list(runs)
         self._logs = logs or {}
+        self._identity = identity
+        self._labels_defined = set(labels_defined)
         self.comments = []
         self.merges = []
 
@@ -319,6 +382,55 @@ class MemoryTracker:
     def comment(self, number, body):
         self._check("comment")
         self.comments.append((number, body))
+        if number in self._issues:
+            self._issues[number].setdefault("comments", []).append(
+                {"author": {"login": self._viewer}, "body": body, "createdAt": "2000-01-01T00:00:00Z",
+                 "isMinimized": False})
+
+    def create_issue_from_file(self, title, body_file, labels):
+        return self.create_issue(title, self._read(body_file), labels)
+
+    def comment_from_file(self, number, body_file):
+        self.comment(number, self._read(body_file))
+
+    def _read(self, path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except OSError as exc:
+            raise TrackerError(f"cannot read {path}: {exc}") from None
+
+    def relabel(self, number, add, remove, unassign=None):
+        self._check("relabel", number)
+        if number not in self._issues:
+            raise TrackerError(f"issue #{number}: Not Found (HTTP 404)")
+        i = self._issues[number]
+        kept = [x for x in i["labels"] if x["name"] not in set(remove)]
+        i["labels"] = kept + [{"name": a} for a in add if a not in {x["name"] for x in kept}]
+        if unassign:
+            login = self._viewer if unassign == "@me" else unassign
+            i["assignees"] = [a for a in i.get("assignees", []) if a.get("login") != login]
+
+    def closed_events(self, number):
+        self._check("closed_events", number)
+        if number not in self._issues:
+            raise TrackerError(f"issue #{number}: Not Found (HTTP 404)")
+        return [e for e in self._issues[number].get("events", []) if e.get("event") == "closed"]
+
+    def repo_identity(self, checkout):
+        self._check("repo_identity")
+        if self._identity is None:
+            raise TrackerError(f"{checkout}: no repo identity")
+        return self._identity
+
+    def label_names(self):
+        self._check("label_names")
+        return set(self._labels_defined)
+
+    def open_issues(self, fields, limit):
+        self._check("open_issues")
+        names = fields.split(",")
+        return [{f: i.get(f) for f in names} for i in self._issues.values() if i["state"] == "open"][:limit]
 
     def merge(self, pr, head):
         self._check("merge")
