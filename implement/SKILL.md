@@ -342,9 +342,11 @@ three things. It merges `origin/spec-<p>` in with
 `python3 ~/.agents/skills/implement/selector_check.py command --root . --base origin/spec-<p>`
 prints as its one suite run, or the scope the repo's seam section names for
 the change (§ Review step 3), exactly as an ordinary ticket does. `--base`
-points the narrowed command's `--changed` at `origin/spec-<p>`, so the run
-selects the slice's own changes and not what earlier slices landed there
-(#1895); a command with no `--changed` runs as declared. It passes § Before the PR step 5's pre-report gate.
+points the narrowed command's `--changed <ref>` at `origin/spec-<p>`, so the
+run selects the slice's own changes and not what earlier slices landed there
+(#1895). A command with no `--changed <ref>` runs as declared, as wide as it
+is, and the resolver says so on stderr: a wider run than the slice alone,
+never a narrower one. It passes § Before the PR step 5's pre-report gate.
 No review wave, no Codex pass, no `dispositions-<n>.jsonl`, and no
 review-ledger row, not even a skip row: a skip row would read as an ablated
 review in the escape count. The merge check reads the same recorded key:

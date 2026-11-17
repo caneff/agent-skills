@@ -243,9 +243,8 @@ def test_command_exits_non_zero_naming_the_gap_and_prints_no_command(tmp_path, a
     assert why in r.stderr
 
 
-def based_repo(tmp_path):
-    """A git repo whose base commit (`HEAD~1`) declares `echo base` as its
-    `Narrowed` command and whose tip, the PR merged in, declares `echo pr`."""
+def init_repo(tmp_path):
+    """`(root, git)`: an empty repo under an isolated HOME and its git runner."""
     root = tmp_path / "repo"
     root.mkdir()
     env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1",
@@ -255,6 +254,13 @@ def based_repo(tmp_path):
         subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True)
 
     git("init", "-q")
+    return root, git
+
+
+def based_repo(tmp_path):
+    """A git repo whose base commit (`HEAD~1`) declares `echo base` as its
+    `Narrowed` command and whose tip, the PR merged in, declares `echo pr`."""
+    root, git = init_repo(tmp_path)
     for name in ("base", "pr"):
         (root / "AGENTS.md").write_text(f"## End-to-end seam\n\n- **Seam**: `true`\n- **Narrowed**: `echo {name}`\n")
         git("add", ".")
@@ -322,8 +328,9 @@ def test_post_comments_through_the_tracker_and_says_why_it_could_not():
 
 # --- #1895: the narrowed command diffs against the PR's base ---------------
 
-def run_script(*args):
-    return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True)
+def run_script(*args, home=None):
+    env = {**os.environ, "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"} if home else None
+    return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True, env=env)
 
 
 def test_command_base_replaces_the_changed_ref_so_a_slice_diffs_against_its_spec_branch(tmp_path):
@@ -357,14 +364,7 @@ def test_list_base_runs_the_listing_against_the_base(tmp_path):
 # --- #1911: the seam-section comparison ------------------------------------
 
 def two_revs(tmp_path, before, after):
-    root = tmp_path / "repo"
-    root.mkdir()
-    env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1", **fixture_identity.env()}
-
-    def git(*args):
-        subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True)
-
-    git("init", "-q")
+    root, git = init_repo(tmp_path)
     for text in (before, after):
         if text is not None:
             (root / "AGENTS.md").write_text(text)
@@ -373,27 +373,27 @@ def two_revs(tmp_path, before, after):
     return root
 
 
-def same(root, a="HEAD~1", b="HEAD"):
-    return run_script("seam-section", "--root", str(root), "--base-rev", a, "--head-rev", b)
+def seam_section_run(root, a="HEAD~1", b="HEAD"):
+    return run_script("seam-section", "--root", str(root), "--base-rev", a, "--head-rev", b, home=root.parent)
 
 
 def test_an_edit_outside_the_seam_section_keeps_the_skip(tmp_path):
     base = "# Rules\n\n- one\n\n" + declared()
     root = two_revs(tmp_path, base, "# Rules\n\n- one\n- two\n\n" + declared() + "\n## Later\n\nnew prose\n")
-    r = same(root)
+    r = seam_section_run(root)
     assert (r.returncode, r.stdout.strip()) == (0, "same")
 
 
 def test_an_edit_inside_the_seam_section_forces_the_rerun(tmp_path):
     base = declared()
     root = two_revs(tmp_path, base, base.replace("origin/main", "origin/other"))
-    r = same(root)
+    r = seam_section_run(root)
     assert r.returncode == 1 and "differs" in r.stdout
 
 
 def test_a_prose_line_in_the_seam_section_counts_as_a_change(tmp_path):
     root = two_revs(tmp_path, declared(), declared() + "\nA puzzle update runs only that puzzle's tests.\n")
-    assert same(root).returncode == 1
+    assert seam_section_run(root).returncode == 1
 
 
 @pytest.mark.parametrize("before, after, why", [
@@ -402,11 +402,38 @@ def test_a_prose_line_in_the_seam_section_counts_as_a_change(tmp_path):
     (declared(), "```\n" + declared() + "```\n", "no `## End-to-end seam` section at HEAD"),
 ])
 def test_a_missing_section_on_either_side_keeps_the_rerun_and_says_why(tmp_path, before, after, why):
-    r = same(two_revs(tmp_path, before, after))
+    r = seam_section_run(two_revs(tmp_path, before, after))
     assert r.returncode == 2 and why in r.stderr and r.stdout == ""
 
 
 def test_an_unreadable_rev_keeps_the_rerun(tmp_path):
     root = two_revs(tmp_path, declared(), declared())
-    r = same(root, a="no-such-rev")
+    r = seam_section_run(root, a="no-such-rev")
     assert r.returncode == 2 and "no AGENTS.md could be read at no-such-rev" in r.stderr
+
+
+def test_command_base_rewrites_every_changed_ref_and_never_a_following_flag(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "AGENTS.md").write_text(
+        "## End-to-end seam\n\n- **Narrowed**: `a --changed origin/main && b --changed=origin/main`\n")
+    r = run_script("command", "--root", str(root), "--base", "origin/spec-7")
+    assert r.stdout == "a --changed origin/spec-7 && b --changed=origin/spec-7\n"
+    (root / "AGENTS.md").write_text("## End-to-end seam\n\n- **Narrowed**: `a --changed --coverage`\n")
+    r = run_script("command", "--root", str(root), "--base", "origin/spec-7")
+    assert r.stdout == "a --changed --coverage\n" and "had no effect" in r.stderr
+
+
+def test_command_base_says_so_when_the_command_takes_its_ref_another_way(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "AGENTS.md").write_text("## End-to-end seam\n\n- **Narrowed**: `node changed-tests.mjs origin/main`\n")
+    r = run_script("command", "--root", str(root), "--base", "origin/spec-7")
+    assert r.returncode == 0 and r.stdout == "node changed-tests.mjs origin/main\n"
+    assert "--base origin/spec-7 had no effect" in r.stderr
+
+
+def test_an_edit_in_a_subsection_of_the_seam_section_is_a_change(tmp_path):
+    before = declared() + "\n### Scope\n\nall suites\n\n## Next\n\nx\n"
+    root = two_revs(tmp_path, before, before.replace("all suites", "one suite"))
+    assert seam_section_run(root).returncode == 1

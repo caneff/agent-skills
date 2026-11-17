@@ -65,7 +65,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 # The seam section's reader, imported as `closing_ticket.py` imports its own
 # fence reader: a second copy of the grammar is a second place for its bugs.
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
-from closing_ticket import _SEAM_HEADING, declaration  # noqa: E402
+from closing_ticket import SEAM_HEADING, declaration  # noqa: E402
 from frontier import HEADING, unfenced  # noqa: E402
 
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "common"))
@@ -92,7 +92,9 @@ def command_of(value):
     return command if command.strip("*_ ") else None
 
 
-_CHANGED_REF = re.compile(r"(--changed(?:\s+|=))\S+")
+# `--changed <ref>` or `--changed=<ref>`; a following flag (`--changed --cov`)
+# is no ref.
+_CHANGED_REF = re.compile(r"(--changed(?:\s+|=))(?!-)\S+")
 
 
 def against(command, base):
@@ -100,8 +102,17 @@ def against(command, base):
     command with no `--changed` (a `Seam` line, a repo's own runner) comes
     back as it was, and so does one when no `base` is given (#1895). The
     declared ref names the default branch, which on a spec's integration
-    branch widens every later run by what earlier slices landed."""
-    return _CHANGED_REF.sub(lambda m: m.group(1) + base, command, count=1) if base else command
+    branch widens every later run by what earlier slices landed. Every
+    `--changed <ref>` in a chained command is rewritten."""
+    return _CHANGED_REF.sub(lambda m: m.group(1) + base, command) if base else command
+
+
+def unnarrowable(command, base):
+    """True when `base` was given and `command` has no `--changed <ref>` to
+    point at it, so the run does not diff against `base` (#1895): a runner
+    that takes its ref some other way, or a `Seam` command. Said on stderr,
+    never silent."""
+    return bool(base) and not _CHANGED_REF.search(command)
 
 
 def narrowed_in(text, base=None):
@@ -181,16 +192,17 @@ def record_listing(root, state_path, rev=None, base=None):
 
 def seam_section(text):
     """The raw text of `text`'s `## End-to-end seam` section, heading to the
-    next heading, or `None` when it has none. A heading inside a fence is an
+    next heading of the same or a higher level (its own subsections are part
+    of it), or `None` when it has none. A heading inside a fence is an
     example and neither starts nor ends it. The whole section, prose included:
     a scope sentence there chooses the gate as much as a `Narrowed` line."""
     raw = text.splitlines()
-    start = None
+    start = level = None
     for index, line in unfenced(raw):
         if start is None:
-            if _SEAM_HEADING.match(line):
-                start = index
-        elif HEADING.match(line):
+            if SEAM_HEADING.match(line):
+                start, level = index, len(line.strip().split()[0])
+        elif HEADING.match(line) and len(line.strip().split()[0]) <= level:
             return "\n".join(raw[start:index]).rstrip()
     return None if start is None else "\n".join(raw[start:]).rstrip()
 
@@ -198,7 +210,10 @@ def seam_section(text):
 def seam_section_same(root, base_rev, head_rev):
     """`(True|False, None)`: whether the seam section reads the same at both
     revs; or `(None, why)` when either side cannot be read or has no section,
-    which the merge reads as "rerun" (#1911), never as "unchanged"."""
+    which the merge reads as "rerun" (#1911), never as "unchanged". The text is
+    compared as written: a section that exists, even one declaring no
+    parseable `Seam`/`Narrowed` line, and reads the same on both sides is
+    `same`, since nothing in it changed what gates the PR."""
     sections = []
     for rev in (base_rev, head_rev):
         text, why = agents_text(root, rev)
@@ -296,6 +311,9 @@ def main(argv=None):
             print(f"{UNDECLARED}{why}", file=sys.stderr)
             return 1
         print(command)
+        if unnarrowable(command, args.base):
+            print(f"selector_check.py command: --base {args.base} had no effect: no `--changed <ref>` in "
+                  f"`{command}`, so this run does not diff against it", file=sys.stderr)
         return 0
     if args.cmd == "list":
         return 0 if record_listing(args.root, args.state, args.rev, args.base) else 3

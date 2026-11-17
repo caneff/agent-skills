@@ -35,7 +35,7 @@ from loop import LoopError, origin_default  # noqa: E402
 # A list item's marker: a bare `**Key**:` line also matches `key_line`, by
 # its first `*`, but is no list item.
 _LIST_ITEM = re.compile(r"^[ \t]*[-*+][ \t]+")
-_SEAM_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
+SEAM_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
                            re.IGNORECASE)
 
 
@@ -89,7 +89,7 @@ def declaration(text):
     lines = visible(raw)
     reachable = {index for index, _ in unfenced(raw)}
     for pos, (_, line) in enumerate(lines):
-        if not _SEAM_HEADING.match(line):
+        if not SEAM_HEADING.match(line):
             continue
         found = {}
         skip_to = 0
