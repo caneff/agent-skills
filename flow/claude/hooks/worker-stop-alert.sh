@@ -4,7 +4,8 @@
 # Contract: read the Stop event JSON on stdin. The session is a worker when its
 # transcript opens with an `/implement` or `/implement-spec` brief carrying
 # `--controller "<name>"`. A turn starts at a human prompt or a peer message
-# that is not a subagent hand-back. The worker has reported when, after that
+# from the controller (a message from any other session, such as a worker this
+# worker dispatched, starts none). The worker has reported when, after that
 # turn start, a SendMessage to the controller came back with `success: true`.
 # A stop while something launched this turn — or an earlier turn, with
 # liveness evidence since this turn's start — is still out is a wait, not
@@ -97,9 +98,21 @@ worker_alert_resolve_controller "$controller"
 IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   --argjson names "$(jq -nc '$ARGS.positional' --args -- ${names[@]+"${names[@]}"})" \
   --argjson socks "$(jq -nc '$ARGS.positional' --args -- ${sockets[@]+"${sockets[@]}"})" '
+  # A peer message starts a turn only when the brief'"'"'s controller sent it: a
+  # worker that dispatches workers of its own hears from them, and each of
+  # those would otherwise start a turn owing the controller a report (#1945).
+  # The sender is `.origin.from` (a `uds:` address) and `.origin.name`; both
+  # are matched against what `worker_alert_resolve_controller` resolved, the
+  # same names and sockets a report is matched against. A peer message
+  # carrying neither is attributable to no one, so it starts no turn.
+  # `// ""` keeps an absent field a plain false: `empty or x` yields nothing.
+  def from_controller: ((.origin.from // "") | IN($socks[]))
+      or ((.origin.name // "") | . as $nm | any(($c, $names[]); . == $nm));
   to_entries as $all
   | ($all | map(select(.value.type == "user"
-      and (.value.origin.kind == "human" or (.value.origin.kind == "peer" and .value.origin.handback != true))))
+      and (.value.origin.kind == "human"
+           or (.value.origin.kind == "peer" and .value.origin.handback != true
+               and (.value | from_controller)))))
    | last | .key // 0) as $start
   | .[($start + 1):] as $after
   | [$all[] | select(.value.type == "assistant") | .value.message.content[]?
