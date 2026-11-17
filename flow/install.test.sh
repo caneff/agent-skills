@@ -134,6 +134,11 @@ if [ -L "$tmp/home/.claude/hooks/worker-stop-alert.sh" ]; then
 else
   echo "FAIL claude/hooks/worker-stop-alert.sh not linked under the scratch HOME"; fails=1
 fi
+if [ -L "$tmp/home/.claude/hooks/worker-dirty-stop.sh" ]; then
+  echo "PASS the worker dirty-stop hook linked under the scratch HOME"
+else
+  echo "FAIL claude/hooks/worker-dirty-stop.sh not linked under the scratch HOME"; fails=1
+fi
 if [ -L "$tmp/home/.claude/hooks/worker-send-alert.sh" ]; then
   echo "PASS the worker-send alert hook linked under the scratch HOME"
 else
