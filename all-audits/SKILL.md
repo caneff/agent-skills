@@ -224,9 +224,8 @@ deciding on each problem, files what they accept, and closes the record.
    current directory: `.audit-ignore.md` goes in the `checkout:` path, and specs
    are filed with `--repo <owner/name>`.
 3. **Land the ignore file, then close the record.** Run
-   the "Land the ignore file" section of
-   [`harness/GRILLING.md`](harness/GRILLING.md) first.
-   Comment on audit record `<issue>` listing the specs the
+   `harness/GRILLING.md` § Land the ignore file; if it stops, close nothing.
+   Otherwise comment on audit record `<issue>` listing the specs the
    grill filed (links), or saying none were filed, then close it:
    `gh issue comment <issue> --repo <owner/name> --body-file …` and
    `gh issue close <issue> --repo <owner/name>`.
