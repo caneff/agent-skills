@@ -13,10 +13,12 @@ export HOME="$tmp/home"; mkdir -p "$HOME"
 
 repo="$tmp/repo"
 git init -q -b implement-77 "$repo"
-git -C "$repo" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m base
+. "$here/../../../tests/fixture-identity.sh"
+fixture_identity "$repo" "$tmp" || exit 2
+git -C "$repo" commit -q --allow-empty -m base
 printf '.scratch/\n' > "$repo/.gitignore"
 git -C "$repo" add .gitignore
-git -C "$repo" -c user.email=t@example.com -c user.name=t commit -q -m ignore
+git -C "$repo" commit -q -m ignore
 
 brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>77 --tier heavy --controller \"ctl\"</command-args>'
 worker="$tmp/worker.jsonl"
@@ -48,7 +50,7 @@ check "stop_hook_active true never blocks again" pass "$(run "$worker" "$repo" t
 
 git -C "$repo" add owned.txt
 check "staged-uncommitted file blocks too" block "$(run "$worker" "$repo")"
-git -C "$repo" -c user.email=t@example.com -c user.name=t commit -q -m owned
+git -C "$repo" commit -q -m owned
 mkdir "$repo/.scratch"; echo y > "$repo/.scratch/note"
 check "ignored .scratch/ does not block" pass "$(run "$worker" "$repo")"
 
