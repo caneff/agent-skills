@@ -53,11 +53,17 @@ order as the default mode:
 
 When the walk is done, send **one reply** carrying:
 
-1. the contested questions, numbered, each with a recommendation;
-2. **Calls I applied without asking** — a short list of the close calls the
+1. **Biggest improvements**, first: the three to seven accepted changes that
+   improve the repo most (by user-visible effect, risk removed, or code
+   removed), whether the agent decided them or they wait in item 2. One line
+   each: what changes, which audit, why it ranks. Why: in batch mode the
+   user is asked only the contested findings, so the largest changes would
+   otherwise land unseen (Chris, 2026-11-17);
+2. the contested questions, numbered, each with a recommendation;
+3. **Calls I applied without asking** — a short list of the close calls the
    agent decided that were reversible, so the user can overrule any one;
-3. the specs and ticket drafts (§ Land one spec per area, step 1),
-   written as if every recommendation in item 1 were taken.
+4. the specs and ticket drafts (§ Land one spec per area, step 1),
+   written as if every recommendation in item 2 were taken.
 
 That reply is the single confirmation gate of § Land one spec per area,
 step 2, unchanged. An answer that differs from a recommendation, or
