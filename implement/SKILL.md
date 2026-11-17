@@ -339,11 +339,13 @@ so. The spec is reviewed once on `spec-<p>` after its last slice lands, so a
 slice keeps § Build: TDD with mutation and reuse before writing. Then it does
 three things. It merges `origin/spec-<p>` in with
 `git fetch origin && git merge --no-edit origin/spec-<p>`. It runs what
-`python3 ~/.agents/skills/implement/selector_check.py command --root .` prints
-as its one suite run, or the scope the repo's seam section names for the
-change (§ Review step 3), exactly as an ordinary ticket does. The command
-runs verbatim, so one that narrows against `origin/<default>` also selects
-what earlier slices changed on `spec-<p>`: a wider run than the slice alone,
+`python3 ~/.agents/skills/implement/selector_check.py command --root . --base origin/spec-<p>`
+prints as its one suite run, or the scope the repo's seam section names for
+the change (§ Review step 3), exactly as an ordinary ticket does. `--base`
+points the narrowed command's `--changed <ref>` at `origin/spec-<p>`, so the
+run selects the slice's own changes and not what earlier slices landed there
+(#1895). A command with no `--changed <ref>` runs as declared, as wide as it
+is, and the resolver says so on stderr: a wider run than the slice alone,
 never a narrower one. It passes § Before the PR step 5's pre-report gate.
 No review wave, no Codex pass, no `dispositions-<n>.jsonl`, and no
 review-ledger row, not even a skip row: a skip row would read as an ablated
@@ -938,9 +940,9 @@ closed.
    ```
    git worktree add --detach <absolute path under .scratch/> origin/<default>
    cd <that path> && git merge --no-edit <headRefOid> \
-     && cmd=$(python3 ~/.agents/skills/implement/selector_check.py command --root . --rev origin/<default>) \
-     && { python3 ~/.agents/skills/implement/selector_check.py list --root . --rev origin/<default> --state <state> \
-          && python3 ~/.agents/skills/implement/selector_check.py comment --root . --rev origin/<default> --state <state> --pr <pr> --repo <owner/name>; true; } \
+     && cmd=$(python3 ~/.agents/skills/implement/selector_check.py command --root . --rev origin/<default> --base origin/<default>) \
+     && { python3 ~/.agents/skills/implement/selector_check.py list --root . --rev origin/<default> --base origin/<default> --state <state> \
+          && python3 ~/.agents/skills/implement/selector_check.py comment --root . --rev origin/<default> --base origin/<default> --state <state> --pr <pr> --repo <owner/name>; true; } \
      && sh -c "$cmd"
    ```
 
@@ -963,17 +965,21 @@ closed.
    After `git fetch origin`, skip the worktree and the run when all three
    hold: `git merge-base --is-ancestor origin/<default> <headRefOid>` exits
    0; the "PR up" `Seam run at:` line equals <headRefOid>; and
-   `git diff --quiet origin/<default> <headRefOid> -- AGENTS.md` exits 0. The
-   merge then yields the tree the worker's green run covered, so the rerun
-   repeats it. The third condition keeps a PR from choosing its own gate: the
+   `python3 ~/.agents/skills/implement/selector_check.py seam-section --root . --base-rev origin/<default> --head-rev <headRefOid>`
+   exits 0 (prints `same`). The merge
+   then yields the tree the worker's green run covered, so the rerun repeats
+   it. The third condition keeps a PR from choosing its own gate: the
    worker's run reads the command from the PR's own `AGENTS.md`, step 3 from
-   the base's. Record the skip with `gh pr comment <pr> --repo <owner/name>
+   the base's, and only the `## End-to-end seam` section chooses it (#1911),
+   so an edit elsewhere in `AGENTS.md` keeps the skip. Exit 1 (the section
+   differs) and exit 2 (a side missing or unreadable) both keep the rerun.
+   Record the skip with `gh pr comment <pr> --repo <owner/name>
    --body "seam rerun skipped: origin/<default> <sha> is in the head
    <headRefOid>, worker's run at <headRefOid>"`. It is not a `selector:`
    comment, so a skipped PR leaves no listing and the backstop grades its
    suites `unknown`. Anything else gets the rerun: a moved base, a head past
-   the worker's run, a report without the line, a PR that touches
-   `AGENTS.md`. A slice reads `origin/spec-<p>` for `origin/<default>`, and
+   the worker's run, a report without the line, a PR that edits the
+   seam section. A slice reads `origin/spec-<p>` for `origin/<default>`, and
    the integration PR's `Seam run at:` is its spec run's
    `implement/SKILL.md` § Review step 3 run. The final `git fetch origin` below compares against the sha this check
    read: a base that moved since is a moved base. `drain` gets no "PR up"

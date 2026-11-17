@@ -13,6 +13,18 @@ command: a guessed command is the absent answer read as a benign one
 passes its base, so a PR that edits its own seam section does not choose the
 command that gates it. `list` and `comment` take the same `--rev`.
 
+`--base <ref>` (all three, #1895) replaces the ref after `--changed` in the
+declared command, so a slice on a spec's integration branch diffs against
+`spec-<p>` and not the default branch: without it each landed slice widens
+every later run. A command with no `--changed` is printed as declared.
+
+`seam-section --root <dir> --base-rev <a> --head-rev <b>` (#1911) compares the
+`## End-to-end seam` section's text at the two revs: exit 0 printing `same`,
+1 printing `differs`, 2 with the reason on stderr when either rev cannot be
+read or has no section. The merge's seam-rerun skip reads it, so an edit
+elsewhere in `AGENTS.md` no longer forces a rerun, and an unreadable side
+keeps the rerun (class 1).
+
 When that run is the narrowed command, the merge records what it selected
 (#1593): `list` runs the narrowed command with `--list` before the run, and
 `comment` posts one line, followed by the suites one per line in a fence:
@@ -53,7 +65,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 # The seam section's reader, imported as `closing_ticket.py` imports its own
 # fence reader: a second copy of the grammar is a second place for its bugs.
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
-from closing_ticket import declaration  # noqa: E402
+from closing_ticket import SEAM_HEADING, declaration  # noqa: E402
+from frontier import HEADING, unfenced  # noqa: E402
 
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "common"))
 import shellcmd  # noqa: E402
@@ -79,7 +92,30 @@ def command_of(value):
     return command if command.strip("*_ ") else None
 
 
-def narrowed_in(text):
+# `--changed <ref>` or `--changed=<ref>`; a following flag (`--changed --cov`)
+# is no ref.
+_CHANGED_REF = re.compile(r"(--changed(?:\s+|=))(?!-)\S+")
+
+
+def against(command, base):
+    """`command` with the ref after its `--changed` replaced by `base`; a
+    command with no `--changed` (a `Seam` line, a repo's own runner) comes
+    back as it was, and so does one when no `base` is given (#1895). The
+    declared ref names the default branch, which on a spec's integration
+    branch widens every later run by what earlier slices landed. Every
+    `--changed <ref>` in a chained command is rewritten."""
+    return _CHANGED_REF.sub(lambda m: m.group(1) + base, command) if base else command
+
+
+def unnarrowable(command, base):
+    """True when `base` was given and `command` has no `--changed <ref>` to
+    point at it, so the run does not diff against `base` (#1895): a runner
+    that takes its ref some other way, or a `Seam` command. Said on stderr,
+    never silent."""
+    return bool(base) and not _CHANGED_REF.search(command)
+
+
+def narrowed_in(text, base=None):
     """`None` when `text` (an `AGENTS.md`) declares no `Narrowed` line (no
     comment is owed), else a `Narrowed`."""
     found = declaration(text)
@@ -88,7 +124,7 @@ def narrowed_in(text):
     command = command_of(found["narrowed"])
     if not command:
         return Narrowed(None, "the `Narrowed` line names no command")
-    return Narrowed(command)
+    return Narrowed(against(command, base))
 
 
 def agents_text(root, rev=None):
@@ -106,7 +142,7 @@ def agents_text(root, rev=None):
         return None, f"no AGENTS.md could be read at {rev} ({' '.join(str(exc).split())[:150]})"
 
 
-def per_change(root, rev=None):
+def per_change(root, rev=None, base=None):
     """`(command, None)`: the repo's per-change command, the `Narrowed` one
     else the `Seam`; or `(None, why)` naming what the section lacks."""
     text, why = agents_text(root, rev)
@@ -118,25 +154,25 @@ def per_change(root, rev=None):
     for key, name in (("narrowed", "Narrowed"), ("seam", "Seam")):
         if key in found:
             command = command_of(found[key])
-            return (command, None) if command else (None, f"the `{name}` line names no command")
+            return (against(command, base), None) if command else (None, f"the `{name}` line names no command")
     return None, "AGENTS.md § End-to-end seam declares neither a `Narrowed` nor a `Seam` line"
 
 
-def read_narrowed(root, rev=None):
+def read_narrowed(root, rev=None, base=None):
     """`narrowed_in` for `root/AGENTS.md` (at `rev`); no file declares
     nothing."""
     text, _ = agents_text(root, rev)
-    return None if text is None else narrowed_in(text)
+    return None if text is None else narrowed_in(text, base)
 
 
-def record_listing(root, state_path, rev=None):
+def record_listing(root, state_path, rev=None, base=None):
     """Run the listing and write the state file. Returns False when the repo
     declares no narrowed line: nothing is written. Any state an earlier run
     left is removed first, so a run that dies before writing is read as
     "no listing record", never as the previous merge's listing."""
     if os.path.exists(state_path):
         os.remove(state_path)
-    narrowed = read_narrowed(root, rev)
+    narrowed = read_narrowed(root, rev, base)
     if narrowed is None:
         return False
     state = {"command": narrowed.command, "status": None, "listing": [], "error": narrowed.error}
@@ -152,6 +188,42 @@ def record_listing(root, state_path, rev=None):
     with open(state_path, "w") as f:
         json.dump(state, f)
     return True
+
+
+def seam_section(text):
+    """The raw text of `text`'s `## End-to-end seam` section, heading to the
+    next heading of the same or a higher level (its own subsections are part
+    of it), or `None` when it has none. A heading inside a fence is an
+    example and neither starts nor ends it. The whole section, prose included:
+    a scope sentence there chooses the gate as much as a `Narrowed` line."""
+    raw = text.splitlines()
+    start = level = None
+    for index, line in unfenced(raw):
+        if start is None:
+            if SEAM_HEADING.match(line):
+                start, level = index, len(line.strip().split()[0])
+        elif HEADING.match(line) and len(line.strip().split()[0]) <= level:
+            return "\n".join(raw[start:index]).rstrip()
+    return None if start is None else "\n".join(raw[start:]).rstrip()
+
+
+def seam_section_same(root, base_rev, head_rev):
+    """`(True|False, None)`: whether the seam section reads the same at both
+    revs; or `(None, why)` when either side cannot be read or has no section,
+    which the merge reads as "rerun" (#1911), never as "unchanged". The text is
+    compared as written: a section that exists, even one declaring no
+    parseable `Seam`/`Narrowed` line, and reads the same on both sides is
+    `same`, since nothing in it changed what gates the PR."""
+    sections = []
+    for rev in (base_rev, head_rev):
+        text, why = agents_text(root, rev)
+        if why:
+            return None, why
+        section = seam_section(text)
+        if section is None:
+            return None, f"AGENTS.md has no `## End-to-end seam` section at {rev}"
+        sections.append(section)
+    return sections[0] == sections[1], None
 
 
 def failing_suites(log_path):
@@ -213,7 +285,12 @@ def main(argv=None):
     cmd = sub.add_parser("command")
     lst = sub.add_parser("list")
     cmt = sub.add_parser("comment")
+    sec = sub.add_parser("seam-section")
+    sec.add_argument("--root", required=True)
+    sec.add_argument("--base-rev", required=True)
+    sec.add_argument("--head-rev", required=True)
     for p in (cmd, lst, cmt):
+        p.add_argument("--base", help="the ref the narrowed command diffs against, in place of the declared one")
         p.add_argument("--root", required=True)
         p.add_argument("--rev", help="read AGENTS.md as committed at this rev, not the working tree")
     for p in (lst, cmt):
@@ -221,16 +298,26 @@ def main(argv=None):
     cmt.add_argument("--pr")
     cmt.add_argument("--repo")
     args = parser.parse_args(argv)
+    if args.cmd == "seam-section":
+        same, why = seam_section_same(args.root, args.base_rev, args.head_rev)
+        if why:
+            print(f"selector_check.py seam-section: {why}", file=sys.stderr)
+            return 2
+        print("same" if same else "differs")
+        return 0 if same else 1
     if args.cmd == "command":
-        command, why = per_change(args.root, args.rev)
+        command, why = per_change(args.root, args.rev, args.base)
         if why:
             print(f"{UNDECLARED}{why}", file=sys.stderr)
             return 1
         print(command)
+        if unnarrowable(command, args.base):
+            print(f"selector_check.py command: --base {args.base} had no effect: no `--changed <ref>` in "
+                  f"`{command}`, so this run does not diff against it", file=sys.stderr)
         return 0
     if args.cmd == "list":
-        return 0 if record_listing(args.root, args.state, args.rev) else 3
-    if read_narrowed(args.root, args.rev) is None:
+        return 0 if record_listing(args.root, args.state, args.rev, args.base) else 3
+    if read_narrowed(args.root, args.rev, args.base) is None:
         return 0  # no narrowed line: no comment is owed, and none is the answer
     line = record(args.state)
     print(line)
