@@ -46,8 +46,6 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 unset BASH_ENV
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
-# One persistent cargo target dir for every suite that builds the lane (#1950).
-. "$(dirname "${BASH_SOURCE[0]}")/cargo-target.sh"
 
 suites() { # prints "<label>\t<command>" per discovered suite
   git ls-files -- '*.test.sh' |
@@ -55,7 +53,7 @@ suites() { # prints "<label>\t<command>" per discovered suite
   git ls-files -- '*_test.py' |
     while IFS= read -r f; do printf '%s\tuv run --locked pytest %s\n' "$f" "$f"; done
   git ls-files -- '*Cargo.toml' |
-    while IFS= read -r f; do printf '%s\tcargo test --manifest-path %s\n' "$f" "$f"; done
+    while IFS= read -r f; do printf '%s\tbash tests/lane-cargo.sh %s -- cargo test --manifest-path %s\n' "$f" "$f" "$f"; done
   # Every mod under flow/mods/ (#1368). A plugin elsewhere (`humanizer/`, a
   # skill plugin; `exa-search-hook/`, a mod outside flow/) runs only when it
   # holds a tracked `*.test.ts`, since `claude plugin test` fails a plugin that
@@ -390,7 +388,7 @@ cat "$tmp/parallel" "$tmp/serial" >"$tmp/ordered"
 default_cpu_budget=25
 cpu_budget() { # <label>: prints the suite's budget in seconds
   case $1 in
-    flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir on a quiet box; 129-157s at load 38 on the shared dir, #1950: sys time from the process-spawning tests, not dependency compiles) and runs 140+ process-spawning tests
+    flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate and runs 140+ process-spawning tests (74s on a quiet box with a warm target dir; 129-157s at load 38, #1950, which is sys time from the tests, so it stays 150: an overrun is only a warning, #1606)
     flow/install.test.sh) echo 120 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME; the dependencies sit in the shared target dir (#1950), the lane crate itself still rebuilds per scratch repo (measured 89-102s warm at load 38, 110s cold)
     flow/claude/hooks/block-dangerous-git.test.sh) echo 45 ;; # every case spawns jq, the hook, git and a gh stub: 9.2s CPU on a quiet box, 14-18s at load average 10-16 (2026-10-13, #1571); 17.3s alone after #1717's per-target cases, 19-21s alone with #1716's at load 5-7 and 32.1s in a parallel all.sh run (2026-11-13)
     drain/drain_test.py) echo 100 ;; # one real git repo, bare origin and stub processes per case, 146 cases (measured 65.7s CPU alone, 67.7s in an 8-job run, 2026-10-15; 80.5s seen under drain load, #1586)
