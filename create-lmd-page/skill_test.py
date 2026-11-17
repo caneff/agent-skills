@@ -238,6 +238,20 @@ def test_every_template_p_uncaps_lmds_35em_measure():
     assert not bare, f"<p> without max-width: none: {bare}"
 
 
+def test_template_ends_with_a_quiet_twitch_signoff_below_the_rules():
+    # #1943: one shared skeleton serves both layouts, so one line covers both.
+    emitted = re.sub(r"<!--.*?-->", "", TEMPLATE, flags=re.S)
+    m = re.search(r'</aside>.*?(<div[^>]*>\s*<a href="https://www\.twitch\.tv/chinstrap45"([^>]*)>'
+                  r'(.*?)</a>\s*</div>)\s*</section>', emitted, flags=re.S)
+    assert m, "no Twitch sign-off link between the Rules card and the closing </section>"
+    style, inner = m.group(2), m.group(3)
+    assert "text-decoration: none" in style and "font-weight: normal" in style
+    assert "color: #889" in style, "sign-off text must stay the muted grey, not Play Now's #557"
+    assert re.search(r"font-size: 0\.8em", m.group(1).split("<a", 1)[0]), "sign-off must be smaller than Play Now"
+    assert 'fill="#9146FF"' in inner and inner.rstrip().endswith("Watch me solve live")
+    assert "twitch.tv" not in re.sub(r"<[^>]*>", "", inner), "the URL must not be visible"
+
+
 # ---- § Edit a live page (#1720) ----
 
 def test_edit_section_runs_the_stream_gate_before_the_driver():
