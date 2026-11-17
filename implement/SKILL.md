@@ -440,8 +440,13 @@ round follows steps 2–3 below keyed on the spec number:
    #1581). A scope is a sentence there that names the command or tests to
    run for a class of change, as sudokupad-art's "a puzzle update runs only
    that puzzle's tests"; a `**Narrowed**` line is the per-change command for
-   every change no scope sentence names. This is the ticket's one suite run,
-   just before "PR up"; the merger runs the same command again on the PR
+   every change no scope sentence names. A scope replaces the default; an
+   **extra run** adds to it (#1898): a sentence there that names a command to
+   run in addition to the selector or scope run when the change touches
+   something (sudokupad-scripts' `npm run test:tampermonkey` on an `@version`
+   header change). Run every extra run the diff triggers after that run, in
+   the same checkout, and each must be green. This is the ticket's one suite
+   run, just before "PR up"; the merger runs the same command again on the PR
    merged into current `<default>` before it merges (§ The merge step 3).
    The run is a parallel job (§ Control): set `TESTS_JOBS=<k>` on it and
    declare `<k>` cores before you launch. `tests/all.sh` caps an unset
@@ -958,8 +963,38 @@ closed.
    only on green. A merge conflict or a red run blocks the merge: send the
    worker the failure to fix, and its next "PR up" restarts at step 2, so the
    fix is read and re-run like any other commit. Remove the worktree
-   afterwards with `git worktree remove --force`, since a conflicted merge
-   leaves it dirty.
+   after the last run that needs it (the extra runs below) with `git worktree
+   remove --force`, since a conflicted merge leaves it dirty.
+
+   **Extra runs** (#1898). An extra run is defined in § Review step 3: a
+   command the repo's seam section names to run in addition, never a
+   replacement for the selector or scope run above. After that run goes
+   green, read the PR's changed files (`gh pr diff <pr> --name-only`)
+   against each such sentence in the section as read from `origin/<default>`
+   (the `--rev` rule), and run every extra run it triggers in the same
+   worktree. A red extra run blocks the merge as a red selector run does.
+   Remove the worktree only after the last of them. The skip rule below never
+   skips an extra run.
+
+   **Visual PRs** (#1903). A green suite has merged a visual regression at
+   least three times (a toolbar icon rendered as a solid square, a misplaced
+   checkbox, inconsistent dialog buttons), because no test reads the page. A
+   PR whose diff changes what a user script shows (its DOM, CSS, icons,
+   dialogs, or the strings it renders) gets a real-page screenshot before the
+   merge, and the merge waits for it. Load the PR's head in the page the
+   script runs on: the repo's own live-page harness when its `AGENTS.md`
+   names one, else the built script injected with `shot-scraper
+   --javascript`. `shot-scraper` the changed surface, then open the image and
+   judge it, per
+   `~/.agents/skills/flow/claude/VISUAL-INSPECTION.md` § Judging visual work;
+   a green log is not that check. A regression (a
+   blank or solid icon, a misplaced control, a control that differs from its
+   siblings) blocks the merge and goes to the worker with the image's path.
+   A page the controller cannot load even so, because it needs a login, is
+   said in the status line as `screenshot not taken: <why>` and handed to
+   Chris before the merge, never skipped silently. A PR that changes nothing
+   a user sees says `no visual change` in the same line. The skip rule below
+   never skips the screenshot.
 
    **Skip when the base is already in the head** (#1616, Chris 2026-10-22).
    After `git fetch origin`, skip the worktree and the run when all three
@@ -977,7 +1012,9 @@ closed.
    --body "seam rerun skipped: origin/<default> <sha> is in the head
    <headRefOid>, worker's run at <headRefOid>"`. It is not a `selector:`
    comment, so a skipped PR leaves no listing and the backstop grades its
-   suites `unknown`. Anything else gets the rerun: a moved base, a head past
+   suites `unknown`. The skip covers the selector run only: an extra run the
+   PR triggers and a visual PR's screenshot still happen. Anything else gets
+   the rerun: a moved base, a head past
    the worker's run, a report without the line, a PR that edits the
    seam section. A slice reads `origin/spec-<p>` for `origin/<default>`, and
    the integration PR's `Seam run at:` is its spec run's
