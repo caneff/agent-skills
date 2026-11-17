@@ -46,6 +46,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 unset BASH_ENV
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
+# One persistent cargo target dir for every suite that builds the lane (#1950).
+. "$(dirname "${BASH_SOURCE[0]}")/cargo-target.sh"
 
 suites() { # prints "<label>\t<command>" per discovered suite
   git ls-files -- '*.test.sh' |
