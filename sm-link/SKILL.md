@@ -54,18 +54,29 @@ SudokuMaker short link, `https://sudokumaker.app/p/<id>`, printed bare on its
 own line (Chris, 2026-10-22). A full link is a ~10 KB blob: unreadable, and
 truncated in a reply, so one never appears in chat.
 
-Mint the short link from a full link or from a file holding one:
+Mint the short link from a full link or from a file holding one, **one source
+per call** (Chris, 2026-11-15: "we shouldnt batch more than 1 at a time"):
 
 ```
-uv run --directory ~/src/sudoku-kit python -m sudoku_kit.link_codec shorten '<link-or-file>' ['<link-or-file>' ...]
+uv run --directory ~/src/sudoku-kit python -m sudoku_kit.link_codec shorten '<link-or-file>'
 ```
 
-It prints one short link per source and checks that the new id resolves back to
+One link per call, and the next call only after the previous one has returned.
+Never pass several sources to one `shorten`: SudokuMaker rate-limits
+`POST /api/puzzles`, and a 22-link batch got a `429 Too Many Requests` on the
+4th. The app posts one puzzle per request, so batching saves SudokuMaker
+nothing.
+
+- **Interval:** wait 10 seconds between `shorten` calls.
+- **On a 429:** wait 60 seconds and retry that one link once. If it fails
+  again, stop and report. Do not probe the limit: every test mint leaves a
+  record on SudokuMaker's server.
+
+Each call prints one short link and checks that the new id resolves back to
 the payload it sent. A non-zero exit prints the reason to stderr: report it,
-and hand over no link. Sources before the failing one are already minted and
-printed: keep those links, and re-run only the failing source and those after
-it, since a second run mints a second record. Never type a short link from
-memory.
+and hand over no link for that source. Links from earlier calls are already
+minted: keep them, and re-run only the failing source, since a second run
+mints a second record. Never type a short link from memory.
 
 Which link files a repo commits, and whether they hold full or short links, is
 that repo's own `AGENTS.md` rule, not this skill's.
