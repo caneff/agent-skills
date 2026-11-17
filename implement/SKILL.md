@@ -985,8 +985,9 @@ closed.
    script runs on: the repo's own live-page harness when its `AGENTS.md`
    names one, else the built script injected with `shot-scraper
    --javascript`. `shot-scraper` the changed surface, then open the image and
-   judge it, per `~/.agents/skills/flow/claude/VISUAL-INSPECTION.md`
-   § Judging visual work; a green log is not that check. A regression (a
+   judge it, per
+   `~/.agents/skills/flow/claude/VISUAL-INSPECTION.md` § Judging visual work;
+   a green log is not that check. A regression (a
    blank or solid icon, a misplaced control, a control that differs from its
    siblings) blocks the merge and goes to the worker with the image's path.
    A page the controller cannot load even so, because it needs a login, is
