@@ -2479,7 +2479,10 @@ fn a_slice_of_a_spec_with_an_integration_branch_builds_on_it() {
     assert!(prompt.contains("gh pr create --base spec-500"), "no PR base in the brief: {prompt}");
     // A slice runs the resolver's per-change command like any ticket, never a
     // hard-coded `--changed` narrowing.
-    assert!(prompt.contains("selector_check.py command --root ."), "no per-change command in the brief: {prompt}");
+    assert!(
+        prompt.contains("selector_check.py command --root . --base origin/spec-500"),
+        "no per-change command diffing against the spec branch in the brief: {prompt}"
+    );
     assert!(!prompt.contains("--changed"), "the brief hard-codes a narrowing: {prompt}");
     assert!(prompt.contains("merge origin/spec-500 in"), "no merge-in base in the brief: {prompt}");
     assert!(prompt.contains("no review wave"), "the brief does not say the slice runs no review wave: {prompt}");

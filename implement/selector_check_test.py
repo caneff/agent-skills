@@ -318,3 +318,95 @@ def test_post_comments_through_the_tracker_and_says_why_it_could_not():
     assert t.comments == [(42, "selector: x")]
     down = tracker.MemoryTracker(broken={"comment": "gh  down\nagain"})
     assert selector_check.post(42, "me/repo", "selector: x", tracker=down) == "gh down again"
+
+
+# --- #1895: the narrowed command diffs against the PR's base ---------------
+
+def run_script(*args):
+    return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True)
+
+
+def test_command_base_replaces_the_changed_ref_so_a_slice_diffs_against_its_spec_branch(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "AGENTS.md").write_text(declared(narrowed=True))
+    r = run_script("command", "--root", str(root), "--base", "origin/spec-7")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "bash tests/all.sh --changed origin/spec-7\n", "")
+
+
+def test_command_base_leaves_a_command_with_no_changed_flag_alone(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "AGENTS.md").write_text(SEAM_ONLY)
+    r = run_script("command", "--root", str(root), "--base", "origin/spec-7")
+    assert (r.returncode, r.stdout) == (0, "npm test\n")
+
+
+def test_list_base_runs_the_listing_against_the_base(tmp_path):
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "AGENTS.md").write_text(declared(narrowed=True))
+    script = root / "tests" / "all.sh"
+    script.write_text('#!/bin/sh\necho "args: $*"\n')
+    script.chmod(0o755)
+    state = tmp_path / "state.json"
+    assert run_script("list", "--root", str(root), "--state", str(state), "--base", "origin/spec-7").returncode == 0
+    assert json.loads(state.read_text())["listing"] == ["args: --changed origin/spec-7 --list"]
+
+
+# --- #1911: the seam-section comparison ------------------------------------
+
+def two_revs(tmp_path, before, after):
+    root = tmp_path / "repo"
+    root.mkdir()
+    env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1", **fixture_identity.env()}
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True)
+
+    git("init", "-q")
+    for text in (before, after):
+        if text is not None:
+            (root / "AGENTS.md").write_text(text)
+        git("add", ".")
+        git("commit", "-qm", "c", "--allow-empty")
+    return root
+
+
+def same(root, a="HEAD~1", b="HEAD"):
+    return run_script("seam-section", "--root", str(root), "--base-rev", a, "--head-rev", b)
+
+
+def test_an_edit_outside_the_seam_section_keeps_the_skip(tmp_path):
+    base = "# Rules\n\n- one\n\n" + declared()
+    root = two_revs(tmp_path, base, "# Rules\n\n- one\n- two\n\n" + declared() + "\n## Later\n\nnew prose\n")
+    r = same(root)
+    assert (r.returncode, r.stdout.strip()) == (0, "same")
+
+
+def test_an_edit_inside_the_seam_section_forces_the_rerun(tmp_path):
+    base = declared()
+    root = two_revs(tmp_path, base, base.replace("origin/main", "origin/other"))
+    r = same(root)
+    assert r.returncode == 1 and "differs" in r.stdout
+
+
+def test_a_prose_line_in_the_seam_section_counts_as_a_change(tmp_path):
+    root = two_revs(tmp_path, declared(), declared() + "\nA puzzle update runs only that puzzle's tests.\n")
+    assert same(root).returncode == 1
+
+
+@pytest.mark.parametrize("before, after, why", [
+    ("# Notes\n", declared(), "no `## End-to-end seam` section at HEAD~1"),
+    (declared(), "# Notes\n", "no `## End-to-end seam` section at HEAD"),
+    (declared(), "```\n" + declared() + "```\n", "no `## End-to-end seam` section at HEAD"),
+])
+def test_a_missing_section_on_either_side_keeps_the_rerun_and_says_why(tmp_path, before, after, why):
+    r = same(two_revs(tmp_path, before, after))
+    assert r.returncode == 2 and why in r.stderr and r.stdout == ""
+
+
+def test_an_unreadable_rev_keeps_the_rerun(tmp_path):
+    root = two_revs(tmp_path, declared(), declared())
+    r = same(root, a="no-such-rev")
+    assert r.returncode == 2 and "no AGENTS.md could be read at no-such-rev" in r.stderr

@@ -822,7 +822,7 @@ enum Base {
 fn slice_note(spec: &str) -> String {
     format!(
         " -- Slice of spec #{spec}: your base is spec-{spec}, never the default branch: merge origin/spec-{spec} in, \
-run what python3 ~/.agents/skills/implement/selector_check.py command --root . prints as your one suite run, \
+run what python3 ~/.agents/skills/implement/selector_check.py command --root . --base origin/spec-{spec} prints as your one suite run, \
 as any ticket does, open the PR with gh pr create --base spec-{spec}; \
 a slice runs no review wave, since the spec is reviewed once on spec-{spec}."
     )
