@@ -2007,3 +2007,47 @@ def test_once_drains_a_ticket_through_the_in_memory_tracker_with_no_gh(sb, d, mo
     assert os.path.exists(os.path.join(ctx.log_dir, f"{branch}-seam.log")), "the per-change command ran"
     assert branch in read(sb.cleanup_log)
     assert not os.path.exists(gh_log), read(gh_log)
+
+
+def test_noted_reads_back_comments_posted_to_the_in_memory_tracker(d, ctx):
+    """`MemoryTracker.comment` lands on the issue, so `noted` round-trips without gh (#1879)."""
+    import tracker
+    ctx.tracker = tracker.MemoryTracker([mem_issue(5, ["in-progress"]), mem_issue(6, [])])
+    ctx.tracker.comment(5, f"{d.ANCHOR_NOTE} implement-5")
+    ctx.tracker.comment(5, f"{d.BUNDLE_NOTE} 5 6 (of 9 candidates)")
+    assert d.noted(ctx, 5) == {6}
+
+
+def test_resumable_finds_an_anchor_posted_to_the_in_memory_tracker(d, ctx):
+    import tracker
+    ctx.tracker = tracker.MemoryTracker([mem_issue(5, ["in-progress"])])
+    assert d.resumable(ctx, set()) is None
+    ctx.tracker.comment(5, f"{d.ANCHOR_NOTE} implement-5")
+    assert d.resumable(ctx, set()) == (5, "ticket")
+
+
+def test_relabel_and_closing_commit_run_on_the_in_memory_tracker(d, ctx):
+    import tracker
+    ctx.tracker = tracker.MemoryTracker([
+        mem_issue(5, ["in-progress"], assignees=[{"login": "me"}],
+                  events=[{"event": "closed", "commit_id": "abc"}]), mem_issue(6, [], events=[])])
+    d.relabel(ctx, 5, "ready-for-agent")
+    assert tracker.labels(ctx.tracker.issue(5)) == {"ready-for-agent"} and ctx.tracker.issue(5)["assignees"] == []
+    assert d.closing_commit(ctx, 5) == "abc"
+    with pytest.raises(d.DrainError, match="no closed event"):
+        d.closing_commit(ctx, 6)
+
+
+def test_stop_worker_swallows_a_pane_close_that_fails(d, monkeypatch):
+    """A pane already gone makes `herdr pane close` exit non-zero: `stop_worker` is best effort."""
+    import shellcmd
+    monkeypatch.setattr(d, "agent_info", lambda name: {"pane_id": "p9"})
+    seen = []
+
+    def close(args, **kw):
+        seen.append(args)
+        raise shellcmd.CmdError("herdr pane close p9: pane not found")
+
+    monkeypatch.setattr(shellcmd, "herdr", close)
+    d.stop_worker("w")
+    assert seen == [["pane", "close", "p9"]]

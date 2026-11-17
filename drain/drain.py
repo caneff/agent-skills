@@ -104,7 +104,6 @@ import collections
 import contextlib
 import ctypes
 import fcntl
-import json
 import os
 import re
 import resource
@@ -217,15 +216,6 @@ def refs(tickets):
     return " ".join(f"#{n}" for n in tickets)
 
 
-def gh(*args):
-    """`gh <args>`'s stripped stdout, for the two calls the tracker has no operation for yet
-    (`relabel`, `closing_commit`); a failure is a `DrainError`."""
-    try:
-        return shellcmd.gh(list(args)).stdout.strip()
-    except shellcmd.CmdError as exc:
-        raise DrainError(str(exc)) from None
-
-
 def git(args, cwd, ok=(0,)):
     """`git <args>` in `cwd`: its stripped stdout; an exit outside `ok` is a `DrainError`."""
     try:
@@ -257,8 +247,7 @@ def issue_view(ctx, n, fields):
 
 def relabel(ctx, n, add):
     """Move ticket `n` from in-progress to `add` and drop drain's assignment."""
-    gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", add,
-       "--remove-assignee", "@me")
+    asked(ctx.tracker.relabel, n, [add], [CLAIMED], "@me")
 
 
 def run_group(cmd, cwd, timeout, preexec=None):
@@ -566,12 +555,10 @@ def stop_worker(name):
     """Close the worker's pane, so a bundle handed to Chris does not keep working
     beside the next one. The workspace stays for inspection; the session's
     transcript stays with claude. Best effort: a worker already gone is fine."""
-    with contextlib.suppress(DrainStop, DrainError, KeyError, OSError):
+    with contextlib.suppress(DrainStop, DrainError, KeyError, OSError, shellcmd.CmdError):
         info = agent_info(name)
         if info:
-            # `shellcmd` has no public `herdr` call beyond `agent get`; `run_group` gives the same
-            # scrubbed environment and a bound.
-            run_group(["herdr", "pane", "close", info["pane_id"]], None, HERDR_SECONDS)
+            shellcmd.herdr(["pane", "close", info["pane_id"]], timeout=HERDR_SECONDS)
 
 
 def excerpt(ctx, n):
@@ -855,8 +842,7 @@ def closing_commit(ctx, n):
     """The sha of the commit that closed ticket `n`, `None` when it was closed
     by hand, as read from its last `closed` event. Raises `DrainError` when
     GitHub cannot say."""
-    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{ctx.repo}/issues/{n}/events") or "null")
-    events = [e for page in pages for e in page if e.get("event") == "closed"]
+    events = asked(ctx.tracker.closed_events, n)
     if not events:
         raise DrainError("it has no closed event")
     if "commit_id" not in events[-1]:

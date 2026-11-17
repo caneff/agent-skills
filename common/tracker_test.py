@@ -219,3 +219,131 @@ def test_gh_adapter_refuses_empty_output_where_it_asked_for_pages(scripted_gh, m
         tracker.GhTracker("o/r").native_blockers({"number": 2})
     monkeypatch.setenv("FAKE_GH_OUT", "[[]]")
     assert tracker.GhTracker("o/r").native_blockers({"number": 2}) == []
+
+
+def recording(answers=None):
+    calls = []
+
+    def run(args, **kw):
+        calls.append((list(args), kw))
+        return (answers or {}).get(args[0], "")
+
+    return calls, run
+
+
+def test_relabel_edits_labels_and_assignee_in_one_call():
+    calls, run = recording()
+    tracker.GhTracker("o/r", run=run).relabel(7, add=["ready-for-agent"], remove=["in-progress"], unassign="@me")
+    assert calls[0][0] == ["issue", "edit", "7", "--repo", "o/r", "--remove-label", "in-progress",
+                           "--add-label", "ready-for-agent", "--remove-assignee", "@me"]
+
+
+def test_memory_relabel_moves_labels_and_drops_the_assignee():
+    t = tracker.MemoryTracker([issue(7, ["in-progress", "x"], assignees=[{"login": "me"}, {"login": "z"}])])
+    t.relabel(7, add=["ready-for-agent"], remove=["in-progress"], unassign="me")
+    assert tracker.labels(t.issue(7)) == {"x", "ready-for-agent"}
+    assert t.issue(7)["assignees"] == [{"login": "z"}]
+    with pytest.raises(tracker.TrackerError, match="404"):
+        t.relabel(99, add=[], remove=[])
+
+
+def test_closed_events_are_the_closed_events_of_every_page():
+    pages = json.dumps([[{"event": "labeled"}, {"event": "closed", "commit_id": "a"}], [{"event": "closed", "commit_id": None}]])
+    calls, run = recording({"api": pages})
+    assert tracker.GhTracker("o/r", run=run).closed_events(5) == [
+        {"event": "closed", "commit_id": "a"}, {"event": "closed", "commit_id": None}]
+    assert calls[0][0] == ["api", "--paginate", "--slurp", "repos/o/r/issues/5/events"]
+    with pytest.raises(tracker.TrackerError, match="pages"):
+        tracker.GhTracker("o/r", run=recording({"api": ""})[1]).closed_events(5)
+
+
+def test_memory_closed_events_come_from_the_issue_and_none_is_an_empty_answer():
+    t = tracker.MemoryTracker([issue(5, events=[{"event": "labeled"}, {"event": "closed", "commit_id": "a"}]), issue(6)])
+    assert t.closed_events(5) == [{"event": "closed", "commit_id": "a"}]
+    assert t.closed_events(6) == []
+    with pytest.raises(tracker.TrackerError, match="404"):
+        t.closed_events(9)
+
+
+def test_repo_identity_reads_the_checkouts_owner_and_name():
+    calls, run = recording({"repo": '{"owner": {"login": "caneff"}, "name": "r"}'})
+    assert tracker.GhTracker(run=run).repo_identity("/x/r") == ("caneff", "r")
+    assert calls[0] == (["repo", "view", "--json", "owner,name"], {"cwd": "/x/r"})
+    for bad in ("", "[]", '{"owner": {}, "name": "r"}', "not json"):
+        with pytest.raises(tracker.TrackerError):
+            tracker.GhTracker(run=recording({"repo": bad})[1]).repo_identity("/x/r")
+    assert tracker.MemoryTracker(identity=("caneff", "r")).repo_identity("/any") == ("caneff", "r")
+
+
+def test_label_names_lists_the_repos_labels():
+    calls, run = recording({"label": '[{"name": "a"}, {"name": "b"}]'})
+    assert tracker.GhTracker("o/r", run=run).label_names() == {"a", "b"}
+    assert calls[0][0] == ["label", "list", "--repo", "o/r", "--limit", "1000", "--json", "name"]
+    with pytest.raises(tracker.TrackerError):
+        tracker.GhTracker("o/r", run=recording({"label": '{"name": "a"}'})[1]).label_names()
+    assert tracker.MemoryTracker([], labels_defined=["x"]).label_names() == {"x"}
+
+
+def test_open_issues_carries_the_chosen_fields_and_the_limit():
+    calls, run = recording({"issue": '[{"number": 1, "body": "b"}]'})
+    assert tracker.GhTracker("o/r", run=run).open_issues("number,body", 50) == [{"number": 1, "body": "b"}]
+    assert calls[0][0] == ["issue", "list", "--repo", "o/r", "--state", "open", "--limit", "50",
+                           "--json", "number,body"]
+    with pytest.raises(tracker.TrackerError, match="list"):
+        tracker.GhTracker("o/r", run=recording({"issue": "{}"})[1]).open_issues("number", 5)
+    t = tracker.MemoryTracker([issue(1, body="x"), issue(2, state="closed"), issue(3)])
+    assert t.open_issues("number,body", 10) == [{"number": 1, "body": "x"}, {"number": 3, "body": ""}]
+    assert len(t.open_issues("number", 1)) == 1
+
+
+def test_create_issue_and_comment_can_read_their_body_from_a_file(tmp_path):
+    calls, run = recording({"issue": "https://github.com/o/r/issues/4\n"})
+    t = tracker.GhTracker("o/r", run=run)
+    assert t.create_issue_from_file("T", "/b.md", ["l"]) == "https://github.com/o/r/issues/4"
+    t.comment_from_file(4, "/c.md")
+    assert calls[0][0] == ["issue", "create", "--repo", "o/r", "--title", "T", "--body-file", "/b.md", "--label", "l"]
+    assert calls[1][0] == ["issue", "comment", "4", "--repo", "o/r", "--body-file", "/c.md"]
+    (tmp_path / "b.md").write_text("body")
+    (tmp_path / "c.md").write_text("more")
+    m = tracker.MemoryTracker([issue(1)])
+    assert m.create_issue_from_file("T", str(tmp_path / "b.md"), ["l"]).endswith("/issues/2")
+    assert m.issue(2)["body"] == "body"
+    m.comment_from_file(2, str(tmp_path / "c.md"))
+    assert m.comments == [(2, "more")]
+    with pytest.raises(tracker.TrackerError, match="b.md"):
+        m.create_issue_from_file("T", str(tmp_path / "nope" / "b.md"), [])
+
+
+def test_a_memory_comment_reads_back_through_issue_view():
+    t = tracker.MemoryTracker([issue(1)])
+    t.comment(1, "first")
+    t.comment(1, "second")
+    got = t.issue_view(1, "comments")["comments"]
+    assert [c["body"] for c in got] == ["first", "second"]
+    assert all(c["author"]["login"] == "me" and c["createdAt"] for c in got)
+    assert t.comments == [(1, "first"), (1, "second")]
+
+
+def test_repo_identity_refuses_an_owner_or_name_that_is_not_a_string():
+    for bad in ('{"owner": {"login": null}, "name": "r"}', '{"owner": {"login": "c"}, "name": 5}'):
+        with pytest.raises(tracker.TrackerError, match="owner and a repo"):
+            tracker.GhTracker(run=recording({"repo": bad})[1]).repo_identity("/x/r")
+
+
+def test_create_issue_from_file_refuses_a_gh_that_prints_no_url():
+    with pytest.raises(tracker.TrackerError, match="no URL"):
+        tracker.GhTracker("o/r", run=recording({"issue": "\n"})[1]).create_issue_from_file("T", "/b.md", [])
+
+
+def test_closed_events_refuse_a_page_with_a_malformed_event():
+    pages = json.dumps([[{"event": "closed", "commit_id": "a"}, "oops"]])
+    with pytest.raises(tracker.TrackerError, match="malformed"):
+        tracker.GhTracker("o/r", run=recording({"api": pages})[1]).closed_events(5)
+
+
+def test_memory_comments_are_stamped_in_posting_order():
+    t = tracker.MemoryTracker([issue(1)])
+    for body in ("a", "b", "c"):
+        t.comment(1, body)
+    stamps = [c["createdAt"] for c in t.issue_view(1, "comments")["comments"]]
+    assert stamps == sorted(stamps) and len(set(stamps)) == 3

@@ -147,3 +147,15 @@ def test_herdr_agent(tmp_path, monkeypatch):
     fake_herdr(tmp_path, monkeypatch, "exec /bin/sleep 5")
     with pytest.raises(shellcmd.CmdError, match="timed out"):
         shellcmd.herdr_agent("w", timeout=0.2)
+
+
+def test_herdr_runs_a_public_call_with_an_exit_contract_and_timeout(tmp_path, monkeypatch):
+    fake_herdr(tmp_path, monkeypatch, 'echo "$@"')
+    assert shellcmd.herdr(["pane", "close", "p1"]).stdout.strip() == "pane close p1"
+    fake_herdr(tmp_path, monkeypatch, "echo down >&2; exit 3")
+    with pytest.raises(shellcmd.CmdError, match="down"):
+        shellcmd.herdr(["pane", "close", "p1"])
+    assert shellcmd.herdr(["pane", "close", "p1"], ok=(0, 3)).returncode == 3
+    fake_herdr(tmp_path, monkeypatch, "exec /bin/sleep 5")
+    with pytest.raises(shellcmd.CmdError, match="timed out"):
+        shellcmd.herdr(["pane", "close", "p1"], timeout=0.2)
