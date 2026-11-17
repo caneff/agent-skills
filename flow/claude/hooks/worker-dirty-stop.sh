@@ -12,28 +12,46 @@
 # sha, scratch or dispositions to judge yet, and the full gate stays the
 # worker's step before "PR up".
 # A second consecutive block would loop, so a stop already continued by a
-# hook (`stop_hook_active`) passes. Not a worker, no transcript, or no jq: pass.
+# hook (`stop_hook_active`) passes; if the tree is still dirty then, that is
+# logged. Not a worker or no transcript: pass. A lib or jq that is missing
+# also passes, but is logged to ~/.claude/worker-dirty-stop.log, never
+# silent. The log is the only record of a pass over a dirty tree.
 set -u
 hook_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 gate="$hook_dir/../../../implement/pre-report-gate.sh"
 
+log="$HOME/.claude/worker-dirty-stop.log"
+note() { mkdir -p "$(dirname "$log")"; printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$1" "$2" >> "$log"; }
+block() { jq -nc --arg r "$1" '{decision:"block", reason:$r}'; exit 0; }
+
+command -v jq >/dev/null 2>&1 || { note "jq-missing" "every worker stop passes unchecked"; exit 0; }
 event="$(cat)"
-jq -e '.stop_hook_active != true' >/dev/null 2>&1 <<<"$event" || exit 0
 transcript="$(jq -r '.transcript_path // ""' <<<"$event" 2>/dev/null)"
 cwd="$(jq -r '.cwd // ""' <<<"$event" 2>/dev/null)"
 [ -r "$transcript" ] || exit 0
 
 # shellcheck source=worker-alert-lib.sh
-source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || exit 0
-declare -F worker_alert_read_brief >/dev/null || exit 0
+source "$hook_dir/worker-alert-lib.sh" 2>/dev/null && declare -F worker_alert_read_brief >/dev/null || {
+  note "lib-missing" "$hook_dir/worker-alert-lib.sh unreadable or lacks worker_alert_read_brief; every worker stop passes unchecked"
+  exit 0
+}
 brief="$(worker_alert_read_brief "$transcript")"
 [ -n "$brief" ] || exit 0
 
-block() { jq -nc --arg r "$1" '{decision:"block", reason:$r}'; exit 0; }
-[ -x "$gate" ] || [ -r "$gate" ] || block "worker-dirty-stop: cannot find $gate, so the tree could not be checked; commit or remove uncommitted work, then stop"
-[ -d "$cwd" ] || block "worker-dirty-stop: the session cwd '$cwd' is not a directory, so the tree could not be checked"
+active=false
+jq -e '.stop_hook_active == true' >/dev/null 2>&1 <<<"$event" && active=true
+
+[ -r "$gate" ] || { [ "$active" = true ] || block "worker-dirty-stop: cannot find $gate, so the tree could not be checked; commit your work and report"; exit 0; }
+[ -d "$cwd" ] || { [ "$active" = true ] || block "worker-dirty-stop: the session cwd '$cwd' is not a directory, so the tree could not be checked"; exit 0; }
 
 out="$(cd "$cwd" && PRE_REPORT_TREE_ONLY=1 bash "$gate" HEAD 2>&1)"
 rc=$?
 [ "$rc" -eq 0 ] && exit 0
-block "You are stopping with uncommitted work (a worker's report must describe the branch, not the tree). Commit it or remove it, then report. ${out}"
+if [ "$active" = true ]; then
+  note "passed-dirty" "$cwd: stop already continued once; ${out%%$'\n'*}"
+  exit 0
+fi
+case "$rc" in
+  1) block "You are stopping with uncommitted work. Commit it (a WIP commit is fine); delete only what you created and no longer need, and ask before deleting anything else. If you already sent your report, send a corrected one naming the new sha. ${out}" ;;
+  *) block "worker-dirty-stop: the tree check could not run (pre-report gate exit $rc), so the tree was not judged clean: ${out}" ;;
+esac

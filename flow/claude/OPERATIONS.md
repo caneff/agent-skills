@@ -250,12 +250,8 @@ defines them.
   send-time sibling `worker-send-alert.sh` (`PostToolUse` on `SendMessage`,
   #1540) is registered; its header states when it fires.
 - Dirty-stop guard (#1907): the registered `Stop` hook `worker-dirty-stop.sh`
-  blocks a worker's stop while its worktree holds uncommitted or untracked
-  files, running the pre-report gate's tree check
-  (`PRE_REPORT_TREE_ONLY=1 implement/pre-report-gate.sh HEAD`). The worker
-  commits or removes them and carries on; a stop the hook already continued
-  once passes, so it cannot loop. It runs the tree check alone, so a stop for
-  a question is not held for a missing sha or dispositions.
+  holds a worker's stop while its worktree has uncommitted files; its header
+  states the contract.
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
   killed. `job-run` records the session that started it, and the `job-wake`

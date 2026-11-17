@@ -9,6 +9,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 hook="$here/worker-dirty-stop.sh"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+export HOME="$tmp/home"; mkdir -p "$HOME"
 
 repo="$tmp/repo"
 git init -q -b implement-77 "$repo"
@@ -55,5 +56,32 @@ check "ignored .scratch/ does not block" pass "$(run "$worker" "$repo")"
 # instead of passing silently.
 nogit="$tmp/nogit"; mkdir "$nogit"
 check "non-repo cwd blocks, naming the failure" block "$(run "$worker" "$nogit")"
+
+# The reason tells the two failure causes apart, and a missing cwd is judged.
+reason() { jq -r '.reason // ""' <<<"$1"; }
+r=$(reason "$(run "$worker" "$nogit")")
+[[ "$r" == *"could not run"* && "$r" != *"uncommitted work"* ]] \
+  && echo "PASS an unjudgeable tree is not called uncommitted work" || { echo "FAIL gate-exit-2 reason: $r"; fails=1; }
+echo z > "$repo/dirty2.txt"
+r=$(reason "$(run "$worker" "$repo")")
+[[ "$r" == *"uncommitted work"* ]] \
+  && echo "PASS a dirty tree says uncommitted work" || { echo "FAIL dirty reason: $r"; fails=1; }
+check "a cwd that does not exist blocks" block "$(run "$worker" "$tmp/gone")"
+
+# A stop already continued once passes even dirty, but leaves a log line.
+rm -f "$tmp/home/.claude/worker-dirty-stop.log"
+mkdir -p "$tmp/home"
+HOME="$tmp/home" run "$worker" "$repo" true >/dev/null
+grep -q passed-dirty "$tmp/home/.claude/worker-dirty-stop.log" 2>/dev/null \
+  && echo "PASS a dirty pass on the second stop is logged" || { echo "FAIL no passed-dirty log line"; fails=1; }
+
+# A lib the hook cannot load passes, loudly: a log line, never silence.
+hk="$tmp/hk"; mkdir -p "$hk/flow/claude/hooks" "$hk/implement"
+cp "$hook" "$hk/flow/claude/hooks/"; cp "$here/../../../implement/pre-report-gate.sh" "$hk/implement/"
+rm -f "$tmp/home/.claude/worker-dirty-stop.log"
+jq -nc --arg t "$worker" --arg c "$repo" '{transcript_path:$t, cwd:$c}' \
+  | HOME="$tmp/home" bash "$hk/flow/claude/hooks/worker-dirty-stop.sh" >/dev/null 2>&1
+grep -q lib-missing "$tmp/home/.claude/worker-dirty-stop.log" 2>/dev/null \
+  && echo "PASS a missing lib is logged" || { echo "FAIL no lib-missing log line"; fails=1; }
 
 exit "$fails"
