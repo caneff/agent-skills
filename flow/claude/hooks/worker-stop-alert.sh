@@ -4,7 +4,8 @@
 # Contract: read the Stop event JSON on stdin. The session is a worker when its
 # transcript opens with an `/implement` or `/implement-spec` brief carrying
 # `--controller "<name>"`. A turn starts at a human prompt or a peer message
-# that is not a subagent hand-back. The worker has reported when, after that
+# from the controller (a message from any other session, such as a worker this
+# worker dispatched, starts none). The worker has reported when, after that
 # turn start, a SendMessage to the controller came back with `success: true`.
 # A stop while something launched this turn — or an earlier turn, with
 # liveness evidence since this turn's start — is still out is a wait, not
@@ -19,7 +20,7 @@
 # status-bearing task-notification, a `TaskStop`, or a Monitor timeout
 # notification (`<event>[Monitor timed out — re-arm if needed.]</event>`,
 # statusless but a finish, not a touch). Also not a silent stop: a worker
-# that reported and has done nothing since — an inbound peer message
+# that reported and has done nothing since — an inbound controller message
 # starts a turn, so a controller closing its own loop (`merged, sha X`)
 # otherwise manufactures an alert on that worker's next stop. Otherwise
 # submit one line into the controller's herdr pane with `herdr agent
@@ -97,9 +98,24 @@ worker_alert_resolve_controller "$controller"
 IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   --argjson names "$(jq -nc '$ARGS.positional' --args -- ${names[@]+"${names[@]}"})" \
   --argjson socks "$(jq -nc '$ARGS.positional' --args -- ${sockets[@]+"${sockets[@]}"})" '
+  # A peer message starts a turn only when the brief'"'"'s controller sent it: a
+  # worker that dispatches workers of its own hears from them, and each of
+  # those would otherwise start a turn owing the controller a report (#1945).
+  # The sender is `.origin.from` (a `uds:` address) and `.origin.name`; both
+  # are matched against what `worker_alert_resolve_controller` resolved, the
+  # same names and sockets a report is matched against. A peer message
+  # carrying neither is attributable to no one, so it starts no turn.
+  def from_controller: (.origin.from | IN($socks[])) or (.origin.name | IN($c, $names[]));
+  # A sub-worker'"'"'s own stop alert is typed into this pane as a human prompt;
+  # it is that worker'"'"'s report to us, not a turn we owe the controller.
+  def worker_alert: (.message.content
+      | if type == "string" then . else ([.[]? | .text? // empty] | join("")) end)
+      | startswith("[worker-stop-alert]");
   to_entries as $all
   | ($all | map(select(.value.type == "user"
-      and (.value.origin.kind == "human" or (.value.origin.kind == "peer" and .value.origin.handback != true))))
+      and ((.value.origin.kind == "human" and (.value | worker_alert | not))
+           or (.value.origin.kind == "peer" and .value.origin.handback != true
+               and (.value | from_controller)))))
    | last | .key // 0) as $start
   | .[($start + 1):] as $after
   | [$all[] | select(.value.type == "assistant") | .value.message.content[]?
@@ -115,7 +131,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
                 | .tool_use_id | select(IN($sends[]))] | length > 0)
       | .key] as $reports
   | [$reports[] | select(. > $start)] as $delivered
-  # An inbound peer message starts a turn, so a controller closing a loop
+  # An inbound controller message starts a turn, so a controller closing a loop
   # (`merged, sha X`) used to manufacture an alert on the next stop. A
   # report still stands while nothing has happened since it: any tool
   # call or tool result after the last delivered report is work that owes
