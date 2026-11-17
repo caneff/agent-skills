@@ -530,7 +530,7 @@ Median PR open->merge: 6.7 min with fuzz-pr, 7.0 min without, so fuzz-pr is not 
 Fuzz-pr finished before the merge on 83 of 85 final-sha runs, so the controller does wait for it.
 
 Local gate (documented, partly measured):
-- `git config land.testcmd` = `npm test && npm run lint` (verified). The same two commands are the whole of `ci.yml`.
+- that repo's `land` test-command git config = `npm test && npm run lint` (verified). The same two commands are the whole of `ci.yml`.
 - AGENTS.md:81-83: the worker runs the changed live files while iterating, then **the full live suite once before
   "PR up"**; the controller's merge check reruns either the full suite or the narrowed file set
   (live/README.md:11-19). Any change to `live/*.mjs`, `package.json`, `site/` or `.github/` forces a full rerun.
@@ -610,7 +610,7 @@ Last 40 squash PRs on main (c9db1eb #811 .. 6b97a35 #1016): **test+harness lines
 
 ##### 6. Redundancy candidates
 
-1. **Local gate == CI.** `land.testcmd` is exactly `ci.yml`'s two steps. CI is 45 s and is the cheap side; the
+1. **Local gate == CI.** The `land` test-command git config is exactly `ci.yml`'s two steps. CI is 45 s and is the cheap side; the
    duplication costs nothing that matters. CI did catch 3 test failures the local gate let through, so keep both.
 2. **CI twice per PR commit** (push + pull_request), no concurrency group: 474 redundant branch-push runs.
 3. **Full live suite twice per PR** (worker, then controller unless the narrowing rule applies), on an overloaded
@@ -677,7 +677,7 @@ Not recommended: cutting CI's `npm test`/lint (45 s, and it caught what the loca
 ##### Verified vs not verified
 
 Verified: every workflow fact (file:line); all GitHub run counts, durations, failure logs and classifications above;
-test/source line and case counts; growth by commit; last-40-PR line ratios; ticket list; `land.testcmd`.
+test/source line and case counts; growth by commit; last-40-PR line ratios; ticket list; the `land` test-command git config.
 
 Not verified:
 - How often the full live suite actually runs per PR. Local timings come from `~/.cache/agent-jobs` (only `job-run`

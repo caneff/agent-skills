@@ -8,6 +8,10 @@
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
+# The lane builds below reuse the shared, locked target dir, not a cold one per
+# scratch HOME (#1950): re-run this file inside tests/lane-cargo.sh. A
+# CARGO_TARGET_DIR already set (the wrapper's own export) runs it as it is.
+[ -n "${CARGO_TARGET_DIR:-}" ] || exec bash "$root/tests/lane-cargo.sh" "$root/flow/lane/Cargo.toml" -- bash "${BASH_SOURCE[0]}" "$@"
 
 # TMPDIR pinned to /tmp: the herdr-toast-install refusal case below depends on
 # every scratch repo living under /tmp, and a caller's own TMPDIR would move
