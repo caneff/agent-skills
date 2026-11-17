@@ -301,7 +301,7 @@ def test_create_issue_and_comment_can_read_their_body_from_a_file(tmp_path):
     t = tracker.GhTracker("o/r", run=run)
     assert t.create_issue_from_file("T", "/b.md", ["l"]) == "https://github.com/o/r/issues/4"
     t.comment_from_file(4, "/c.md")
-    assert calls[0][0] == ["issue", "create", "--repo", "o/r", "--title", "T", "--label", "l", "--body-file", "/b.md"]
+    assert calls[0][0] == ["issue", "create", "--repo", "o/r", "--title", "T", "--body-file", "/b.md", "--label", "l"]
     assert calls[1][0] == ["issue", "comment", "4", "--repo", "o/r", "--body-file", "/c.md"]
     (tmp_path / "b.md").write_text("body")
     (tmp_path / "c.md").write_text("more")
@@ -322,3 +322,28 @@ def test_a_memory_comment_reads_back_through_issue_view():
     assert [c["body"] for c in got] == ["first", "second"]
     assert all(c["author"]["login"] == "me" and c["createdAt"] for c in got)
     assert t.comments == [(1, "first"), (1, "second")]
+
+
+def test_repo_identity_refuses_an_owner_or_name_that_is_not_a_string():
+    for bad in ('{"owner": {"login": null}, "name": "r"}', '{"owner": {"login": "c"}, "name": 5}'):
+        with pytest.raises(tracker.TrackerError, match="owner and a repo"):
+            tracker.GhTracker(run=recording({"repo": bad})[1]).repo_identity("/x/r")
+
+
+def test_create_issue_from_file_refuses_a_gh_that_prints_no_url():
+    with pytest.raises(tracker.TrackerError, match="no URL"):
+        tracker.GhTracker("o/r", run=recording({"issue": "\n"})[1]).create_issue_from_file("T", "/b.md", [])
+
+
+def test_closed_events_refuse_a_page_with_a_malformed_event():
+    pages = json.dumps([[{"event": "closed", "commit_id": "a"}, "oops"]])
+    with pytest.raises(tracker.TrackerError, match="malformed"):
+        tracker.GhTracker("o/r", run=recording({"api": pages})[1]).closed_events(5)
+
+
+def test_memory_comments_are_stamped_in_posting_order():
+    t = tracker.MemoryTracker([issue(1)])
+    for body in ("a", "b", "c"):
+        t.comment(1, body)
+    stamps = [c["createdAt"] for c in t.issue_view(1, "comments")["comments"]]
+    assert stamps == sorted(stamps) and len(set(stamps)) == 3

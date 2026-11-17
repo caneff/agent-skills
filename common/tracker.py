@@ -6,6 +6,7 @@ drives the real seam without faking a binary. A `gh` that cannot answer (it fail
 printed nothing, or printed something that is not the shape asked for) raises `TrackerError`:
 never an empty answer, since an empty queue and an unreadable one are different facts. Issues are
 GitHub REST objects."""
+import datetime
 import json
 from urllib.parse import quote
 
@@ -52,7 +53,8 @@ def gh_json(args):
 
 class GhTracker:
     """The issues, PRs and runs of one repo, read and written through `gh`. Every call goes through
-    `run(args)`, which returns gh's stdout and is the seam a test of this adapter replaces."""
+    `run(args)`, which returns gh's stdout and is the seam a test of this adapter replaces;
+    `repo_identity` alone passes `cwd=<checkout>` too, so a replacement accepts that keyword."""
 
     def __init__(self, repo=None, run=gh_text):
         self.repo = repo
@@ -178,9 +180,8 @@ class GhTracker:
             raise TrackerError(f"run {run_id}: gh printed no log")
         return text.strip()
 
-    def create_issue(self, title, body, labels):
-        """File an issue and return its URL."""
-        args = ["issue", "create", "--repo", self.repo, "--title", title, "--body", body]
+    def _create(self, title, labels, body_args):
+        args = ["issue", "create", "--repo", self.repo, "--title", title, *body_args]
         for label in labels:
             args += ["--label", label]
         url = self._run(args).strip()
@@ -188,15 +189,13 @@ class GhTracker:
             raise TrackerError("gh issue create printed no URL")
         return url
 
+    def create_issue(self, title, body, labels):
+        """File an issue and return its URL."""
+        return self._create(title, labels, ["--body", body])
+
     def create_issue_from_file(self, title, body_file, labels):
         """`create_issue` with the body read by gh from `body_file`; returns the URL."""
-        args = ["issue", "create", "--repo", self.repo, "--title", title]
-        for label in labels:
-            args += ["--label", label]
-        url = self._run(args + ["--body-file", body_file]).strip()
-        if not url:
-            raise TrackerError("gh issue create printed no URL")
-        return url
+        return self._create(title, labels, ["--body-file", body_file])
 
     def comment_from_file(self, number, body_file):
         """`comment` with the body read by gh from `body_file`."""
@@ -216,8 +215,10 @@ class GhTracker:
 
     def closed_events(self, number):
         """The `closed` events of issue `number`, every page, oldest first."""
-        return [e for e in self._pages(self._path(f"issues/{int(number)}/events"), "events")
-                if isinstance(e, dict) and e.get("event") == "closed"]
+        events = self._pages(self._path(f"issues/{int(number)}/events"), "events")
+        if not all(isinstance(e, dict) for e in events):
+            raise TrackerError(f"issue #{number}: an event came back malformed")
+        return [e for e in events if e.get("event") == "closed"]
 
     def repo_identity(self, checkout):
         """`(owner login, name)` of the GitHub repo the checkout `checkout` is a clone of. A reply
@@ -383,9 +384,11 @@ class MemoryTracker:
         self._check("comment")
         self.comments.append((number, body))
         if number in self._issues:
-            self._issues[number].setdefault("comments", []).append(
-                {"author": {"login": self._viewer}, "body": body, "createdAt": "2000-01-01T00:00:00Z",
-                 "isMinimized": False})
+            posted = self._issues[number].setdefault("comments", [])
+            # One second apart, so a reader that sorts by time keeps the posting order.
+            stamp = (datetime.datetime(2000, 1, 1) + datetime.timedelta(seconds=len(posted))).isoformat()
+            posted.append({"author": {"login": self._viewer}, "body": body, "createdAt": stamp + "Z",
+                           "isMinimized": False})
 
     def create_issue_from_file(self, title, body_file, labels):
         return self.create_issue(title, self._read(body_file), labels)

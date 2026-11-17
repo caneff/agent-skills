@@ -25,6 +25,12 @@ MULTI_DIR = "multi"  # under stored_sweeps_base(): one folder per sweep id, neve
 OWNER = "caneff"
 
 
+def new_tracker(slug=None):
+    """The tracker for GitHub repo `slug` (`owner/name`; None for a call that names a checkout
+    instead). The one place this module makes one, so a test replaces it with a `MemoryTracker`."""
+    return tracker.GhTracker(slug)
+
+
 def stored_sweeps_base():
     """Where finished sweeps live: outside the run-folder cache the driver prunes."""
     return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "all-audits")
@@ -38,7 +44,7 @@ def repo_identity(repo):
     if not os.path.isdir(repo):
         return None, "no such directory"
     try:
-        owner, name = tracker.GhTracker().repo_identity(repo)
+        owner, name = new_tracker().repo_identity(repo)
     except tracker.TrackerError as e:
         return None, f"owner check failed ({e})"
     if owner != OWNER:
@@ -66,7 +72,7 @@ def label_refusal(slug, label):
     is refused. A `gh` that cannot answer is a refusal, never a pass; no label
     is ever created."""
     try:
-        names = tracker.GhTracker(slug).label_names()
+        names = new_tracker(slug).label_names()
     except tracker.TrackerError as e:
         return f"label check failed ({e})"
     return None if label in names else f"label `{label}` is missing"
@@ -110,7 +116,7 @@ def issue_state(number, slug):
     """("OPEN" or "CLOSED", "") from `gh`, or (None, why). An answer that is
     neither is never read as either."""
     try:
-        state = tracker.GhTracker(slug).issue_view(number, "state").get("state")
+        state = new_tracker(slug).issue_view(number, "state").get("state")
     except tracker.TrackerError as e:
         return None, str(e)
     if state in ("OPEN", "CLOSED"):
@@ -151,7 +157,7 @@ def resume_unposted(name):
     sweep, rec = records[-1]
     while rec["unposted"]:
         try:
-            tracker.GhTracker(record_repo(sweep, rec)).comment_from_file(
+            new_tracker(record_repo(sweep, rec)).comment_from_file(
                 rec["issue"], os.path.join(sweep, rec["unposted"][0]))
         except tracker.TrackerError as e:
             return f"audit record {rec['url']} still misses comments {', '.join(rec['unposted'])} ({e})"
@@ -186,7 +192,7 @@ def open_specs_of(sweep, rec):
     comment. A listing that fails, is not a list of bodies, or fills the
     limit (so may hide an open spec) is a refusal, never "none open"."""
     try:
-        listed = tracker.GhTracker(record_repo(sweep, rec)).open_issues("number,body", SPEC_LIST_LIMIT)
+        listed = new_tracker(record_repo(sweep, rec)).open_issues("number,body", SPEC_LIST_LIMIT)
     except tracker.TrackerError as e:
         return None, f"open-spec lookup failed ({e})"
     try:
@@ -246,7 +252,7 @@ def write_json(path, data):
         json.dump(data, f, indent=2)
 
 
-def file_audit_record(repo, stored, title, label, chunks, meta):
+def file_audit_record(stored, title, label, chunks, meta):
     """Open the issue with `chunks[0]` and add the rest as comments, in order.
     The chunks stay in the stored sweep, and the record file is written the
     moment the issue exists, naming every comment not yet posted, so a failure
@@ -256,7 +262,7 @@ def file_audit_record(repo, stored, title, label, chunks, meta):
         paths.append(os.path.join(stored, f"audit-record-{i}.md"))
         with open(paths[-1], "w", encoding="utf-8") as f:
             f.write(text)
-    gh = tracker.GhTracker(meta["repo"])
+    gh = new_tracker(meta["repo"])
     try:
         out = gh.create_issue_from_file(title, paths[0], [label])
     except tracker.TrackerError as e:
@@ -274,7 +280,7 @@ def file_audit_record(repo, stored, title, label, chunks, meta):
         f.write(json.dumps({"sweep": os.path.basename(stored), "url": url}) + "\n")
     for path in paths[1:]:
         try:
-            gh.comment_from_file(number, path)
+            gh.comment_from_file(int(number), path)
         except tracker.TrackerError as e:
             return url, (f"audit record {url} is missing continuation comments {', '.join(meta['unposted'])} "
                          f"({e}); their text is in {stored}")

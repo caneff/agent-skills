@@ -2036,3 +2036,18 @@ def test_relabel_and_closing_commit_run_on_the_in_memory_tracker(d, ctx):
     assert d.closing_commit(ctx, 5) == "abc"
     with pytest.raises(d.DrainError, match="no closed event"):
         d.closing_commit(ctx, 6)
+
+
+def test_stop_worker_swallows_a_pane_close_that_fails(d, monkeypatch):
+    """A pane already gone makes `herdr pane close` exit non-zero: `stop_worker` is best effort."""
+    import shellcmd
+    monkeypatch.setattr(d, "agent_info", lambda name: {"pane_id": "p9"})
+    seen = []
+
+    def close(args, **kw):
+        seen.append(args)
+        raise shellcmd.CmdError("herdr pane close p9: pane not found")
+
+    monkeypatch.setattr(shellcmd, "herdr", close)
+    d.stop_worker("w")
+    assert seen == [["pane", "close", "p9"]]

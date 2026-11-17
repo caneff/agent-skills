@@ -1054,7 +1054,7 @@ def _sweep_checkout(repo, slug, name, wt, run_root, sweep_id, only, short, force
     if not audit_record.worth_filing(model):
         return outcome  # stored with no record: `prune_closed_sweeps` drops it after RUN_TTL_DAYS
     meta = {"repo": slug, "checkout": repo}
-    url, error = file_audit_record(repo, stored, f"Audit record: {name} {sweep_id}", label,
+    url, error = file_audit_record(stored, f"Audit record: {name} {sweep_id}", label,
                                    audit_record.build(model), meta)
     outcome.issue_url = url
     if error:
