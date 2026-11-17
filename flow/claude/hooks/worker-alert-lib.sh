@@ -190,7 +190,8 @@ worker_alert_current_controller() { # <transcript> <brief controller> -> name on
 # (`$2`), a name or a `uds:` address `worker_alert_resolve_controller` left in
 # `names` and `sockets`, each optionally followed by SendMessage's ` [ref]`.
 # worker-stop-alert.sh reads the same rule in jq over the transcript, where
-# this function cannot be called; a change to one is a change to both.
+# this function cannot be called; a change to one is a change to both. Its
+# sender check (`from_controller`) matches the same names and sockets again.
 worker_alert_is_controller_target() { # <to> <brief controller> -> 0 when it is
   local to="$1" nm
   for nm in "$2" ${names[@]+"${names[@]}"} ${sockets[@]+"${sockets[@]}"}; do

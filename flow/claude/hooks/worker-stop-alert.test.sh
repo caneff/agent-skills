@@ -56,6 +56,8 @@ send() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"
 ok() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"sent"}]},"toolUseResult":{"success":true,"message":"sent"}}\n' "$1"; }
 denied() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
 peer() { printf '{"type":"user","isMeta":true,"origin":{"kind":"peer","name":"skills-b6"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
+# peer_from <from> <name> <text> : a peer message from a named sender and socket.
+peer_from() { printf '{"type":"user","isMeta":true,"origin":{"kind":"peer","from":"%s","name":"%s"},"message":{"role":"user","content":"%s"}}\n' "$1" "$2" "$3"; }
 notification() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
 # launch <agentId> ; teammate_launch <agentId> [name] ; handback <agentId>
 launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"%s"}}\n' "$1" "$1"; }
@@ -225,6 +227,38 @@ t="$tmp/uds.jsonl"
 { human "$brief"; peer "ruling"; send u1 "uds:/run/ctl.sock"; ok u1; } > "$t"
 run "uds reply" "$t"
 expect_none "a reply to the controller's uds: address counts as reported"
+
+# A peer message from a session that is not the controller (a worker this
+# worker dispatched, #1945) does not start a turn that owes the controller a
+# report. Runs after the uds record above, so the controller has a socket.
+reset_log
+t="$tmp/third-party-after-report.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1;
+  peer_from "uds:/run/other.sock" "implement-231-88" "idle"; work; assistant_text "noted"; } > "$t"
+run "third-party peer after report" "$t"
+expect_reported "a peer message from a third session starts no turn, so the earlier report stands"
+
+reset_log
+t="$tmp/subworker-alert-after-report.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1;
+  human "[worker-stop-alert] worker #231 stopped without reporting to skills-b6"; work; assistant_text "noted"; } > "$t"
+run "sub-worker stop alert after report" "$t"
+expect_reported "a sub-worker's stop alert (a human prompt) starts no turn owed to the controller"
+
+reset_log
+# Guard only: this one also passes on the pre-#1945 hook; the test above is
+# the one that fails without the fix.
+t="$tmp/third-party-never-reported.jsonl"
+{ human "$brief"; work; peer_from "uds:/run/other.sock" "implement-231-88" "idle"; assistant_text "noted"; } > "$t"
+run "third-party peer, never reported" "$t"
+expect_alert "a third-party peer message does not hide a worker that never reported"
+
+reset_log
+t="$tmp/controller-by-socket.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1;
+  peer_from "uds:/run/ctl.sock" "renamed-ctl" "fix this"; work; assistant_text "fixed"; } > "$t"
+run "controller peer matched by socket" "$t"
+expect_alert "a peer message from the controller's socket starts a turn even under another name"
 
 reset_log
 t="$tmp/stale-report.jsonl"
