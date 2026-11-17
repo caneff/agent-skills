@@ -9,7 +9,8 @@ repoint_bashrc_line() { printf '[ -r "%s" ] && . "%s"  # #1625\n' "$1" "$1"; }
 # lib-missing for two days.
 LINKED_HOOKS=(block-dangerous-git.sh refresh-landed.sh
               wrap-background-jobs.sh worker-stop-alert.sh
-              worker-send-alert.sh worker-alert-lib.sh package.json)
+              worker-send-alert.sh worker-alert-lib.sh worker-dirty-stop.sh
+              package.json)
 
 # Repo hooks with no settings.json entry on purpose. worker-stop-alert.sh is
 # linked but its Stop entry was removed 2026-10-04 (flow/claude/OPERATIONS.md,

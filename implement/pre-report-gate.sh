@@ -12,6 +12,9 @@
 # commit and must keep is named in the PR-up report by setting
 # PRE_REPORT_KEEP_SCRATCH="<why>", which passes the check and folds the
 # reason into the pass line itself.
+# PRE_REPORT_TREE_ONLY=1 stops after the clean-tree check (exit 0 + a pass
+# line): the Stop hook worker-dirty-stop.sh (#1907) runs it on every worker
+# stop, where a stop for a question has no sha, scratch or dispositions yet.
 # Usage: bash pre-report-gate.sh <sha> [<tip, default HEAD>]
 # Exit 0 + a pass line to quote in the report; 1 + a one-line reason; 2 on
 # usage or a sha git cannot resolve.
@@ -32,6 +35,11 @@ if [ -n "$dirty" ]; then
   echo "pre-report gate: uncommitted or untracked files — commit or remove them:" >&2
   printf '%s\n' "$dirty" >&2
   exit 1
+fi
+
+if [ -n "${PRE_REPORT_TREE_ONLY:-}" ]; then
+  echo "pre-report gate: clean tree (tree-only check)"
+  exit 0
 fi
 
 top=$(git rev-parse --show-toplevel) || { echo "pre-report gate: cannot resolve the repo root" >&2; exit 2; }

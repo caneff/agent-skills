@@ -301,4 +301,22 @@ else
   echo "FAIL: no sha argument — want exit 2 + usage, got $rc: $out"; fails=1
 fi
 
+# PRE_REPORT_TREE_ONLY (#1907): the clean-tree check alone, for the Stop hook.
+echo scratch > "$repo/.scratch-probe"
+out=$(cd "$repo" && PRE_REPORT_TREE_ONLY=1 bash "$gate" HEAD 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"uncommitted"* ]]; then
+  echo "PASS: tree-only still refuses a dirty tree"
+else
+  echo "FAIL: tree-only on a dirty tree — want exit 1 + 'uncommitted', got $rc: $out"; fails=1
+fi
+rm "$repo/.scratch-probe"
+mkdir -p "$repo/.scratch"; echo x > "$repo/.scratch/f"
+out=$(cd "$repo" && PRE_REPORT_TREE_ONLY=1 bash "$gate" HEAD 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"tree-only"* ]]; then
+  echo "PASS: tree-only passes a clean tree and skips the scratch check"
+else
+  echo "FAIL: tree-only on a clean tree with .scratch/ — want exit 0 + 'tree-only', got $rc: $out"; fails=1
+fi
+rm -r "$repo/.scratch"
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

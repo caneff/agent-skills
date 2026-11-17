@@ -259,6 +259,11 @@
             "type": "command",
             "command": "/home/caneff/.claude/hooks/worker-stop-alert.sh",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/worker-dirty-stop.sh",
+            "timeout": 10
           }
         ]
       }
