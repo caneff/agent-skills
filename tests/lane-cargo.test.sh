@@ -49,6 +49,12 @@ case "$got" in "$xdg/agent-skills/cargo-target-private."*) ;; *) no "busy lock d
 [ "$rc" = 7 ] || no "the command's exit status was lost (rc=$rc)"
 [ ! -e "$got" ] || no "the private dir $got was left behind"
 
+# 4b. A manifest that yields no package stops the run before the command runs
+# (an empty clean would read as a clean tree).
+mkdir -p "$shadow/bad"; printf 'not toml' >"$shadow/bad/Cargo.toml"
+out=$(bash "$w" "$shadow/bad/Cargo.toml" -- bash -c 'echo RAN' 2>/dev/null); rc=$?
+{ [ "$rc" != 0 ] && [ "$out" != RAN ]; } || no "a manifest cargo cannot read still ran the command (rc=$rc)"
+
 # 5. A command's exit status passes through the locked path too.
 bash "$w" "$shadow/a/Cargo.toml" -- bash -c 'exit 3'; [ $? = 3 ] || no "locked path lost the exit status"
 

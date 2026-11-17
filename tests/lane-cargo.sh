@@ -40,7 +40,11 @@ if flock -w "${LANE_CARGO_WAIT:-240}" 9; then
   export CARGO_TARGET_DIR=$cache/cargo-target
   # The crate's own artifacts only; the dependencies stay. Both profiles: the
   # tests build debug, `cargo install` builds release.
-  for pkg in $(cargo metadata --no-deps --format-version 1 --manifest-path "$manifest" | jq -r '.packages[].name'); do
+  # Assigned first so a failing cargo or jq stops the run: inside `for ... in $(...)`
+  # it would leave an empty loop and skip the clean, which reads as a clean tree.
+  pkgs=$(cargo metadata --no-deps --format-version 1 --manifest-path "$manifest" | jq -r '.packages[].name')
+  [ -n "$pkgs" ] || { echo "lane-cargo.sh: no package found in $manifest" >&2; exit 1; }
+  for pkg in $pkgs; do
     cargo clean -q --manifest-path "$manifest" -p "$pkg"
     cargo clean -q --manifest-path "$manifest" -p "$pkg" --release
   done
