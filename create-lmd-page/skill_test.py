@@ -238,6 +238,17 @@ def test_every_template_p_uncaps_lmds_35em_measure():
     assert not bare, f"<p> without max-width: none: {bare}"
 
 
+def test_template_ends_with_a_quiet_twitch_signoff_below_the_rules():
+    # #1943: one shared skeleton serves both layouts, so one line covers both.
+    emitted = re.sub(r"<!--.*?-->", "", TEMPLATE, flags=re.S)
+    m = re.search(r"</aside>.*?(<div[^>]*>I also solve other people's puzzles at "
+                  r'<a href="https://www\.twitch\.tv/chinstrap45"([^>]*)>twitch\.tv/chinstrap45</a></div>)\s*</section>',
+                  emitted, flags=re.S)
+    assert m, "no Twitch sign-off between the Rules card and the closing </section>"
+    assert "text-decoration: none" in m.group(2) and "font-weight: normal" in m.group(2)
+    assert "<p" not in m.group(1), "a <p> here would need max-width: none"
+
+
 # ---- § Edit a live page (#1720) ----
 
 def test_edit_section_runs_the_stream_gate_before_the_driver():

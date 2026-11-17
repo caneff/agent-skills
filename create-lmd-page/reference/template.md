@@ -42,5 +42,8 @@ short. `flex-wrap` stacks both variants vertically on narrow screens.
       </div>
     </aside>
   </div>
+
+  <!-- Sign-off: discreet, last thing in the section (below the rules). A <div>, so LMD's 35em cap does not apply. -->
+  <div style="margin-top: 18px; text-align: center; font-size: 0.8em; color: #889;">I also solve other people's puzzles at <a href="https://www.twitch.tv/chinstrap45" style="color: #889; font-weight: normal; text-decoration: none;">twitch.tv/chinstrap45</a></div>
 </section>
 ```
