@@ -2072,7 +2072,6 @@ def test_a_head_the_worker_ran_on_with_main_in_it_skips_the_rerun_and_says_so_on
 
 
 @pytest.mark.parametrize("env", [
-    {"SEAM_AT": "head", "RESET_TO_OLD": "1"},  # main moved past the worker's base
     {"SEAM_AT": "0" * 40},                     # the worker's run was on another sha
     {"SEAM_AT": "head", "PR_AGENTS": '## End-to-end seam\n\n- **Seam**: `echo pr >> "$SEAM_LOG"`\n'},
     {},                                        # a body with no line
@@ -2081,6 +2080,19 @@ def test_anything_short_of_all_three_checks_reruns(sb, env):
     sb.write_state({1: {}})
     sb.set_seam('echo run >> "$SEAM_LOG"')
     r = sb.drain("--once", env=env)
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == ["run"]
+    assert not [b for b in pr_comments(sb) if b.startswith("seam rerun skipped")]
+
+
+def test_a_main_moved_past_the_workers_base_reruns_though_the_seam_section_is_the_same(sb):
+    sb.write_state({1: {}})
+    sb.set_seam('echo run >> "$SEAM_LOG"')
+    write(os.path.join(sb.repo, "tip"), "t\n")  # main's tip touches no AGENTS.md: only the ancestor check sees it
+    sb.git(sb.repo, "add", ".")
+    sb.git(sb.repo, "commit", "-qm", "tip")
+    sb.git(sb.repo, "push", "-q", "origin", "main")
+    r = sb.drain("--once", env={"SEAM_AT": "head", "RESET_TO_OLD": "1"})
     assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
     assert sb.seam_runs() == ["run"]
     assert not [b for b in pr_comments(sb) if b.startswith("seam rerun skipped")]
