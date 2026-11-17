@@ -203,3 +203,32 @@ An area closes on its own.
    refuses a `spec`-labelled issue, so that pair sends it to `/implement-spec`
    instead of an ordinary agent building it unsliced, and a parent labelled
    early could be dispatched before its blockers exist.
+
+## Land the ignore file
+
+Triage only (`SKILL.md` Triage section): it needs the `checkout:` path that
+`driver.py load` prints. A plain sweep has no audit record and no such path,
+so it skips this section. Run it once the grill ends, in that checkout, after
+§ Land one spec per area, or after the confirmation when no spec was filed.
+It lands the DROPs the grill wrote; the ignore file and any ADR are the only
+changes it commits. It ends at step 5; closing the record stays with Triage.
+
+1. **Write what is still missing.** Every DROP is already in the
+   ignore file (§ Grilling a report). Add an entry now for each rejection an applied recommendation implied but did not write, in the
+   format `IGNORE-FILE.md` defines.
+2. **Check the branch and what changed.** `git branch --show-current` is the
+   repo's default branch; any other branch stops the step. Then
+   `git status --porcelain --untracked-files=all` lists only
+   `.audit-ignore.md` and the ADR files this grill wrote. Any other path
+   stops the step. Nothing listed skips steps 3 to 5 and says so.
+3. **Update, then commit literal paths.** `git pull --ff-only`; a refusal
+   stops the step. Then `git add -- .audit-ignore.md <each ADR path>` and
+   commit. Never `git add -A` or `git commit -a`.
+4. **Check the author before the push.** `git log -1 --format=%ae` prints the
+   checkout's own configured address, not the one in the session context. A
+   different address stops the step with nothing pushed.
+5. **Push.** `git push` on a repo the user owns. On another owner's repo,
+   stop at the commit and hand the user the push line.
+
+A stop reports its reason verbatim, and Triage then closes nothing: the
+rejections are not on the default branch, so the record stays open.
