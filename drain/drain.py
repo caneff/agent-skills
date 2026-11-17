@@ -56,15 +56,17 @@ pane), and returns any ticket the worker claimed but the PR did not close to
 the queue. The per-change command is what `implement/selector_check.py
 command` reads from current main's `AGENTS.md` § End-to-end seam, never the
 merged tree's, so a PR that edits that section does not choose its own gate:
-its `Narrowed` command, else its `Seam` (#1597). It runs on every merge but
-one whose PR body says, in a `Seam run at: <sha>` line, that the worker's green
-run covered the head, when current main is in that head and the seam section
-is unchanged: that merge is skipped with a `seam rerun skipped:` comment on the
-PR, the lane's merge step's #1616 skip (#1949). A run that happens has
-`TESTS_JOBS` set to `SEAM_JOBS`, and a repo that declares a `Narrowed` line
-gets that run's listing as one `selector:` comment on the PR, posted before the
-command, as the lane's merge step does (#1593). A section that declares no command merges nothing. No full
-seam runs in drain: the nightly backstop (`backstop/`) is the only full run.
+its `Narrowed` command, else its `Seam` (#1597). It runs on every merge
+but one the worker's green run already covered: the PR body's `Seam run at:
+<sha>` line names the head, current main is in that head, and the seam
+section is unchanged and declares a command. That merge skips the run with a
+`seam rerun skipped:` comment on the PR, the lane's merge step's #1616 skip
+(#1949). A main that moved by the fetch before the merge is checked again. A
+run that happens has `TESTS_JOBS` at most `SEAM_JOBS`, and a repo that
+declares a `Narrowed` line gets that run's listing as one `selector:` comment
+on the PR, posted before the command, as the lane's merge step does (#1593).
+A section that declares no command merges nothing. No full seam runs in
+drain: the nightly backstop (`backstop/`) is the only full run.
 A bundle that fails is given one more try by prompting the same worker with
 the reason (waiting for it to start working before it looks again); a second
 failure closes the worker's pane, labels the anchor and every claimed ticket
@@ -736,11 +738,12 @@ def open_pr(ctx, branch):
     return prs[0] if prs else None
 
 
-def run_in_scratch_tree(ctx, cmd, log, head):
-    """`scratch_run.run_in_scratch_tree` on current main with `head` merged in, under the
-    worker's wall clock; any failure there is a `DrainError`."""
+def run_in_scratch_tree(ctx, cmd, log, head, main):
+    """`scratch_run.run_in_scratch_tree` on `main` (current main's sha) with
+    `head` merged in, under the worker's wall clock; any failure there is a
+    `DrainError`."""
     try:
-        scratch_run.run_in_scratch_tree(ctx.root, ctx.default, cmd, log, WALL_CLOCK_SECONDS, head=head)
+        scratch_run.run_in_scratch_tree(ctx.root, main, cmd, log, WALL_CLOCK_SECONDS, head=head)
     except scratch_run.ScratchError as exc:
         raise DrainError(str(exc)) from None
 
@@ -751,55 +754,78 @@ SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", 
 RUNNING = "per-change command: "
 
 
-# `TESTS_JOBS` for the run: `tests/all.sh`'s `linked_cap`, the width an undeclared run in a linked
-# worktree gets (#1808), set here because the scratch tree's run is no declared job either (#1949).
-# A test holds the two equal.
+# The most `TESTS_JOBS` the run gets: `tests/all.sh`'s `linked_cap`, the
+# width an undeclared run in a linked worktree gets (#1808). The scratch
+# tree's run is no declared job either (#1949). A test holds the two equal.
 SEAM_JOBS = 4
-# The PR body line a worker under drain writes for the commit its green run covered (#1949).
+# How many times main may move under the merge's check before drain gives up:
+# each move means the checked tree is not the one the merge would land.
+BASE_CHECKS = 3
+# The PR body line a worker under drain writes for the commit its green run
+# covered (#1949).
 SEAM_RUN_AT = re.compile(r"^Seam run at: ([0-9a-f]{40})\s*$", re.MULTILINE)
 
 
+def seam_jobs():
+    """`TESTS_JOBS` for the run: drain's own `TESTS_JOBS` when it is a smaller
+    positive number, else `SEAM_JOBS`. The cap only ever lowers the width."""
+    try:
+        asked = int(os.environ.get("TESTS_JOBS", ""))
+    except ValueError:
+        return SEAM_JOBS
+    return asked if 0 < asked < SEAM_JOBS else SEAM_JOBS
+
+
 def worker_ran_on(body):
-    """The full sha every `Seam run at:` line of the PR body names, else `None`: no line, a
-    line that is no full sha, or two lines naming different shas all keep the rerun."""
+    """The full sha every `Seam run at:` line of the PR body names, else
+    `None`: no line, a line that is no full sha, or two lines naming
+    different shas all keep the rerun."""
     shas = set(SEAM_RUN_AT.findall(body or ""))
     return shas.pop() if len(shas) == 1 else None
 
 
-def skip_reason(ctx, head, body):
-    """The `seam rerun skipped:` comment when the rerun would repeat the worker's green run
-    (#1616's three checks, `implement/SKILL.md` § The merge step 3), else `None`: current main
-    is in `head`, the body's `Seam run at:` sha is `head`, and the seam section is the same at
-    both. Any check that cannot answer keeps the rerun. Call after the fetch."""
+def skip_reason(ctx, head, body, main):
+    """The `seam rerun skipped:` comment when the rerun would repeat the
+    worker's green run, else `None`. These are #1616's three checks
+    (`implement/SKILL.md` § The merge step 3): current main (`main`, read
+    after the fetch) is in `head`, the body's `Seam run at:` sha is `head`,
+    and the seam section is the same at both. A fourth keeps the module
+    docstring's rule that a section declaring no command merges nothing:
+    main's section must resolve a command. Any check that cannot answer
+    keeps the rerun."""
     if worker_ran_on(body) != head:
         return None
     try:
-        if shellcmd.git(["merge-base", "--is-ancestor", ctx.default, head], cwd=ctx.root, ok=(0, 1)).returncode:
+        if shellcmd.git(["merge-base", "--is-ancestor", main, head], cwd=ctx.root, ok=(0, 1)).returncode:
             return None
-        main = git(["rev-parse", ctx.default], cwd=ctx.root)
-    except (shellcmd.CmdError, DrainError):
+    except shellcmd.CmdError:
         return None
-    same = subprocess.run([sys.executable, SELECTOR_CHECK, "seam-section", "--root", ctx.root,
-                           "--base-rev", ctx.default, "--head-rev", head], capture_output=True, text=True)
+    tool = [sys.executable, SELECTOR_CHECK]
+    same = subprocess.run(tool + ["seam-section", "--root", ctx.root, "--base-rev", main, "--head-rev", head],
+                          capture_output=True, text=True)
     if same.returncode or same.stdout.strip() != "same":
+        return None
+    if subprocess.run(tool + ["command", "--root", ctx.root, "--rev", main], capture_output=True).returncode:
         return None
     return f"seam rerun skipped: {ctx.default} {main} is in the head {head}, worker's run at {head}"
 
 
-def seam(ctx, head, log, pr, body=""):
+def seam(ctx, head, log, pr, body):
     """The merge's run, as the module docstring states it, on the PR head
-    merged into current main in a throwaway worktree. The command's own exit
-    status is what comes out, never the `selector:` comment's; a resolver
-    refusal raises with its reason, before anything runs. Skipped, with its
-    comment on the PR, when `skip_reason` finds the worker's run covered this
-    tree; a comment that cannot be posted runs it anyway, so no merge lands
-    with neither record."""
+    merged into current main in a throwaway worktree; returns the main sha
+    it checked against. The command's own exit status is what comes out,
+    never the `selector:` comment's; a resolver refusal raises with its
+    reason, before anything runs. Skipped, with its comment on the PR, when
+    `skip_reason` finds the worker's run covered this tree; a comment that
+    cannot be posted runs it anyway, so no merge lands with neither
+    record."""
     git(["fetch", "-q", "origin"], cwd=ctx.root)
-    skipped = skip_reason(ctx, head, body)
+    main = git(["rev-parse", ctx.default], cwd=ctx.root)
+    skipped = skip_reason(ctx, head, body, main)
     if skipped:
         try:
             ctx.tracker.comment(pr, skipped)
-            return
+            return main
         except tracker.TrackerError:
             pass
     log = os.path.abspath(log)  # the commands run in the scratch tree, not in drain's cwd
@@ -807,15 +833,17 @@ def seam(ctx, head, log, pr, body=""):
         os.remove(log)  # a conflict writes no log, and an earlier drain's must not answer for it
     state = shlex.quote(os.path.splitext(log)[0] + "-selector.json")
     tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
-    base = f"--root . --rev {shlex.quote(ctx.default)}"
-    cmd = (f"export TESTS_JOBS={SEAM_JOBS}; cmd=$({tool} command {base}) || exit 1; printf '{RUNNING}%s\\n' \"$cmd\"; "
+    base = f"--root . --rev {shlex.quote(main)}"
+    cmd = (f"export TESTS_JOBS={seam_jobs()}; cmd=$({tool} command {base}) || exit 1; "
+           f"printf '{RUNNING}%s\\n' \"$cmd\"; "
            f"if {tool} list {base} --state {state}; then "
            f"{tool} comment {base} --state {state} --pr {pr} --repo {shlex.quote(ctx.repo)}; fi; "
            'sh -c "$cmd"')
     try:
-        run_in_scratch_tree(ctx, cmd, log, head)
+        run_in_scratch_tree(ctx, cmd, log, head, main)
     except DrainError as exc:
         raise DrainError(f"seam {seam_failure(log) or exc} on the PR merged into main") from exc
+    return main
 
 
 def seam_failure(log):
@@ -864,10 +892,24 @@ def verify_pr(ctx, branch, anchor, kind):
                              + f" which no {BUNDLE_NOTE} comment on #{anchor} names")
         if len(closed) > ctx.bundle_max:
             raise DrainError(f"{view['url']} closes {len(closed)} tickets, over --bundle-max {ctx.bundle_max}")
-    seam(ctx, view["headRefOid"], os.path.join(ctx.log_dir, f"{branch}-seam.log"), view["number"],
-         view.get("body") or "")
     view["closes"] = sorted(closed)
+    check_merge(ctx, branch, view)
     return view
+
+
+def check_merge(ctx, branch, view):
+    """`seam` on the PR, then again each time main has moved by the last
+    fetch before the merge, as the lane's merge step re-runs on a moved
+    base: a check of an older main is no check of the tree the merge
+    lands. Main moving under `BASE_CHECKS` checks in a row is a
+    `DrainError`."""
+    log = os.path.join(ctx.log_dir, f"{branch}-seam.log")
+    for _ in range(BASE_CHECKS):
+        checked = seam(ctx, view["headRefOid"], log, view["number"], view.get("body"))
+        git(["fetch", "-q", "origin"], cwd=ctx.root)
+        if git(["rev-parse", ctx.default], cwd=ctx.root) == checked:
+            return
+    raise DrainError(f"{ctx.default} moved under each of {BASE_CHECKS} merge checks of {view['url']}")
 
 
 def cleanup_notes(ctx, branch):
