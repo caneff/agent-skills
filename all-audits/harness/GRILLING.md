@@ -203,3 +203,30 @@ An area closes on its own.
    refuses a `spec`-labelled issue, so that pair sends it to `/implement-spec`
    instead of an ordinary agent building it unsliced, and a parent labelled
    early could be dispatched before its blockers exist.
+
+## Land the ignore file
+
+Run this once after step 3 above, or after the confirmation when no spec was
+filed, in the audited repo's `checkout:` path. It lands the DROPs the grill
+wrote. The ignore file and any ADR are the only changes it commits.
+
+1. **Write what is still missing.** Every DROP is already in
+   `.audit-ignore.md` (the rule under "Write down each rejection"). Add an entry now for each
+   rejection an applied recommendation implied but did not write, in the
+   `IGNORE-FILE.md` format.
+2. **Check what changed.** `git status --porcelain` in the checkout lists only
+   `.audit-ignore.md` and the ADR files this grill wrote. Any other path is
+   not this step's: stop and tell the user, and commit nothing.
+3. **Update, then commit literal paths.** `git pull --ff-only`; a refusal is
+   reported verbatim and stops the step. Then `git add -- .audit-ignore.md
+   <each ADR path>` and commit. Never `git add -A` or `git commit -a`, and
+   never `-c user.email` or `-c user.name`.
+4. **Push.** `git push` to the default branch of a repo the user owns. On
+   another owner's repo, stop at the commit and hand the user the push line.
+5. **Check the author.** `git log -1 --format=%ae` prints the checkout's own
+   configured address, not the one in the session context. A different
+   address stops the run before the record is closed.
+6. **Close the audit record**, per step 3 of the Triage section of `SKILL.md`.
+
+Nothing to commit (`git status --porcelain` empty at step 2) skips steps 3 to
+5 and says so; the record still closes.

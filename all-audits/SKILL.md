@@ -223,7 +223,10 @@ deciding on each problem, files what they accept, and closes the record.
    area after one confirmation. The audited repo is the record's repo, not the
    current directory: `.audit-ignore.md` goes in the `checkout:` path, and specs
    are filed with `--repo <owner/name>`.
-3. **Close the record.** Comment on audit record `<issue>` listing the specs the
+3. **Land the ignore file, then close the record.** Run
+   the "Land the ignore file" section of
+   [`harness/GRILLING.md`](harness/GRILLING.md) first.
+   Comment on audit record `<issue>` listing the specs the
    grill filed (links), or saying none were filed, then close it:
    `gh issue comment <issue> --repo <owner/name> --body-file …` and
    `gh issue close <issue> --repo <owner/name>`.
