@@ -57,7 +57,7 @@ def test_visual_pr_gets_a_real_page_screenshot_before_the_merge():
 def test_handed_over_pr_create_checks_its_body_file_first():
     """#1908: a `gh pr create --body-file` line is never handed over unchecked."""
     other = " ".join(section("Someone else's repo").split())
-    assert "durable body file of § The PR" in other
+    assert "durable body file of § The PR." in other
     assert "test -s <that path>" in other
     assert "before you print the `gh pr create` line" in other
     assert "print it only when that exits 0" in other
