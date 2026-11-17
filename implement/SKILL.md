@@ -1103,3 +1103,11 @@ A finding that needs its own design has no ticket to name there
 (§ Review step 2): each one's `gh issue create` command, as `/file-ticket`
 gave it, goes in that same message, one per finding beside its id, so Chris
 can file it after he has seen the work. Nothing files it before then.
+
+A handover once pointed `--body-file` at a scratchpad file that did not
+exist: the push succeeded, the create failed, and Chris merged by hand
+(#1908). The `gh pr create` line you hand over carries `--body-file` pointing
+at the durable body file of § The PR. Run `test -s <that path>` before you print the
+`gh pr create` line, and print it only when that exits 0. A missing or empty
+file means no line goes out: write the body there, then run the check
+again.

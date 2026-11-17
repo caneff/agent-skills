@@ -10,8 +10,8 @@ SKILL = (Path(__file__).resolve().parent / "SKILL.md").read_text()
 
 
 def section(heading):
-    """Text of the `### <heading>` section, up to the next heading of level 2 or deeper."""
-    match = re.search(rf"^###? {re.escape(heading)}\n(.*?)(?=^##)", SKILL, re.S | re.M)
+    """Text of the `### <heading>` section, up to the next heading of level 2 or deeper, or the end of the file."""
+    match = re.search(rf"^###? {re.escape(heading)}\n(.*?)(?=^##|\Z)", SKILL, re.S | re.M)
     assert match, f"no section {heading!r} in SKILL.md"
     return match.group(1)
 
@@ -52,3 +52,13 @@ def test_visual_pr_gets_a_real_page_screenshot_before_the_merge():
     assert "blocks the merge and goes to the worker" in para
     assert "screenshot not taken: <why>" in para
     assert "never skipped silently" in para
+
+
+def test_handed_over_pr_create_checks_its_body_file_first():
+    """#1908: a `gh pr create --body-file` line is never handed over unchecked."""
+    other = " ".join(section("Someone else's repo").split())
+    assert "durable body file of § The PR." in other
+    assert "test -s <that path>" in other
+    assert "before you print the `gh pr create` line" in other
+    assert "print it only when that exits 0" in other
+    assert "A missing or empty file means no line goes out" in other
