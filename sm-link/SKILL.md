@@ -75,7 +75,8 @@ Each call prints one short link and checks that the new id resolves back to
 the payload it sent. A non-zero exit prints the reason to stderr: report it,
 and hand over no link for that source. Links from earlier calls are already
 minted: keep them. Except for the one 429 retry above, never re-run a failed
-source on your own, since a second run mints a second record. Never type a short link from memory.
+source on your own, since a second run mints a second record. Never type a
+short link from memory.
 
 Which link files a repo commits, and whether they hold full or short links, is
 that repo's own `AGENTS.md` rule, not this skill's.
