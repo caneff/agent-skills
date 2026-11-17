@@ -8,19 +8,20 @@
 # survives. Read it back with `job-run --status <name>`.
 #
 # The name is derived from the call — the Bash description (else the first word
-# of the command) plus a slice of the tool_use_id — so it is stable for that
+# of the command, unless that is a shell builtin or file verb) plus a slice of the tool_use_id — so it is stable for that
 # call and unique across calls. The caller learns it from the rewritten command,
 # which the background task's own completion notice echoes back verbatim; it is
 # repeated in permissionDecisionReason rather than in systemMessage, because a
 # warning banner on every background job would be noise, and nothing here is a
 # warning.
 #
-# It degrades and does not block, with one exception: a poll loop (`until`/`while`
-# that sleeps) is denied, naming pr_settle.py and `gh run watch` (#1705). job-run
-# owns that test, so a bare `job-run -- bash -c '<loop>'` is refused there too.
-# A call it cannot wrap — no command, or `job-run`
-# not on PATH — passes through unchanged *and* says so, because the one failure
-# worse than no record is an agent believing in a record that was never written.
+# It degrades and does not block, with one exception: a poll loop is denied,
+# naming pr_settle.py and `gh run watch` (#1705). job-run owns that test, so a
+# bare `job-run -- bash -c '<loop>'` is refused there too. A call it cannot
+# wrap — no command, or `job-run` not on PATH — passes through unchanged *and*
+# says so, because the one failure worse than no record is an agent believing in
+# a record that was never written. A poll loop is denied only when job-run is
+# there to judge it: without job-run the call passes through, said so.
 # An already-wrapped command passes through silently: that record exists.
 #
 # Every path exits 0. A bookkeeping hook must never be the reason a real command
@@ -69,9 +70,10 @@ skip() { # skip <why> — pass the call through, and say a record will not exist
 
 [ -n "$cmd" ] || skip "this call carries no command to wrap"
 command -v job-run >/dev/null 2>&1 || skip "job-run is not on PATH (run flow/install.sh)"
-# job-run refuses a script ending in a top-level `&` (#1901); wrapping one would
-# fail the call, so the hook asks job-run (--check) and passes the call through
-# with the reason when it refuses.
+# job-run refuses a script ending in a top-level `&` (#1901) and one that polls
+# (#1705); wrapping either would fail the call, so the hook asks job-run
+# (--check). A trailing & passes the call through with the reason; a poll loop
+# denies it (below).
 refusal=$(job-run --check -- bash -c "$cmd" 2>&1); check_rc=$?
 # Exit 2 is the one refusal that denies (#1705): a poll loop in a job is the spin
 # the no-poll rule bans, and passing it through would run it. Any other non-zero
@@ -85,18 +87,21 @@ fi
 
 # <slug> - <tail of the tool_use_id>. The slug is the Bash call's description
 # (what the job is, which the job-wake prompt then shows), else the first word
-# of the command — unless that word is a file verb (`rm`, `cd`, `mkdir`, ...)
-# that names the cleanup around the job, not the job (#1711): then `job`. The id makes concurrent runs of the same command distinct, so
-# the wrapper's name-collision refusal can never turn into a failed tool call.
+# of the command — unless that word is a shell builtin or file verb (`rm`, `cd`,
+# `mkdir`, `for`, ...) that names the setup around the job, not the job (#1711):
+# then `job`. The id makes concurrent runs of the same command distinct, so the
+# wrapper's name-collision refusal can never turn into a failed tool call.
 slugify() { # slugify <max-length> ; stdin -> legal name fragment, may be empty
   tr -c 'A-Za-z0-9' '-' | tr -s '-' | sed 's/^-//' | cut -c1-"$1" | sed 's/-*$//'
 }
 desc=$(field '.tool_input.description // "" | if type == "string" then . else "" end')
 slug=$(printf '%s' "$desc" | slugify 40)
 if [ -z "$slug" ]; then
-  first=${cmd%%[ 	;|&]*}
+  # first word of the first line, past any leading ( or {
+  first=$(printf '%s\n' "$cmd" | sed -E -n '1{s/^[[:space:]({]+//;s/[[:space:];|&)].*//;p}')
   case "${first##*/}" in
-    rm|cd|mkdir|rmdir|mv|cp|ln|touch|chmod|chown|pushd|popd|export|set|unset|source|.|true|:|echo) ;;
+    rm|cd|mkdir|rmdir|mv|cp|ln|touch|chmod|chown|pushd|popd|export|set|unset|source|.|true|:|echo|\
+    for|while|until|if|case|select|time|exec|test|\[|\[\[) ;;
     *) slug=$(printf '%s' "$first" | slugify 24) ;;
   esac
 fi

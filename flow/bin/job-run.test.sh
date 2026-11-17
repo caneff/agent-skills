@@ -221,8 +221,12 @@ for script in \
 do
   sleep 2
 done' \
-  'gh run rerun 1 && sleep 3 && gh run watch 1'; do
-  out=$("$job_run" --name poll-loop -- bash -c "$script" 2>&1); rc=$?
+  'gh run rerun 1 && sleep 3 && gh run watch 1' \
+  'sleep $n && gh run watch 1' \
+  'while sleep 5; do gh run view 1; done' \
+  'for i in $(seq 100); do gh run view 1 | grep -q completed && break; sleep 10; done' \
+  'while true; do sleep 5; done &'; do
+  out=$("$job_run" --name poll-loop --timeout 5 -- bash -c "$script" 2>&1); rc=$?
   [ "$rc" = 1 ] && grep -q 'pr_settle.py' <<<"$out" && grep -q 'gh run watch' <<<"$out" && [ ! -d "$jobs_dir/poll-loop" ] \
     && ok "a poll loop is refused naming pr_settle.py and gh run watch: ${script%%$'\n'*}" \
     || no "a poll loop is refused naming pr_settle.py and gh run watch: ${script%%$'\n'*}" "rc=$rc out=$out"
@@ -230,9 +234,20 @@ done' \
   [ "$rc" = 2 ] && ok "--check answers a poll loop with exit 2: ${script%%$'\n'*}" \
     || no "--check answers a poll loop with exit 2: ${script%%$'\n'*}" "rc=$rc"
 done
+# A wrapper in front of the shell does not hide the loop from a direct call.
+for pre in 'timeout 600' env nohup; do
+  "$job_run" --check -- $pre bash -c 'until false; do sleep 5; done' >/dev/null 2>&1; rc=$?
+  [ "$rc" = 2 ] && ok "--check reads a poll loop behind: $pre" || no "--check reads a poll loop behind: $pre" "rc=$rc"
+done
 # Waiting is not polling when the loop has no sleep, a plain sleep is a job, and
-# a read loop that paces itself is not a condition poll.
+# a read loop that paces itself is not a condition poll. A sleep after the last
+# loop, or the word while in a string, is not a loop that sleeps; one delayed
+# gh pr checks is a check, not a poll.
 for script in \
+  'while [ "$n" -lt 3 ]; do n=$((n+1)); done; sleep 2' \
+  'while getopts a: o; do :; done; sleep 1' \
+  'echo "while we do this"; sleep 5' \
+  'sleep 60; gh pr checks 5' \
   'sleep 2; echo done' \
   'for i in 1 2 3; do echo $i; sleep 1; done' \
   'while read -r x; do echo "$x"; sleep 1; done < /dev/null' \
