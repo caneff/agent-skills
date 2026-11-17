@@ -173,7 +173,9 @@ ends when the PR is up (heavy tier) or the ticket has landed (light tier) and
 you go idle, and `drain` waits for exactly that. A question you would have
 put to a controller you decide yourself and list under Decisions made; one you
 cannot decide leaves you idle with no PR, which `drain` reads as a failed
-build and hands to Chris. Everything else in this skill applies unchanged.
+build and hands to Chris. The PR body carries one more line, `Seam run at:`
+(§ The PR), since the "PR up" report that would carry it reaches no one.
+Everything else in this skill applies unchanged.
 
 **Your turn ends mid-lane only on a message to the controller**: a question,
 a job declaration, or "PR up". A summary in your own pane reaches no one.
@@ -761,6 +763,11 @@ The body has these sections and nothing else:
   Codex pass's own line says whether it ran: its finding count, or
   `Codex pass skipped: <why>` / `Codex pass refused: <why>`. On any other
   build, the disputed and moved findings.
+- **Seam run at: \<sha\>** — under a `drain` controller only (#1949): a
+  bare line, the full 40-character sha the § Review step 3 run covered,
+  exactly as the "PR up" field of that name. `drain` reads it for the merge
+  step's skip (§ The merge step 3), and a line that is missing, shortened or
+  stale costs only a rerun.
 - **Last reviewed sha** — the commit the wave read, and that the fix round's
   commits after it were checked by the seam and the mechanical check, not
   re-reviewed.
@@ -1020,7 +1027,9 @@ closed.
    the integration PR's `Seam run at:` is its spec run's
    `implement/SKILL.md` § Review step 3 run. The final `git fetch origin` below compares against the sha this check
    read: a base that moved since is a moved base. `drain` gets no "PR up"
-   report, so it keeps the rerun.
+   report, so it reads the `Seam run at:` line from the PR body instead
+   (§ The PR) and applies the same three checks and comment (#1949); a body
+   without the line keeps the rerun.
 
    **Selector evidence** (#1537, #1593). The `list` and `comment` lines
    record the suites the narrowed command selected as one comment on the PR,

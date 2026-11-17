@@ -98,6 +98,12 @@ elif args[:2] == ["issue", "comment"] and args[2] in [str(p["number"]) for p in 
         sys.stderr.write("fake gh: pr comment refused\n"); sys.exit(1)
     state.setdefault("pr_comments", []).append([args[2], opt("--body")])
     save()
+    mover = os.environ.get("MOVE_ON_COMMENT")  # main moves once, just after the first PR comment
+    if mover and not os.path.exists(mover + ".moved"):
+        open(mover + ".moved", "w").close()
+        import subprocess
+        subprocess.run(["git", "-C", mover, "commit", "-q", "--allow-empty", "-m", "moved"], check=True)
+        subprocess.run(["git", "-C", mover, "push", "-q", "origin", "HEAD:main"], check=True)
 elif args[:2] == ["issue", "comment"]:
     state.setdefault("comments", []).append([args[2], opt("--body")])
     save()
@@ -123,7 +129,7 @@ elif args[:2] == ["pr", "view"]:
          "statusCheckRollup": [dict(__typename="CheckRun", name="gate", status="COMPLETED",
                                     conclusion=os.environ.get("CHECK_CONCLUSION", "SUCCESS"))],
          "headRefOid": pr["head"], "url": pr["url"], "number": pr["number"],
-         "closingIssuesReferences": [dict(number=n) for n in pr["closes"]],
+         "closingIssuesReferences": [dict(number=n) for n in pr["closes"]], "body": pr.get("body", ""),
          "mergeCommit": {"oid": "m" + pr["head"]}})
 elif args[:2] == ["pr", "merge"]:
     branch = next(b for b, p in state["prs"].items() if str(p["number"]) == args[2])
@@ -169,7 +175,8 @@ print(env.get("CHOOSER_SAY") or "thinking...\ndrain bundle: " + " ".join([anchor
 # (tickets the PR closes that were never in the bundle), RESET_TO_OLD (build on
 # the commit before main's tip), SPEC_SLICES (what a `--spec` dispatch's run
 # claims and its PR closes beside the spec), PR_AGENTS (the `AGENTS.md` the PR
-# commits in place of main's).
+# commits in place of main's), SEAM_AT (the PR body's lines after its
+# `Closes`, `{head}` standing for the PR's head; unset, the body is bare).
 STUB_DISPATCH = r"""#!/usr/bin/env python3
 import json, os, subprocess, sys
 env, argv = os.environ, sys.argv[1:]
@@ -243,6 +250,8 @@ st = json.load(open(env["FAKE_STATE"]))
 st["prs"][branch] = {"number": 100 + int(n), "url": "https://example.test/pull/%d" % (100 + int(n)),
                      "head": head, "closes": closes, "draft": n in env.get("DRAFT_TICKETS", "").split(),
                      "status": env.get("STATUS", "CLEAN")}
+if env.get("SEAM_AT"):
+    st["prs"][branch]["body"] = "Closes #%s\n\n%s\n" % (n, env["SEAM_AT"].replace("{head}", head))
 json.dump(st, open(env["FAKE_STATE"], "w"))
 for t in env.get("TAKE_AFTER_BUILD", "").split():  # another worker claims it while this one builds
     st = json.load(open(env["FAKE_STATE"]))
@@ -2051,3 +2060,120 @@ def test_stop_worker_swallows_a_pane_close_that_fails(d, monkeypatch):
     monkeypatch.setattr(shellcmd, "herdr", close)
     d.stop_worker("w")
     assert seen == [["pane", "close", "p9"]]
+
+
+# --- #1949: the merge rerun skips a head the worker's run already covered ---------------------
+
+AT_HEAD = "Seam run at: {head}"
+SKIPPED = "seam rerun skipped"
+
+
+def mover(sb):
+    """A second clone of origin on main, the way another merge moves main
+    without drain's own checkout seeing it before its fetch."""
+    path = os.path.join(sb.tmp, "mover")
+    sb.git(sb.tmp, "clone", "-q", "-b", "main", sb.origin, path)
+    return path
+
+
+def move_main(path):
+    for args in (["commit", "-q", "--allow-empty", "-m", "moved"], ["push", "-q", "origin", "HEAD:main"]):
+        subprocess.run(["git", "-C", path, *args], check=True, capture_output=True)
+
+
+def test_a_head_the_worker_ran_on_with_main_in_it_skips_the_rerun_and_says_so_on_the_pr(sb):
+    sb.write_state({1: {}})
+    sb.set_seam('echo run >> "$SEAM_LOG"')
+    r = sb.drain("--once", env={"SEAM_AT": AT_HEAD})
+    st = sb.state()
+    assert [m[0] for m in st["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == []
+    head, main = st["prs"]["implement-1"]["head"], sb.git(sb.repo, "rev-parse", "origin/main")
+    assert pr_comments(sb) == [f"{SKIPPED}: origin/main {main} is in the head {head}, "
+                               f"worker's run at {head}"]
+
+
+@pytest.mark.parametrize("env", [
+    {"SEAM_AT": "Seam run at: " + "0" * 40},  # the worker's run was on another sha
+    {"SEAM_AT": AT_HEAD + "\nSeam run at: " + "0" * 40},  # two lines that disagree
+    {"SEAM_AT": AT_HEAD, "PR_AGENTS": '## End-to-end seam\n\n- **Seam**: `echo pr >> "$SEAM_LOG"`\n'},
+    {},  # a body with no line
+])
+def test_anything_short_of_all_three_checks_reruns(sb, env):
+    sb.write_state({1: {}})
+    sb.set_seam('echo run >> "$SEAM_LOG"')
+    r = sb.drain("--once", env=env)
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == ["run"]
+    assert not [b for b in pr_comments(sb) if b.startswith(SKIPPED)]
+
+
+def test_a_main_moved_since_drains_last_look_reruns_though_the_seam_section_is_the_same(sb):
+    # Another clone moves main, touching no AGENTS.md: only the ancestor
+    # check, read after drain's own fetch, sees it.
+    other = mover(sb)
+    sb.write_state({1: {}})
+    sb.set_seam('echo run >> "$SEAM_LOG"')
+    sb.git(other, "pull", "-q", "origin", "main")
+    move_main(other)
+    r = sb.drain("--once", env={"SEAM_AT": AT_HEAD})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == ["run"]
+    assert not [b for b in pr_comments(sb) if b.startswith(SKIPPED)]
+
+
+def test_a_seam_section_that_declares_no_command_merges_nothing_even_with_the_line(sb):
+    sb.write_state({1: {}})
+    write(os.path.join(sb.repo, "AGENTS.md"), "## End-to-end seam\n\n- **Blind to**: the live editor\n")
+    sb.git(sb.repo, "commit", "-qam", "no command")
+    sb.git(sb.repo, "push", "-q", "origin", "main")
+    sb.drain("--once", env={"SEAM_AT": AT_HEAD})
+    assert "merged" not in sb.state()
+    assert "declares no per-change command" in sb.handed_comment(1)[0]
+
+
+def test_main_moving_after_a_skip_is_checked_again_before_the_merge(sb):
+    other = mover(sb)
+    sb.write_state({1: {}})
+    sb.set_seam('echo run >> "$SEAM_LOG"')
+    sb.git(other, "pull", "-q", "origin", "main")
+    r = sb.drain("--once", env={"SEAM_AT": AT_HEAD, "MOVE_ON_COMMENT": other})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == ["run"]  # main moved off the head: the second check runs it
+
+
+def test_main_moving_during_a_rerun_is_checked_again_before_the_merge(sb):
+    other = mover(sb)
+    sb.write_state({1: {}})
+    flag = os.path.join(sb.tmp, "moved-once")
+    sb.set_seam(f'echo run >> "$SEAM_LOG"; test -e {flag} || {{ touch {flag}; '
+                f'git -C {other} commit -q --allow-empty -m moved && git -C {other} push -q origin HEAD:main; }}')
+    sb.git(other, "pull", "-q", "origin", "main")
+    r = sb.drain("--once")
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == ["run", "run"]
+
+
+def test_a_skip_comment_that_cannot_be_posted_reruns_rather_than_merge_unrecorded(sb):
+    sb.write_state({1: {}})
+    sb.set_seam('echo run >> "$SEAM_LOG"')
+    r = sb.drain("--once", env={"SEAM_AT": AT_HEAD, "PR_COMMENT_FAIL": "1"})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert sb.seam_runs() == ["run"]
+
+
+@pytest.mark.parametrize("asked, runs", [(None, "4"), ("32", "4"), ("2", "2"), ("x", "4")])
+def test_a_rerun_gets_tests_jobs_capped_and_never_raised(sb, asked, runs):
+    sb.write_state({1: {}})
+    sb.set_seam('echo "jobs=$TESTS_JOBS" >> "$SEAM_LOG"')
+    env = {k: v for k, v in sb.drain_env().items() if k != "TESTS_JOBS"}
+    if asked:
+        env["TESTS_JOBS"] = asked
+    subprocess.run([sys.executable, DRAIN, "--repo", sb.repo, "--once"], capture_output=True, text=True, env=env)
+    assert sb.seam_runs() == [f"jobs={runs}"]
+
+
+def test_drains_cap_is_the_one_tests_all_sh_gives_a_linked_worktree():
+    mod = _drain_mod()
+    with open(os.path.join(HERE, "..", "tests", "all.sh")) as f:
+        assert f"\nlinked_cap={mod.SEAM_JOBS}\n" in f.read()
