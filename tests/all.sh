@@ -390,8 +390,8 @@ cat "$tmp/parallel" "$tmp/serial" >"$tmp/ordered"
 default_cpu_budget=25
 cpu_budget() { # <label>: prints the suite's budget in seconds
   case $1 in
-    flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir) and runs 140+ process-spawning tests
-    flow/install.test.sh) echo 160 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME (measured 109s)
+    flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir on a quiet box; 129-157s at load 38 on the shared dir, #1950: sys time from the process-spawning tests, not dependency compiles) and runs 140+ process-spawning tests
+    flow/install.test.sh) echo 120 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME; the dependencies sit in the shared target dir (#1950), the lane crate itself still rebuilds per scratch repo (measured 89-102s warm at load 38, 110s cold)
     flow/claude/hooks/block-dangerous-git.test.sh) echo 45 ;; # every case spawns jq, the hook, git and a gh stub: 9.2s CPU on a quiet box, 14-18s at load average 10-16 (2026-10-13, #1571); 17.3s alone after #1717's per-target cases, 19-21s alone with #1716's at load 5-7 and 32.1s in a parallel all.sh run (2026-11-13)
     drain/drain_test.py) echo 100 ;; # one real git repo, bare origin and stub processes per case, 146 cases (measured 65.7s CPU alone, 67.7s in an 8-job run, 2026-10-15; 80.5s seen under drain load, #1586)
     all-audits/driver_test.py) echo 45 ;; # each --multi case builds bare origins, clones and worktrees and spawns the driver, fake claude and fake gh: 30.3s CPU alone on origin/main c245fc48 already, 30.1s with #1721's 139 cases (2026-11-13)
