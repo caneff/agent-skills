@@ -402,18 +402,30 @@ RUN_FORBID="cannot tell where to" RUN_CWD="$fork" run "push: a leading cd into a
   "cd $solo && git push origin main"
 RUN_FORBID="cannot tell where to" RUN_CWD="$fork" run "push: a quoted leading cd path is allowed" 0 \
   "cd \"$solo\" && git push origin main"
-RUN_CWD="$solo" run "push: a leading cd to a path that is no checkout is refused" 2 \
-  "cd $tmp/nonexistent && git push origin main" "cannot tell where to"
+RUN_FORBID="-C path" RUN_CWD="$solo" run "push: a leading cd to a path that is no checkout is refused, naming the cd path" 2 \
+  "cd $tmp/nonexistent && git push origin main" "the leading cd path that does not resolve"
 RUN_CWD="$solo" run "push: a relative leading cd is refused" 2 \
   "cd ../repo && git push origin main" "cannot tell where to"
 RUN_CWD="$solo" run "push: a second cd after the leading one is refused" 2 \
-  "cd $repo && cd $fork && git push upstream master" "cannot tell where to"
+  "cd $solo && cd $fork && git push origin master" "a cd or pushd"
 RUN_CWD="$solo" run "push: a cd that is not leading is refused" 2 \
-  "git status && cd $repo && git push origin main" "cannot tell where to"
+  "git status && cd $solo && git push origin main" "a cd or pushd"
 RUN_CWD="$solo" run "push: a leading cd joined by ; is refused" 2 \
   "cd $repo ; git push origin main" "cannot tell where to"
 RUN_CWD="$solo" run "push: a leading cd with a variable path is refused" 2 \
   'cd $D && git push origin main' "cannot tell where to"
+RUN_CWD="$solo" run "push: a leading cd path holding a \$ after a slash is refused" 2 \
+  'cd /$D && git push origin main' "cannot tell where to"
+# bash's cd drops `link/..` as text; realpath follows the link first, so the
+# two would name different checkouts: refused, not guessed at.
+ln -s "$solo" "$tmp/link-to-solo"
+RUN_CWD="$solo" run "push: a leading cd path with a .. is refused" 2 \
+  "cd $tmp/link-to-solo/../fork && git push upstream master" "a '..' in the leading cd path"
+# A relative -C after a leading cd is read from that cd's directory.
+RUN_CWD="$solo" run "push: -C relative to the leading cd is judged there, blocked as foreign" 2 \
+  "cd $tmp && git -C fork push upstream master" "swaroopg92/penpa-edit"
+RUN_FORBID="cannot tell where to" RUN_CWD="$fork" run "push: -C relative to the leading cd, owned, allowed" 0 \
+  "cd $tmp && git -C solo push origin main"
 RUN_CWD="$fork" run "push: -o's value is not read as the remote" 2 \
   "git push -o ci.skip upstream master" "swaroopg92/penpa-edit"
 RUN_CWD="$fork" run "push: -o's value is skipped on an owned remote too" 0 \
@@ -594,6 +606,8 @@ run "dot discard: --work-tree before the verb blocked" 2 \
 run "dot discard: inside a subshell blocked" 2 "(git checkout -- .)" "$blocked"
 run "dot discard: quoted -C a mutation worktree allowed" 0 \
   "git -C \"$repo/.scratch/mutation-m1\" checkout -q -- ."
+RUN_CWD="$repo" run "dot discard: a leading cd into a scratch worktree is judged there, allowed (#1900)" 0 \
+  "cd $repo/.scratch/mutation-m1 && git checkout -q -- ."
 RUN_CWD="$repo/.scratch/mutation-m1" run "dot discard: cd out of the mutation cwd blocked" 2 \
   "cd $repo && git checkout -- ." "$blocked"
 RUN_CWD="$repo/.scratch/mutation-m1" run "dot discard: GIT_WORK_TREE naming the primary blocked" 2 \

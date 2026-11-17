@@ -9,7 +9,8 @@
 #     itself, never as its parent (Chris, 2026-11-09: a fork he publishes from
 #     is his). A repo someone else owns is blocked, and the agent hands the
 #     user the push and PR lines to run themselves: the outward-facing step is
-#     the user's. A push whose target cannot be told (a `cd`, a comment, a
+#     the user's. A push whose target cannot be told (a `cd` other than a leading `cd <absolute path> &&`,
+#     a comment, a
 #     word that is no remote) is refused. The ownership lookup FAILS CLOSED:
 #     gh erroring or the network being down means "not owned" means blocked.
 #   - `gh pr create` is gated on the PR's base repo (`pr_create_is_owned`):
@@ -89,8 +90,12 @@ split_segments() {
   printf '%s\n' "$1" | sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba' -e '}' | sed -E 's/(&&|\|\||;|\|)/\n/g'
 }
 # A `cd` or `pushd` anywhere in the command: git, and gh, then run somewhere
-# this hook cannot read.
+# this hook cannot read. `git_target` accepts one literal leading
+# `cd <absolute path> &&` (`lead_cd_re`); `gh pr create` still refuses any cd.
 cd_re='(^|[;&|(`[:space:]])(cd|pushd)([[:space:]]|$)'
+# A literal leading `cd <absolute path> &&` (#1900): the path bare, or in one
+# pair of quotes, with no expansion in it. Groups 2-4 are the path, 5 the rest.
+lead_cd_re='^[[:space:]]*cd[[:space:]]+("(/[^"$`\\]*)"|'"'"'(/[^'"'"'$`\\]*)'"'"'|(/[^[:space:]"'"'"'$`\\;&|()]*))[[:space:]]*&&(.*)$'
 # A `git push`, global options before the verb included (`-C <dir>`,
 # `-c <key=value>`, `--no-pager`).
 push_re='(^|[;&|(`[:space:]])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+push([[:space:]]|$)'
@@ -124,24 +129,31 @@ git_verb() {
 }
 # The checkout a command segment's git runs in. Anything that can move git
 # off the directory this reads is refused rather than parsed (#1387, #1529): a
-# `cd`, a `GIT_DIR`-style variable or flag, a second `-C`, a comment, a path
-# that does not resolve. The target is `git -C <path>` or the cwd, resolved
-# with realpath so a `..` or a symlink cannot name another checkout.
+# `cd` (but one literal leading `cd <absolute path> &&`, whose path then stands
+# for the cwd), a `GIT_DIR`-style variable or flag, a second `-C`, a comment, a
+# path that does not resolve. The target is `git -C <path>` or the cwd, resolved
+# with realpath so a `..` or a symlink cannot name another checkout; a `..` in
+# the leading cd path is refused, since bash's cd and realpath disagree on it.
 # $1 the segment; $SCAN the whole command. Returns 1, TARGET_WHY saying why,
 # when the directory cannot be told; else 0 with TARGET_TOP the checkout's top
 # level and TARGET_LINKED 1 when it is a linked worktree (git-dir differs from
 # the common dir).
 git_target() {
-  local dir real gitdir common lead rest
+  local dir real gitdir common lead rest what
   TARGET_TOP="" TARGET_LINKED=0
   TARGET_WHY="a cd or pushd in the command"
   # A literal leading `cd <absolute path> &&` (#1900) sets the directory every
-  # later segment runs in; any other cd, or a path with an expansion in it,
-  # stays refused.
+  # later segment runs in; any other cd, a path with an expansion in it, or one
+  # with a `..` in it stays refused: realpath resolves `link/..` through the
+  # link and bash's cd drops it as text, so the two would name different
+  # checkouts.
   lead="" rest=$SCAN
-  if [[ "$SCAN" =~ ^[[:space:]]*cd[[:space:]]+(\"(/[^\"\$\`\\]*)\"|\'(/[^\'\$\`\\]*)\'|(/[^[:space:]\"\'\$\`\\\;\&\|\(\)]*))[[:space:]]*\&\&(.*)$ ]]; then
+  if [[ "$SCAN" =~ $lead_cd_re ]]; then
     lead=${BASH_REMATCH[2]}${BASH_REMATCH[3]}${BASH_REMATCH[4]}
     rest=${BASH_REMATCH[5]}
+    TARGET_WHY="a '..' in the leading cd path"
+    case "/$lead/" in */../*) return 1 ;; esac
+    TARGET_WHY="a cd or pushd in the command"
   fi
   echo "$rest" | grep -qE "$cd_re" && return 1
   TARGET_WHY="a GIT_DIR-style variable or flag"
@@ -151,9 +163,11 @@ git_target() {
   TARGET_WHY="more than one -C"
   [ "$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]' | wc -l)" -le 1 ] || return 1
   dir=$(echo "$1" | grep -oE '(^|[[:space:]])-C[[:space:]]+[^[:space:]]+' | sed -E 's/^[[:space:]]*-C[[:space:]]+//')
-  dir=$(printf '%s' "${dir:-.}" | tr -d "'\"")
+  what="a -C path"
+  [ -n "$dir" ] || { dir=.; [ -z "$lead" ] || what="the leading cd path"; }
+  dir=$(printf '%s' "$dir" | tr -d "'\"")
   [ -z "$lead" ] || case "$dir" in /*) ;; *) dir=$lead/$dir ;; esac
-  TARGET_WHY="a -C path that does not resolve to a checkout ('$dir')"
+  TARGET_WHY="$what that does not resolve to a checkout ('$dir')"
   real=$(realpath -- "$dir" 2>/dev/null) || return 1
   TARGET_TOP=$(git -C "$real" rev-parse --show-toplevel 2>/dev/null) || return 1
   gitdir=$(git -C "$real" rev-parse --absolute-git-dir 2>/dev/null) || return 1
@@ -602,7 +616,7 @@ push_named_remote() {
 # The URLs a push segment $1 sends to, one per line, into PUSH_URLS. The
 # remote is the one the command names, else the branch's pushRemote,
 # remote.pushDefault, the branch's remote, then origin: git's own order. It is
-# read in the checkout `git_target` resolves, so a `cd`, a comment or a
+# read in the checkout `git_target` resolves, so a `cd` other than a leading `cd <absolute path> &&`, a comment or a
 # GIT_DIR is refused, not guessed at. PUSH_REMOTE is the remote's name when it
 # is a configured one, for the block text; a URL the command spells out is
 # never printed, as it can carry a token. 3, PUSH_WHY saying why, when the
@@ -646,7 +660,7 @@ if echo "$SCAN" | grep -qE "$push_re"; then
     case "$rc" in
       0) continue ;;
       2) lookup_blocked "" ;;
-      3) echo "BLOCKED: '$COMMAND' pushes, and this guard cannot tell where to ($PUSH_WHY). Give the push as 'git -C <absolute path> push <remote> <branch>' with a configured remote, and no cd, comment or shell expansion." >&2 ;;
+      3) echo "BLOCKED: '$COMMAND' pushes, and this guard cannot tell where to ($PUSH_WHY). Give the push as 'git -C <absolute path> push <remote> <branch>' with a configured remote, and no comment or shell expansion, and no cd but a leading 'cd <absolute path> &&'." >&2 ;;
       *) echo "BLOCKED: pushing to a repo you don't own.$(unseen_note) This push goes to $OWNERSHIP_REPO${PUSH_REMOTE:+, through remote '$PUSH_REMOTE'}. Hand the user the exact '! git push -u <remote> <branch>' line and a drafted '! gh pr create ...' line to run in their own shell — the outward-facing step is theirs, not yours." >&2 ;;
     esac
     exit 2
