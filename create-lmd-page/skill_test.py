@@ -246,9 +246,10 @@ def test_template_ends_with_a_quiet_twitch_signoff_below_the_rules():
     assert m, "no Twitch sign-off link between the Rules card and the closing </section>"
     style, inner = m.group(2), m.group(3)
     assert "text-decoration: none" in style and "font-weight: normal" in style
+    assert "color: #889" in style, "sign-off text must stay the muted grey, not Play Now's #557"
+    assert re.search(r"font-size: 0\.8em", m.group(1).split("<a", 1)[0]), "sign-off must be smaller than Play Now"
     assert 'fill="#9146FF"' in inner and inner.rstrip().endswith("Watch me solve live")
     assert "twitch.tv" not in re.sub(r"<[^>]*>", "", inner), "the URL must not be visible"
-    assert not re.search(r"<p\b", m.group(1)), "a <p> here would need max-width: none"
 
 
 # ---- § Edit a live page (#1720) ----
