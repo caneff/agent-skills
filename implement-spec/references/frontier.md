@@ -26,7 +26,8 @@ reason not to collapse it back into `unresolved` for tidiness.
 then listed it seconds later. `settled_listing` reads the label's issues twice, a pause between them;
 a ticket only the first read listed is read on its own and kept while still
 open and carrying the label. A read that fails stops the frontier, never
-counts as an absent ticket. The cost: a pause of `SETTLE_SECONDS` between the reads, one extra listing
+counts as an absent ticket. The cost: a pause of `SETTLE_SECONDS` between the reads (the environment
+variable `FRONTIER_SETTLE_SECONDS` overrides it, for tests), one extra listing
 call, and one issue read per ticket only the first listing had.
 
 A claimed ticket — one with an assignee, or the `in-progress` label — is in

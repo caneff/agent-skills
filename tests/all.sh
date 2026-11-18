@@ -31,6 +31,11 @@
 # The nightly backstop reports every such line. `TESTS_CPU_BUDGET=<seconds>`
 # can only lower every budget (a test uses it to make a fixture suite go
 # over); raising one is an edit to `cpu_budget`, a visible diff line.
+# Wall seconds (#1958): before the verdict line the run prints each suite's wall
+# seconds, slowest first, and a total, and appends one record per run to
+# `$TESTS_RUN_DIR/runs.jsonl` (default `~/.cache/test-runs`, `off` disables;
+# fields, the reader and the retention: `tests/run_summary.py`). A run killed
+# part-way leaves its record `incomplete`. Report-only: no wall time fails a run.
 # This is the merge gate (the command AGENTS.md's `## End-to-end seam` names),
 # not a push hook — see #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
@@ -148,9 +153,94 @@ if [ "$list_only" = 1 ]; then selected 2>/dev/null | cut -f1; exit "${PIPESTATUS
 tmp=$(mktemp -d) || exit 1
 # Every exit from here to the run's own trap (below) leaves no temp directory.
 trap 'rm -rf "$tmp"' EXIT
+# Run records (#1958; the record's fields: tests/run_summary.py). The writer is
+# inline because a gate fixture copies this file alone. `begin_record` appends
+# an `incomplete` record; `finish_run`, from the EXIT trap, rewrites it by id
+# with the final status and the suites reported, so a gate failure before any
+# suite ran is a `fail` record and a kill leaves `incomplete`. The default
+# directory is used only by a checkout that holds the reader beside this file,
+# so a fixture repo that copies this script alone never writes to the real
+# cache; an explicit `TESTS_RUN_DIR` is always honoured. A writer that fails
+# says so on stderr and never changes the run's verdict.
+elapsed() { awk -v a="$1" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.1f", b - a }'; }
+run_dir=${TESTS_RUN_DIR:-}
+if [ -z "$run_dir" ]; then
+  if [ -f "$root/tests/run_summary.py" ]; then run_dir=$HOME/.cache/test-runs; else run_dir=off; fi
+fi
+run_keep=${TESTS_RUN_KEEP:-50}
+case $run_keep in ''|*[!0-9]*|0) echo "tests/all.sh: TESTS_RUN_KEEP must be a positive integer, got '$run_keep'" >&2; exit 2 ;; esac
+run_id="$$-$(date +%s)"
+run_start=$EPOCHREALTIME
+outcome=fail   # until the run reaches its dispatch; every gate exit before that is a failure
+record_started=0 selected_count=0
+export TESTS_RUN_DIR="$tmp/nested-runs"  # suites this run starts never write to the real cache
+: >"$tmp/results.tsv"
+record_result() { # <label> <pass|fail>: wall and cpu of the suite at $idx, `-` when unmeasured
+  local wall=- cpu=-
+  [ -s "$tmp/$idx.wall" ] && wall=$(cat "$tmp/$idx.wall")
+  [ -s "$tmp/$idx.cpu" ] && cpu=$(cat "$tmp/$idx.cpu")
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$wall" "$cpu" >>"$tmp/results.tsv"
+}
+run_writer=$(cat <<'PY'
+import fcntl, json, os, sys
+mode, d, keep, rid, status, tsv, selected, narrowed, load1, wall = sys.argv[1:11]
+os.makedirs(d, exist_ok=True)
+path = os.path.join(d, "runs.jsonl")
+num = lambda x: None if x == "-" else float(x)
+suites = []
+for line in open(tsv):
+    label, verdict, w, c = line.rstrip("\n").split("\t")
+    suites.append({"label": label, "verdict": verdict, "wall": num(w), "cpu": num(c)})
+rec = {"id": rid, "mode": "narrowed" if narrowed == "1" else "full", "selected": int(selected),
+       "load1": num(load1), "wall_total": float(wall), "status": status, "suites": suites}
+def rows_of(f):
+    rows = []
+    for line in f:
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass  # a damaged line is dropped, never a reason to stop recording
+    return rows
+with open(path + ".lock", "w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        rows = rows_of(open(path))
+    except FileNotFoundError:
+        rows = []
+    for i, r in enumerate(rows):
+        if r.get("id") == rid:
+            rows[i] = rec
+            break
+    else:
+        rows.append(rec)
+    with open(path + ".tmp", "w") as f:
+        f.writelines(json.dumps(r) + "\n" for r in rows[-int(keep):])
+    os.replace(path + ".tmp", path)
+PY
+)
+write_record() { # <status>
+  [ "$run_dir" = off ] && return 0
+  python3 -c "$run_writer" x "$run_dir" "$run_keep" "$run_id" "$1" "$tmp/results.tsv" "$selected_count" \
+    "$([ -n "$changed_base" ] && echo 1 || echo 0)" "$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo -)" "$(elapsed "$run_start")" \
+    || echo "tests/all.sh: could not write the run record under $run_dir" >&2
+}
+begin_record() { record_started=1; write_record incomplete; }
+finish_run() { [ "$record_started" = 1 ] && write_record "$outcome"; return 0; }
+# Wall seconds per suite, slowest first, and a total. Printed before the verdict
+# line, so the last line of a run stays the one callers read.
+print_wall() {
+  if [ -s "$tmp/results.tsv" ]; then
+    echo "wall seconds per suite, slowest first:"
+    sort -t$'\t' -k3,3 -rn "$tmp/results.tsv" | awk -F'\t' '{ printf "  %8s wall  %s (%ss cpu)\n", ($3 == "-" ? "?" : sprintf("%.1fs", $3)), $1, $4 }'
+  fi
+  echo "total wall: $(elapsed "$run_start")s"
+}
+trap 'finish_run; rm -rf "$tmp"' EXIT
 # The selection is read once: its scope line goes to the report and a diff that
 # cannot be read (exit 2) stops the run rather than selecting nothing.
-selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; exit 2; }
+selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; begin_record; exit 2; }
+selected_count=$(printf '%s\n' "$selection" | grep -c .)
+begin_record
 [ -s "$tmp/scope" ] && cat "$tmp/scope"
 # A missing cargo must fail the gate, not silently skip every Cargo suite.
 if printf '%s\n' "$selection" | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
@@ -275,6 +365,9 @@ failure_signature='^(FAIL|Traceback|ERROR)'
 report_failure() { # <label> <output> [<note>...]
   local label=$1 output=$2 note
   shift 2
+  outcome=fail
+  record_result "$label" fail
+  print_wall
   echo "FAIL $label"
   # Skip empty notes: a caller passing a conditional note it decided not to
   # produce would otherwise print a blank line into the failure report.
@@ -415,8 +508,9 @@ cpu_seconds() { # <file>
 }
 
 run_suite() { # <index> <command>
-  local out status after
+  local out status after t0=$EPOCHREALTIME
   out=$($2 2>&1 </dev/null); status=$?
+  elapsed "$t0" >"$tmp/$1.wall"
   cpu_seconds "$tmp/$1.cpu"
   after=$(identity_snapshot)
   printf '%s' "$out" >"$tmp/$1.out"
@@ -443,9 +537,11 @@ dispatch() {
   done <"$tmp/serial"
 }
 
-stop_and_wait() { touch "$tmp/stop"; wait "$dispatcher" 2>/dev/null; }
-trap 'stop_and_wait; rm -rf "$tmp"' EXIT
-trap 'exit 130' INT TERM
+stop_and_wait() { touch "$tmp/stop"; wait "${dispatcher:-}" 2>/dev/null; }
+
+trap 'stop_and_wait; finish_run; rm -rf "$tmp"' EXIT
+trap 'outcome=incomplete; exit 130' INT TERM
+outcome=incomplete
 dispatch &
 dispatcher=$!
 
@@ -484,6 +580,7 @@ while IFS=$'\t' read -r label cmd; do
     cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label"); over=""
     if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then over=", over its ${budget}s budget"; fi
     echo "PASS $label (${cpu}s cpu${over})"
+    record_result "$label" pass
     count=$((count + 1))
   else
     stop_and_wait
@@ -496,6 +593,8 @@ while IFS=$'\t' read -r label cmd; do
   idx=$((idx + 1))
 done <"$tmp/ordered"
 wait "$dispatcher"
+outcome=pass
+print_wall
 
 # A narrowed run says so (defect class 1): `N suites passed` alone reads the
 # same as a full green.
