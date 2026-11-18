@@ -492,13 +492,20 @@ t="$tmp/question-no-reply.jsonl"
 run "question, no controller reply at all" "$t"
 expect_alert "an open request with no controller message since is not a hold"
 
-for reply in "Wait, no: use origin/main and rebuild" "hold off: fix the lint first, then report" "slot free, you're next: go"; do
+for reply in "Wait, no: use origin/main and rebuild" "hold off: fix the lint first, then report" "slot free, you're next: go" "wait: slot is free now, go ahead"; do
   reset_log
   t="$tmp/answer-like-hold.jsonl"
   { human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; peer "$reply"; work; assistant_text "stopped"; } > "$t"
   run "answer shaped like a hold: $reply" "$t"
   expect_alert "a controller answer that merely opens with wait/hold is not a hold: $reply"
 done
+
+reset_log
+t="$tmp/hold-then-human.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; peer "wait: both slots are busy, you're next";
+  human "carry on"; work; assistant_text "stopped"; } > "$t"
+run "hold, then a human prompt" "$t"
+expect_alert "a human prompt after the hold ends the hold"
 
 reset_log
 t="$tmp/request-mentioned.jsonl"
