@@ -54,8 +54,29 @@ check "a diff touching tests/all.sh lists everything" "$(has a/a.test.sh && has 
 fresh; change README.md; list
 check "a root file no suite directory owns lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
 
+fresh; change c/note.txt; list
+check "a non-Markdown file in a directory with no suites lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
+fresh; change c/note.png; list
+check "a file type the selector does not know lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
+fresh; change c/noext; list
+check "a file with no extension lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
+fresh; change tests/suite-edges.py; list
+check "a diff touching the edge finder lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
+
+# A Markdown-only diff in a directory with no suites runs the prose checks only.
+prose_fresh() { # a prose-check suite under tests/, a plain one beside it
+  fresh; printf '#!/usr/bin/env bash\n# all.sh: prose-check (reads Markdown)\nexit 0\n' >"$shadow/repo/tests/p.test.sh"
+  git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm prose; base=$(git -C "$shadow/repo" rev-parse HEAD)
+}
+prose_fresh; change c/note.md; list
+check "Markdown only in a directory with no suites lists the prose checks" "$(has tests/p.test.sh; echo $?)"
+check "...and not the other suites, under tests/ or elsewhere" "$(! has tests/t.test.sh && ! has a/a.test.sh && ! has b/b.test.sh; echo $?)"
+out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1)
+check "...and says it narrowed to the prose checks" "$(grep -q 'changed suites: Markdown only, in directories with no suites: the prose checks' <<<"$out"; echo $?)"
+prose_fresh; change c/note.md; change a/x.txt; list
+check "Markdown beside a change in a directory with suites is an ordinary narrowed run" "$(has a/a.test.sh && has tests/t.test.sh; echo $?)"
 fresh; change c/note.md; list
-check "a directory with no suites lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
+check "a Markdown-only diff with no prose-check suite lists everything, never nothing" "$(has a/a.test.sh && has b/b.test.sh && has tests/t.test.sh; echo $?)"
 
 fresh; list
 check "an empty diff lists only the repo-wide checks" "$(has tests/t.test.sh && ! has a/a.test.sh; echo $?)"
@@ -89,8 +110,19 @@ edge() { # <file> <line>: commit a tracked file whose line reaches another direc
 }
 fresh; edge b/lib.py 'sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "a"))'; change a/x.txt; list
 check "a sys.path line into a/ keeps b/'s suites when only a/ changes" "$(has b/b.test.sh; echo $?)"
-fresh; edge b/b.test.sh '# reads $here/../a/data.txt'; change a/x.txt; list
+fresh; edge b/b.test.sh 'cat "$here/../a/x.txt"'; change a/x.txt; list
 check "a '\$here/../a/' read in a shell suite keeps b/'s suites" "$(has b/b.test.sh; echo $?)"
+fresh; edge b/b.test.sh '# reads $here/../a/x.txt'; change a/x.txt; list
+check "a comment naming a/ is not an edge" "$(has b/b.test.sh; echo $((1 - $?)))"
+fresh; edge b/lib.py '"""Loads ../a/x.txt."""'; change a/x.txt; list
+check "a docstring naming a/ is not an edge" "$(has b/b.test.sh; echo $((1 - $?)))"
+fresh; edge b/lib.py 'git("commit", "-qm", "reads ../a/x.txt")'; change a/x.txt; list
+check "a commit message naming a/ is not an edge" "$(has b/b.test.sh; echo $((1 - $?)))"
+fresh; mkdir -p "$shadow/repo/a/deep"; echo 1 >"$shadow/repo/a/deep/f.txt"; git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm deep
+edge b/lib.py 'DATA = os.path.join(HERE, "..", "a", "deep", "f.txt")'; change a/x.txt; list
+check "an edge to a file does not run for a change to another file of that directory" "$(has b/b.test.sh; echo $((1 - $?)))"
+change a/deep/f.txt; list
+check "...and runs for a change to the file itself" "$(has b/b.test.sh; echo $?)"
 fresh; edge b/b.test.sh '. "$here/../tests/helper.sh"'; change tests/helper.sh; list
 check "a sourced tests/ helper keeps the suites that source it" "$(has b/b.test.sh; echo $?)"
 fresh; edge b/lib.py 'sys.path.insert(0, os.path.join(HERE, "..", "a"))'; change b/y.txt; list
@@ -118,9 +150,20 @@ check "...and an unmarked suite is not" "$(has b/b.test.sh; echo $((1 - $?)))"
 fresh; printf '#!/usr/bin/env python3\nimport sys\nsys.exit(3)\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
 check "a failing edge scan lists everything" "$([ "$rc" = 0 ] && has a/a.test.sh && has b/b.test.sh; echo $?)"
 out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1)
-check "...and says the scan failed" "$(grep -q 'full suite: the cross-directory edge scan failed' <<<"$out"; echo $?)"
+check "...and says the edge finder gave no answer" "$(grep -q 'full suite: the edge finder gave no answer' <<<"$out"; echo $?)"
 fresh; printf '#!/usr/bin/env python3\nprint("a")\nprint("b")\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
-check "an edge scan that prints more than one line lists everything" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
+check "an edge scan that prints no verdict line lists everything" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
+out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1)
+check "...and says it got no verdict" "$(grep -q 'full suite: the edge finder gave no verdict' <<<"$out"; echo $?)"
+fresh; printf '#!/usr/bin/env python3\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
+check "an edge scan that exits 0 and prints nothing lists everything" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
+fresh; printf '#!/usr/bin/env python3\nprint("dirs")\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
+check "a verdict word without its directory list is no answer either" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
+fresh; printf '#!/usr/bin/env python3\nprint("dirs\\t")\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
+check "...while a well-formed empty list keeps only the repo-wide checks" "$([ "$rc" = 0 ] && has tests/t.test.sh && ! has b/b.test.sh; echo $?)"
+fresh; change a/x.txt; printf 'a/x.txt\nb/y.txt\n' >"$shadow/files.txt"
+out=$(cd "$shadow/repo" && bash tests/all.sh --list --files "$shadow/files.txt" 2>&1)
+check "--list --files names what a change to those paths would run" "$(has a/a.test.sh && has b/b.test.sh && has tests/t.test.sh; echo $?)"
 fresh; rm "$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
 check "a missing edge scanner lists everything" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
 

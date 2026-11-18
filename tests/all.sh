@@ -12,10 +12,13 @@
 # `--list` prints the labels the rules select, without running anything.
 # `--changed <base>` narrows the run to the suites under every top-level
 # directory the diff `<base>...HEAD` touches plus everything under `tests/`
-# (the repo-wide checks), widened by the cross-directory edges
-# `tests/suite-edges.py` finds (a suite that loads or reads another directory's
-# files runs when that directory changes); see `scope_changed` for when it
-# widens to the full suite. A suite with a line `# all.sh: repo-wide (<why>)`
+# (the repo-wide checks), widened by the file-to-file edges
+# `tests/suite-edges.py` finds (a suite that loads or reads a file runs when
+# that file changes); see `scope_changed` for when it widens to the full suite.
+# A Markdown-only diff in directories with no suites runs only the suites marked
+# `# all.sh: prose-check` (#1955). `--list --files <listfile>` prints what a
+# change to those paths would run, for replaying history
+# (`tests/replay_selection.py`). A suite with a line `# all.sh: repo-wide (<why>)`
 # in its first twenty lines reads the whole tree and is always kept. A
 # narrowed run's last line says so:
 # `N of M suites passed (narrowed: ...)`. Suites run concurrently, `TESTS_JOBS`
@@ -101,7 +104,10 @@ scope_changed() {
   fi
   cat "$err" >&2
   rm -f "$list" "$err"
-  verdict=${answer%%$'\t'*}; dirs=${answer#*$'\t'}
+  case "$answer" in
+    *$'\t'*) verdict=${answer%%$'\t'*}; dirs=${answer#*$'\t'} ;;
+    *) verdict=none dirs="" ;;  # no tab: not a verdict line
+  esac
   case "$verdict" in
     full) echo '*' ;;
     dirs) echo "changed suites: ${dirs:-none} + tests" >&2; echo "$dirs" ;;
@@ -153,7 +159,11 @@ selected() { # prints the "<label>\t<command>" lines this run covers
   dirs=$(scope_changed "$changed_base") || exit $?
   case "$dirs" in
     '*') suites ;;
-    "prose"|"prose "*) suites | filter_prose "${dirs#prose}" "$(marked_labels prose-check)" "$(marked_labels repo-wide)" ;;
+    "prose"|"prose "*)
+      local kept
+      kept=$(suites | filter_prose "${dirs#prose}" "$(marked_labels prose-check)" "$(marked_labels repo-wide)")
+      # No suite marked prose-check is no prose checks, never "nothing to run".
+      if [ -z "$kept" ]; then echo "full suite: no suite is marked '# all.sh: prose-check'" >&2; suites; else printf '%s\n' "$kept"; fi ;;
     *) suites | filter_dirs "$dirs" "$(marked_labels repo-wide)" ;;
   esac
 }
