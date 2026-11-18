@@ -517,7 +517,9 @@ def _parent_number(body, repo):
 
 # Pause between the two listing reads: the lag #1897 saw was seconds long,
 # so an immediate second read could meet the same stale listing.
-SETTLE_SECONDS = 3.0
+# `FRONTIER_SETTLE_SECONDS` lets a test shorten it (drain's suite does, #1954:
+# the pause cost every drain case 3 s per frontier read, ~17 min for the file).
+SETTLE_SECONDS = float(os.environ.get("FRONTIER_SETTLE_SECONDS", 3.0))
 
 
 def settled_listing(tracker, label):

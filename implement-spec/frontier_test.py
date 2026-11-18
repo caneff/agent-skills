@@ -1410,3 +1410,19 @@ def test_a_ticket_that_cannot_be_re_read_fails_the_frontier_rather_than_vanish()
     t = Flaky([ticket(1), ticket(2)], [[1, 2], [2]], broken={"issue": "HTTP 502"})
     with pytest.raises(T.TrackerError):
         F.frontier("owner/repo", "ready-for-agent", tracker=t)
+
+
+def _settle_seconds(env_value):
+    """`SETTLE_SECONDS` as a fresh import of frontier.py reads it."""
+    env = {k: v for k, v in os.environ.items() if k != "FRONTIER_SETTLE_SECONDS"}
+    if env_value is not None:
+        env["FRONTIER_SETTLE_SECONDS"] = env_value
+    code = f"import sys; sys.path.insert(0, {os.path.dirname(F.__file__)!r}); import frontier; print(frontier.SETTLE_SECONDS)"
+    return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_the_pause_between_the_two_listings_is_three_seconds_unless_the_environment_names_another():
+    # drain's own tests set it low (#1954): without the override each of their
+    # drain runs paid 3 s per frontier read.
+    assert _settle_seconds(None) == "3.0"
+    assert _settle_seconds("0.05") == "0.05"

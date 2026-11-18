@@ -390,7 +390,7 @@ class Sandbox:
         return {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
                 "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
                 "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
-                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_FRONTIER_RETRY_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
+                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_FRONTIER_RETRY_SECONDS": "0.05", "FRONTIER_SETTLE_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3", "DRAIN_SPEC_WALL_CLOCK_SECONDS": "20",
                 "DRAIN_LOG_DIR": os.path.join(self.tmp, "logs"), **(env or {})}
 
     def drain(self, *argv, env=None):
