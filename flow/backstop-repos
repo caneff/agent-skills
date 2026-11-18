@@ -3,9 +3,9 @@
 # removing a repo is one line here; bin/backstop-nightly reads this file.
 # Optional second field: `<checkout> workflow=<file name>` names the repo's
 # full-gate workflow (e.g. `workflow=gate.yml`); the backstop then reads that
-# repo's result from CI instead of running its seam locally. No repo below has
-# one, so each runs its seam locally.
+# repo's result from CI instead of running its seam locally. A repo with no
+# field runs its seam locally.
 ~/.agents/skills
-~/src/sudokumaker-custom-constraints
+~/src/sudokumaker-custom-constraints workflow=ci.yml
 ~/src/grid-hunts workflow=ci.yml
 ~/src/twitch-rules-scroller

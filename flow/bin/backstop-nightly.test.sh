@@ -117,5 +117,18 @@ else
   fail "shipped list (rc=$rc): $out / $(cat "$log")"
 fi
 
+# Both repos with a CI nightly are read from it, not run here (#1956): the
+# shipped list passes `--workflow ci.yml` for each, and no other repo.
+: > "$log"
+HOME="$tmp/home" "$tool" "$here/../backstop-repos" >/dev/null 2>&1
+got=$(grep -- '--workflow' "$log")
+if [ "$(grep -c -- '--workflow' "$log")" = 2 ] \
+   && grep -qx -- "--repo $tmp/home/src/sudokumaker-custom-constraints.*--workflow ci.yml" "$log" \
+   && grep -qx -- "--repo $tmp/home/src/grid-hunts.*--workflow ci.yml" "$log"; then
+  pass "the shipped list reads sudokumaker-custom-constraints and grid-hunts from ci.yml"
+else
+  fail "shipped list workflow args: $got / $(cat "$log")"
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
