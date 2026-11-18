@@ -14,7 +14,6 @@ quiet (`docs/research/2026-11-16-home-repo-pattern.md`).
 - sudoku-kit: `~/src/sudoku-kit`. Shared CP-SAT helpers, SudokuMaker link codec, uniqueness check.
 - sudokumaker-custom-constraints: `~/src/sudokumaker-custom-constraints`. SudokuMaker custom constraints in JS, tested in Node.
 - grid-hunts: `~/src/grid-hunts`. One-off CP-SAT grid finders for puzzle rules.
-- gridfind: `~/src/gridfind`. Grid constraint solving and validation (found / broke / unknown), CP-SAT.
 - lmd-archive: `~/src/lmd-archive`. Data-only backup of ChinStrap's Logic Masters puzzles.
 - visual-teach: `~/src/visual-teach`. Interactive teaching lessons from a block format.
 - research-queue: `~/src/research-queue`. Research briefs and the cloud drainer for leftover weekly quota.
