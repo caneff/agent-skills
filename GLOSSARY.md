@@ -74,7 +74,7 @@ _Avoid_: sweep (that is every repo under a root), clean up, garbage collect
 _Avoid_: feature branch, spec branch, staging branch
 
 **Closing test**:
-The one end-to-end test a spec's closing check adds in the target repo (`spec_<n>_closing.test.*`). It runs once for the closing check and its passing run is recorded on the spec. Then each check in it is sorted by one question, "can ordinary later work make it false?": a one-time fact is removed, a behaviour check moves into the ordinary suite under a name with no spec number. The default branch ends with no spec-numbered test file (`implement-spec/closing_ticket.py` § After it passes).
+The one end-to-end test a spec's closing check adds in the target repo (for example `spec_<n>_closing.test.*`). It runs once and its passing run is recorded on the spec; it does not stay as a spec-numbered file. The generated closing-check section (`_after_it_passes` in `implement-spec/closing_ticket.py`) says what becomes of its checks.
 _Avoid_: spec test, seam test, acceptance test
 
 **Run file**:

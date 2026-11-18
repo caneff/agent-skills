@@ -176,17 +176,26 @@ def _after_it_passes(spec, one_slice):
 
     Without this step the file stays and runs in every later gate: three
     repos held 14, 17 and 24 spec-numbered test files, many asserting
-    one-time facts or the wording of `AGENTS.md` (#1957).
+    one-time facts or the wording of `AGENTS.md` (#1957). The rule covers
+    the file this spec's closing check added; other specs' leftovers have
+    their own cleanup tickets.
     """
-    where = ("this slice's PR" if one_slice
-             else "the integration PR, before it merges")
+    if one_slice:
+        where = ("this slice's PR, before it goes up, so its review wave "
+                 "reads the result")
+    else:
+        where = (f"`spec-{spec}`, before the spec-level review below, so "
+                 "that review reads the moved tests and the integration PR "
+                 "carries the result")
     return [
         "### After it passes", "",
-        "The end-to-end test runs once for this closing check; it does not "
-        "stay as a spec-numbered file. In order:", "",
+        "The end-to-end test runs once for this closing check; the file "
+        "this spec added for it does not stay as a spec-numbered file. "
+        "In order:", "",
         f"1. Run it green, then post the command and its result line as a "
-        f"comment on spec #{spec}. That comment is the evidence; do it "
-        "before the file is removed or converted.",
+        f"comment on spec #{spec}, with the \"Blind to\" line above. That "
+        "comment is the evidence; do it before the file is removed or "
+        "converted.",
         "2. Sort each check in it, and each step inside a file that mixes "
         "both kinds, with one question: **Can ordinary later work make it "
         "false?**",
@@ -195,11 +204,15 @@ def _after_it_passes(spec, one_slice):
         "removed.",
         "   - Yes: it protects behaviour. It is moved into the ordinary "
         "suite for the code it covers, under a name that says what it "
-        "protects, with no spec number in the name.",
+        "protects, with no spec number in the name. Run that suite and see "
+        "the moved check listed and green: a file the runner does not pick "
+        "up silently stops checking.",
         "3. A removed check that covered behaviour names the stronger test "
         "that already covers it, in the commit message.",
-        f"4. Do all of this in {where}, so the default branch is left with "
-        "no spec-numbered test file.", ""]
+        f"4. Do all of this in {where}.",
+        f"5. Confirm none is left: `git ls-files | grep -E "
+        f"'spec[-_]?{spec}([^0-9]|$)'` prints no test file of this spec.",
+        ""]
 
 
 def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
@@ -260,6 +273,7 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
                   "reach:", ""]
         lines += [f"- {s}" for s in surfaces]
         lines.append("")
+    lines += _after_it_passes(spec, one_slice)
     if not one_slice:
         lines += [
             f"The end-to-end check is that seam run on `{branch}` merged with "
@@ -284,19 +298,20 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
             "backstop is the only full run. "
             f"`fix-check.sh {spec} origin/{branch}` then exits 0.",
             ""]
-    lines += _after_it_passes(spec, one_slice)
     lines += ["### Acceptance criteria", "",
               "- [ ] One end-to-end test drives the whole spec's acceptance "
-              f"criteria at the seam above, and lives where `{seam}` runs it",
+              f"criteria at the seam above, and `{seam}` runs it green "
+              "before the file goes",
               "- [ ] What the seam is blind to is stated in the test's own "
-              "comment, so the next reader knows what a green run does not "
-              "cover"]
+              "comment and repeated in the evidence comment on the spec, so "
+              "the next reader knows what a green run does not cover"]
     if not one_slice:
         lines.append(f"- [ ] The spec-level review run over "
                      f"`origin/{default}...{branch}`, every finding disposed "
                      f"of, and `fix-check.sh {spec} origin/{branch}` exits 0")
-    lines.append("- [ ] The passing run is recorded on the spec, and the "
-                 "default branch ends with no spec-numbered test file")
+    lines.append("- [ ] The passing run is recorded on the spec, and this "
+                 "spec's closing test is not left as a spec-numbered test "
+                 "file")
     for surface in surfaces:
         lines.append(f"- [ ] One open of the real thing: {surface} — checked "
                      "in the shipping surface, not in the seam")
