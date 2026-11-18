@@ -15,13 +15,14 @@ before #1955.
 | A path that names nothing tracked (a path in a fixture repo, a file written at run time) fell back to the whole directory. | It is no edge. A bare directory with no path after it is still every file under it. |
 | A directory put on `sys.path` reached every file in it. | It reaches the modules the file imports from it. |
 | A Markdown file in a directory with no suites ran the full seam. | A diff of only such files runs the suites marked `# all.sh: prose-check`, the repo-wide suites, and the suites of any directory that reaches the file. |
+| A source file that names a file beside it (or below it) by its written name (`helper.py` reading `"x.txt"`) had no edge to it. | It does, so a change to `x.txt` reaches the suites that load `helper.py`. |
 | An unknown file type was treated as its directory. | It runs the full seam, as do a change to `tests/all.sh` or `tests/suite-edges.py`. |
 | An empty or failed answer from the finder was checked by line count. | The finder prints a verdict line (`full`, `dirs <list>` or `prose <list>`); a missing line, an unknown word, a missing tab or a non-zero exit runs the full seam and says so. |
 
 ## Edges removed
 
-The old finder made 150 links from a source file to a top-level directory. 11
-are gone; the other 139 stay as links to the files they name (833 file edges
+The old finder made 153 links from a source file to a top-level directory. 11
+are gone; the other 142 stay as links to the files they name (837 file edges
 between directories, against whole directories before). Each removed link, with
 the reason it was false:
 
@@ -58,5 +59,7 @@ survey's replay of the old rules: 132.7 of 153). 14 PRs select every suite and
 16 select 130 or more (survey: 12 and 44 or more). The 14 full runs are
 legitimate widenings: PRs that change `tests/all.sh`, a root file such as
 `.gitignore`, or a file type the selector does not know (`justfile`), plus
-sweeps that touch most directories at once. The floor for any narrowed run is
-the 29 suites under `tests/` and the repo-wide ones.
+sweeps that touch most directories at once. The floor for a narrowed run that is not
+Markdown-only is the 29 suites under `tests/` and the repo-wide ones; a
+Markdown-only diff in directories with no suites runs fewer (the prose checks
+and the repo-wide ones).
