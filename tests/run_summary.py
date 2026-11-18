@@ -4,10 +4,22 @@
 `run_summary.py report [--dir D] [--top K]` prints the slowest suites (worst
 wall seconds over the kept runs) and the suites that failed at least once.
 Records live in `$TESTS_RUN_DIR` (default `~/.cache/test-runs`) as `runs.jsonl`,
-one JSON object per run: id, started, repo, mode (full|narrowed), selected,
-load1, wall_total, status (pass|fail|incomplete), suites [{label, verdict,
-wall, cpu}]. An `incomplete` run (killed, or still going) is counted and never
-read as a pass. Report-only: nothing here fails a run.
+one JSON object per run, the last `TESTS_RUN_KEEP` (default 50) kept:
+
+    id          "<pid>-<epoch>"
+    mode        "full" | "narrowed"
+    selected    how many suites the run selected
+    load1       the 1-minute load at the start, null when unreadable
+    wall_total  seconds
+    status      "pass" | "fail" | "incomplete"
+    suites      [{label, verdict "pass"|"fail", wall, cpu}] for the suites reported;
+                wall and cpu are null when unmeasured
+
+`tests/all.sh` writes the record `incomplete` at the start and rewrites it at
+exit, so a run killed part-way (even by SIGKILL) stays `incomplete` and never
+reads as a pass; a gate failure or a failing suite is `fail`. Suites that
+`tests/all.sh` starts get a scratch `TESTS_RUN_DIR`, so a nested run never
+writes here. A damaged line is skipped. Report-only: nothing here fails a run.
 """
 import argparse
 import json
@@ -19,7 +31,13 @@ def load(d):
     path = os.path.join(d, "runs.jsonl")
     try:
         with open(path) as f:
-            return [json.loads(l) for l in f if l.strip()]
+            rows = []
+            for line in f:
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    pass  # a damaged line is skipped, as the writer does
+            return rows
     except FileNotFoundError:
         return []
 
@@ -29,15 +47,16 @@ def report(d, top):
     if not runs:
         print(f"no run records in {d}", file=sys.stderr)
         return 1
-    worst, seen, failed = {}, {}, {}
+    worst, failed = {}, {}
     for r in runs:
         for s in r.get("suites", []):
-            worst[s["label"]] = max(worst.get(s["label"], 0.0), s["wall"])
+            if s["wall"] is not None:
+                worst[s["label"]] = max(worst.get(s["label"], 0.0), s["wall"])
             if s["verdict"] == "fail":
                 failed[s["label"]] = failed.get(s["label"], 0) + 1
     incomplete = sum(r["status"] == "incomplete" for r in runs)
     print(f"{len(runs)} runs, {incomplete} incomplete, {sum(r['status'] == 'fail' for r in runs)} failed")
-    print(f"slowest suites (worst wall over the kept runs):")
+    print("slowest suites (worst wall over the kept runs):")
     for label, w in sorted(worst.items(), key=lambda kv: -kv[1])[:top]:
         print(f"  {w:8.1f}s  {label}")
     print("suites that failed at least once:")

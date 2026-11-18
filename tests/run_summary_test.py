@@ -55,3 +55,13 @@ def test_an_incomplete_run_is_counted_and_never_read_as_a_pass(tmp_path):
 def test_no_records_says_so_and_fails(tmp_path):
     r = report(tmp_path)
     assert r.returncode != 0 and "no run records" in (r.stdout + r.stderr)
+
+
+def test_a_damaged_line_and_an_unmeasured_wall_do_not_stop_the_report(tmp_path):
+    write(tmp_path, [rec("pass", [("a", "pass", None), ("b", "pass", 3.0)])])
+    with open(tmp_path / "runs.jsonl", "a") as f:
+        f.write("{not json\n")
+    r = report(tmp_path)
+    assert r.returncode == 0, r.stderr
+    slow, _ = sections(r.stdout)
+    assert "3.0s" in slow and "  a" not in slow
