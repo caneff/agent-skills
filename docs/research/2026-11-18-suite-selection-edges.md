@@ -54,9 +54,9 @@ source line.
 PRs on `origin/main` through `tests/all.sh --list --files`, against the tree it
 is run in. Nothing is run.
 
-Result on 2026-11-18, 156 suites in the tree: **mean 90.8 suites per PR** (the
+Result on 2026-11-18, 156 suites in the tree: **mean 91.7 suites per PR** (the
 survey's replay of the old rules: 132.7 of 153). 14 PRs select every suite and
-16 select 130 or more (survey: 12 and 44 or more). The 14 full runs are
+16 select 85% or more, 130 or more of 153 being the survey's measure (survey: 12 and 44 or more). The 14 full runs are
 legitimate widenings: PRs that change `tests/all.sh`, a root file such as
 `.gitignore`, or a file type the selector does not know (`justfile`), plus
 sweeps that touch most directories at once. The floor for a narrowed run that is not
