@@ -31,6 +31,16 @@
 # The nightly backstop reports every such line. `TESTS_CPU_BUDGET=<seconds>`
 # can only lower every budget (a test uses it to make a fixture suite go
 # over); raising one is an edit to `cpu_budget`, a visible diff line.
+# Wall seconds (#1958): after the PASS/FAIL lines the run prints each suite's
+# wall seconds, slowest first, and a total. It also appends one record per run
+# (status pass|fail|incomplete, mode full|narrowed, suites selected, 1-minute
+# load, per-suite wall/cpu/verdict) to `$TESTS_RUN_DIR/runs.jsonl` (default
+# `~/.cache/test-runs`, `off` disables), keeping the last `TESTS_RUN_KEEP`
+# (default 50). The record is written `incomplete` at the start and rewritten
+# at exit, so a killed run never reads as a pass. Report-only: no wall time
+# fails a run. Suites it starts get a scratch `TESTS_RUN_DIR`, so a nested run
+# of this script never writes to the real cache. Reader: `tests/run_summary.py
+# report`.
 # This is the merge gate (the command AGENTS.md's `## End-to-end seam` names),
 # not a push hook — see #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
@@ -275,6 +285,8 @@ failure_signature='^(FAIL|Traceback|ERROR)'
 report_failure() { # <label> <output> [<note>...]
   local label=$1 output=$2 note
   shift 2
+  outcome=fail
+  record_result "$label" fail
   echo "FAIL $label"
   # Skip empty notes: a caller passing a conditional note it decided not to
   # produce would otherwise print a blank line into the failure report.
@@ -415,8 +427,9 @@ cpu_seconds() { # <file>
 }
 
 run_suite() { # <index> <command>
-  local out status after
+  local out status after t0=$EPOCHREALTIME
   out=$($2 2>&1 </dev/null); status=$?
+  awk -v a="$t0" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.1f", b - a }' >"$tmp/$1.wall"
   cpu_seconds "$tmp/$1.cpu"
   after=$(identity_snapshot)
   printf '%s' "$out" >"$tmp/$1.out"
@@ -444,8 +457,83 @@ dispatch() {
 }
 
 stop_and_wait() { touch "$tmp/stop"; wait "$dispatcher" 2>/dev/null; }
-trap 'stop_and_wait; rm -rf "$tmp"' EXIT
+
+# Run records (#1958). The writer is inline because a gate fixture copies this
+# file alone. `start` appends an `incomplete` record; `finish` rewrites that
+# record by id with the final status and the suites reported, and keeps the
+# last N. Both run under a lock and replace the file atomically. A writer that
+# fails says so on stderr and never changes the run's verdict.
+run_dir=${TESTS_RUN_DIR:-$HOME/.cache/test-runs}
+run_keep=${TESTS_RUN_KEEP:-50}
+case $run_keep in ''|*[!0-9]*|0) run_keep=50 ;; esac
+run_id="$$-$(date +%s)"
+run_start=$EPOCHREALTIME
+outcome=incomplete
+: >"$tmp/results.tsv"
+export TESTS_RUN_DIR="$tmp/nested-runs"
+record_result() { # <label> <pass|fail>: wall of the suite at $idx, cpu if measured
+  local wall=0 cpu=0
+  [ -s "$tmp/$idx.wall" ] && wall=$(cat "$tmp/$idx.wall")
+  [ -s "$tmp/$idx.cpu" ] && cpu=$(cat "$tmp/$idx.cpu")
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$wall" "$cpu" >>"$tmp/results.tsv"
+}
+run_writer=$(cat <<'PY'
+import fcntl, json, os, sys, time
+mode, d, keep, rid, status, tsv, selected, narrowed, load1, wall, repo = sys.argv[1:12]
+os.makedirs(d, exist_ok=True)
+path = os.path.join(d, "runs.jsonl")
+suites = []
+if tsv != "-":
+    for line in open(tsv):
+        label, verdict, w, c = line.rstrip("\n").split("\t")
+        suites.append({"label": label, "verdict": verdict, "wall": float(w), "cpu": float(c)})
+rec = {"id": rid, "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "repo": repo,
+       "mode": "narrowed" if narrowed == "1" else "full", "selected": int(selected),
+       "load1": float(load1), "wall_total": float(wall), "status": status, "suites": suites}
+with open(path + ".lock", "w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        rows = [json.loads(l) for l in open(path) if l.strip()]
+    except FileNotFoundError:
+        rows = []
+    if mode == "start":
+        rows.append(rec)
+    else:
+        for i, r in enumerate(rows):
+            if r.get("id") == rid:
+                rec["started"] = r.get("started", rec["started"])
+                rows[i] = rec
+                break
+        else:
+            rows.append(rec)
+    rows = rows[-int(keep):]
+    with open(path + ".tmp", "w") as f:
+        f.writelines(json.dumps(r) + "\n" for r in rows)
+    os.replace(path + ".tmp", path)
+PY
+)
+selected_count=$(printf '%s\n' "$selection" | grep -c .)
+narrowed_flag=0; [ -n "$changed_base" ] && narrowed_flag=1
+load1=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+write_record() { # <start|finish> <status> <tsv|->
+  [ "$run_dir" = off ] && return 0
+  local wall
+  wall=$(awk -v a="$run_start" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.1f", b - a }')
+  python3 -c "$run_writer" "$1" "$run_dir" "$run_keep" "$run_id" "$2" "$3" "$selected_count" "$narrowed_flag" "$load1" "$wall" "$(basename "$root")" \
+    || echo "tests/all.sh: could not write the run record under $run_dir" >&2
+}
+# Wall seconds per suite, slowest first, and a total; then the final record.
+finish_run() {
+  if [ -s "$tmp/results.tsv" ]; then
+    echo "wall seconds per suite, slowest first:"
+    sort -t$'\t' -k3,3 -rn "$tmp/results.tsv" | awk -F'\t' '{ printf "  %8.1fs wall  %s (%ss cpu)\n", $3, $1, $4 }'
+  fi
+  awk -v a="$run_start" -v b="$EPOCHREALTIME" 'BEGIN { printf "total wall: %.1fs\n", b - a }'
+  write_record finish "$outcome" "$tmp/results.tsv"
+}
+trap 'stop_and_wait; finish_run; rm -rf "$tmp"' EXIT
 trap 'exit 130' INT TERM
+write_record start incomplete -
 dispatch &
 dispatcher=$!
 
@@ -484,6 +572,7 @@ while IFS=$'\t' read -r label cmd; do
     cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label"); over=""
     if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then over=", over its ${budget}s budget"; fi
     echo "PASS $label (${cpu}s cpu${over})"
+    record_result "$label" pass
     count=$((count + 1))
   else
     stop_and_wait
@@ -496,6 +585,7 @@ while IFS=$'\t' read -r label cmd; do
   idx=$((idx + 1))
 done <"$tmp/ordered"
 wait "$dispatcher"
+outcome=pass
 
 # A narrowed run says so (defect class 1): `N suites passed` alone reads the
 # same as a full green.
