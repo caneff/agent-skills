@@ -550,3 +550,44 @@ def test_a_wrapped_value_stops_at_the_next_heading():
             "## Next\n- **Seam**: elsewhere\n")
     assert T.declaration(text) == {"blind to": "the live app"}, \
         T.declaration(text)
+
+
+# --- what becomes of the end-to-end test after it passes (#1957) ---
+
+@pytest.mark.parametrize("one_slice", [False, True])
+def test_the_body_says_what_becomes_of_the_test_after_it_passes(repo, one_slice):
+    got = body(repo(), spec=366, surfaces=[], one_slice=one_slice)
+    assert "### After it passes" in got, got
+    # the stated test, not examples alone
+    assert "Can ordinary later work make it false?" in got, got
+    assert "It is removed." in got and "It is moved into the ordinary suite" in got, got
+    assert "listed and green" in got, got
+    assert "no spec number in the name" in got, got
+    assert "names the stronger test" in got, got
+    # evidence is recorded before the file goes
+    assert "comment on spec #366" in got, got
+    assert got.index("comment on spec #366") < got.index("Can ordinary"), got
+
+
+@pytest.mark.parametrize("one_slice", [False, True])
+def test_the_body_ends_with_no_spec_numbered_test_file(repo, one_slice):
+    got = body(repo(), spec=366, surfaces=[], one_slice=one_slice)
+    assert re.search(r"- \[ \] .*not left as a spec-numbered test file", got), got
+    assert "grep -E 'spec[-_]?366(" in got, got
+
+
+def test_the_integration_form_removes_it_in_the_integration_pr(repo):
+    got = body(repo(), spec=366, surfaces=[])
+    assert "integration PR" in got.split("### After it passes")[1], got
+
+
+def test_the_one_slice_form_removes_it_in_the_slice_pr(repo):
+    after = body(repo(), spec=366, surfaces=[],
+                 one_slice=True).split("### After it passes")[1]
+    assert "this slice's PR" in after, after
+    assert "integration" not in after, after
+
+
+def test_the_integration_form_moves_checks_before_the_spec_level_review(repo):
+    got = body(repo(), spec=366, surfaces=[])
+    assert got.index("### After it passes") < got.index("### The spec-level review"), got
