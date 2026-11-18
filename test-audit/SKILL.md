@@ -118,6 +118,15 @@ finding(s) suppressed under fixtures/.`, `N duplicate-name finding(s) suppressed
 under fixtures/.`) even when it passes — otherwise a repo could park hollow
 tests under a directory it named `fixtures` and never notice.
 
+**Prose gate.** `audit.py --prose-gate [path]` is a separate gate for the
+prose-assertion smell alone (#1959): it fails, naming the file and the test, on
+a test whose only assertions are containment checks on a prose file, including
+one that reads the file through a helper of its own module that does nothing
+else. Fixtures are skipped; `PROSE_BASELINE` in `audit.py` lists the two older
+tests it tolerates, and gets no new entry. Exit 2, never 0, when it crashes or
+reads no test file. In this repo `test-audit/prose-gate.test.sh` runs it on
+every seam run, narrowed or not.
+
 Wire it into a repo by adding it to the command that repo's `AGENTS.md`
 `## End-to-end seam` section names. In this repo that is
 `test-audit/assertion-free-gate.test.sh`,
