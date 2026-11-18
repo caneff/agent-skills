@@ -568,13 +568,15 @@ def _is_containment_assert(node):
     return _call_name(test) in {"search", "match", "fullmatch", "findall"}
 
 
-def _is_prose_call(call):
+def _is_prose_call(call, helpers=frozenset()):
     """A file read or string handling, not a call into code under test."""
     f = call.func
     if isinstance(f, ast.Name):
-        return f.id in PROSE_OK_BUILTINS
+        return f.id in PROSE_OK_BUILTINS or f.id in helpers
     if isinstance(f, ast.Attribute):
         if f.attr in PROSE_OK_METHODS:
+            return True
+        if f.attr == "join" and isinstance(f.value, ast.Constant) and isinstance(f.value.value, str):
             return True
         # Path operations, only on a path built in place: `Path(x).resolve()`.
         if f.attr in {"resolve", "exists", "is_file", "joinpath"} and isinstance(f.value, (ast.Call, ast.BinOp)):
@@ -597,21 +599,63 @@ def _prose_names(tree):
     return names
 
 
-def is_prose_assertion(func, prose_names=frozenset()):
+FILE_READS = frozenset({"open", "read", "read_text", "read_bytes"})
+
+
+def _call_names(func):
+    return [_name_of(n.func) for n in ast.walk(func) if isinstance(n, ast.Call)]
+
+
+def _touches_prose(func, prose_names, touching):
+    """The function names a prose file, or calls a helper that does. A `.md`
+    string alone is not a read: `assert "GLOSSARY.md" in module.CONSTANT`
+    spells the name as a needle and reads no file."""
+    reads = any(name in FILE_READS for name in _call_names(func))
+    for n in ast.walk(func):
+        if isinstance(n, ast.Name) and (n.id in prose_names or n.id in touching):
+            return True
+        if reads and isinstance(n, ast.Constant) and isinstance(n.value, str) and PROSE_FILE.search(n.value):
+            return True
+    return False
+
+
+def prose_helpers(tree, prose_names):
+    """`(pure, touching)`: names of module-level helper functions (not tests)
+    that call nothing but file reads, string handling and each other (pure),
+    and of those, the ones that also name a prose file (touching). A test that
+    goes through `section("The merge")` is judged like one that reads the file
+    itself. Found by fixpoint, since a helper may call another."""
+    funcs = {
+        n.name: n
+        for n in tree.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("test_")
+    }
+    pure, touching = set(), set()
+    grew = True
+    while grew:
+        grew = False
+        for name, fn in funcs.items():
+            if name not in pure and all(_is_prose_call(c, pure) for c in ast.walk(fn) if isinstance(c, ast.Call)):
+                pure.add(name)
+                grew = True
+            if name in pure and name not in touching and _touches_prose(fn, prose_names, touching):
+                touching.add(name)
+                grew = True
+    return pure, touching
+
+
+def is_prose_assertion(func, prose_names=frozenset(), helpers=(frozenset(), frozenset())):
     """6. prose-assertion (Python) — every assertion is a containment check,
-    the test reads a prose file, and it calls nothing but file reads and
-    string handling."""
+    the test reads a prose file (itself, or through a helper of the same
+    module that only reads and handles text), and it calls nothing but file
+    reads, string handling and such helpers."""
     mechs = _assertion_mechanisms(func)
     if not mechs or not all(isinstance(m, ast.Assert) and _is_containment_assert(m) for m in mechs):
         return False
-    reads_prose = any(
-        (isinstance(n, ast.Constant) and isinstance(n.value, str) and PROSE_FILE.search(n.value))
-        or (isinstance(n, ast.Name) and n.id in prose_names)
-        for n in ast.walk(func)
-    )
-    if not reads_prose:
+    pure, touching = helpers
+    if not _touches_prose(func, prose_names, touching):
         return False
-    return all(_is_prose_call(n) for n in ast.walk(func) if isinstance(n, ast.Call))
+    return all(_is_prose_call(n, pure) for n in ast.walk(func) if isinstance(n, ast.Call))
 
 
 def _shell_command_words(source):
@@ -704,12 +748,13 @@ def scan_file(path):
         return []
     findings = []
     prose_names = _prose_names(tree)
+    helpers = prose_helpers(tree, prose_names)
     xfail_strict = xfail_strict_for(path)
     for func in _test_functions(tree):
         for smell, detector in DETECTORS:
             if detector(func):
                 findings.append((path, func.lineno, smell))
-        if is_prose_assertion(func, prose_names):
+        if is_prose_assertion(func, prose_names, helpers):
             findings.append((path, func.lineno, PROSE_SMELL))
         if is_nonstrict_xfail(func, xfail_strict):
             findings.append((path, func.lineno, "non-strict xfail"))
@@ -780,9 +825,82 @@ def gate(root):
     return findings, suppressed
 
 
+# `--prose-gate` (#1959): Chris ruled out tests whose only assertions check that
+# a document contains a sentence (#1414, "wording is shit tests"), and the
+# ruling slid twice, so the seam enforces it. These are the two that predate the
+# gate in suites that otherwise run code; each is a prose assertion by this
+# detector, kept so the gate can land without widening its ticket. Delete an
+# entry when its test goes; never add one -- write a test that runs the code the
+# rule governs, or no test when the rule is prose only.
+PROSE_BASELINE = {
+    ("create-lmd-page/skill_test.py", "test_edit_section_states_that_a_failure_stops_it"),
+    ("multi-axis-code-review/render_brief_test.py", "test_the_diff_reviewer_runs_the_witness_check_in_the_foreground"),
+}
+
+PROSE_GATE_ADVICE = (
+    "test-audit: a test whose only assertions check that a prose file contains a string proves\n"
+    "nothing about behavior (Chris's ruling, #1414). Write a test that runs the code the rule\n"
+    "governs, or no test when the rule is prose only. Delete the test named above."
+)
+
+
+def prose_tests(path):
+    """`(scanned, [(lineno, test name)])` for one test file: whether it was
+    read and parsed as a test file at all, and its prose-assertion tests."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            source = f.read()
+    except OSError:
+        return False, []
+    if path.endswith(".test.sh"):
+        return True, ([(1, os.path.basename(path))] if is_shell_prose_test(source) else [])
+    tree = ast.parse(source, filename=path)  # a file that cannot parse raises: the gate fails, never passes
+    if not _is_pytest_file(path, tree):
+        return False, []
+    prose_names = _prose_names(tree)
+    helpers = prose_helpers(tree, prose_names)
+    return True, [(f.lineno, f.name) for f in _test_functions(tree) if is_prose_assertion(f, prose_names, helpers)]
+
+
+def prose_gate(root):
+    """`(findings, scanned)`: `(path, lineno, name)` per prose-assertion test
+    outside `fixtures/` and `PROSE_BASELINE`, and how many test files were
+    read. Zero files read is the caller's failure, not a clean tree."""
+    paths = [os.path.join(root, rel) for rel in auditlib.walk_source(root)]
+    paths += [os.path.join(root, rel) for rel in auditlib.walk_source(root, suffix=".test.sh")]
+    findings, scanned = [], 0
+    for path in paths:
+        rel = os.path.relpath(path, root).replace(os.sep, "/")
+        if _under_fixtures(rel):  # specimens of the smell, some unparsable on purpose
+            continue
+        read, found = prose_tests(path)
+        scanned += read
+        findings.extend((rel, lineno, name) for lineno, name in found if (rel, name) not in PROSE_BASELINE)
+    return findings, scanned
+
+
+def run_prose_gate(root):
+    try:
+        findings, scanned = prose_gate(root)
+    except Exception as exc:  # a detector that crashed has not found the tree clean
+        print(f"test-audit: the prose-assertion gate crashed ({type(exc).__name__}: {exc}); nothing was checked.", file=sys.stderr)
+        return EXIT_UNABLE
+    if scanned == 0:
+        print(f"test-audit: the prose-assertion gate read no test file under {root}; nothing was checked.", file=sys.stderr)
+        return EXIT_UNABLE
+    for rel, lineno, name in findings:
+        print(f"{rel}:{lineno}: {name}: prose-assertion")
+    if findings:
+        print(PROSE_GATE_ADVICE, file=sys.stderr)
+        return 1
+    print(f"test-audit: prose-assertion gate read {scanned} test files, none flagged.", file=sys.stderr)
+    return 0
+
+
 def main(argv):
     gate_mode = argv[1:2] == ["--gate"]
-    rest = argv[2:] if gate_mode else argv[1:]
+    prose_mode = argv[1:2] == ["--prose-gate"]
+    rest = argv[2:] if gate_mode or prose_mode else argv[1:]
     root = rest[0] if rest else "."
     # Refuse a root that does not exist before scanning it. Walking a missing
     # directory finds nothing, and "nothing" is indistinguishable from a clean
@@ -801,6 +919,8 @@ def main(argv):
     if not os.access(root, needed):
         print(f"test-audit: cannot read {root} -- nothing was scanned.", file=sys.stderr)
         return EXIT_UNABLE
+    if prose_mode:
+        return run_prose_gate(root)
     if gate_mode:
         findings, suppressed = gate(root)
         for path, lineno, smell in findings:

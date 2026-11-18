@@ -547,3 +547,79 @@ def test_private_imports_flags_underscore_names_only():
 ])
 def test_has_vacuous_loop_assertion(source, expected):
     assert has_vacuous_loop_assertion(_func_from(source)) is expected
+
+
+# ---- --prose-gate (#1959) ----
+
+PROSE_TEST = (
+    "from pathlib import Path\nSKILL = Path('SKILL.md')\n\n"
+    "def section(name):\n    return SKILL.read_text().split(name)[1]\n\n"
+    "def test_says_it():\n    assert 'a sentence' in section('Head')\n"
+)
+
+
+def _tree(tmp_path, files):
+    for rel, text in files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return str(tmp_path)
+
+
+def test_prose_gate_fails_naming_the_file_and_the_test(tmp_path):
+    root = _tree(tmp_path, {"d/x_test.py": PROSE_TEST})
+    code, err = _main_stderr(["audit.py", "--prose-gate", root])
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        main(["audit.py", "--prose-gate", root])
+    assert code == 1
+    assert "d/x_test.py:7: test_says_it: prose-assertion" in out.getvalue()
+    assert "Write a test that runs the code the rule" in err
+
+
+def test_prose_gate_passes_a_test_that_runs_code_and_a_needle_that_reads_nothing(tmp_path):
+    root = _tree(tmp_path, {
+        "d/x_test.py": (
+            "import mod\n\ndef test_runs():\n    assert 'a sentence' in mod.render('SKILL.md')\n\n"
+            "def test_constant():\n    assert 'GLOSSARY.md' in mod.GATED['x']\n"
+        ),
+    })
+    code, err = _main_stderr(["audit.py", "--prose-gate", root])
+    assert code == 0, err
+    assert "read 1 test files" in err
+
+
+def test_prose_gate_skips_fixtures_and_baselined_tests(tmp_path):
+    root = _tree(tmp_path, {
+        "fixtures/x_test.py": PROSE_TEST,
+        "fixtures/unparsable_test.py": "def (:\n",
+        "d/ok_test.py": "def test_a():\n    assert 1 + 1 == 2\n",
+        "create-lmd-page/skill_test.py": PROSE_TEST.replace("test_says_it", "test_edit_section_states_that_a_failure_stops_it"),
+    })
+    assert _main_stderr(["audit.py", "--prose-gate", root])[0] == 0
+
+
+def test_prose_gate_that_reads_no_test_file_is_unable_not_clean(tmp_path):
+    code, err = _main_stderr(["audit.py", "--prose-gate", _tree(tmp_path, {"README.md": "x"})])
+    assert code == EXIT_UNABLE
+    assert "read no test file" in err
+
+
+def test_prose_gate_that_cannot_parse_a_file_is_unable_not_clean(tmp_path):
+    code, err = _main_stderr(["audit.py", "--prose-gate", _tree(tmp_path, {"d/x_test.py": "def (:\n"})])
+    assert code == EXIT_UNABLE
+    assert "crashed" in err
+
+
+def test_prose_gate_reaches_shell_tests(tmp_path):
+    root = _tree(tmp_path, {"d/p.test.sh": "grep -q 'a sentence' SKILL.md\n"})
+    assert _main_stderr(["audit.py", "--prose-gate", root])[0] == 1
+
+
+def test_a_test_that_goes_through_a_prose_helper_is_flagged_and_a_code_helper_is_not():
+    import audit
+    tree = ast.parse(PROSE_TEST + "\ndef run(x):\n    return subprocess.run(x)\n\ndef test_code():\n    assert 'a' in run('b')\n")
+    names = audit._prose_names(tree)
+    helpers = audit.prose_helpers(tree, names)
+    flagged = [f.name for f in audit._test_functions(tree) if is_prose_assertion(f, names, helpers)]
+    assert flagged == ["test_says_it"]
