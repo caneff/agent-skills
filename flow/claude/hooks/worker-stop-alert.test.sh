@@ -453,7 +453,7 @@ expect_reported "an open request answered only by a hold reads waiting"
 reset_log
 t="$tmp/question-held.jsonl"
 { human "$brief"; send_text s1 "skills-b6" "Which base do I use?"; ok s1;
-  peer "hold on, checking"; work; assistant_text "holding"; } > "$t"
+  peer "wait: checking, you're next"; work; assistant_text "holding"; } > "$t"
 run "question, held" "$t"
 expect_reported "an unanswered question followed by a hold reads waiting"
 
@@ -477,6 +477,42 @@ t="$tmp/non-request.jsonl"
   peer "wait: reviewing"; work; assistant_text "stopped"; } > "$t"
 run "report that is not a request, then a hold" "$t"
 expect_alert "a hold after a report that asked for nothing does not read waiting"
+
+# Answers that merely start with "wait"/"hold", a reply the hook cannot see,
+# and no reply at all are not holds (review C1-C3, C5, P1, P3).
+reset_log
+t="$tmp/ready-human-go.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; human "go"; work; assistant_text "ran, stopped"; } > "$t"
+run "ready for seam, answered by a human prompt" "$t"
+expect_alert "a human-prompt answer is not a hold: the stop is silent"
+
+reset_log
+t="$tmp/question-no-reply.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "Which base do I use?"; ok s1; human "continue"; work; work; assistant_text "stopped"; } > "$t"
+run "question, no controller reply at all" "$t"
+expect_alert "an open request with no controller message since is not a hold"
+
+for reply in "Wait, no: use origin/main and rebuild" "hold off: fix the lint first, then report" "slot free, you're next: go"; do
+  reset_log
+  t="$tmp/answer-like-hold.jsonl"
+  { human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; peer "$reply"; work; assistant_text "stopped"; } > "$t"
+  run "answer shaped like a hold: $reply" "$t"
+  expect_alert "a controller answer that merely opens with wait/hold is not a hold: $reply"
+done
+
+reset_log
+t="$tmp/request-mentioned.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "Seam green (was ready for seam at 3pm), PR up"; ok s1;
+  peer "wait: reviewing, you're next"; work; assistant_text "stopped"; } > "$t"
+run "report that only mentions ready for seam" "$t"
+expect_alert "a report mentioning the phrase mid-text is not an open request"
+
+reset_log
+t="$tmp/request-then-report.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; send_text s2 "skills-b6" "PR up: https://x/pull/1"; ok s2;
+  peer "wait: reviewing, you're next"; work; assistant_text "stopped"; } > "$t"
+run "request, then a later plain report, then a hold" "$t"
+expect_alert "only the last delivered send decides: a later plain report is no open request"
 
 # An id with no liveness evidence since the turn start is not out, and that bound is load-bearing: 45% of
 # real background tasks never emit a terminal notification, so a set carried

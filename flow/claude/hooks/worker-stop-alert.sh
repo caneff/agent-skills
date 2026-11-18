@@ -27,8 +27,7 @@
 # its own background work") is not its hand-back, and a worker whose last
 # delivered send is an open request ("ready for seam", a question) that the
 # controller has only held ("wait: ... you're next") is waiting for its "go".
-# Otherwise
-# submit one line into the controller's herdr pane with `herdr agent
+# Otherwise submit one line into the controller's herdr pane with `herdr agent
 # prompt` — a hook command, so the auto-mode classifier never sees it (a
 # report sent that way was once denied there). One alert per stop: every
 # attempt is logged to ~/.claude/worker-stop-alerts.log keyed by session
@@ -113,12 +112,12 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   def from_controller: (.origin.from | IN($socks[])) or (.origin.name | IN($c, $names[]));
   # A sub-worker'"'"'s own stop alert is typed into this pane as a human prompt;
   # it is that worker'"'"'s report to us, not a turn we owe the controller.
-  def worker_alert: (.message.content
-      | if type == "string" then . else ([.[]? | .text? // empty] | join("")) end)
-      | startswith("[worker-stop-alert]");
-  # A subagent'"'"'s interim task-notification: status `completed`, but the agent
-  # is itself waiting on background work and delivers its report later with the
-  # same task-id (#1960). It is evidence the agent is alive, never a return.
+  def msg_text: .message.content
+      | if type == "string" then . else ([.[]? | .text? // empty] | join("")) end;
+  def worker_alert: msg_text | startswith("[worker-stop-alert]");
+  # A subagent'"'"'s interim task-notification: status `completed`, but the
+  # agent is itself waiting on background work and delivers its report later
+  # under the same task-id (#1960). Evidence it is alive, never a return.
   def interim: strings | test("<summary>[^<]*is waiting on its own background work");
   to_entries as $all
   | ($all | map(select(.value.type == "user"
@@ -151,26 +150,29 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
                 and ([.value.message.content[]? | select(.type == "tool_use")] | length > 0))
                or (.value.toolUseResult != null))] as $since_report
   # Holding for the controller (#1960): the last delivered send is an open
-  # request ("ready for seam", a question) and every controller message since
-  # only held it ("wait: ... you'"'"'re next"). Ending the turn then is waiting for
-  # the promised "go" or ruling, not a silent stop. Any other controller
-  # message answers the request, and a stop after it with nothing sent is
-  # silent again.
-  | def msg_text: .message.content
-      | if type == "string" then . else ([.[]? | .text? // empty] | join("")) end;
-  ([$all[] | select(.value.type == "assistant") | .value.message.content[]?
-      | select(.type == "tool_use" and .name == "SendMessage" and (.id | IN($sends[])))
-      | {key: .id, value: (.input.message | if type == "string" then . else tojson end)}]
-    | from_entries) as $sendtext
+  # request (it opens with "ready for seam" or ends in "?") and the latest
+  # turn-starting message since, from the controller or a human prompt, is a
+  # hold ("wait: ... you'"'"'re next"). Ending the turn then is waiting for the
+  # promised "go" or ruling. No message since, or any other one (a "go", a
+  # ruling, a human prompt), means the request was answered or never held,
+  # and a stop with nothing sent is silent.
   | ([$all[] | select(.key == $reported_at) | .value.message.content[]?
-      | select(.type == "tool_result") | .tool_use_id | select(IN($sends[]))] | first) as $last_id
-  | [$all[] | select($reported_at != null and .key > $reported_at)
-      | .value | select(.type == "user" and .origin.kind == "peer"
-                        and .origin.handback != true and from_controller)
-      | msg_text] as $ctl_after
-  | ($reported_at != null and $last_id != null
-      and (($sendtext[$last_id] // "") | test("ready for seam|\\?\\s*$"; "i"))
-      and all($ctl_after[]; test("^\\s*(wait|hold)\\b|you.?re next"; "i"))) as $holding
+      | select(.type == "tool_result") | .tool_use_id | select(IN($sends[]))]
+      | first) as $last_id
+  | ([$all[] | .value | select(.type == "assistant") | .message.content[]?
+      | select(.type == "tool_use" and .id == $last_id)
+      | .input.message | if type == "string" then . else tojson end]
+      | first // "") as $last_sent
+  | ([$all[] | select(.key > $reported_at)
+      | .value | select(.type == "user"
+          and ((.origin.kind == "human" and (worker_alert | not))
+               or (.origin.kind == "peer" and .origin.handback != true
+                   and from_controller)))
+      | msg_text] | last // "") as $last_starter
+  | ($last_id != null
+      and ($last_sent | test("^\\s*ready for seam|\\?\\s*$"; "i"))
+      and ($last_starter | test("^\\s*(wait|hold)\\s*:"; "i"))
+      and ($last_starter | test("\\bgo\\b"; "i") | not)) as $holding
   # Liveness evidence: a launch from an earlier turn counts as out only
   # if something since the start of this turn names its id — a tool call
   # by the worker whose task_id, shell_id, agentId or `to` is that id (a
@@ -224,7 +226,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   | [$after[] | .toolUseResult? | objects
       | (.backgroundTaskId // .taskId) | select(strings)] as $tasks_now
   | [($all[] | .value | select(.type == "user") | .message.content | strings
-       | select(test("<status>") and (interim | not)) | scan("<task-id>([^<]+)</task-id>")[0]),
+       | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]),
      $timed_out[],
      ($all[] | .value | select(.type == "assistant") | .message.content[]?
        | select(.type == "tool_use" and .name == "TaskStop")
