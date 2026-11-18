@@ -1,3 +1,4 @@
+# all.sh: prose-check (reads the always-on Markdown: a Markdown-only change in a directory with no suites runs it)
 """The always-on budget gate: every session loads the global
 CLAUDE.md plus its `@`-imports, and tests/check-always-on.py fails when that
 text passes its word budget or a pointer line names a path that does not

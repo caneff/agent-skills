@@ -75,69 +75,75 @@ suites() { # prints "<label>\t<command>" per discovered suite
     done
 }
 
-# Which suites a `--changed <base>` run keeps. The full suite is the answer
-# whenever the diff cannot be pinned to a directory that owns suites: a change
-# to this script, a file at the repo root, or a directory with no suite of its
-# own (nothing then says which suites cover it), or an edge scan that fails
-# (#1495). An empty diff keeps only the repo-wide checks. Prints the kept labels' directories as a space-separated
-# word list on stdout, or `*` for the full suite; the reason goes to stderr.
+# Which suites a `--changed <base>` run keeps. `tests/suite-edges.py --select`
+# decides from the changed paths and answers with one line, `full`, `dirs <list>`
+# or `prose <list>` (its docstring holds the rules and why each widens). This
+# function only fails closed around it: a diff git cannot produce is exit 2, and
+# an edge finder that fails, prints no verdict line or an unknown verdict word
+# has given no answer, so the full suite runs and the reason says so (#1495,
+# #1955). An empty directory list is a verdict (an empty diff keeps only the
+# repo-wide checks), never the absence of one. Prints `*` for the full suite,
+# `prose <list>` for the prose checks, else the kept directories as a
+# space-separated word list on stdout; the reason goes to stderr.
 scope_changed() {
-  local base=$1 files file dir all_dirs dirs="" widened
-  files=$(git diff --name-only --no-renames "$base...HEAD") || {
-    echo "tests/all.sh: cannot diff $base...HEAD" >&2; exit 2; }
-  all_dirs=$(suites | cut -f1 | awk -F/ 'NF > 1 {print $1}' | sort -u)
-  while IFS= read -r file; do
-    [ -n "$file" ] || continue
-    dir=${file%%/*}
-    if [ "$file" = tests/all.sh ] || [ "$dir" = "$file" ] || ! grep -qxF "$dir" <<<"$all_dirs"; then
-      if [ "$file" = tests/all.sh ]; then why="tests/all.sh itself changed"
-      elif [ "$dir" = "$file" ]; then why="$file is at the repo root, which no directory of suites owns"
-      else why="$dir/ holds no suite ($file)"; fi
-      echo "full suite: $why" >&2
-      echo '*'; return
-    fi
-    case " $dirs " in *" $dir "*) ;; *) dirs="$dirs $dir" ;; esac
-  done <<<"$files"
-  dirs=${dirs# }
-  if [ -n "$dirs" ]; then
-    # A suite that loads or reads another directory's files is impacted by a
-    # change there too (#1495). The scan failing is not "no edges": the full
-    # suite runs instead.
-    if ! widened=$(python3 "$(dirname "${BASH_SOURCE[0]}")/suite-edges.py" $dirs 2>&1) || [ "$(wc -l <<<"$widened")" != 1 ]; then
-      echo "full suite: the cross-directory edge scan failed ($(head -c 200 <<<"$widened" | tr '\n' ' '))" >&2
-      echo '*'; return
-    fi
-    if [ "$widened" != "$dirs" ]; then
-      echo "cross-directory edges widen $dirs to: $widened" >&2
-      dirs=$widened
-    fi
+  local list err answer all_dirs verdict dirs
+  list=$(mktemp) && err=$(mktemp) || { echo "tests/all.sh: mktemp failed" >&2; exit 2; }
+  if [ -n "$changed_files" ]; then
+    tr '\n' '\0' <"$changed_files" >"$list" || { echo "tests/all.sh: cannot read $changed_files" >&2; rm -f "$list" "$err"; exit 2; }
+  else
+    git diff --name-only -z --no-renames "$changed_base...HEAD" >"$list" || {
+      echo "tests/all.sh: cannot diff $changed_base...HEAD" >&2; rm -f "$list" "$err"; exit 2; }
   fi
-  echo "changed suites: ${dirs:-none} + tests" >&2
-  echo "$dirs"
+  all_dirs=$(suites | cut -f1 | awk -F/ 'NF > 1 {print $1}' | sort -u | tr '\n' ' ')
+  if ! answer=$(python3 "$(dirname "${BASH_SOURCE[0]}")/suite-edges.py" --select --suite-dirs "$all_dirs" <"$list" 2>"$err"); then
+    echo "full suite: the edge finder gave no answer ($(head -c 200 "$err" | tr '\n' ' '))" >&2
+    rm -f "$list" "$err"; echo '*'; return
+  fi
+  cat "$err" >&2
+  rm -f "$list" "$err"
+  verdict=${answer%%$'\t'*}; dirs=${answer#*$'\t'}
+  case "$verdict" in
+    full) echo '*' ;;
+    dirs) echo "changed suites: ${dirs:-none} + tests" >&2; echo "$dirs" ;;
+    prose) echo "changed suites: Markdown only, in directories with no suites: the prose checks${dirs:+ + $dirs}" >&2; echo "prose $dirs" ;;
+    *) echo "full suite: the edge finder gave no verdict (got: $(head -c 200 <<<"$answer" | tr '\n' ' '))" >&2; echo '*' ;;
+  esac
 }
 
 filter_dirs() { # <dirs word list> <repo-wide labels>: keeps suites under those dirs, under tests/, at the root, or marked repo-wide
   awk -F'\t' -v dirs=" $1 tests " -v wide=" $2 " '{ n = split($1, p, "/"); if (n == 1 || index(dirs, " " p[1] " ") || index(wide, " " $1 " ")) print }'
 }
 
-# A suite that reads the whole tree rather than one directory cannot be pinned
-# by an edge, so it says so with a line `# all.sh: repo-wide (<why>)` in its
-# first twenty lines and every `--changed` run keeps it (#1495).
-repo_wide_labels() {
+# A Markdown-only diff in directories with no suites runs only the prose
+# checks (#1955): the suites that read the tree's Markdown, which mark
+# themselves with a line `# all.sh: prose-check (<why>)` in their first twenty
+# lines, plus the repo-wide ones and the suites under any directory that
+# reaches the changed file.
+marked_labels() { # <marker word>: the labels whose first twenty lines carry `# all.sh: <word>`
   local label
   while IFS=$'\t' read -r label _; do
-    [ -f "$label" ] && head -n 20 "$label" | grep -q '^# all\.sh: repo-wide' && printf '%s ' "$label"
+    [ -f "$label" ] && head -n 20 "$label" | grep -q "^# all\\.sh: $1" && printf '%s ' "$label"
   done < <(suites)
   return 0
 }
 
-list_only=0 changed_base=""
+filter_prose() { # <dirs word list> <prose labels> <repo-wide labels>
+  awk -F'\t' -v dirs=" $1 " -v wide=" $2 $3 " '{ n = split($1, p, "/"); if ((n > 1 && index(dirs, " " p[1] " ")) || index(wide, " " $1 " ")) print }'
+}
+
+# A suite that reads the whole tree rather than one directory cannot be pinned
+# by an edge, so it says so with a line `# all.sh: repo-wide (<why>)` in its
+# first twenty lines and every `--changed` run keeps it (#1495).
+
+list_only=0 changed_base="" changed_files=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --list) list_only=1; shift ;;
-    --changed) [ $# -ge 2 ] || { echo "usage: tests/all.sh [--list] [--changed <base>]" >&2; exit 2; }
+    --changed) [ $# -ge 2 ] || { echo "usage: tests/all.sh [--list] [--changed <base> | --files <listfile>]" >&2; exit 2; }
                changed_base=$2; shift 2 ;;
-    *) echo "usage: tests/all.sh [--list] [--changed <base>]" >&2; exit 2 ;;
+    --files) [ $# -ge 2 ] && [ "$list_only" = 1 ] || { echo "usage: tests/all.sh --list --files <listfile> (what a change to those paths would run)" >&2; exit 2; }
+             changed_files=$2; changed_base="files:$2"; shift 2 ;;
+    *) echo "usage: tests/all.sh [--list] [--changed <base> | --files <listfile>]" >&2; exit 2 ;;
   esac
 done
 
@@ -145,7 +151,11 @@ selected() { # prints the "<label>\t<command>" lines this run covers
   if [ -z "$changed_base" ]; then suites; return; fi
   local dirs
   dirs=$(scope_changed "$changed_base") || exit $?
-  if [ "$dirs" = '*' ]; then suites; else suites | filter_dirs "$dirs" "$(repo_wide_labels)"; fi
+  case "$dirs" in
+    '*') suites ;;
+    "prose"|"prose "*) suites | filter_prose "${dirs#prose}" "$(marked_labels prose-check)" "$(marked_labels repo-wide)" ;;
+    *) suites | filter_dirs "$dirs" "$(marked_labels repo-wide)" ;;
+  esac
 }
 
 if [ "$list_only" = 1 ]; then selected 2>/dev/null | cut -f1; exit "${PIPESTATUS[0]}"; fi
