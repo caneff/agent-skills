@@ -171,6 +171,37 @@ def _settled(key, root, declared, explored):
     return value
 
 
+def _after_it_passes(spec, one_slice):
+    """What becomes of the end-to-end test once the closing check has passed.
+
+    Without this step the file stays and runs in every later gate: three
+    repos held 14, 17 and 24 spec-numbered test files, many asserting
+    one-time facts or the wording of `AGENTS.md` (#1957).
+    """
+    where = ("this slice's PR" if one_slice
+             else "the integration PR, before it merges")
+    return [
+        "### After it passes", "",
+        "The end-to-end test runs once for this closing check; it does not "
+        "stay as a spec-numbered file. In order:", "",
+        f"1. Run it green, then post the command and its result line as a "
+        f"comment on spec #{spec}. That comment is the evidence; do it "
+        "before the file is removed or converted.",
+        "2. Sort each check in it, and each step inside a file that mixes "
+        "both kinds, with one question: **Can ordinary later work make it "
+        "false?**",
+        "   - No: it proves only that the spec landed (a file was moved or "
+        "removed, a doc carries a sentence, a name was changed). It is "
+        "removed.",
+        "   - Yes: it protects behaviour. It is moved into the ordinary "
+        "suite for the code it covers, under a name that says what it "
+        "protects, with no spec number in the name.",
+        "3. A removed check that covered behaviour names the stronger test "
+        "that already covers it, in the commit message.",
+        f"4. Do all of this in {where}, so the default branch is left with "
+        "no spec-numbered test file.", ""]
+
+
 def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
          one_slice=False):
     """The closing check for one spec: the seam it drives, what that seam
@@ -253,6 +284,7 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
             "backstop is the only full run. "
             f"`fix-check.sh {spec} origin/{branch}` then exits 0.",
             ""]
+    lines += _after_it_passes(spec, one_slice)
     lines += ["### Acceptance criteria", "",
               "- [ ] One end-to-end test drives the whole spec's acceptance "
               f"criteria at the seam above, and lives where `{seam}` runs it",
@@ -263,6 +295,8 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
         lines.append(f"- [ ] The spec-level review run over "
                      f"`origin/{default}...{branch}`, every finding disposed "
                      f"of, and `fix-check.sh {spec} origin/{branch}` exits 0")
+    lines.append("- [ ] The passing run is recorded on the spec, and the "
+                 "default branch ends with no spec-numbered test file")
     for surface in surfaces:
         lines.append(f"- [ ] One open of the real thing: {surface} — checked "
                      "in the shipping surface, not in the seam")

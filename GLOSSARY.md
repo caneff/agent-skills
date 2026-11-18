@@ -73,6 +73,10 @@ _Avoid_: sweep (that is every repo under a root), clean up, garbage collect
 `spec-<n>`, the branch a spec run with more than one slice builds its spec on: cut from `origin/<default>` by `implement-dispatch --spec <n>`, the spec run's own workspace branch. Its slices branch from it and merge into it with no review wave; the default branch is merged in, never rebased; one review and one fix round run on it; one integration PR takes it to the default branch, closing every slice and the spec (ADR 0006).
 _Avoid_: feature branch, spec branch, staging branch
 
+**Closing test**:
+The one end-to-end test a spec's closing check adds in the target repo (`spec_<n>_closing.test.*`). It runs once for the closing check and its passing run is recorded on the spec. Then each check in it is sorted by one question, "can ordinary later work make it false?": a one-time fact is removed, a behaviour check moves into the ordinary suite under a name with no spec number. The default branch ends with no spec-numbered test file (`implement-spec/closing_ticket.py` § After it passes).
+_Avoid_: spec test, seam test, acceptance test
+
 **Run file**:
 One JSON file per run at `~/.cache/spec-run/<run-id>.json` holding that run's whole state: run id, slot budget, controller, and per clump its tickets, workspace, herdr agent name and squash sha. What a resumed controller reads instead of its own context.
 _Avoid_: progress file, state file, log
