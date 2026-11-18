@@ -827,11 +827,12 @@ def gate(root):
 
 # `--prose-gate` (#1959): Chris ruled out tests whose only assertions check that
 # a document contains a sentence (#1414, "wording is shit tests"), and the
-# ruling slid twice, so the seam enforces it. These are the two that predate the
-# gate in suites that otherwise run code; each is a prose assertion by this
-# detector, kept so the gate can land without widening its ticket. Delete an
-# entry when its test goes; never add one -- write a test that runs the code the
-# rule governs, or no test when the rule is prose only.
+# ruling slid twice, so the seam enforces it. These two tests were already in
+# suites that otherwise run code (one the ticket names as passing); each is a
+# prose assertion by this detector, kept so the gate can land without widening
+# its ticket. An entry whose test is gone or no longer flagged fails the gate
+# as stale, so delete it then; never add one -- write a test that runs the code
+# the rule governs, or no test when the rule is prose only.
 PROSE_BASELINE = {
     ("create-lmd-page/skill_test.py", "test_edit_section_states_that_a_failure_stops_it"),
     ("multi-axis-code-review/render_brief_test.py", "test_the_diff_reviewer_runs_the_witness_check_in_the_foreground"),
@@ -847,11 +848,8 @@ PROSE_GATE_ADVICE = (
 def prose_tests(path):
     """`(scanned, [(lineno, test name)])` for one test file: whether it was
     read and parsed as a test file at all, and its prose-assertion tests."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            source = f.read()
-    except OSError:
-        return False, []
+    with open(path, encoding="utf-8", errors="replace") as f:  # unreadable raises: the gate fails, never skips
+        source = f.read()
     if path.endswith(".test.sh"):
         return True, ([(1, os.path.basename(path))] if is_shell_prose_test(source) else [])
     tree = ast.parse(source, filename=path)  # a file that cannot parse raises: the gate fails, never passes
@@ -868,14 +866,18 @@ def prose_gate(root):
     read. Zero files read is the caller's failure, not a clean tree."""
     paths = [os.path.join(root, rel) for rel in auditlib.walk_source(root)]
     paths += [os.path.join(root, rel) for rel in auditlib.walk_source(root, suffix=".test.sh")]
-    findings, scanned = [], 0
+    findings, scanned, flagged = [], 0, set()
     for path in paths:
         rel = os.path.relpath(path, root).replace(os.sep, "/")
         if _under_fixtures(rel):  # specimens of the smell, some unparsable on purpose
             continue
         read, found = prose_tests(path)
         scanned += read
+        flagged.update((rel, name) for _, name in found)
         findings.extend((rel, lineno, name) for lineno, name in found if (rel, name) not in PROSE_BASELINE)
+    # A baseline entry whose test is gone or is no longer a prose assertion is
+    # stale, and left in it would excuse a future test of the same name.
+    findings.extend((rel, 1, f"{name} (stale PROSE_BASELINE entry: delete it)") for rel, name in sorted(PROSE_BASELINE - flagged))
     return findings, scanned
 
 

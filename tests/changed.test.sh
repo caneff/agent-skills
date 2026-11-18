@@ -56,10 +56,10 @@ check "a root file no suite directory owns lists everything" "$(has a/a.test.sh 
 
 fresh; change c/note.txt; list
 check "a non-Markdown file in a directory with no suites lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
-fresh; change c/note.png; list
-check "a file type the selector does not know lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
-fresh; change c/noext; list
-check "a file with no extension lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
+fresh; change a/pic.png; list
+check "a file type the selector does not know, in a directory with suites, lists everything" "$(has b/b.test.sh; echo $?)"
+fresh; change a/noext; list
+check "a file with no extension, in a directory with suites, lists everything" "$(has b/b.test.sh; echo $?)"
 fresh; change tests/suite-edges.py; list
 check "a diff touching the edge finder lists everything" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
 
@@ -73,10 +73,18 @@ check "Markdown only in a directory with no suites lists the prose checks" "$(ha
 check "...and not the other suites, under tests/ or elsewhere" "$(! has tests/t.test.sh && ! has a/a.test.sh && ! has b/b.test.sh; echo $?)"
 out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1)
 check "...and says it narrowed to the prose checks" "$(grep -q 'changed suites: Markdown only, in directories with no suites: the prose checks' <<<"$out"; echo $?)"
+prose_fresh; printf '#!/usr/bin/env bash\n# all.sh: repo-wide (reads the tree)\nexit 0\n' >"$shadow/repo/tests/w.test.sh"
+git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm wide; base=$(git -C "$shadow/repo" rev-parse HEAD); change c/note.md; list
+check "...and a repo-wide suite is kept beside them" "$(has tests/w.test.sh && has tests/p.test.sh; echo $?)"
 prose_fresh; change c/note.md; change a/x.txt; list
 check "Markdown beside a change in a directory with suites is an ordinary narrowed run" "$(has a/a.test.sh && has tests/t.test.sh; echo $?)"
 fresh; change c/note.md; list
 check "a Markdown-only diff with no prose-check suite lists everything, never nothing" "$(has a/a.test.sh && has b/b.test.sh && has tests/t.test.sh; echo $?)"
+fresh; printf '#!/usr/bin/env bash\n# all.sh: repo-wide (reads the tree)\nexit 0\n' >"$shadow/repo/tests/w.test.sh"
+git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm wide; base=$(git -C "$shadow/repo" rev-parse HEAD); change c/note.md; list
+check "...even when a repo-wide suite exists, which is not a prose check" "$(has a/a.test.sh && has b/b.test.sh; echo $?)"
+fresh; change c/note.md; list
+check "--list reports why it widened, on stderr beside the labels" "$(grep -q 'full suite: no suite is marked' <<<"$out"; echo $?)"
 
 fresh; list
 check "an empty diff lists only the repo-wide checks" "$(has tests/t.test.sh && ! has a/a.test.sh; echo $?)"
@@ -157,6 +165,8 @@ out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1)
 check "...and says it got no verdict" "$(grep -q 'full suite: the edge finder gave no verdict' <<<"$out"; echo $?)"
 fresh; printf '#!/usr/bin/env python3\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
 check "an edge scan that exits 0 and prints nothing lists everything" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
+fresh; printf '#!/usr/bin/env python3\nprint("dirs\\ta")\nprint("b")\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
+check "a verdict line followed by a second line is no answer: b/ is not dropped" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
 fresh; printf '#!/usr/bin/env python3\nprint("dirs")\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list
 check "a verdict word without its directory list is no answer either" "$([ "$rc" = 0 ] && has b/b.test.sh; echo $?)"
 fresh; printf '#!/usr/bin/env python3\nprint("dirs\\t")\n' >"$shadow/repo/tests/suite-edges.py"; change a/x.txt; list

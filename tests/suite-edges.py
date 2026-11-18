@@ -67,6 +67,7 @@ SPAN = 3  # a hint line and the two after it (a call split over lines)
 RUNNER = ("tests/all.sh", "tests/suite-edges.py")
 CREATES = re.compile(r"\bmkdir|makedirs|mktemp")  # a line that makes the directory it names is building a fixture
 COMMIT_LINE = re.compile(r"\bcommit\b.*\s[\"']?-\w*m\b")  # a `git commit -m` line: its message is prose
+WORD = re.compile(r"[\w.\-]+\.[A-Za-z]\w*")  # a file name as it is written in source
 TAIL = re.compile(r"[^\s\"'`),;:(<>|&]*")
 VARIABLE = re.compile(r"[$*{%?]")
 
@@ -127,7 +128,7 @@ def _python_lines(text):
     return lines
 
 
-def _c_like_lines(text, markers):
+def _c_like_lines(text):
     out, in_block = [], False
     for raw in text.splitlines():
         line = raw
@@ -139,7 +140,7 @@ def _c_like_lines(text, markers):
             in_block = False
         if "/*" in line and "*/" not in line.split("/*", 1)[1]:
             line, in_block = line.split("/*", 1)[0], True
-        out.append(_strip_line_comment(line, markers))
+        out.append(_strip_line_comment(line, ("//",)))
     return out
 
 
@@ -151,7 +152,7 @@ def source_lines(path, text):
     elif path.endswith(".sh"):
         lines = [_strip_line_comment(l, ("#",)) for l in text.splitlines()]
     else:
-        lines = _c_like_lines(text, ("//",))
+        lines = _c_like_lines(text)
     return ["" if COMMIT_LINE.search(l) else l for l in lines]
 
 
@@ -171,8 +172,6 @@ def tails(span, top):
         found.append(TAIL.match(span, m.end()).group(0) if span[m.end() - 1] == "/" else "")
     for m in re.finditer(BUILT_PATH % (name, name, name), span):
         parts, pos = [], m.end()
-        if m.group(0).endswith("/"):  # `"top" /` already consumed the separator
-            pass
         while True:
             more = BUILT_MORE.match(span, pos)
             if not more:
@@ -194,7 +193,7 @@ def resolve(top, tail, by_top):
     if not tail:
         return files
     want = f"{top}/{tail}"
-    return [f for f in files if f.startswith(want.rstrip("/") + "/") or f.startswith(want)]
+    return [f for f in files if f.startswith(want)]
 
 
 def imported_modules(text):
@@ -220,11 +219,14 @@ def scan(files):
     `reach_dirs[src] = {top directories src reaches}` (for a path git no longer
     tracks, which can only be matched by directory). Raises ScanError."""
     tracked_set = set(files)
-    tops = {p.split("/", 1)[0] for p in files if "/" in p}
     by_top = {}
     for p in files:
         if "/" in p:
             by_top.setdefault(p.split("/", 1)[0], []).append(p)
+    tops = set(by_top)
+    by_name = {}
+    for p in files:
+        by_name.setdefault(p.rsplit("/", 1)[-1], []).append(p)
     edges, reach_dirs = {}, {}
 
     def add(src, target, why):
@@ -248,15 +250,26 @@ def scan(files):
                 for cand in (f"{here}{mod}.py", f"{here}{mod}/__init__.py"):
                     if cand in tracked_set:
                         add(path, cand, f"{path}: import {mod}")
+        here = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+        if here:
+            # A file named in source is read or run by it: this directory's, or one below.
+            words = set(WORD.findall("\n".join(lines)))
+            for word in words:
+                for cand in by_name.get(word, ()):
+                    if cand.startswith(here) and cand != path:
+                        add(path, cand, f"{path}: names {word}")
         for i, line in enumerate(lines):
-            if not HINT.search(line) or CREATES.search(line):
+            if not HINT.search(line):
                 continue
+            builds = CREATES.search(line)
             span = "\n".join(lines[i:i + SPAN])
             for top in tops - {home}:
-                if not reaches(span, top):
+                if top not in span or not reaches(span, top):  # the substring test is the cheap half
                     continue
                 reach_dirs.setdefault(path, set()).add(top)
                 for tail in tails(span, top):
+                    if builds and not tail:  # `root / "tests").mkdir(...)` builds a fixture, it loads nothing
+                        continue
                     targets = resolve(top, tail, by_top)
                     if imports and "sys.path" in span:
                         # A directory put on sys.path is reached through what the
@@ -271,7 +284,7 @@ def scan(files):
 
 # ---- selection --------------------------------------------------------------
 
-def closure(changed, edges, reach_dirs, files, deleted):
+def closure(changed, edges, reach_dirs, deleted):
     """The changed files plus every file that transitively reaches one. A
     deleted path matches no edge target, so the files that reach its top
     directory at all stand in for it."""
@@ -319,7 +332,7 @@ def select(paths, suite_dirs, files, edges, reach_dirs):
             deleted.append(p)
     if not paths:
         return "dirs", [], notes
-    kept = closure(live, edges, reach_dirs, files, deleted)
+    kept = closure(live, edges, reach_dirs, deleted)
     dirs = sorted({f.split("/", 1)[0] for f in kept if "/" in f} & set(suite_dirs) | direct)
     if prose_only:
         return "prose", dirs, notes

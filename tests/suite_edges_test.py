@@ -68,6 +68,22 @@ def test_a_sys_path_directory_is_reached_through_what_is_imported(tmp_path, monk
     assert targets(edges, "b/c.py") == ["common/used.py"]
 
 
+def test_a_module_loaded_from_another_directory_reaches_the_file_it_names_beside_it(tmp_path, monkeypatch):
+    _, edges, _ = scan_tree(tmp_path, monkeypatch, {
+        "a/helper.py": 'DATA = "x.txt"\n', "a/x.txt": "x", "a/unrelated.txt": "u",
+        "b/c.py": 'import helper\nsys.path.insert(0, os.path.join(HERE, "..", "a"))\n',
+    })
+    assert targets(edges, "a/helper.py") == ["a/x.txt"]
+    assert targets(edges, "b/c.py") == ["a/helper.py"]
+
+
+def test_a_line_that_makes_a_directory_keeps_the_files_it_names(tmp_path, monkeypatch):
+    _, edges, _ = scan_tree(tmp_path, monkeypatch, {
+        "a/x.txt": "x", "b/c.py": 'os.makedirs(os.path.join(HERE, "..", "a"))\nP = os.path.join(HERE, "..", "a", "x.txt"); os.mkdir(P)\n',
+    })
+    assert targets(edges, "b/c.py") == ["a/x.txt"]
+
+
 def dirs_for(tmp_path, monkeypatch, files, changed, suite_dirs):
     tracked, edges, reach = scan_tree(tmp_path, monkeypatch, files)
     return se.select(changed, set(suite_dirs), tracked, edges, reach)

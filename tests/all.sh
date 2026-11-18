@@ -16,7 +16,9 @@
 # `tests/suite-edges.py` finds (a suite that loads or reads a file runs when
 # that file changes); see `scope_changed` for when it widens to the full suite.
 # A Markdown-only diff in directories with no suites runs only the suites marked
-# `# all.sh: prose-check` (#1955). `--list --files <listfile>` prints what a
+# `# all.sh: prose-check`, the repo-wide ones and the suites of any directory
+# whose files reach the changed Markdown: it does not keep everything under
+# `tests/` (#1955). `--list --files <listfile>` prints what a
 # change to those paths would run, for replaying history
 # (`tests/replay_selection.py`). A suite with a line `# all.sh: repo-wide (<why>)`
 # in its first twenty lines reads the whole tree and is always kept. A
@@ -86,8 +88,9 @@ suites() { # prints "<label>\t<command>" per discovered suite
 # has given no answer, so the full suite runs and the reason says so (#1495,
 # #1955). An empty directory list is a verdict (an empty diff keeps only the
 # repo-wide checks), never the absence of one. Prints `*` for the full suite,
-# `prose <list>` for the prose checks, else the kept directories as a
-# space-separated word list on stdout; the reason goes to stderr.
+# `*prose <list>` for the prose checks (a `*` prefix no directory name can
+# have), else the kept directories as a space-separated word list on stdout;
+# the reason goes to stderr.
 scope_changed() {
   local list err answer all_dirs verdict dirs
   list=$(mktemp) && err=$(mktemp) || { echo "tests/all.sh: mktemp failed" >&2; exit 2; }
@@ -105,13 +108,14 @@ scope_changed() {
   cat "$err" >&2
   rm -f "$list" "$err"
   case "$answer" in
+    *$'\n'*) verdict=none dirs="" ;;  # more than one line: not a verdict line
     *$'\t'*) verdict=${answer%%$'\t'*}; dirs=${answer#*$'\t'} ;;
     *) verdict=none dirs="" ;;  # no tab: not a verdict line
   esac
   case "$verdict" in
     full) echo '*' ;;
     dirs) echo "changed suites: ${dirs:-none} + tests" >&2; echo "$dirs" ;;
-    prose) echo "changed suites: Markdown only, in directories with no suites: the prose checks${dirs:+ + $dirs}" >&2; echo "prose $dirs" ;;
+    prose) echo "changed suites: Markdown only, in directories with no suites: the prose checks${dirs:+ + $dirs}" >&2; echo "*prose $dirs" ;;
     *) echo "full suite: the edge finder gave no verdict (got: $(head -c 200 <<<"$answer" | tr '\n' ' '))" >&2; echo '*' ;;
   esac
 }
@@ -120,11 +124,10 @@ filter_dirs() { # <dirs word list> <repo-wide labels>: keeps suites under those 
   awk -F'\t' -v dirs=" $1 tests " -v wide=" $2 " '{ n = split($1, p, "/"); if (n == 1 || index(dirs, " " p[1] " ") || index(wide, " " $1 " ")) print }'
 }
 
-# A Markdown-only diff in directories with no suites runs only the prose
-# checks (#1955): the suites that read the tree's Markdown, which mark
-# themselves with a line `# all.sh: prose-check (<why>)` in their first twenty
-# lines, plus the repo-wide ones and the suites under any directory that
-# reaches the changed file.
+# A suite marks itself with a line `# all.sh: <word> (<why>)` in its first
+# twenty lines: `repo-wide` (it reads the whole tree rather than one directory,
+# which no edge can pin, so every `--changed` run keeps it, #1495) or
+# `prose-check` (it reads the tree's Markdown, #1955).
 marked_labels() { # <marker word>: the labels whose first twenty lines carry `# all.sh: <word>`
   local label
   while IFS=$'\t' read -r label _; do
@@ -133,13 +136,12 @@ marked_labels() { # <marker word>: the labels whose first twenty lines carry `# 
   return 0
 }
 
+# A Markdown-only diff in directories with no suites runs only the prose
+# checks (#1955): the suites marked `prose-check`, the repo-wide ones, and the
+# suites under any directory whose files reach the changed file.
 filter_prose() { # <dirs word list> <prose labels> <repo-wide labels>
   awk -F'\t' -v dirs=" $1 " -v wide=" $2 $3 " '{ n = split($1, p, "/"); if ((n > 1 && index(dirs, " " p[1] " ")) || index(wide, " " $1 " ")) print }'
 }
-
-# A suite that reads the whole tree rather than one directory cannot be pinned
-# by an edge, so it says so with a line `# all.sh: repo-wide (<why>)` in its
-# first twenty lines and every `--changed` run keeps it (#1495).
 
 list_only=0 changed_base="" changed_files=""
 while [ $# -gt 0 ]; do
@@ -148,7 +150,8 @@ while [ $# -gt 0 ]; do
     --changed) [ $# -ge 2 ] || { echo "usage: tests/all.sh [--list] [--changed <base> | --files <listfile>]" >&2; exit 2; }
                changed_base=$2; shift 2 ;;
     --files) [ $# -ge 2 ] && [ "$list_only" = 1 ] || { echo "usage: tests/all.sh --list --files <listfile> (what a change to those paths would run)" >&2; exit 2; }
-             changed_files=$2; changed_base="files:$2"; shift 2 ;;
+             # changed_base only says "this is a narrowed selection" from here on; scope_changed reads the list file
+             changed_files=$2; changed_base="files"; shift 2 ;;
     *) echo "usage: tests/all.sh [--list] [--changed <base> | --files <listfile>]" >&2; exit 2 ;;
   esac
 done
@@ -156,19 +159,22 @@ done
 selected() { # prints the "<label>\t<command>" lines this run covers
   if [ -z "$changed_base" ]; then suites; return; fi
   local dirs
-  dirs=$(scope_changed "$changed_base") || exit $?
+  dirs=$(scope_changed) || exit $?
   case "$dirs" in
     '*') suites ;;
-    "prose"|"prose "*)
-      local kept
-      kept=$(suites | filter_prose "${dirs#prose}" "$(marked_labels prose-check)" "$(marked_labels repo-wide)")
-      # No suite marked prose-check is no prose checks, never "nothing to run".
-      if [ -z "$kept" ]; then echo "full suite: no suite is marked '# all.sh: prose-check'" >&2; suites; else printf '%s\n' "$kept"; fi ;;
+    "*prose"|"*prose "*)
+      local prose_labels
+      prose_labels=$(marked_labels prose-check)
+      # No suite marked prose-check is no prose checks, never "nothing to run":
+      # the repo-wide suites alone would be a green that checked no Markdown.
+      if [ -z "$prose_labels" ]; then echo "full suite: no suite is marked '# all.sh: prose-check'" >&2; suites
+      else suites | filter_prose "${dirs#\*prose}" "$prose_labels" "$(marked_labels repo-wide)"; fi ;;
     *) suites | filter_dirs "$dirs" "$(marked_labels repo-wide)" ;;
   esac
 }
 
-if [ "$list_only" = 1 ]; then selected 2>/dev/null | cut -f1; exit "${PIPESTATUS[0]}"; fi
+# The scope line (what narrowed it, or why it widened) goes to stderr beside the labels on stdout.
+if [ "$list_only" = 1 ]; then selected | cut -f1; exit "${PIPESTATUS[0]}"; fi
 
 tmp=$(mktemp -d) || exit 1
 # Every exit from here to the run's own trap (below) leaves no temp directory.

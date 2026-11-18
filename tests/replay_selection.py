@@ -72,7 +72,7 @@ def main(argv):
         print("replay_selection.py: no merged PR found on the ref; nothing was measured", file=sys.stderr)
         return 2
     print(f"{len(counts)} PRs, {total} suites: mean {sum(counts) / len(counts):.1f}; "
-          f"{sum(c == total for c in counts)} full; {sum(c >= 130 for c in counts)} select 130 or more")
+          f"{sum(c == total for c in counts)} full; {sum(c >= 0.85 * total for c in counts)} select 85% or more")
     return 0
 
 
