@@ -5,6 +5,7 @@
 # key, and each sentence there that names it must say it is not read. Both
 # `git grep` outcomes are checked: exit 1 (no match) is the only clean "none";
 # any other non-zero exit fails, never reads as an empty result.
+# all.sh: prose-check (greps the whole tree, Markdown included, for a retired key)
 set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root" || exit 1

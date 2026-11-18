@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Ensures prose section references remain valid when their target headings move.
+# all.sh: prose-check (reads the tree's Markdown: a Markdown-only change in a directory with no suites runs it)
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 

@@ -7,6 +7,7 @@
 # Scans every fenced block of every tracked SKILL.md for `$<digit>` and
 # `${<digit>` (`$0` included, since the harness's rule for it is not known);
 # `$@`, `$#` and `$*` stay allowed. Prose outside a fenced block is not scanned.
+# all.sh: prose-check (reads the tree's Markdown: a Markdown-only change in a directory with no suites runs it)
 set -u
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
