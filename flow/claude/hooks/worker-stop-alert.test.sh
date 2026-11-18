@@ -111,6 +111,12 @@ task_poll_denied() { printf '{"type":"assistant","message":{"role":"assistant","
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
 task_poll_errored() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"No task found with ID: %s","is_error":true}]},"toolUseResult":"Error: No task found"}\n' "$1" "$1"; }
+# send_text <id> <to> <text> : a SendMessage whose message text matters.
+send_text() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"%s","name":"SendMessage","input":{"to":"%s","message":"%s"}}]}}\n' "$1" "$2" "$3"; }
+# interim <agentId> : a subagent's interim task-notification — `completed`
+# status, but the agent is itself waiting on background work and has not
+# handed back (#1960). Same task-id notifies again at its real hand-back.
+interim() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<status>completed</status>\\n<summary>Agent \\"Correctness review\\" is waiting on its own background work</summary>\\n<result>This agent has not reported yet: it is waiting on its own background work.</result>\\n</task-notification>"}}\n' "$1"; }
 # bash_cmd <text> : a Bash call whose command merely mentions text.
 bash_cmd() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"bc-1","name":"Bash","input":{"command":"%s"}}]}}\n' "$1"; }
 
@@ -416,6 +422,104 @@ t="$tmp/reported-then-worked.jsonl"
   work; assistant_text "answered, then kept going"; } > "$t"
 run "reported this turn, then kept working" "$t"
 expect_none "a report inside this turn covers the stop even when work followed it"
+
+# #1960 shape 1: a subagent's interim notice ("is waiting on its own
+# background work", status completed) is not its hand-back; the subagent stays
+# out until the real one.
+reset_log
+t="$tmp/interim-this-turn.jsonl"
+{ human "$brief"; launch a1; interim a1; assistant_text "reviewer still working, waiting"; } > "$t"
+run "interim notice, launch this turn" "$t"
+expect_reported "an interim notice leaves the subagent out: a stop is a wait"
+{ handback a1; assistant_text "back, stopping"; } >> "$t"
+run "real hand-back after the interim notice" "$t"
+expect_alert "once the real hand-back lands, a stop without a report alerts"
+
+reset_log
+t="$tmp/interim-earlier-turn.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; launch a1; peer "carry on"; interim a1; assistant_text "waiting"; } > "$t"
+run "interim notice, launch from an earlier turn" "$t"
+expect_reported "an interim notice is liveness evidence for an earlier-turn launch"
+
+# #1960 shape 2: the worker's last send is an open request and the controller
+# only held it ("wait: ... you're next"); ending the turn is waiting for "go".
+reset_log
+t="$tmp/held.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1;
+  peer "wait: both slots are busy, you're next"; work; assistant_text "holding for go"; } > "$t"
+run "ready for seam, held" "$t"
+expect_reported "an open request answered only by a hold reads waiting"
+
+reset_log
+t="$tmp/question-held.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "Which base do I use?"; ok s1;
+  peer "wait: checking, you're next"; work; assistant_text "holding"; } > "$t"
+run "question, held" "$t"
+expect_reported "an unanswered question followed by a hold reads waiting"
+
+reset_log
+t="$tmp/seam-go.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1;
+  peer "wait: both slots are busy, you're next"; peer "go"; work; assistant_text "ran, stopped with nothing out"; } > "$t"
+run "ready for seam, answered go, then silent" "$t"
+expect_alert "a request answered with go, then a stop with nothing sent, is silent"
+
+reset_log
+t="$tmp/question-ruled.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "Which base do I use?"; ok s1;
+  peer "use origin/main"; work; assistant_text "done, stopped"; } > "$t"
+run "question, ruled, then silent" "$t"
+expect_alert "a question answered with a ruling, then a stop with nothing sent, is silent"
+
+reset_log
+t="$tmp/non-request.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "PR up: https://x/pull/1"; ok s1;
+  peer "wait: reviewing"; work; assistant_text "stopped"; } > "$t"
+run "report that is not a request, then a hold" "$t"
+expect_alert "a hold after a report that asked for nothing does not read waiting"
+
+# Answers that merely start with "wait"/"hold", a reply the hook cannot see,
+# and no reply at all are not holds (review C1-C3, C5, P1, P3).
+reset_log
+t="$tmp/ready-human-go.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; human "go"; work; assistant_text "ran, stopped"; } > "$t"
+run "ready for seam, answered by a human prompt" "$t"
+expect_alert "a human-prompt answer is not a hold: the stop is silent"
+
+reset_log
+t="$tmp/question-no-reply.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "Which base do I use?"; ok s1; human "continue"; work; work; assistant_text "stopped"; } > "$t"
+run "question, no controller reply at all" "$t"
+expect_alert "an open request with no controller message since is not a hold"
+
+for reply in "Wait, no: use origin/main and rebuild" "hold off: fix the lint first, then report" "slot free, you're next: go" "wait: slot is free now, go ahead"; do
+  reset_log
+  t="$tmp/answer-like-hold.jsonl"
+  { human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; peer "$reply"; work; assistant_text "stopped"; } > "$t"
+  run "answer shaped like a hold: $reply" "$t"
+  expect_alert "a controller answer that merely opens with wait/hold is not a hold: $reply"
+done
+
+reset_log
+t="$tmp/hold-then-human.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; peer "wait: both slots are busy, you're next";
+  human "carry on"; work; assistant_text "stopped"; } > "$t"
+run "hold, then a human prompt" "$t"
+expect_alert "a human prompt after the hold ends the hold"
+
+reset_log
+t="$tmp/request-mentioned.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "Seam green (was ready for seam at 3pm), PR up"; ok s1;
+  peer "wait: reviewing, you're next"; work; assistant_text "stopped"; } > "$t"
+run "report that only mentions ready for seam" "$t"
+expect_alert "a report mentioning the phrase mid-text is not an open request"
+
+reset_log
+t="$tmp/request-then-report.jsonl"
+{ human "$brief"; send_text s1 "skills-b6" "ready for seam"; ok s1; send_text s2 "skills-b6" "PR up: https://x/pull/1"; ok s2;
+  peer "wait: reviewing, you're next"; work; assistant_text "stopped"; } > "$t"
+run "request, then a later plain report, then a hold" "$t"
+expect_alert "only the last delivered send decides: a later plain report is no open request"
 
 # An id with no liveness evidence since the turn start is not out, and that bound is load-bearing: 45% of
 # real background tasks never emit a terminal notification, so a set carried

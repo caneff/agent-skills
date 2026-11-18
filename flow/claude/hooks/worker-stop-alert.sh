@@ -22,8 +22,12 @@
 # statusless but a finish, not a touch). Also not a silent stop: a worker
 # that reported and has done nothing since — an inbound controller message
 # starts a turn, so a controller closing its own loop (`merged, sha X`)
-# otherwise manufactures an alert on that worker's next stop. Otherwise
-# submit one line into the controller's herdr pane with `herdr agent
+# otherwise manufactures an alert on that worker's next stop. Two more waits
+# (#1960): a subagent's interim notice (`completed`, summary "is waiting on
+# its own background work") is not its hand-back, and a worker whose last
+# delivered send is an open request ("ready for seam", a question) that the
+# controller has only held ("wait: ... you're next") is waiting for its "go".
+# Otherwise submit one line into the controller's herdr pane with `herdr agent
 # prompt` — a hook command, so the auto-mode classifier never sees it (a
 # report sent that way was once denied there). One alert per stop: every
 # attempt is logged to ~/.claude/worker-stop-alerts.log keyed by session
@@ -108,9 +112,13 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   def from_controller: (.origin.from | IN($socks[])) or (.origin.name | IN($c, $names[]));
   # A sub-worker'"'"'s own stop alert is typed into this pane as a human prompt;
   # it is that worker'"'"'s report to us, not a turn we owe the controller.
-  def worker_alert: (.message.content
-      | if type == "string" then . else ([.[]? | .text? // empty] | join("")) end)
-      | startswith("[worker-stop-alert]");
+  def msg_text: .message.content
+      | if type == "string" then . else ([.[]? | .text? // empty] | join("")) end;
+  def worker_alert: msg_text | startswith("[worker-stop-alert]");
+  # A subagent'"'"'s interim task-notification: status `completed`, but the
+  # agent is itself waiting on background work and delivers its report later
+  # under the same task-id (#1960). Evidence it is alive, never a return.
+  def interim: strings | test("<summary>[^<]*is waiting on its own background work");
   to_entries as $all
   | ($all | map(select(.value.type == "user"
       and ((.value.origin.kind == "human" and (.value | worker_alert | not))
@@ -141,6 +149,30 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
       | select((.value.type == "assistant"
                 and ([.value.message.content[]? | select(.type == "tool_use")] | length > 0))
                or (.value.toolUseResult != null))] as $since_report
+  # Holding for the controller (#1960): the last delivered send is an open
+  # request (it opens with "ready for seam" or ends in "?") and the latest
+  # turn-starting message since, from the controller or a human prompt, is a
+  # hold ("wait: ... you'"'"'re next"). Ending the turn then is waiting for the
+  # promised "go" or ruling. No message since, or any other one (a "go", a
+  # ruling, a human prompt), means the request was answered or never held,
+  # and a stop with nothing sent is silent.
+  | ([$all[] | select(.key == $reported_at) | .value.message.content[]?
+      | select(.type == "tool_result") | .tool_use_id | select(IN($sends[]))]
+      | first) as $last_id
+  | ([$all[] | .value | select(.type == "assistant") | .message.content[]?
+      | select(.type == "tool_use" and .id == $last_id)
+      | .input.message | if type == "string" then . else tojson end]
+      | first // "") as $last_sent
+  | ([$all[] | select(.key > $reported_at)
+      | .value | select(.type == "user"
+          and ((.origin.kind == "human" and (worker_alert | not))
+               or (.origin.kind == "peer" and .origin.handback != true
+                   and from_controller)))
+      | msg_text] | last // "") as $last_starter
+  | ($last_id != null
+      and ($last_sent | test("^\\s*ready for seam|\\?\\s*$"; "i"))
+      and ($last_starter | test("^\\s*(wait|hold)\\s*:"; "i"))
+      and ($last_starter | test("\\bgo\\b"; "i") | not)) as $holding
   # Liveness evidence: a launch from an earlier turn counts as out only
   # if something since the start of this turn names its id — a tool call
   # by the worker whose task_id, shell_id, agentId or `to` is that id (a
@@ -172,7 +204,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
         | select(.type == "tool_use" and (.id | IN($answered[]))) | .input | objects
         | (.task_id, .shell_id, .bash_id, .agentId, .agent_id, .to) | strings]
      + [$after[] | select(.type == "user" and .origin.kind == "task-notification")
-        | .message.content | strings | select(test("<status>") | not)
+        | .message.content | strings | select((test("<status>") | not) or interim)
         | scan("<task-id>([^<]+)</task-id>")[0]
         | select(IN($timed_out[]) | not)]) as $touched
   # An id is compared whole, in the fields that name a task or an agent, and
@@ -187,7 +219,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
       | select(.status == "async_launched" or .status == "teammate_spawned")
       | (.agentId // .agent_id) | select(strings)] as $launched_now
   | [$all[] | .value | select(.type == "user") | (.origin.senderTaskId // empty),
-      (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0]),
+      (.message.content | select(interim | not) | strings | scan("<task-id>([^<]+)</task-id>")[0]),
       (.message.content | strings | scan("<teammate-message teammate_id=\"([^\"]+)\"")[0])] as $returned
   | [$all[] | .value | select(.type == "user") | .toolUseResult? | objects
       | (.backgroundTaskId // .taskId) | select(strings)] as $tasks_all
@@ -209,6 +241,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
   | (if ($delivered | length) > 0 then "reported"
      elif $reported_at != null and ($since_report | length) == 0 then "reported"
      elif (($unresolved | length) + ($unfinished | length)) > 0 then "waiting"
+     elif $holding then "waiting"
      else "silent" end) as $verdict
   | "\($verdict)\t\(last.uuid // "line \(length)")"')
 [ "${verdict:-}" = "silent" ] || exit 0
