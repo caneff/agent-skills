@@ -241,8 +241,12 @@ defines them.
   `SendMessage({to: "<worker session name>", notify_when_idle: true})`.
   Omit `message` rather than passing `""`: the tool's schema lists `message`
   under `required` but defaults it, so a call that leaves it out validates
-  and routes, while an empty `message` fails as invalid. The
-  idle notice reaches the controller only. On it, read that worker's pane
+  and routes, while an empty `message` fails as invalid. A worker that is
+  already idle when you subscribe, such as one that ended its turn to wait
+  on its own background job, fires the notice at once on that same finished
+  turn. Read its pane once, and don't subscribe again until it sends you
+  something: in spec-300 (2026-11-07) three re-subscriptions gave three
+  identical notices. The idle notice reaches the controller only. On it, read that worker's pane
   (`herdr agent read <name>`) and say nothing to Chris unless the pane holds
   a question for him. The `Stop` hook `worker-stop-alert.sh` stays installed
   but unregistered, because typing into the controller's pane landed in
