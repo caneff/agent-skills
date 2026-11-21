@@ -130,7 +130,7 @@ dispatch() { printf '{"type":"assistant","message":{"role":"assistant","content"
 dispatch_error() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"de-%s","name":"Bash","input":{"command":"for n in 1; do implement-dispatch $n | sed s/^/[$n]/; done"}}]}}\n' "$1"
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"de-%s","content":"Exit code 5\\n[1] dispatched #1 (sonnet, run r)\\n[1] worktree: /w/implement-1\\n[1] agent:    %s\\n[1] session:  s"}]},"toolUseResult":"Error: Exit code 5\\n[1] dispatched #1 (sonnet, run r)\\n[1] agent:    %s"}\n' "$1" "$1" "$1"; }
 # not_dispatch <name> : unrelated command output with an `agent:` line.
-not_dispatch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"nd-1","content":"config\\nagent:    %s\\n"}]},"toolUseResult":{"stdout":"x","stderr":""}}\n' "$1"; }
+not_dispatch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"nd-1","content":"a doc says dispatched #1 is printed first\\nagent:    %s\\n"}]},"toolUseResult":{"stdout":"x","stderr":""}}\n' "$1"; }
 # agents_live <name>... : the herdr list with the controller's pane and these
 # named worker agents.
 agents_live() { local a='{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}}' nm
