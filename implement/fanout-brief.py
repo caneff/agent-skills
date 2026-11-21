@@ -106,6 +106,9 @@ def parse_findings(flagged, owners):
                 first, first_ruled = seen[fid]
                 hint = (" — once with --finding and once with --ruled: pass it with one of them, not both"
                         if first_ruled != ruled else "")
+                if not hint:
+                    hint = (f" — to split one finding across workers, mint sub-ids ({fid}a, {fid}b), "
+                            "one per worker, so each id keeps one disposition")
                 raise BadInput(f"finding {fid} is given twice (for {first} and {worker}){hint}")
             seen[fid] = (worker, ruled)
             found[worker].append(Finding(fid, text, ruled))
@@ -120,13 +123,31 @@ def parse_findings(flagged, owners):
 NO_TEST_WORDS = {"true", "false", ":", "echo", "printf", "exit", "test", "[", "ls", "cat", "sleep", "pwd", "cd"}
 
 
-def runs_no_tests(cmd):
+def is_pytest_only_script(words, worktree):
+    """`python[3] <file>.py` where the file, read from `worktree` (or absolute), defines pytest-style
+    tests and has no `__main__` runner: plain python imports it and runs none of them. A file that
+    cannot be read is not caught."""
+    if not words or not re.fullmatch(r"python3?(\.\d+)?", posixpath.basename(words[0])):
+        return False
+    if len(words) < 2 or not words[1].endswith(".py"):
+        return False
+    try:
+        with open(os.path.join(worktree, words[1])) as fh:
+            source = fh.read()
+    except (OSError, UnicodeDecodeError):
+        return False
+    defines_tests = re.search(r"^(def test_|class Test)", source, re.M)
+    return bool(defines_tests) and "__main__" not in source
+
+
+def runs_no_tests(cmd, worktree="."):
     """A static answer, not a run: True when every segment of `cmd` (split on `&&`, `||`, `;` and
-    `|`) starts, past any `VAR=value` prefix, with a no-op such as `true`, `echo` or `cd`. A runner
-    that selects nothing (`pytest -k nomatch`) or a non-test command (`ruff check`) is beyond it."""
+    `|`) starts, past any `VAR=value` prefix, with a no-op such as `true`, `echo` or `cd`, or runs
+    plain `python3` on a pytest file with no `__main__` runner. A runner that selects nothing
+    (`pytest -k nomatch`) or a non-test command (`ruff check`) is beyond it."""
     for segment in re.split(r"&&|\|\||;|\|", cmd):
         words = [w for w in segment.split() if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w)]
-        if words and words[0] not in NO_TEST_WORDS:
+        if words and words[0] not in NO_TEST_WORDS and not is_pytest_only_script(words, worktree):
             return False
     return True
 
@@ -142,9 +163,10 @@ def render(a, owners, findings):
         raise BadInput(f"worktree {a.worktree} is not a directory")
     if not a.test_command.strip():
         raise BadInput("the test command is empty")
-    if runs_no_tests(a.test_command):
+    if runs_no_tests(a.test_command, a.worktree):
         raise BadInput(f"the test command {a.test_command!r} runs no tests: every command in it is a no-op "
-                       f"({', '.join(sorted(NO_TEST_WORDS))})")
+                       f"({', '.join(sorted(NO_TEST_WORDS))}) or plain python on a pytest file with no "
+                       "`__main__` runner (use `python3 -m pytest <file>`)")
     if a.worker not in owners:
         raise BadInput(f"--for {a.worker}: not among the assigned workers ({', '.join(owners)})")
     with open(os.path.join(HERE, "briefs", "fanout-worker.md")) as fh:
@@ -189,10 +211,12 @@ RULES = """rules (exit 2, nothing written, on any of these):
   --worktree   must be a directory. --for must be one of the assigned workers.
   --assign   one worker is valid; several must own disjoint files; a worker owns at least one.
   --finding / --ruled   an id is given once: with --finding or with --ruled, not both. A --ruled
-             id needs no --finding. Once any finding is given, every worker needs at least one
+             id needs no --finding. To split one finding across workers, mint sub-ids
+             (F3a, F3b), one per worker, never the same id twice. Once any finding is given, every worker needs at least one
              (a worker with no finding is a worker with nothing to fix: leave it out).
   --test-command   refused when empty or when every command in it is a no-op (true, echo,
-             cd...); a runner that selects nothing is not caught."""
+             cd...) or is plain python on a pytest file with no __main__ runner; a runner that
+             selects nothing is not caught."""
 
 
 def main(argv):

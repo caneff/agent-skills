@@ -293,3 +293,42 @@ def test_a_test_command_that_runs_no_tests_is_refused(wt, cmd):
 def test_a_test_command_that_runs_something_is_accepted(wt, cmd):
     code, out, err = run(wt, "alpha=a.py", test_command=cmd)
     assert code == 0, err
+
+
+def test_a_finding_split_across_workers_by_sub_ids_renders_one_part_each(wt):
+    text_a = task(wt, "--finding", "alpha:F3a=left half", "--finding", "beta:F3b=right half")
+    assert "`F3a`" in text_a and "left half" in text_a and "F3b" not in text_a, text_a
+    text_b = task(wt, "--finding", "alpha:F3a=left half", "--finding", "beta:F3b=right half", worker="beta")
+    assert "`F3b`" in text_b and "F3a" not in text_b, text_b
+
+
+def test_the_twice_refusal_tells_the_controller_to_mint_sub_ids(wt):
+    err = refused_task(wt, "--finding", "alpha:F3=x", "--finding", "beta:F3=y")
+    assert "twice" in err and "sub-ids" in err and "F3a" in err and "F3b" in err, err
+
+
+def test_help_describes_sub_ids(wt):
+    out = subprocess.run(["python3", RENDER, "--help"], capture_output=True, text=True).stdout
+    assert "sub-id" in out and "F3a" in out, out
+
+
+PYTEST_FILE = "def test_x():\n    assert True\n"
+
+
+def test_python_on_a_pytest_file_with_no_main_runner_is_refused_as_running_no_tests(wt):
+    with open(os.path.join(wt, "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE)
+    err = refused(wt, "alpha=a.py", test_command="python3 x_test.py")
+    assert "runs no tests" in err and "python3 x_test.py" in err, err
+
+
+def test_python_on_a_test_file_with_a_main_runner_is_accepted(wt):
+    with open(os.path.join(wt, "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE + "\nif __name__ == '__main__':\n    test_x()\n")
+    code, out, err = run(wt, "alpha=a.py", test_command="python3 x_test.py")
+    assert code == 0, err
+
+
+def test_python_on_a_file_that_cannot_be_read_is_accepted(wt):
+    code, out, err = run(wt, "alpha=a.py", test_command="python3 missing_test.py")
+    assert code == 0, err
