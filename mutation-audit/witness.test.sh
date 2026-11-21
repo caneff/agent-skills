@@ -85,7 +85,7 @@ grep -qx 'outcome: red' "$scratch/rel.out" ||
 
 # A witness check whose report has no line for the id is refused, never an outcome.
 mkdir -p "$scratch/stub/mutation-audit" "$scratch/stub/multi-axis-code-review"
-cp "$tool" "$here/witness-mutate.sh" "$scratch/stub/mutation-audit/"
+cp "$tool" "$scratch/stub/mutation-audit/"
 printf '#!/usr/bin/env bash\necho "someone-else: red — not our id"\n' >"$scratch/stub/multi-axis-code-review/witness-check.sh"
 stub_rc=0
 ( cd "$repo" && bash "$scratch/stub/mutation-audit/witness.sh" --patch "$scratch/breaks.patch" \

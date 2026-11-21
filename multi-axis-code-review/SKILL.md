@@ -270,10 +270,10 @@ days, and a review outside a spec run has no closing report, so that row is gone
 
 **A witness check ends with one `append` per mutation** (#1270). The script
 under *Isolation* below runs `review_ledger.py append --type witness-mutation`
-(`call-site-mutation` for an id passed with `--call-site`, `worker-mutation` for every
-id under `--worker`) once per mutation id, with `--status-file` (an `append` takes no
-hand-written `--outcome`, #1969),
-reading the outcome its report loop wrote for that id and its wall clock, before it removes them. The row
+(`call-site-mutation` for a call passed `--call-site`, `worker-mutation` for one passed
+`--worker`) once per call, with `--status-file` (an `append` takes no hand-written
+`--outcome`, #1969), reading the outcome its report wrote for that mutation and the wall clock
+the script timed itself, before it removes them. The row
 holds the outcome `red`, `green` or `unknown` and no tokens, which stay with the
 correctness row. An `unknown` stays `unknown`. A refusal is reported like the
 review's own: the script exits 4 and the reviewer puts the stderr on the first
@@ -435,7 +435,7 @@ check* — a heading that is absent when there are none. It writes no outcome of
 its own. It states the worker count (default 1) and wall-clock ceiling (default
 600 seconds) any solve, build or test run is held to, and that the reviewer
 spawns no nested subagent; the correctness prompt also passes the worker count
-to `witness-check.sh --slots` as workers x 3 axes (#1855: only correctness runs
+to `witness-check.sh --slots` as workers x 3 axes (the cap on calls running at once) (#1855: only correctness runs
 tests, so it takes the review's whole budget; the spec and standards briefs
 carry no witness line). The correctness brief always tells the reviewer to run
 only the test files its mutants target, unmutated, before mutating, never the narrowed or full suite
@@ -505,29 +505,27 @@ costs no copy of the tracked tree. `HEAD` is
 the revision the captured diff ends at, so the mutation lands on exactly the
 code under review.
 
-*Concurrency* (#957). The mutations share nothing — each has its own worktree,
-its own index and its own output file — so they run together, and the check
-costs one covering-suite run of wall clock instead of one per mutated test.
+*One mutation per call* (#1708, #957). The mutations share nothing — each has its own
+worktree, its own index and its own output file — so calls may run together, and a review
+costs one covering-suite run of wall clock instead of one per mutated test. The caller starts
+them: one `witness-check.sh` call per mutation, looped or backgrounded in its own shell; the
+script bounds how many run at once (*The bound*, below). Mind the Bash tool's 600 s ceiling:
+a loop of calls in one tool call must fit inside it, or each call goes in its own.
 
-A call-site mutation (correctness brief, (e)) is one more kind of mutation for
-this machinery to run, one per protected entry point, enumerated beside the
-constraint mutation it accompanies. Each gets its own id, its own worktree and
-its own output file — allocated the same way a constraint mutation's are — and
-its `unknown` is reported the same way. No two mutations, call-site or
+A call-site mutation (correctness brief, (e)) is one more call, one per protected entry
+point, enumerated beside the constraint mutation it accompanies and passed `--call-site`. Each
+gets its own id, its own worktree and its own output. No two mutations, call-site or
 constraint, ever share an id.
 
-Two things the concurrency must not cost. **The message stays paired with its
-mutation**: reading the message rather than the exit status is what catches
-defect class 3, and N reds collected into one stream is how that pairing is
-lost — hence one output file per id, and a collection loop that prints each
-message under the id that produced it. **An unreached mutation is `unknown`,
-not a pass**: a worktree that failed to create, a suite that never started, an
-output file that is empty. Reported by name, never folded in with the
-assertions that genuinely held — that is defect class 1, and it is the failure
-this whole block is most exposed to.
+Two things must not be lost. **The message stays paired with its mutation**: reading the
+message rather than the exit status is what catches defect class 3, and every output line is
+tagged with the id that produced it. **An unreached mutation is `unknown`, not a pass**: a
+worktree that failed to create, a replacement that did not land, a suite that never started,
+a command that failed having printed nothing. Reported by name, never folded in with the
+assertions that genuinely held — that is defect class 1, and it is the failure this whole
+block is most exposed to.
 
-There is **nothing to restore**: with the mutations concurrent, nothing is
-shared to restore, and each worktree is discarded whole. No step here reaches back into the
+There is **nothing to restore**: nothing is shared, and each worktree is discarded whole. No step here reaches back into the
 checkout to undo anything, and reintroducing one would be the `cp -a` defect by
 another route.
 
@@ -542,29 +540,38 @@ the sequential check this replaces, slower but still run. So does a box whose
 process table cannot be read at all: an unreadable count is treated as a full
 machine, never as an idle one, which is class 1 applied to the bound itself.
 It never refuses: a witness check that declines because the machine is loaded
-is worse than a slow one.
+is worse than a slow one. The bound is enforced across calls: each call holds one of that
+many `flock`ed slot files under `~/.cache/agent-reviews/.witness-slots/` while it runs and
+waits for a free one, so calls started side by side never exceed it. `--slots <k>` lowers it.
 
 The check is a script shipped with this skill,
-[`witness-check.sh`](witness-check.sh); its header holds the full contract.
-You write one file, outside the checkout, defining `mutate`:
-
-```
-mutate() {   # arguments, in order: the id, the witness worktree, a marker path
-  # strip that test's constraint in the witness worktree, then on the line
-  # IMMEDIATELY before the covering suite's command create the marker (the
-  # third argument) and run only that suite:
-  : >"<the marker path>"
-  ...
-}
-```
-
-and run it once, with every mutation id in the one call:
+[`witness-check.sh`](witness-check.sh); its header holds the full contract. **No other runner
+may be used** (#1708): it is the only way to run a mutation. No sourced file, no `git worktree add` of your own, no
+hand-made runner, no hand-written ledger row. A hand-rolled probe gets refused by the git
+guard, and a row written around the script is refused by `append`; either refusal is correct,
+never worked around. One call is one mutation, given by flags:
 
 ```
 bash ~/.agents/skills/multi-axis-code-review/witness-check.sh \
-  --worktree <the worktree under review> --mutate <that file> \
-  --repo <repo> --ticket <n> [--baseline-seconds <s>] \
-  [--call-site <id>]... -- <id>...
+  --worktree <the worktree under review> --id <id> \
+  --file <path in the tree> --old '<text, once>' --new '<its replacement>' \
+  --test '<the command that runs only the covering suite>' \
+  --repo <repo> --ticket <n> [--baseline-seconds <s>] [--slots <k>] [--call-site | --worker]
+```
+
+`--old` is replaced by `--new` once, literally: quotes, `$`, backslashes and newlines are
+text, and `--new ''` deletes. `--old` must occur exactly once in the file at `HEAD`; a count of
+zero or two is refused with the count, before anything runs, and writes no row. Give enough
+surrounding text to match one place. `--file` is relative to the tree and tracked at `HEAD`,
+the revision the captured diff ends at (commit first: an uncommitted edit is not in the
+witness). A mutation that is already a unified diff goes in as `--patch <file>` instead of
+`--file/--old/--new` (`mutation-audit/witness.sh` is that wrapper). `--test` runs from the
+witness's top level under `bash -o pipefail -c`; the script puts the mutation in, then runs it,
+and writes the covering command's own exit status down as the outcome. To run several
+mutations, loop in your shell:
+
+```
+for spec in ...; do bash ~/.agents/skills/multi-axis-code-review/witness-check.sh ... ; done
 ```
 
 *The time limit* (#1854). One mutant that hangs must not stall the review (a
@@ -573,13 +580,14 @@ unmutated run's own time of the target files; the header holds the rest (the
 3x rule, the 240 s default, `red (timeout)`).
 
 `--repo` and `--ticket` are the ledger's, as in § 4's append line; `--no-ledger`
-replaces them only outside a review. Each `--call-site` id is one of the ids.
-A single mutation that is already a patch, with the command that covers it,
-can go through `mutation-audit/witness.sh` instead, which writes the `mutate`
-for you (`mutation-audit/SKILL.md` § Single-diff witness mode).
-Exit 0 means every mutation ran and was reported — `<id>: red` with its own
-message, `<id>: HOLLOW`, or `<id>: unknown` — so read the output, not the
-status; the header lists the other exit codes.
+replaces them only outside a review. `--call-site` types the row a call-site mutation.
+Exit 0 means the mutation ran and was reported — `<id>: red` with its own message,
+`<id>: HOLLOW`, or `<id>: unknown` — so read the output, not the status; the header lists
+the other exit codes.
+
+*What a call costs* (#1708). Every call makes its own worktree and setup rather than reusing
+a shared one: a tree an earlier mutation edited could leak into the next, which is class 3.
+The measured cost of that setup is in the PR that introduced the flag form.
 
 Each witness gets the setup a fresh worktree lacks (#1219), which the script's
 header states: no Python bytecode, no `__pycache__`, and a link to the

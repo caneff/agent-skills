@@ -249,17 +249,17 @@ No PR and no reviewer; Chris reads the log after.
   the code that makes it pass. Once green, strip the constraint it verifies
   and see it fail — a test that passed with the fix reverted has shipped as
   proof of a fix it never checked. Commit the work first, then run every mutation through the
-  witness check, one id each (#1969):
+  witness check, one call per mutation (#1969, #1708):
 
   ```
-  bash ~/.agents/skills/multi-axis-code-review/witness-check.sh --worktree . --mutate <file> --repo <repo> --ticket <n> --worker --baseline-seconds <s> -- <id>...
+  bash ~/.agents/skills/multi-axis-code-review/witness-check.sh --worktree . --id <id> --file <path> --old '<text, once>' --new '<replacement>' --test '<covering command>' --repo <repo> --ticket <n> --worker --baseline-seconds <s>
   ```
 
-  `<file>` is yours, outside the checkout, defining `mutate` as
-  `multi-axis-code-review/witness-check.sh`'s header says: it strips the
-  constraint in the throwaway worktree the script made, creates the marker
-  on the line before the covering suite, and runs only that suite. The
-  script owns the worktree and its removal, the `node_modules` and
+  `--old` becomes `--new` once, literally, in the throwaway worktree
+  the script made, and `--test` runs only the covering suite; `--old`
+  occurring other than once is refused with its count. It is the only
+  mutation runner: never a hand-rolled worktree, loop or ledger row.
+  The script owns the worktree and its removal, the `node_modules` and
   `__pycache__` setup (#1219), `CARGO_TARGET_DIR` (#1696), the time and the
   ledger row: its row is typed `worker-mutation` by `--worker`, and the
   outcome is the covering command's own exit status, never a word you type
