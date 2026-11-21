@@ -342,8 +342,6 @@ out=$("$job_run" --name pf-env -- env X=1 bash -c 'false | cat; echo "x=$X"' 2>&
 [[ "$("$job_run" --status pf-env2)" == *"stage 1 of 2"* ]] \
   && ok "pipefail applies behind an env prefix" || no "pipefail applies behind an env prefix"
 
-[ "$fails" = 0 ] && echo "ALL PASS"
-exit "$fails"
 
 # A job whose child outlives it makes the wrapper write the one progress line it
 # does not write from inside the tee; under a non-UTC TZ that line must still be
