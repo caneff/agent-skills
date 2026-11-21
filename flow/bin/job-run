@@ -85,12 +85,12 @@
 # stderr), so the wrap hook asks job-run instead of keeping a copy.
 #
 # A `bash -c '<script>'` job (behind the same `env`, `nohup`, `time`, `timeout`
-# prefixes) runs as `bash -E -o pipefail -c`, with an ERR trap that saves the
+# prefixes) runs as `bash -o pipefail -c`, with an ERR trap that saves the
 # failing pipeline's PIPESTATUS (#1703). A job whose exit comes from a stage
-# other than the last then says which: the `exit` file's `pipeline=` line, the
+# other than the last then says which: the `exit` file's `note=` line, the
 # `--status` line (`pipeline stage 1 of 2 failed (PIPESTATUS=1 0)`) and a
-# progress line. An rc of 141 is also noted as a SIGPIPE stop, a reader that
-# closed its pipe early (`yes | head -1`). Only bash is touched, since sh has no
+# progress line. An rc of 141 is noted as a SIGPIPE stop, not a failure: usually
+# a reader that closed its pipe early (`yes | head -1`). Only bash is touched, since sh has no
 # ERR trap; foreground Bash calls are not touched at all. The trap sits on the
 # script's first line, so line numbers in its errors do not shift. Limit: the
 # saved status is the last failing pipeline, so a tolerated `false | cat`
@@ -151,7 +151,7 @@ check_name() { # check_name <value> [<flag>]
 # --wait adds 13: interrupted while waiting, the run's state not known.
 # `verdict` is the one place that line and code are produced; --wait loops on it.
 verdict() { # verdict <name> ; prints the line, returns the code
-  local n="$1" dir="$jobs_dir/$1" up=0 rc cause ended pid last pipeline
+  local n="$1" dir="$jobs_dir/$1" up=0 rc cause ended pid last note
   [ -d "$dir" ] || { echo "unknown $n: no run directory at $dir"; return 12; }
   # Liveness is read before the exit record: a wrapper writes `exit` and only
   # then dies, so a pid seen dead has its record on disk already. Reading them
@@ -161,8 +161,8 @@ verdict() { # verdict <name> ; prints the line, returns the code
     rc=$(sed -n 's/^rc=//p' "$dir/exit")
     cause=$(sed -n 's/^cause=//p' "$dir/exit")
     ended=$(sed -n 's/^ended=//p' "$dir/exit")
-    pipeline=$(sed -n 's/^pipeline=//p' "$dir/exit")
-    echo "finished $n rc=$rc cause=$cause ended=$ended${pipeline:+ $pipeline}"
+    note=$(sed -n 's/^note=//p' "$dir/exit")
+    echo "finished $n rc=$rc cause=$cause ended=$ended${note:+ $note}"
     return 0
   fi
   pid=$(cat "$dir/pid" 2>/dev/null)
@@ -209,33 +209,76 @@ if [ -n "$wait_for" ]; then
   done
 fi
 
-# The one place a shell script is judged (#1901, #1705). Only
-# `<shell> -c <script>` is read, behind any `env`, `nohup`, `time` or
-# `timeout <duration>` prefix: elsewhere an & or a sleep is an argument's own
-# data. Two refusals: a poll loop (exit 2, so the wrap hook can tell a denial
-# from a pass-through) and a trailing & (exit 1). The poll loop is judged first,
-# so a loop ending in & is denied and never passed through to run unwrapped.
-refuse_script() { # refuse_script <command> [args...]
-  while :; do
-    case "${1##*/}" in
-      env|nohup|time|command|exec) shift ;;
-      timeout) shift; while [[ ${1-} == -* ]]; do shift; done; shift ;;
+cmd_index() { # cmd_index <command> [args...] ; sets CMD_I, the index of the command proper
+  local a=("$@") i=0 n=$#
+  while [ "$i" -lt "$n" ]; do
+    case "${a[i]##*/}" in
+      env)
+        i=$((i + 1))
+        while [ "$i" -lt "$n" ]; do
+          case "${a[i]}" in
+            -u|-C|-S|--unset|--chdir) i=$((i + 2)) ;;
+            -*|[A-Za-z_]*=*) i=$((i + 1)) ;;
+            *) break ;;
+          esac
+        done ;;
+      nohup|time|command|exec) i=$((i + 1)) ;;
+      nice)
+        i=$((i + 1))
+        while [[ ${a[i]-} == -* ]]; do
+          if [ "${a[i]}" = -n ]; then i=$((i + 2)); else i=$((i + 1)); fi
+        done ;;
+      timeout)
+        i=$((i + 1))
+        while [[ ${a[i]-} == -* ]]; do
+          case "${a[i]}" in -k|-s|--kill-after|--signal) i=$((i + 2)) ;; *) i=$((i + 1)) ;; esac
+        done
+        i=$((i + 1)) ;;
       *) break ;;
     esac
-    [ $# -gt 0 ] || return 0
   done
-  case "${1##*/}" in sh|bash|dash|zsh|ksh) ;; *) return 0 ;; esac
-  shift
-  local script
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      -c|-[a-zA-Z]*c) script="${2-}"; break ;;
-      -*) shift ;;
+  CMD_I=$i
+}
+
+# The one reader of `<shell> [flags] -c [options] <script>`, behind the prefixes
+# cmd_index skips: refuse_script judges the script it finds and harden rewrites
+# it, so the two cannot disagree on what a command is (#1703). Sets SHELL_I and
+# SCRIPT_I; SCRIPT_I is -1 for any other shape (a script file, a non-shell
+# program). `-o <option>` before -c and options after -c (`-c -- 'x'`) are read.
+locate_script() { # locate_script <command> [args...]
+  local a=("$@") n=$# j
+  SHELL_I=-1 SCRIPT_I=-1
+  cmd_index "$@"
+  [ "$CMD_I" -lt "$n" ] || return 0
+  case "${a[CMD_I]##*/}" in sh|bash|dash|zsh|ksh) ;; *) return 0 ;; esac
+  SHELL_I=$CMD_I
+  j=$((CMD_I + 1))
+  while [ "$j" -lt "$n" ]; do
+    case "${a[j]}" in
+      -o|+o|-O|+O) j=$((j + 2)) ;;
+      -c|-[a-zA-Z]*c) break ;;
+      -*) j=$((j + 1)) ;;
       *) return 0 ;;
     esac
   done
-  [ -n "${script-}" ] || return 0
+  [ "$j" -lt "$n" ] || return 0
+  j=$((j + 1))
+  while [ "$j" -lt "$n" ] && [[ ${a[j]} == -* ]]; do j=$((j + 1)); done
+  [ "$j" -lt "$n" ] && SCRIPT_I=$j
+  return 0
+}
+
+# The one place a shell script is judged (#1901, #1705). Two refusals: a poll
+# loop (exit 2, so the wrap hook can tell a denial from a pass-through) and a
+# trailing & (exit 1). The poll loop is judged first, so a loop ending in & is
+# denied and never passed through to run unwrapped.
+refuse_script() { # refuse_script <command> [args...]
+  locate_script "$@"
+  [ "$SCRIPT_I" -ge 0 ] || return 0
+  local a=("$@") script
+  script="${a[SCRIPT_I]}"
   script="${script%"${script##*[![:space:]]}"}"
+  [ -n "$script" ] || return 0
   refuse_poll_loop "$script"
   case "$script" in
     *'&&') ;;
@@ -280,34 +323,19 @@ refuse_script "$@"
 dir="$jobs_dir/$name"
 
 # `bash -c <script>` gets pipefail and an ERR trap that saves the failing
-# pipeline's PIPESTATUS (#1703). The command is walked like refuse_script walks
-# it: behind env/nohup/time/command/exec/timeout, then bash, its flags, -c. Any
-# other shape (sh, a script file, `bash -o x -c`) runs as given, in HARD.
+# pipeline's PIPESTATUS (#1703). The command is read by locate_script, the same
+# reader refuse_script uses. Any other shape (sh, a script file) runs as given.
 HARD=("$@")
 harden() { # harden <command> [args...] ; sets HARD
-  local a=("$@") i=0 n=$# j
-  while [ "$i" -lt "$n" ]; do
-    case "${a[i]##*/}" in
-      env|nohup|time|command|exec)
-        i=$((i + 1))
-        while [[ ${a[i]-} == -* || ${a[i]-} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do i=$((i + 1)); done ;;
-      timeout) i=$((i + 1)); while [[ ${a[i]-} == -* ]]; do i=$((i + 1)); done; i=$((i + 1)) ;;
-      *) break ;;
-    esac
-  done
-  [ "$i" -lt "$n" ] && [ "${a[i]##*/}" = bash ] || return 0
-  j=$((i + 1))
-  while [ "$j" -lt "$n" ]; do
-    case "${a[j]}" in
-      -c|-[a-zA-Z]*c) break ;;
-      -*) j=$((j + 1)) ;;
-      *) return 0 ;;
-    esac
-  done
-  [ $((j + 1)) -lt "$n" ] || return 0
-  # shellcheck disable=SC2016  # the trap body expands in the job, not here
-  local trap_line='trap '\''printf "%s" "${PIPESTATUS[*]}" > "$JOB_PIPESTATUS"'\'' ERR; '
-  HARD=("${a[@]:0:i+1}" -E -o pipefail "${a[@]:i+1:j-i}" "$trap_line${a[j+1]}" "${a[@]:j+2}")
+  locate_script "$@"
+  local a=("$@")
+  [ "$SCRIPT_I" -ge 0 ] && [ "${a[SHELL_I]##*/}" = bash ] || return 0
+  # The path is written into the trap, not read from the environment, so a job
+  # run under `env -i` still reports. The name is checked, HOME is the user's.
+  local trap_line
+  trap_line="trap 'printf \"%s\" \"\${PIPESTATUS[*]}\" > $(printf '%q' "$dir/pipestatus")' ERR; "
+  a[SCRIPT_I]="$trap_line${a[SCRIPT_I]}"
+  HARD=("${a[@]:0:SHELL_I+1}" -o pipefail "${a[@]:SHELL_I+1}")
 }
 harden "$@"
 
@@ -402,21 +430,27 @@ record() {
   fi
   # A pipeline named only when its saved PIPESTATUS explains this rc: more than
   # one stage, the rightmost failing stage is not the last, and its code is rc.
-  local codes=() k pipeline="" note=""
+  # An rc of 141 is a SIGPIPE stop, not a failure: a reader closed its pipe early
+  # (`yes | head -1`), though `exit 141` or `kill -PIPE` reads the same.
+  local codes=() k note=""
   [ -r "$JOB_PIPESTATUS" ] && read -r -a codes < "$JOB_PIPESTATUS"
   if [ "${#codes[@]}" -gt 1 ] && [ "$rc" != 0 ]; then
     for ((k = ${#codes[@]} - 1; k >= 0; k--)); do
       [ "${codes[k]}" != 0 ] || continue
-      [ "${codes[k]}" = "$rc" ] && [ "$k" -lt $((${#codes[@]} - 1)) ] \
-        && pipeline="pipeline stage $((k + 1)) of ${#codes[@]} failed (PIPESTATUS=${codes[*]})"
+      if [ "${codes[k]}" = "$rc" ] && [ "$k" -lt $((${#codes[@]} - 1)) ]; then
+        if [ "$rc" = 141 ]; then
+          note="pipeline stage $((k + 1)) of ${#codes[@]} stopped by SIGPIPE (PIPESTATUS=${codes[*]})"
+        else
+          note="pipeline stage $((k + 1)) of ${#codes[@]} failed (PIPESTATUS=${codes[*]})"
+        fi
+      fi
       break
     done
   fi
-  [ "$rc" = 141 ] && note="stopped by SIGPIPE: a reader closed its pipe early (rc 141)"
-  [ -n "$pipeline$note" ] && printf '%s [job-run] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    "${pipeline}${pipeline:+${note:+; }}${note}" >> "$JOB_PROGRESS"
+  [ -z "$note" ] && [ "$rc" = 141 ] && note="stopped by SIGPIPE (rc 141)"
+  [ -n "$note" ] && printf '%s [job-run] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$note" >> "$JOB_PROGRESS"
   printf 'rc=%s\ncause=%s\nended=%s\n' "$rc" "$cause" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/exit"
-  [ -n "$pipeline" ] && printf 'pipeline=%s\n' "$pipeline" >> "$dir/exit"
+  [ -n "$note" ] && printf 'note=%s\n' "$note" >> "$dir/exit"
 }
 
 # Forward the signal to the job and go on waiting. A job that ignores it keeps

@@ -543,7 +543,10 @@ which is what lets the axes run beside it. Launch it as this explicit `job-run`
 call, never as the bare `python3` command (#1697): the background-job hook
 rewrites a bare background call, and Agent calls sent in the same response as a
 rewritten call get no auto-mode verdict, so all three axes would be reissued.
-The hook leaves a call that already starts with `job-run` unchanged:
+The hook leaves a call that already starts with `job-run` unchanged. When
+`command -v job-run` finds nothing, run `bash ~/.agents/skills/flow/install.sh`
+first (the hook's own pass-through message names it), since the call exits 127
+and no pass runs without it:
 
 ```
 job-run --name codex-<n> -- python3 ~/.agents/skills/implement/codex-gate-run.py --ticket <n> \

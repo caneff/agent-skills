@@ -273,11 +273,12 @@ got=$(fire withjr "$bare_codex"); body=${got#*|}
 [[ "$(printf '%s' "$body" | jq -r '.hookSpecificOutput.updatedInput.command // ""')" == job-run\ --name\ *"codex-gate-run.py"* ]] \
   && ok "a bare background Codex call is still wrapped" \
   || no "a bare background Codex call is still wrapped" "$body"
-# No doc may show the pass launched bare: every codex-gate-run.py command line in
-# a Markdown file sits under a job-run line or inside a job-run call.
+# No doc may show the pass launched bare: a Markdown line (any indent) holding a
+# `python3 ... codex-gate-run.py` command must hold `job-run` as well. A line that
+# only names the script (a prose mention) is not a command.
 repo_root="$(cd "$here/../../.." && pwd)"
 bare_docs=$(cd "$repo_root" && git ls-files '*.md' | grep -v '^docs/research/' \
-  | xargs grep -n -B1 '^python3 .*codex-gate-run\.py' 2>/dev/null | grep -v -- '-job-run ' | grep 'codex-gate-run\.py')
+  | xargs grep -n -E 'python3 [^ ]*codex-gate-run\.py' 2>/dev/null | grep -v 'job-run ')
 [ -z "$bare_docs" ] \
   && ok "no doc shows the Codex pass launched as a bare background call" \
   || no "no doc shows the Codex pass launched as a bare background call" "$bare_docs"
