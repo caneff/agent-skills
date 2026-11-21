@@ -270,7 +270,9 @@ days, and a review outside a spec run has no closing report, so that row is gone
 
 **A witness check ends with one `append` per mutation** (#1270). The script
 under *Isolation* below runs `review_ledger.py append --type witness-mutation`
-(`call-site-mutation` for an id passed with `--call-site`) once per mutation id,
+(`call-site-mutation` for an id passed with `--call-site`, `worker-mutation` for every
+id under `--worker`) once per mutation id, with `--status-file` (an `append` takes no
+hand-written `--outcome`, #1969),
 reading the outcome its report loop wrote for that id and its wall clock, before it removes them. The row
 holds the outcome `red`, `green` or `unknown` and no tokens, which stay with the
 correctness row. An `unknown` stays `unknown`. A refusal is reported like the
@@ -420,7 +422,7 @@ python3 ~/.agents/skills/multi-axis-code-review/render-brief.py --axis <axis> \
   [--ruling "<text>"]... [--choice "<text>"]... [--claim "<id>: <text>"]... \
   [--round <K> [--first-id <ordinal>]] \\
   [--workers <k>] [--ceiling <seconds>] [--test-command "<cmd>"] \\
-  [--capture-stat "<the capture's printed stat line>"] [--seam-sha <the worker's "Seam run at" sha>]
+  [--capture-stat "<the capture's printed stat line>"]
 ```
 
 It reads the diff's line count from the file, prints the capture's stat line
@@ -435,11 +437,10 @@ its own. It states the worker count (default 1) and wall-clock ceiling (default
 spawns no nested subagent; the correctness prompt also passes the worker count
 to `witness-check.sh --slots` as workers x 3 axes (#1855: only correctness runs
 tests, so it takes the review's whole budget; the spec and standards briefs
-carry no witness line). `--seam-sha` is the worker's `Seam run at:` sha: when it
-equals the worktree's HEAD the correctness brief says that run stands and the
-reviewer reruns only the files its mutants target, unmutated, never the whole
-narrowed suite (#1856); absent, different or unreadable, it says nothing and the
-reviewer's current behaviour stands. Exit 2 means a bad input and nothing written.
+carry no witness line). The correctness brief always tells the reviewer to run
+only the test files its mutants target, unmutated, before mutating, never the narrowed or full suite
+(#1856, #1928: the wave runs before the worker's seam, so no seam sha exists to
+condition it on). Exit 2 means a bad input and nothing written.
 
 It writes the brief to `<dir>/brief-<n>-<axis>.md` (`-2`, `-3` for a later wave
 of the same ticket and axis: an earlier wave's brief is never overwritten) and
@@ -581,8 +582,12 @@ message, `<id>: HOLLOW`, or `<id>: unknown` — so read the output, not the
 status; the header lists the other exit codes.
 
 Each witness gets the setup a fresh worktree lacks (#1219), which the script's
-header states: no Python bytecode, no `__pycache__`, and a link to the reviewed
-tree's `node_modules`. A tree whose HEAD has a `uv.lock` gets `uv sync
+header states: no Python bytecode, no `__pycache__`, and a link to the
+`node_modules` Node would find from the reviewed tree: the nearest one walking up
+from its top level, else the primary checkout's (#1969). A tree whose `package.json`
+declares dependencies and has none anywhere leaves every mutation `unknown`. The
+covering command runs under `pipefail`, so a pipe through `tail` or `grep` still
+reports the test's own exit status. A tree whose HEAD has a `uv.lock` gets `uv sync
 --frozen` run in each witness, so every witness has its own `.venv`; one
 with no `uv.lock` leaves `.venv` unset and the run says so (#1528). The
 reviewed tree's `.venv` is never symlinked in: an editable install there
@@ -601,10 +606,10 @@ run the way `tests/all.sh` would run it (`bash <name>.test.sh`, `python3
 the repo, so a diff adding five tests would pay it five times inside one
 axis, while the covering suite finishes in seconds. The whole gate belongs to
 the worker's own pre-report gate, where it already runs once. The same holds
-before mutating (#1856): the worker's seam run at the reviewed commit stands, so
-run only the files the planned mutants target, unmutated, to confirm they start
-green, never the narrowed or full suite. With no worker seam sha in the brief
-(a review outside the implement lane) that is the reviewer's call.
+before mutating (#1856, #1928): run only the files the planned mutants target,
+unmutated, to confirm they start green, never the narrowed or full suite. The
+worker's seam run comes after the wave, so it is never the reason to skip a rerun
+of those files.
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs: render it with `--no-spec`, which puts `Spec: no spec available` under its Inputs, so its part (b) reports that instead of judging scope.
 

@@ -636,6 +636,64 @@ fi
 [ -e "$target/node_modules/marker" ] ||
   { echo "FAIL: removing the witness deleted the reviewed tree's node_modules contents" >&2; fail=1; }
 
+# #1969: a review run from a worktree nested under the checkout (`.claude/worktrees/`) has no
+# `node_modules` at its own top level; the one the checkout holds is found by walking up from
+# the reviewed tree, and a reviewed tree outside the checkout finds it through the git common
+# dir's parent. The body goes red only when it can read node_modules/marker.
+node_body=': >"$3"; if [ -e "$2/node_modules/marker" ]; then echo "MARKER-PRESENT: reachable"; exit 1; fi; echo "no marker"; exit 0'
+target="$(make_repo nestedrepo 'printf "node_modules/\n" >.gitignore')" || exit 1
+# The reviewed tree sits under a directory that holds the node_modules, but the repo it is a
+# worktree of has none, so the git common dir's parent cannot supply it: only the walk-up can.
+mkdir -p "$scratch/outer/node_modules" "$scratch/outer/sub" && : >"$scratch/outer/node_modules/marker"
+git -C "$scratch/nestedrepo" worktree add -q --detach "$scratch/outer/sub/rev" HEAD
+substitute 'nn1' "$node_body" "$scratch/outer/sub/rev" >"$scratch/launcher-nested.sh"
+hygiene_run nested "$scratch/outer/sub/rev" "$scratch/launcher-nested.sh"
+if ! grep -q 'nn1: red' "$scratch/nested.out" || ! grep -q 'nn1|.*MARKER-PRESENT' "$scratch/nested.out"; then
+  echo "FAIL: a worktree under a directory holding node_modules did not get it by walking up" >&2
+  cat "$scratch/nested.out" >&2; fail=1
+fi
+# The common dir's parent: a reviewed tree outside the checkout, node_modules only in the checkout.
+mkdir -p "$scratch/nestedrepo/node_modules" && : >"$scratch/nestedrepo/node_modules/marker"
+substitute 'nc1' "$node_body" "$target" >"$scratch/launcher-common.sh"
+hygiene_run common "$target" "$scratch/launcher-common.sh"
+if ! grep -q 'nc1: red' "$scratch/common.out" || ! grep -q 'nc1|.*MARKER-PRESENT' "$scratch/common.out"; then
+  echo "FAIL: a worktree outside the checkout did not get the primary checkout's node_modules" >&2
+  cat "$scratch/common.out" >&2; fail=1
+fi
+# A tree that declares dependencies with no node_modules anywhere: a mutant whose output says
+# its module failed to load is `unknown`, never a `red` from the missing module; one that fails
+# for its own reason (a Python suite here) is still `red`.
+target="$(make_repo nonodes 'printf "{\"devDependencies\": {\"playwright\": \"1\"}}\n" >package.json')" || exit 1
+substitute 'nx1 nx2' 'case "$1" in nx1) : >"$3"; echo "Error [ERR_MODULE_NOT_FOUND]: Cannot find package playwright"; exit 1;; *) : >"$3"; echo "ASSERTION-FAILED: own message"; exit 1;; esac' "$target" >"$scratch/launcher-nonodes.sh"
+hygiene_run nonodes "$target" "$scratch/launcher-nonodes.sh"
+if ! grep -q 'nx1: unknown' "$scratch/nonodes.out" || grep -q 'nx1: red' "$scratch/nonodes.out" ||
+   ! grep -q 'nx2: red' "$scratch/nonodes.out"; then
+  echo "FAIL: a missing module was not unknown, or an unrelated failure in the same tree was not red" >&2
+  cat "$scratch/nonodes.out" >&2; fail=1
+fi
+
+# #1969: a test command piped through `tail` yields the test's own exit status, not tail's.
+target="$(make_repo pipedrepo "$py_setup")" || exit 1
+substitute 'pp1' ': >"$3"; false | tail -1' "$target" >"$scratch/launcher-piped.sh"
+hygiene_run piped "$target" "$scratch/launcher-piped.sh"
+grep -q 'pp1: red' "$scratch/piped.out" ||
+  { echo "FAIL: a failing test piped through tail read as a pass (pipe status, not the test's)" >&2; cat "$scratch/piped.out" >&2; fail=1; }
+
+# A pipe reader that closes early can SIGPIPE the test: status 141 reads unknown, not red.
+substitute 'sp1' ': >"$3"; kill -PIPE $$' "$target" >"$scratch/launcher-sigpipe.sh"
+hygiene_run sigpipe "$target" "$scratch/launcher-sigpipe.sh"
+grep -q 'sp1: unknown' "$scratch/sigpipe.out" ||
+  { echo "FAIL: a SIGPIPE status was not reported unknown" >&2; cat "$scratch/sigpipe.out" >&2; fail=1; }
+
+# #1969: `--worker` writes worker-mutation rows, so the worker's own mutations need no hand outcome.
+wledger="$scratch/worker-ledger.jsonl"
+printf 'mutate() { : >"$3"; exit 1; }\n' >"$scratch/mutate-def-worker.sh"
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$checker" --worktree "$repo" --mutate "$scratch/mutate-def-worker.sh" \
+    --repo skills --ticket 7 --ledger "$wledger" --worker -- wk1 ) >"$scratch/worker.out" 2>&1 ||
+  { echo "FAIL: the --worker run exited non-zero" >&2; cat "$scratch/worker.out" >&2; fail=1; }
+grep -q '"type": "worker-mutation"' "$wledger" 2>/dev/null ||
+  { echo "FAIL: --worker did not write a worker-mutation row" >&2; cat "$wledger" >&2 2>/dev/null; fail=1; }
+
 # A Rust suite in the witness must build into the witness's own target dir, never
 # the reviewed tree's (#1696).
 target="$(make_repo cargorepo "$py_setup")" || exit 1

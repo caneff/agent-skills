@@ -14,9 +14,6 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
-import fixture_identity  # noqa: E402
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDER = os.path.join(HERE, "render-brief.py")
 SHAPES = ("an absent or malformed answer read as a benign one",
@@ -281,37 +278,10 @@ def test_the_correctness_prompt_asks_for_the_unmutated_time_as_the_baseline(wt, 
     assert "--baseline-seconds" in out, out
 
 
-# #1856: the worker's seam run at the reviewed sha stands; the reviewer reruns only the files
-# its mutants target. No seam sha, or one that is not the reviewed sha, leaves it unsaid.
-@pytest.fixture
-def repo_wt(tmp_path):
-    path = tmp_path / "gitwt"
-    path.mkdir()
-    env = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
-           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, **fixture_identity.env()}
-    for cmd in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "base"]):
-        subprocess.run(["git", "-C", str(path), *cmd], check=True, env=env, capture_output=True)
-    head = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], check=True,
-                          capture_output=True, text=True).stdout.strip()
-    return str(path), head
-
-
-def test_a_seam_sha_equal_to_the_reviewed_sha_tells_the_reviewer_the_seam_run_stands(repo_wt, diff):
-    path, head = repo_wt
-    _, out, _ = render(path, diff, "--seam-sha", head, axis="correctness")
-    assert "worker's seam run" in out and "never the whole" in out, out
-
-
-def test_a_one_character_seam_sha_that_happens_to_prefix_head_gets_no_seam_instruction(repo_wt, diff):
-    path, head = repo_wt
-    code, out, _ = render(path, diff, "--seam-sha", head[0], axis="correctness")
-    assert code == 0 and "seam run" not in out, (code, out)
-
-
-def test_a_short_seam_sha_of_seven_characters_is_accepted(repo_wt, diff):
-    path, head = repo_wt
-    _, out, _ = render(path, diff, "--seam-sha", head[:7], axis="correctness")
-    assert "worker's seam run" in out, out
+# #1928: the review wave runs before the seam, so the targeted-files line is unconditional.
+def test_the_correctness_brief_always_limits_its_test_run_to_the_mutants_target_files(wt, diff):
+    code, out, _ = render(wt, diff, axis="correctness")
+    assert code == 0 and "run only the test files your planned mutants target" in out and "never the whole narrowed or full suite" in out, (code, out)
 
 
 def test_the_witness_slots_line_says_it_overrides_the_worker_count(wt, diff):
@@ -319,28 +289,10 @@ def test_the_witness_slots_line_says_it_overrides_the_worker_count(wt, diff):
     assert "for the witness check this replaces the worker count above" in out, out
 
 
-def test_a_seam_sha_that_is_not_the_reviewed_sha_leaves_the_current_behaviour(repo_wt, diff):
-    path, head = repo_wt
-    code, out, _ = render(path, diff, "--seam-sha", "0" * 40, axis="correctness")
-    assert code == 0 and "seam run" not in out, (code, out)
-
-
-def test_no_seam_sha_leaves_the_current_behaviour(repo_wt, diff):
-    path, _ = repo_wt
-    code, out, _ = render(path, diff, axis="correctness")
-    assert code == 0 and "seam run" not in out, (code, out)
-
-
-def test_a_worktree_whose_head_cannot_be_read_gets_no_seam_instruction(wt, diff):
-    code, out, _ = render(wt, diff, "--seam-sha", "abc1234", axis="correctness")
-    assert code == 0 and "seam run" not in out, (code, out)
-
-
 @pytest.mark.parametrize("axis", ["standards", "spec"])
-def test_the_other_axes_carry_no_seam_instruction(repo_wt, diff, axis):
-    path, head = repo_wt
-    code, out, _ = render(path, diff, "--seam-sha", head, axis=axis)
-    assert code == 0 and "seam run" not in out, (code, out)
+def test_the_other_axes_carry_no_targeted_files_instruction(wt, diff, axis):
+    code, out, _ = render(wt, diff, axis=axis)
+    assert code == 0 and "your planned mutants target" not in out, (code, out)
 
 
 @pytest.mark.parametrize("axis,needle", [("standards", "Over-engineering"), ("spec", "scope creep"),

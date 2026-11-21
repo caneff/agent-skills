@@ -53,7 +53,7 @@ class TestAppendMutation:
     def test_call_site_and_worker_types_append_too(self, mut):
         mut.ok("c1", "call-site-mutation", "red\n")
         r = mut.run("append", "--repo", "skills", "--ticket", 500, "--type", "worker-mutation", "--mutation-id", "w1",
-                    "--outcome", "green", "--seconds", 30, "--ledger", mut.ledger)
+                    "--status-file", mut.status_file("w1", "green"), "--seconds", 30, "--ledger", mut.ledger)
         assert r.returncode == 0, r.stderr
         assert sorted(r["type"] for r in mut.rows().values()) == ["call-site-mutation", "worker-mutation"]
 
@@ -82,13 +82,12 @@ class TestAppendMutation:
         assert mut.append("m1", seconds=bad).returncode == 2, bad
         assert not mut.ledger.exists()
 
-    def test_the_outcome_source_is_exactly_one_of_status_file_and_outcome(self, mut):
+    def test_the_outcome_source_is_the_status_file_alone(self, mut):
         base = ["append", "--repo", "skills", "--ticket", 500, "--type", "worker-mutation", "--mutation-id", "w1",
                 "--seconds", 5, "--ledger", mut.ledger]
         assert mut.run(*base).returncode == 2
         both = mut.run(*base, "--outcome", "red", "--status-file", mut.status_file("w1", "red"))
-        assert both.returncode == 2
-        assert mut.run(*base, "--outcome", "maybe").returncode == 2
+        assert both.returncode == 2 and "unrecognized arguments: --outcome" in both.stderr
         assert not mut.ledger.exists()
 
     @pytest.mark.parametrize("id_args", [
@@ -98,13 +97,13 @@ class TestAppendMutation:
     ])
     def test_a_mutation_append_without_an_id_or_with_an_unusable_one_is_refused(self, mut, id_args):
         r = mut.run("append", "--repo", "skills", "--ticket", 500, "--type", "witness-mutation", *id_args,
-                    "--outcome", "red", "--seconds", 1, "--ledger", mut.ledger)
+                    "--status-file", mut.status_file("m1", "red"), "--seconds", 1, "--ledger", mut.ledger)
         assert r.returncode == 2
         assert not mut.ledger.exists()
 
     def test_a_review_type_refuses_mutation_arguments(self, mut):
         r = mut.run("append", "--repo", "skills", "--ticket", 500, "--type", "standards", "--mutation-id", "m1",
-                    "--outcome", "red", "--seconds", 1, "--ledger", mut.ledger)
+                    "--status-file", mut.status_file("m1", "red"), "--seconds", 1, "--ledger", mut.ledger)
         assert r.returncode == 2
         # The parser's own message, not a missing transcripts tree.
         assert "append --type standards: error: unrecognized arguments: --mutation-id m1" in r.stderr
@@ -112,7 +111,7 @@ class TestAppendMutation:
     @pytest.mark.parametrize("flag", ["--cache", "--transcripts"])
     def test_a_mutation_type_refuses_the_review_cache_arguments(self, mut, flag):
         r = mut.run("append", "--repo", "skills", "--ticket", 500, "--type", "witness-mutation", "--mutation-id",
-                    "m1", "--outcome", "red", "--seconds", 1, flag, mut.tmp, "--ledger", mut.ledger)
+                    "m1", "--status-file", mut.status_file("m1", "red"), "--seconds", 1, flag, mut.tmp, "--ledger", mut.ledger)
         assert r.returncode == 2, flag
         assert f"unrecognized arguments: {flag}" in r.stderr
         assert not mut.ledger.exists()
