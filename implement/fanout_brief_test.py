@@ -293,3 +293,110 @@ def test_a_test_command_that_runs_no_tests_is_refused(wt, cmd):
 def test_a_test_command_that_runs_something_is_accepted(wt, cmd):
     code, out, err = run(wt, "alpha=a.py", test_command=cmd)
     assert code == 0, err
+
+
+def test_a_finding_split_across_workers_by_sub_ids_renders_one_part_each(wt):
+    text_a = task(wt, "--finding", "alpha:F3a=left half", "--finding", "beta:F3b=right half")
+    assert "`F3a`" in text_a and "left half" in text_a and "F3b" not in text_a, text_a
+    text_b = task(wt, "--finding", "alpha:F3a=left half", "--finding", "beta:F3b=right half", worker="beta")
+    assert "`F3b`" in text_b and "F3a" not in text_b, text_b
+
+
+def test_the_twice_refusal_tells_the_controller_to_mint_sub_ids(wt):
+    err = refused_task(wt, "--finding", "alpha:F3=x", "--finding", "beta:F3=y")
+    assert "twice" in err and "sub-ids" in err and "F3a" in err and "F3b" in err, err
+
+
+def test_help_describes_sub_ids(wt):
+    out = subprocess.run(["python3", RENDER, "--help"], capture_output=True, text=True).stdout
+    assert "sub-id" in out and "F3a" in out, out
+
+
+PYTEST_FILE = "def test_x():\n    assert True\n"
+
+
+def test_python_on_a_pytest_file_with_no_main_runner_is_refused_as_running_no_tests(wt):
+    with open(os.path.join(wt, "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE)
+    err = refused(wt, "alpha=a.py", test_command="python3 x_test.py")
+    assert "runs no tests" in err and "python3 x_test.py" in err, err
+
+
+def test_python_on_a_test_file_with_a_main_runner_is_accepted(wt):
+    with open(os.path.join(wt, "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE + "\nif __name__ == '__main__':\n    test_x()\n")
+    code, out, err = run(wt, "alpha=a.py", test_command="python3 x_test.py")
+    assert code == 0, err
+
+
+def test_python_on_a_file_that_cannot_be_read_is_accepted(wt):
+    code, out, err = run(wt, "alpha=a.py", test_command="python3 missing_test.py")
+    assert code == 0, err
+
+
+def test_the_sub_id_hint_is_absent_when_one_worker_is_given_the_same_id_twice(wt):
+    err = refused_task(wt, "--finding", "alpha:F3=x", "--finding", "alpha:F3=y", "--finding", "beta:P2=z")
+    assert "twice" in err and "sub-ids" not in err, err
+
+
+def test_a_finding_and_a_ruled_one_with_one_id_for_two_workers_gets_both_hints(wt):
+    err = refused_task(wt, "--finding", "alpha:F3=x", "--ruled", "beta:F3=y")
+    assert "not both" in err and "sub-ids" in err, err
+
+
+def test_a_sub_id_given_beside_its_whole_id_is_refused(wt):
+    err = refused_task(wt, "--finding", "alpha:F3=x", "--finding", "beta:F3b=y")
+    assert "F3b" in err and "F3" in err and "part of" in err, err
+
+
+def test_two_parts_of_one_finding_for_one_worker_are_refused(wt):
+    err = refused_task(wt, "--finding", "alpha:F3a=x", "--finding", "alpha:F3b=y", "--finding", "beta:P2=z")
+    assert "F3a" in err and "F3b" in err and "one worker each" in err, err
+
+
+def test_python_on_a_test_file_after_a_cd_reads_the_file_in_that_directory(wt):
+    os.mkdir(os.path.join(wt, "sub"))
+    with open(os.path.join(wt, "sub", "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE)
+    err = refused(wt, "alpha=a.py", test_command="cd sub && python3 x_test.py")
+    assert "runs no tests" in err, err
+
+
+def test_a_root_pytest_file_does_not_refuse_a_cd_into_a_directory_whose_file_has_a_runner(wt):
+    os.mkdir(os.path.join(wt, "sub"))
+    with open(os.path.join(wt, "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE)
+    with open(os.path.join(wt, "sub", "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE + "\nif __name__ == '__main__':\n    test_x()\n")
+    code, out, err = run(wt, "alpha=a.py", test_command="cd sub && python3 x_test.py")
+    assert code == 0, err
+
+
+def test_pytest_on_a_pytest_file_is_accepted(wt):
+    with open(os.path.join(wt, "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE)
+    code, out, err = run(wt, "alpha=a.py", test_command="pytest x_test.py")
+    assert code == 0, err
+
+
+def test_python_on_a_script_that_defines_no_tests_is_accepted(wt):
+    with open(os.path.join(wt, "tool.py"), "w") as fh:
+        fh.write("print('hi')\n")
+    code, out, err = run(wt, "alpha=a.py", test_command="python3 tool.py")
+    assert code == 0, err
+
+
+def test_python_on_a_file_with_only_a_test_class_is_refused(wt):
+    with open(os.path.join(wt, "x_test.py"), "w") as fh:
+        fh.write("class TestX:\n    def test_a(self):\n        pass\n")
+    err = refused(wt, "alpha=a.py", test_command="python3 x_test.py")
+    assert "runs no tests" in err, err
+
+
+def test_the_refusal_names_the_cause_it_found(wt):
+    with open(os.path.join(wt, "x_test.py"), "w") as fh:
+        fh.write(PYTEST_FILE)
+    py = refused(wt, "alpha=a.py", test_command="python3 x_test.py")
+    assert "x_test.py" in py and "-m pytest" in py and "no-op" not in py, py
+    noop = refused(wt, "alpha=a.py", test_command="echo ok")
+    assert "no-op" in noop and "-m pytest" not in noop, noop
