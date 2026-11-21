@@ -434,6 +434,74 @@ def test_command_base_says_so_when_the_command_takes_its_ref_another_way(tmp_pat
 
 
 def test_an_edit_in_a_subsection_of_the_seam_section_is_a_change(tmp_path):
-    before = declared() + "\n### Scope\n\nall suites\n\n## Next\n\nx\n"
+    before = declared() + "\n### Scope\n\nA doc edit runs all suites.\n\n## Next\n\nx\n"
     root = two_revs(tmp_path, before, before.replace("all suites", "one suite"))
     assert seam_section_run(root).returncode == 1
+
+
+# --- #1975: only the commands the merge would run are compared --------------
+
+def test_a_prose_only_edit_to_the_seam_section_reads_same(tmp_path):
+    before = declared() + "\nThe gate is slow but thorough; see the history.\n"
+    after = (declared().replace("the live editor", "the live editor and the CDN")
+             .replace("over the changed suites", "over every changed suite")
+             + "\nThe gate is thorough but slow.\n")
+    r = seam_section_run(two_revs(tmp_path, before, after))
+    assert (r.returncode, r.stdout.strip()) == (0, "same")
+
+
+def test_a_changed_narrowed_command_reads_differs(tmp_path):
+    root = two_revs(tmp_path, declared(), declared().replace("--changed origin/main", "--changed origin/dev"))
+    r = seam_section_run(root)
+    assert r.returncode == 1 and "differs" in r.stdout
+
+
+def test_a_changed_seam_command_reads_differs(tmp_path):
+    root = two_revs(tmp_path, declared(), declared().replace("`bash tests/all.sh`", "`bash tests/other.sh`"))
+    assert seam_section_run(root).returncode == 1
+
+
+def test_an_added_extra_run_sentence_reads_differs(tmp_path):
+    extra = "\nA change to `package.json` also runs `npm run test:live`.\n"
+    root = two_revs(tmp_path, declared(), declared() + extra)
+    assert seam_section_run(root).returncode == 1
+
+
+def test_a_removed_extra_run_sentence_reads_differs(tmp_path):
+    extra = "\nA change to `package.json` also runs `npm run test:live`.\n"
+    root = two_revs(tmp_path, declared() + extra, declared())
+    assert seam_section_run(root).returncode == 1
+
+
+# --- #1975 review round: blocks, fences, and what counts as gate text -------
+
+EXTRA = "\nA puzzle update runs only that puzzle's tests while it is\nbuilt, for a change confined to puzzles/<name>/.\n"
+
+
+def test_an_edit_on_the_wrapped_second_line_of_a_run_sentence_reads_differs(tmp_path):
+    root = two_revs(tmp_path, declared() + EXTRA, declared() + EXTRA.replace("puzzles/<name>/", "puzzles/ or rules/"))
+    assert seam_section_run(root).returncode == 1
+
+
+def test_a_rerun_sentence_counts_as_gate_text(tmp_path):
+    root = two_revs(tmp_path, declared() + "\nA lib edit reruns the live suite.\n",
+                    declared() + "\nA lib edit reruns the full live suite.\n")
+    assert seam_section_run(root).returncode == 1
+
+
+def test_an_edit_to_a_command_inside_a_fence_reads_differs(tmp_path):
+    before = declared() + "\n```sh\nnpm test live\n```\n"
+    root = two_revs(tmp_path, before, before.replace("live", "e2e"))
+    assert seam_section_run(root).returncode == 1
+
+
+def test_a_blind_to_edit_that_mentions_running_reads_same(tmp_path):
+    before = declared().replace("the live editor", "what runs only in a browser")
+    root = two_revs(tmp_path, before, before.replace("a browser", "Chrome"))
+    assert (seam_section_run(root).returncode, ) == (0, )
+
+
+def test_an_edit_to_prose_naming_a_backticked_file_reads_same(tmp_path):
+    before = declared() + "\nThe helper list lives in `tests/helpers.txt`.\n"
+    root = two_revs(tmp_path, before, before.replace("tests/helpers.txt", "tests/other.txt"))
+    assert (seam_section_run(root).returncode, ) == (0, )
