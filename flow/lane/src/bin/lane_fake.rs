@@ -365,9 +365,20 @@ fn run_gh(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
         if let Ok(dir) = env::var("GH_CLAIM_DIR") {
+            let claim = std::path::Path::new(&dir).join(n);
             if args.windows(2).any(|w| w[0] == "--add-label" && w[1] == "in-progress") {
-                let _ = std::fs::write(std::path::Path::new(&dir).join(n), "");
+                let _ = std::fs::write(&claim, "");
             }
+            if args.windows(2).any(|w| w[0] == "--remove-label" && w[1] == "in-progress") {
+                let _ = std::fs::remove_file(&claim);
+            }
+        }
+        // `GH_ISSUE_EDIT_APPLIED_FAIL` names the tickets whose claim edit is
+        // applied server-side and then reports an error (a 502 on the reply).
+        let applied = env::var("GH_ISSUE_EDIT_APPLIED_FAIL").unwrap_or_default();
+        if applied.split(',').any(|t| !t.is_empty() && t == n) && args.iter().any(|a| a == "--add-label") {
+            eprintln!("gh: HTTP 502");
+            return ExitCode::FAILURE;
         }
     }
     if (a0, a1) == ("pr", "list") {
@@ -629,11 +640,24 @@ fn run_herdr(args: &[String]) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+        // `HERDR_STALL_RESEND_OK`: the Enter the dispatcher resends is what
+        // submits a typed brief, so only after one does the agent work.
+        ("agent", "send-keys") => {
+            if let Ok(log) = env::var("CALL_LOG") {
+                let _ = std::fs::write(format!("{log}.entered"), "");
+            }
+        }
+        ("agent", "wait") => {
+            if herdr_stalled() {
+                println!("{{\"error\":{{\"code\":\"agent_wait_timeout\",\"message\":\"never reached working\"}}}}");
+                return ExitCode::FAILURE;
+            }
+        }
         ("agent", "prompt") => {
             if let (Ok(log), Some(text)) = (env::var("CALL_LOG"), args.get(3)) {
                 let _ = std::fs::write(format!("{log}.prompt"), text);
             }
-            if env_flag("HERDR_STALL") {
+            if herdr_stalled() {
                 println!(
                     "{{\"error\":{{\"code\":\"agent_prompt_stalled\",\"message\":\"no activity observed\"}},\"id\":\"cli:agent:prompt\"}}"
                 );
@@ -643,6 +667,16 @@ fn run_herdr(args: &[String]) -> ExitCode {
         _ => {}
     }
     ExitCode::SUCCESS
+}
+
+/// Whether the brief is still stuck unsubmitted: `HERDR_STALL`, cleared by an
+/// Enter resend when `HERDR_STALL_RESEND_OK` is set too.
+fn herdr_stalled() -> bool {
+    if !env_flag("HERDR_STALL") {
+        return false;
+    }
+    let entered = env::var("CALL_LOG").is_ok_and(|log| Path::new(&format!("{log}.entered")).exists());
+    !(env_flag("HERDR_STALL_RESEND_OK") && entered)
 }
 
 fn main() -> ExitCode {

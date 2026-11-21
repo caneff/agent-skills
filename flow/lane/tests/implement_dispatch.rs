@@ -407,17 +407,17 @@ fn the_report_names_the_workers_claude_session_beside_the_herdr_agent() {
     let _ = child.kill();
     let _ = child.wait();
     assert!(out.status.success(), "{}", out_text(&out));
-    assert!(out_text(&out).contains("session:  implement-395-42"), "{}", out_text(&out));
+    assert!(out_text(&out).contains("send to (SendMessage): implement-395-42"), "{}", out_text(&out));
 }
 
 #[test]
-fn no_matching_herdr_agent_session_reports_unavailable_instead_of_failing() {
+fn no_matching_herdr_agent_session_reports_not_registered_yet_instead_of_failing() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
-    assert!(out_text(&out).contains("session:  (unavailable)"), "{}", out_text(&out));
+    assert!(out_text(&out).contains("send to (SendMessage): not registered yet; ListAgents shows it as implement-395-…"), "{}", out_text(&out));
 }
 
 #[test]
@@ -461,14 +461,14 @@ fn a_non_worker_session_sharing_the_worktree_and_sorting_first_is_not_reported()
     let _ = worker.wait();
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(
-        out_text(&out).contains("session:  implement-395-42"),
+        out_text(&out).contains("send to (SendMessage): implement-395-42"),
         "the non-worker session sorting first should not be reported: {}",
         out_text(&out)
     );
 }
 
 #[test]
-fn a_live_matching_session_with_no_name_key_at_all_reports_unavailable() {
+fn a_live_matching_session_with_no_name_key_at_all_reports_not_registered_yet() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -487,8 +487,8 @@ fn a_live_matching_session_with_no_name_key_at_all_reports_unavailable() {
     let _ = child.wait();
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(
-        out_text(&out).contains("session:  (unavailable)"),
-        "a nameless session should report (unavailable), not a blank name: {}",
+        out_text(&out).contains("send to (SendMessage): not registered yet; ListAgents shows it as implement-395-…"),
+        "a nameless session should report the fallback, not a blank name: {}",
         out_text(&out)
     );
 }
@@ -630,7 +630,7 @@ fn refuses_when_the_resolved_base_is_not_on_origin() {
 }
 
 #[test]
-fn a_stalled_prompt_exits_non_zero_with_herdrs_error_and_leaves_the_worktree() {
+fn a_stalled_prompt_that_persists_releases_the_claim_closes_the_pane_and_keeps_the_workspace() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -639,6 +639,41 @@ fn a_stalled_prompt_exits_non_zero_with_herdrs_error_and_leaves_the_worktree() {
     assert!(!out.status.success());
     assert!(out_text(&out).contains("agent_prompt_stalled"), "{}", out_text(&out));
     assert!(repo.join(".claude/worktrees/implement-399").is_dir());
+    let calls = f.calls();
+    assert!(calls.lines().any(|l| l.starts_with("herdr agent send-keys ") && l.ends_with(" Enter")), "Enter never resent: {calls}");
+    assert!(
+        calls.lines().any(|l| l == format!("gh issue edit 399 --repo {SLUG} --remove-label in-progress --add-label ready-for-agent --remove-assignee @me")),
+        "the claim was left on a ticket with no worker: {calls}"
+    );
+    assert!(calls.lines().any(|l| l.starts_with("herdr pane close ")), "the pane was left open: {calls}");
+}
+
+#[test]
+fn a_stalled_prompt_followed_by_a_successful_resend_dispatches_normally() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("HERDR_STALL", "1"), ("HERDR_STALL_RESEND_OK", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "399"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    assert!(calls.lines().any(|l| l.starts_with("herdr agent send-keys ") && l.ends_with(" Enter")), "{calls}");
+    assert!(!calls.contains("--remove-label in-progress"), "a dispatched worker's claim was released: {calls}");
+    assert!(!calls.lines().any(|l| l.starts_with("herdr pane close ")), "{calls}");
+}
+
+#[test]
+fn a_claim_edit_that_errors_after_applying_leaves_the_ticket_unclaimed() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let claims = f.tmp.path().join("claims");
+    std::fs::create_dir_all(&claims).unwrap();
+    let scenario = with(&default_scenario(), &[("GH_CLAIM_DIR", claims.to_str().unwrap()), ("GH_ISSUE_EDIT_APPLIED_FAIL", "441")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "441"], &scenario);
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("could not claim #441"), "{}", out_text(&out));
+    assert!(!claims.join("441").exists(), "the claim the failed edit applied is still on the ticket: {}", f.calls());
 }
 
 #[test]
@@ -868,20 +903,17 @@ fn a_failure_past_the_claim_on_a_ready_for_human_ticket_only_undoes_in_progress(
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // A persistent stall releases the claim itself, and that release is the
+    // same edit the printed release line is.
     let scenario = with(&default_scenario(), &[("GH_LABELS", "ready-for-human"), ("HERDR_STALL", "1")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "411"], &scenario);
     assert!(!out.status.success());
+    let calls = f.calls();
     assert!(
-        out_text(&out)
-            .contains("release the ticket: gh issue edit 411 --repo caneff/sudokumaker-custom-constraints --remove-label in-progress"),
-        "{}",
-        out_text(&out)
+        calls.lines().any(|l| l == "gh issue edit 411 --repo caneff/sudokumaker-custom-constraints --remove-label in-progress --remove-assignee @me"),
+        "{calls}"
     );
-    assert!(
-        !out_text(&out).contains("--add-label ready-for-human"),
-        "release re-added ready-for-human, but the claim never removed it: {}",
-        out_text(&out)
-    );
+    assert!(!calls.contains("--add-label ready-for-human"), "release re-added ready-for-human, but the claim never removed it: {calls}");
 }
 
 #[test]

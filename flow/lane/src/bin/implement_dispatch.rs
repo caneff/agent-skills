@@ -105,6 +105,16 @@ session running this (the nearest ancestor process whose
 looked up in herdr agent list), else that session's name when its agent has
 none. The worker resolves the brief's name to a live session name with
 resolve-controller before every send. Names can hold spaces, hence the quotes.
+resolve-controller, run in a worker's workspace, answers first with the
+controller session dispatch recorded for that workspace (when it bears the
+name asked for), so a worker agent that shares the controller's name is never
+printed in its place.
+
+The report's `send to (SendMessage): <name>` line is the address a controller
+passes to SendMessage: the worker's Claude session name, never its herdr agent
+name. The lookup is retried for up to 5 s (herdr's read-after-write lag); a
+miss after that prints `send to (SendMessage): not registered yet; ListAgents
+shows it as implement-<n>-…`, and the dispatch still succeeds.
 
 The claim swaps ready-for-agent for in-progress on every ticket in the clump.
 A ready-for-human ticket keeps ready-for-human and adds in-progress beside it,
@@ -113,7 +123,8 @@ dispatch still refuses on the held in-progress label. Release on a failed
 claim undoes only what the claim did: in-progress off, the ready label back on
 for ready-for-agent, and the assignee removed. A claim that fails partway
 through a clump releases the tickets it had already claimed, so nothing is
-left half-claimed.
+left half-claimed. A claim edit that errors (an HTTP 502, a timeout) may still
+have applied: the ticket is read back and, when its claim is on, released too.
 
 Dispatches of one repository serialize on a lock held from the first ticket
 read to the last claim edit (~/.implement-dispatch-claim-<owner>__<name>.lock,
@@ -139,6 +150,10 @@ visible`, up to 5 reads, LANE_BRIEF_POLL_MS apart, 1000 by default) for the
 `/implement <n>` or `/implement-spec <n>` line. A pane that never shows it, or
 cannot be read, fails the dispatch non-zero but prints no release command: the
 worker is already working and may hold the brief, so the tickets stay claimed.
+A prompt that stalls (`agent_prompt_stalled`: the brief typed, unsubmitted) gets
+Enter resent once and a 30 s wait for the agent to work; if it still is not
+working, every claim is released, the pane closed, the workspace kept, and the
+exit is non-zero naming the stall.
 
 Spec mode refuses when 8 or more spec runs are live in herdr (agents named
 `<repo>-spec-<n>` that are not done). A spec dispatch holds the claim lock
@@ -1144,9 +1159,10 @@ fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
 /// or pid alone can be fooled by another live session sharing the
 /// worktree, or by a stale registry file left behind on a reused pid;
 /// sessionId can't collide that way. A short retry covers herdr's own
-/// read-after-write lag before it reports the session. "(unavailable)" on
-/// a miss — the report stays total, no dispatch failure over it.
-fn worker_session_name(home: &str, wt: &str, agent: &str) -> String {
+/// read-after-write lag before it reports the session, bounded by
+/// `SESSION_POLL_DEADLINE`. `None` on a miss — the report stays total, no
+/// dispatch failure over it.
+fn worker_session_name(home: &str, wt: &str, agent: &str) -> Option<String> {
     poll_worker_session_name(home, wt, agent, SESSION_POLL_DEADLINE, SESSION_POLL_INTERVAL, || {
         quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_POLL_CALL_TIMEOUT)
     })
@@ -1172,7 +1188,7 @@ fn poll_worker_session_name(
     deadline: std::time::Duration,
     interval: std::time::Duration,
     herdr_list: impl Fn() -> Option<String>,
-) -> String {
+) -> Option<String> {
     let start = std::time::Instant::now();
     loop {
         let name = herdr_list()
@@ -1180,12 +1196,22 @@ fn poll_worker_session_name(
             .and_then(|agents| agents.iter().find(|a| a.name() == agent).map(|a| a.session().to_string()).filter(|s| !s.is_empty()))
             .and_then(|session_id| sessions::live_in(Path::new(home), wt).into_iter().find(|s| s.session_id == session_id).map(|s| s.name).filter(|n| !n.is_empty()));
         if let Some(name) = name {
-            return name;
+            return Some(name);
         }
         if start.elapsed() >= deadline {
-            return "(unavailable)".to_string();
+            return None;
         }
         std::thread::sleep(interval);
+    }
+}
+
+/// The report's address line: the name `SendMessage` accepts (the Claude
+/// session name, never the herdr agent name), or, when the lookup still
+/// missed after its bounded retry, where to find the worker meanwhile.
+fn send_to_line(session: Option<&str>, ticket: &str) -> String {
+    match session {
+        Some(name) => format!("send to (SendMessage): {name}"),
+        None => format!("send to (SendMessage): not registered yet; ListAgents shows it as implement-{ticket}-…"),
     }
 }
 
@@ -1621,15 +1647,24 @@ fn run() -> Result<(), ExitCode> {
         match run_timeout("gh", &claim_args, gh_mutation_timeout()) {
             Ok(c) if c.success => claimed.push(t),
             other => {
-                release_claimed(&claimed, &slug);
-                // Names the underlying gh output so a timeout here — where
-                // GitHub may still have applied the edit after this
-                // process's own child was killed — reads as a timeout an
-                // operator should check GitHub over, not a bare "could not
-                // claim" that looks like an ordinary gh failure. This
-                // ticket itself is never auto-released past a timeout:
-                // doing so on a claim that actually landed server-side
-                // would incorrectly revert it.
+                // An edit that errored (a 502, a timeout) may still have
+                // applied server-side: read the ticket back and release this
+                // one too only when its claim is on (#1980). A read that
+                // fails proves nothing, so the ticket is left as it is and
+                // the message below says to check GitHub.
+                let mut to_release = claimed.clone();
+                let applied = matches!(
+                    lane::issue_state::read_timeout(&slug, &t.n, gh_query_timeout()),
+                    Ok(Some(i)) if i.has_label("in-progress")
+                );
+                if applied {
+                    to_release.push(t);
+                }
+                release_claimed(&to_release, &slug);
+                // Names the underlying gh output so a timeout here reads as
+                // a timeout an operator should check GitHub over, not a
+                // bare "could not claim" that looks like an ordinary gh
+                // failure.
                 let why = match other {
                     Ok(c) => c.combined,
                     Err(e) => e.to_string(),
@@ -1773,11 +1808,34 @@ fn run() -> Result<(), ExitCode> {
         }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };
-    claim.step(
-        "herdr agent prompt",
-        run_timeout("herdr", &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"], HERDR_PROMPT_TIMEOUT),
-        None,
-    )?;
+    let prompted = run_timeout("herdr", &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"], HERDR_PROMPT_TIMEOUT);
+    // A stalled prompt leaves the brief typed and unsubmitted (#1980): resend
+    // Enter once and wait for the agent to work. Still not working, the
+    // claim is released, the pane closed and the workspace kept.
+    let stalled = matches!(&prompted, Ok(o) if !o.success && o.combined.contains("agent_prompt_stalled"));
+    if stalled {
+        let stall_text = prompted.as_ref().map(|o| o.combined.clone()).unwrap_or_default();
+        let _ = run_timeout("herdr", &["agent", "send-keys", &agent, "Enter"], HERDR_QUERY_TIMEOUT);
+        let working = matches!(
+            run_timeout("herdr", &["agent", "wait", &agent, "--until", "working", "--timeout", "30000"], Duration::from_secs(40)),
+            Ok(o) if o.success
+        );
+        if !working {
+            let to_release: Vec<&Ticket> = tickets.iter().collect();
+            release_claimed(&to_release, &slug);
+            if !matches!(run_timeout("herdr", &["pane", "close", &pane], HERDR_MUTATION_TIMEOUT), Ok(o) if o.success) {
+                eprintln!("implement-dispatch: could not close pane {pane}; close it by hand: herdr pane close {pane}");
+            }
+            eprintln!("implement-dispatch: herdr agent prompt failed: {}", stall_text.trim());
+            eprintln!("the brief stayed unsubmitted after Enter was resent: the claim is released, pane {pane} closed");
+            if wt.exists() {
+                eprintln!("workspace left in place at {}", wt.display());
+            }
+            return Err(ExitCode::FAILURE);
+        }
+    } else {
+        claim.step("herdr agent prompt", prompted, None)?;
+    }
 
     // `--until working` says the agent started doing something, not that
     // the brief is the thing it is doing: read the pane back for the line.
@@ -1865,7 +1923,7 @@ fn run() -> Result<(), ExitCode> {
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");
-    safe_println!("session:  {session}");
+    safe_println!("{}", send_to_line(session.as_deref(), &n));
     safe_println!("cleanup:  {cleanup}");
     match (&base, mode) {
         (Base::Integration { created }, _) => {
@@ -1960,7 +2018,7 @@ print(json.dumps(out))
             Duration::from_millis(20),
             herdr_list,
         );
-        assert_eq!(name, "skills-worker");
+        assert_eq!(name.as_deref(), Some("skills-worker"));
     }
 
     #[test]
@@ -2001,6 +2059,23 @@ print(json.dumps(out))
             herdr_list,
         );
         writer.join().unwrap();
-        assert_eq!(name, "skills-worker");
+        assert_eq!(name.as_deref(), Some("skills-worker"));
+    }
+
+    #[test]
+    fn a_persistent_miss_gives_up_within_its_stated_bound() {
+        let tmp = TempDir::new().unwrap();
+        let start = Instant::now();
+        let name = poll_worker_session_name(
+            tmp.path().to_str().unwrap(),
+            "/nowhere",
+            "implement-836",
+            Duration::from_millis(300),
+            Duration::from_millis(20),
+            || None,
+        );
+        assert_eq!(name, None);
+        assert!(start.elapsed() < Duration::from_millis(900), "took {:?}", start.elapsed());
+        assert_eq!(SESSION_POLL_DEADLINE, Duration::from_secs(5), "the stated bound, in OPERATIONS.md and --help");
     }
 }

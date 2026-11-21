@@ -238,7 +238,11 @@ defines them.
   stalled ~4 h unseen (#820). The controller subscribes to each worker it
   dispatches, and again after every message it sends one: `SendMessage` to
   the worker with `notify_when_idle: true` and no `message` key at all:
-  `SendMessage({to: "<worker session name>", notify_when_idle: true})`.
+  `SendMessage({to: "<worker session name>", notify_when_idle: true})`, the
+  name on the dispatch report's `send to (SendMessage):` line — never the
+  herdr agent name on its `agent:` line, which `SendMessage` rejects. A
+  `not registered yet` line means `ListAgents` shows the worker as
+  `implement-<n>-…`; send to that name.
   Omit `message` rather than passing `""`: the tool's schema lists `message`
   under `required` but defaults it, so a call that leaves it out validates
   and routes, while an empty `message` fails as invalid. A worker that is

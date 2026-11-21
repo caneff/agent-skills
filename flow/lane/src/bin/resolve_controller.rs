@@ -62,6 +62,23 @@ fn print_if_reachable(home: &Path, session: &LiveSession) -> ExitCode {
     }
 }
 
+/// The live controller session recorded for the worker running in the
+/// current directory, when it is the one `target` names.
+fn recorded_controller(home: &Path, target: &str, agents: &[herdr::Agent]) -> Option<LiveSession> {
+    let cwd = std::env::current_dir().ok()?.display().to_string();
+    for (pid, start) in lane::workers::controllers_of_workspace_holding(home, &cwd) {
+        let Some(session) = sessions::live_all(home).into_iter().find(|s| s.pid == pid) else { continue };
+        if pid.parse::<i32>().ok().and_then(lane::proc_info::read_stat).map(|s| s.start).as_deref() != Some(start.as_str()) {
+            continue;
+        }
+        let by_agent = agents.iter().any(|a| a.given_name() == Some(target) && a.session() == session.session_id);
+        if session.name == target || by_agent {
+            return Some(session);
+        }
+    }
+    None
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
@@ -89,6 +106,14 @@ fn main() -> ExitCode {
         Some(a) => a,
         None => return fail("herdr agent list gave output of an unexpected shape"),
     };
+    // The session id dispatch recorded for this worker's controller comes
+    // first (#1980): a controller session and a worker's herdr agent can bear
+    // one name, and the herdr-name-first order then printed the worker. It
+    // answers only for a name that controller bears (its session name, or the
+    // herdr agent name its session runs under), never for any other target.
+    if let Some(session) = recorded_controller(home, target, &agents) {
+        return print_if_reachable(home, &session);
+    }
     if let Some(agent) = agents.iter().find(|a| a.given_name() == Some(target.as_str())) {
         return match sessions::named_session_of(home, agent.session()) {
             Some(session) => print_if_reachable(home, &session),
