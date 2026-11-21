@@ -1,8 +1,10 @@
-"""comment-audit's answer key against its fixtures.
+"""comment-audit's answer key against its fixtures, and its apply rules.
 
 The audit is prompt-only, so the key is the grader: each row must name a real
 comment line and follow the citation rule (a citation that carries a why is a
-salvage, a whole delete only when only the number remains).
+salvage, a whole delete only when only the number remains). The last tests
+pin the shape of SKILL.md's Applying the cuts section: nine numbered rules,
+each stated in the direction it gives.
 """
 import re
 from pathlib import Path
@@ -80,16 +82,16 @@ def test_three_mis_cuts_are_keyed():
 
 
 SKILL = Path(__file__).parent / "SKILL.md"
-RULE_TOPICS = [  # one topic per standing apply rule, in list order
-    r"text, never (?:its|a) line number",
-    r"comments only",
-    r"load-bearing",
-    r"ignore file",
-    r"salvage",
-    r"imports",
-    r"current fact",
-    r"in doubt, keep",
-    r"lint",
+RULE_TOPICS = [  # one phrase per standing apply rule, in list order, stating its direction
+    r"text, never its line number",
+    r"edit comments only",
+    r"never touch a load-bearing line",
+    r"keep an issue citation",
+    r"never cut it whole",
+    r"keep the docstring of a symbol",
+    r"rewrite a historical or stale comment to the current fact",
+    r"when in doubt, keep",
+    r"run the repo's lint",
 ]
 
 
