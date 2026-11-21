@@ -36,4 +36,7 @@ Log line numbers in brackets. Repeats come first.
 
 ## What this says about the log
 
+Chris ruled on 2026-11-21 to keep the log. #1970 stops its cross-repo content breaking the section check, and the live clusters were filed as tickets (#1973 to #1985).
+
+
 The log works as capture: entries are specific, dated and checkable, and the agents could verify 196 of 202. It fails as a pipeline. Nothing promotes a repeat, nothing retires a fixed entry, and the tickets it does feed wait on grilling. Its cross-repo content also broke this repo's section-reference check five times (#1970).
