@@ -122,10 +122,10 @@ tests under a directory it named `fixtures` and never notice.
 prose-assertion smell alone (#1959): it fails, naming the file and the test, on
 a test whose only assertions are containment checks on a prose file, including
 one that reads the file through a helper of its own module that does nothing
-else. Fixtures are skipped; `PROSE_BASELINE` in `audit.py` lists the two
-tests it tolerates, fails when an entry goes stale, and gets no new entry. Exit 2, never 0, when it crashes or
-reads no test file. In this repo `test-audit/prose-gate.test.sh` runs it on
-every seam run, narrowed or not.
+else. Fixtures are skipped; `PROSE_BASELINE` in `audit.py` is empty
+(#1963), fails when an entry goes stale, and gets no new entry. Exit 2,
+never 0, when it crashes or reads no test file. In this repo
+`test-audit/prose-gate.test.sh` runs it on every seam run, narrowed or not.
 
 Wire it into a repo by adding it to the command that repo's `AGENTS.md`
 `## End-to-end seam` section names. In this repo that is

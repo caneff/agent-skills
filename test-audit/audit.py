@@ -827,16 +827,11 @@ def gate(root):
 
 # `--prose-gate` (#1959): Chris ruled out tests whose only assertions check that
 # a document contains a sentence (#1414, "wording is shit tests"), and the
-# ruling slid twice, so the seam enforces it. These two tests were already in
-# suites that otherwise run code (one the ticket names as passing); each is a
-# prose assertion by this detector, kept so the gate can land without widening
-# its ticket. An entry whose test is gone or no longer flagged fails the gate
-# as stale, so delete it then; never add one -- write a test that runs the code
-# the rule governs, or no test when the rule is prose only.
-PROSE_BASELINE = {
-    ("create-lmd-page/skill_test.py", "test_edit_section_states_that_a_failure_stops_it"),
-    ("multi-axis-code-review/render_brief_test.py", "test_the_diff_reviewer_runs_the_witness_check_in_the_foreground"),
-}
+# ruling slid twice, so the seam enforces it. The baseline is empty (#1963);
+# an entry whose test is gone or no longer flagged fails the gate as stale,
+# and none is added -- write a test that runs the code the rule governs, or no
+# test when the rule is prose only.
+PROSE_BASELINE = set()
 
 PROSE_GATE_ADVICE = (
     "test-audit: a test whose only assertions check that a prose file contains a string proves\n"

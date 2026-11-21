@@ -267,7 +267,3 @@ def test_edit_section_never_activates_and_reuses_the_one_archive_call():
     assert 'never clicks "Aktivieren"' in edit
     assert "§ Archive's command" in edit and "--lmd <id>" in edit
     assert not [l for l in raw.splitlines() if "lmd_archive.py" in l]  # the one archive call stays in § Archive
-
-
-def test_edit_section_states_that_a_failure_stops_it():
-    assert "The failure rule above applies" in " ".join(section("Edit a live page").split())
