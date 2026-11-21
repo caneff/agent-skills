@@ -5,7 +5,9 @@ A cross-reference to a heading in Markdown prose is written `§ <Heading>`.
 `docs/research/`, `tests/fixtures/` and `docs/agents/friction-log.md`, and
 fails the suite on a reference that does not resolve. The friction log is
 exempt because it is a dated record of events in other repos: a `§` in it
-usually names another repo's heading, which never resolves here.
+usually names another repo's heading, which never resolves here. The log is
+only never read for references: a reference from another file into it still
+resolves against its headings.
 
 ## Which file a reference points at
 

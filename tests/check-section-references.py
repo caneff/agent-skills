@@ -208,8 +208,8 @@ def inside_code_span(spans: list[tuple[int, int]], position: int) -> bool:
     return any(start <= position < end for start, end in spans)
 
 
-# A dated record of events in other repos: a "§" in it usually names another
-# repo's heading, which never resolves here (#1970).
+# Never read as a source of references (#1970); still a valid target.
+# Why it is exempt: docs/agents/section-references.md.
 FRICTION_LOG = "docs/agents/friction-log.md"
 
 
@@ -220,8 +220,7 @@ def tracked_markdown() -> list[Path]:
     return [
         ROOT / name
         for name in output.splitlines()
-        if name != FRICTION_LOG
-        and not name.startswith(("docs/research/", "tests/fixtures/"))
+        if not name.startswith(("docs/research/", "tests/fixtures/"))
     ]
 
 
@@ -365,6 +364,8 @@ def main() -> int:
     failures: list[str] = []
 
     for source in files:
+        if source.relative_to(ROOT).as_posix() == FRICTION_LOG:
+            continue
         source = source.resolve()
         latest_named_file: Path | None = None
         previous_line_named_file: Path | None = None

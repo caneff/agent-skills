@@ -1,0 +1,3 @@
+# Friction log
+
+## Entries
