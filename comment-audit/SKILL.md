@@ -252,9 +252,9 @@ words that still read clearly. The standing rules:
 2. **Edit comments only.** Leave the code, its formatting and every keeper
    that already reads true exactly as they are. Confirm with
    `git diff --word-diff`: comment lines and nothing else.
-3. **Never touch a load-bearing line** (§ Load-bearing — directives, pragmas,
-   license headers, doc markers, and any marker a tool reads such as
-   shellcheck or `# all.sh:` lines), and never cut a comment the repo's
+3. **Never touch a load-bearing line** (§ Load-bearing: directives, pragmas, license
+   headers, doc markers, and any marker a tool reads such as shellcheck or
+   `# all.sh:` lines), and never cut a comment the repo's
    ignore file (`.audit-ignore.md`) lists.
 4. **Keep an issue citation when the repo's ignore file or the ticket says
    citations stay.** That ruling outranks the audit's default of stripping

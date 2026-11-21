@@ -86,7 +86,7 @@ RULE_TOPICS = [  # one topic per standing apply rule, in list order
     r"load-bearing",
     r"ignore file",
     r"salvage",
-    r"imported",
+    r"imports",
     r"current fact",
     r"in doubt, keep",
     r"lint",
