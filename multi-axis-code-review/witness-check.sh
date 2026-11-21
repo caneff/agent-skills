@@ -21,12 +21,14 @@
 # Before `mutate` runs, every witness gets the setup a fresh worktree lacks
 # (#1219): PYTHONDONTWRITEBYTECODE=1 and no `__pycache__` (why: at the export
 # below), and, when the witness has no `node_modules`, a symlink to the one Node
-# would find from the reviewed tree (#1969): the nearest `node_modules` walking up
-# from its top level, else the primary checkout's (the git common dir's parent), so
-# a review run from a worktree under `.claude/worktrees/` still finds the
-# checkout's. A tree whose HEAD `package.json` declares dependencies and has none
-# anywhere leaves every mutation `unknown`, never a `red` from a module that
-# failed to load. So a Node suite fails on the mutation, not a missing module. The link is shared with the reviewed tree, not a copy: a
+# would find from the reviewed tree (#1969): the nearest `node_modules` walking
+# up from its top level, else the primary checkout's (the git common dir's
+# parent), so a review run from a worktree under `.claude/worktrees/` still finds
+# the checkout's. A Node suite then fails on the mutation, not a missing module.
+# When none exists and HEAD's `package.json` declares dependencies, a mutation
+# whose output says the module failed to load (ERR_MODULE_NOT_FOUND, Cannot
+# find module) is `unknown`, never `red`. The link is shared with the reviewed
+# tree, not a copy: a
 # workspace package that `node_modules` links back into the tree resolves to
 # the reviewed tree's files, a tool cache written through it lands there, and
 # the link shows as untracked where `.gitignore` says `node_modules/`
@@ -38,7 +40,9 @@
 # `.venv` stays unset and the run says so. `vendor` is not set up.
 #
 # The outcome is the covering command's own exit status, `pipefail` set: a command piped
-# through `tail` or `grep` reports the test's status, not the filter's (#1969).
+# through `tail` reports the test's status, not the filter's (#1969). A reader that exits
+# early (`head`, `grep -q`) can SIGPIPE the test: status 141 reads `unknown`; write the
+# output to a file instead.
 #
 # Each mutation's suite runs under a time limit (#1854); SKILL.md § 4 *The time
 # limit* gives the reason. `--baseline-seconds <s>` (the unmutated run's own
@@ -267,17 +271,17 @@ if [ -z "$nm_source" ] && common=$(git -C "$worktree" rev-parse --path-format=ab
    [ -d "$(dirname "$common")/node_modules" ]; then
   nm_source="$(dirname "$common")/node_modules"
 fi
-# A tree that declares dependencies and has no `node_modules` to link cannot run its suite.
+# A tree that declares dependencies and has no `node_modules` to link: a Node suite in it
+# cannot load its modules, which the report loop below reads per mutation.
 nm_missing=0
 if [ -z "$nm_source" ] && git -C "$worktree" cat-file -e HEAD:package.json 2>/dev/null &&
    git -C "$worktree" show HEAD:package.json | grep -Eq '"(dependencies|devDependencies)"'; then
   nm_missing=1
-  echo "witness check: package.json declares dependencies but no node_modules was found from $top or the primary checkout - every mutation is unknown" >&2
+  echo "witness check: package.json declares dependencies but no node_modules was found from $top or the primary checkout - a mutation that cannot load a module reads unknown" >&2
 fi
 prepare() { # <witness>
   find "$1" -name __pycache__ -type d -prune -exec rm -rf {} + || {
     echo "witness check: could not clear __pycache__ in $1" >&2; return 1; }
-  [ "$nm_missing" -eq 0 ] || return 1
   if [ -n "$nm_source" ] && [ ! -e "$1/node_modules" ] && [ ! -L "$1/node_modules" ]; then
     ln -s "$nm_source" "$1/node_modules" || {
       echo "witness check: could not link node_modules into $1" >&2; return 1; }
@@ -355,7 +359,16 @@ for id in "${mutations[@]}"; do
              printf 'unknown\n' >"$root/outcome/$id" ;;
     0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id"
        printf 'green\n' >"$root/outcome/$id" ;;
-    [1-9]*) printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
+    141) printf '%s: unknown — SIGPIPE: a pipe reader closed early, so the exit status is not the test'"'"'s; write the output to a file\n' "$id"
+         show "$id"
+         printf 'unknown\n' >"$root/outcome/$id" ;;
+    [1-9]*) if [ "$nm_missing" -eq 1 ] && grep -Eq 'ERR_MODULE_NOT_FOUND|Cannot find (module|package)' "$root/output/$id"; then
+              printf '%s: unknown — the module failed to load and no node_modules exists to link; not a red\n' "$id"
+              show "$id"
+              printf 'unknown\n' >"$root/outcome/$id"
+              continue
+            fi
+            printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
             show "$id"
             printf 'red\n' >"$root/outcome/$id" ;;
     *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id"

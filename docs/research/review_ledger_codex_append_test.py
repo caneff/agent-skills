@@ -258,7 +258,7 @@ class TestFlags:
         # The axes may be skipped (the ablation), so `spec` + --skip-reason is a row, not a refusal.
         # Each type's parser holds only its own flags, so argparse names the foreign one.
         flags = [str(px.cache) if a == "CACHE" else a for a in flags]
-        extra = ["--mutation-id", "m1", "--outcome", "red", "--seconds", "1"] if mutation else []
+        extra = ["--mutation-id", "m1", "--status-file", str(px.cache / "st"), "--seconds", "1"] if mutation else []
         r = px.run("append", "--repo", "skills", "--ticket", 500, "--type", rtype,
                    "--ledger", px.ledger, *flags, *extra)
         assert r.returncode == 2, (rtype, flags)
@@ -267,7 +267,7 @@ class TestFlags:
 
     def test_mutation_flags_are_refused_on_a_codex_type_by_the_guard_not_a_missing_cache(self, px):
         px.record(500, before=f"1 {W1}", after=f"2 {W1}")
-        r = px.append(500, "gate", "--mutation-id", "m1", "--outcome", "red", "--seconds", 3)
+        r = px.append(500, "gate", "--mutation-id", "m1", "--status-file", str(px.cache / "st"), "--seconds", 3)
         assert r.returncode == 2
         assert "append --type codex-gate: error: unrecognized arguments: --mutation-id m1" in r.stderr
         assert not px.ledger.exists()

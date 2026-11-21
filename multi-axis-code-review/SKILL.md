@@ -437,8 +437,8 @@ its own. It states the worker count (default 1) and wall-clock ceiling (default
 spawns no nested subagent; the correctness prompt also passes the worker count
 to `witness-check.sh --slots` as workers x 3 axes (#1855: only correctness runs
 tests, so it takes the review's whole budget; the spec and standards briefs
-carry no witness line). The correctness brief always tells the reviewer to run only the test files its
-mutants target, unmutated, before mutating, never the narrowed or full suite
+carry no witness line). The correctness brief always tells the reviewer to run
+only the test files its mutants target, unmutated, before mutating, never the narrowed or full suite
 (#1856, #1928: the wave runs before the worker's seam, so no seam sha exists to
 condition it on). Exit 2 means a bad input and nothing written.
 

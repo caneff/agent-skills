@@ -641,30 +641,34 @@ fi
 # the reviewed tree, and a reviewed tree outside the checkout finds it through the git common
 # dir's parent. The body goes red only when it can read node_modules/marker.
 node_body=': >"$3"; if [ -e "$2/node_modules/marker" ]; then echo "MARKER-PRESENT: reachable"; exit 1; fi; echo "no marker"; exit 0'
-target="$(make_repo nestedrepo 'printf "node_modules/\n.claude/\n" >.gitignore')" || exit 1
-primary="$scratch/nestedrepo"
-mkdir -p "$primary/node_modules" && : >"$primary/node_modules/marker"
-git -C "$primary" worktree add -q --detach "$primary/.claude/worktrees/rev" HEAD
-substitute 'nn1' "$node_body" "$primary/.claude/worktrees/rev" >"$scratch/launcher-nested.sh"
-hygiene_run nested "$primary/.claude/worktrees/rev" "$scratch/launcher-nested.sh"
+target="$(make_repo nestedrepo 'printf "node_modules/\n" >.gitignore')" || exit 1
+# The reviewed tree sits under a directory that holds the node_modules, but the repo it is a
+# worktree of has none, so the git common dir's parent cannot supply it: only the walk-up can.
+mkdir -p "$scratch/outer/node_modules" "$scratch/outer/sub" && : >"$scratch/outer/node_modules/marker"
+git -C "$scratch/nestedrepo" worktree add -q --detach "$scratch/outer/sub/rev" HEAD
+substitute 'nn1' "$node_body" "$scratch/outer/sub/rev" >"$scratch/launcher-nested.sh"
+hygiene_run nested "$scratch/outer/sub/rev" "$scratch/launcher-nested.sh"
 if ! grep -q 'nn1: red' "$scratch/nested.out" || ! grep -q 'nn1|.*MARKER-PRESENT' "$scratch/nested.out"; then
-  echo "FAIL: a worktree nested under the checkout did not get the checkout's node_modules" >&2
+  echo "FAIL: a worktree under a directory holding node_modules did not get it by walking up" >&2
   cat "$scratch/nested.out" >&2; fail=1
 fi
-# Outside the checkout, so only the common dir's parent leads to it.
+# The common dir's parent: a reviewed tree outside the checkout, node_modules only in the checkout.
+mkdir -p "$scratch/nestedrepo/node_modules" && : >"$scratch/nestedrepo/node_modules/marker"
 substitute 'nc1' "$node_body" "$target" >"$scratch/launcher-common.sh"
 hygiene_run common "$target" "$scratch/launcher-common.sh"
 if ! grep -q 'nc1: red' "$scratch/common.out" || ! grep -q 'nc1|.*MARKER-PRESENT' "$scratch/common.out"; then
   echo "FAIL: a worktree outside the checkout did not get the primary checkout's node_modules" >&2
   cat "$scratch/common.out" >&2; fail=1
 fi
-# A tree that declares dependencies with no node_modules anywhere cannot run its suite: every
-# mutant is `unknown` and its body never runs, never a `red` from a module that failed to load.
+# A tree that declares dependencies with no node_modules anywhere: a mutant whose output says
+# its module failed to load is `unknown`, never a `red` from the missing module; one that fails
+# for its own reason (a Python suite here) is still `red`.
 target="$(make_repo nonodes 'printf "{\"devDependencies\": {\"playwright\": \"1\"}}\n" >package.json')" || exit 1
-substitute 'nx1' ': >"$3"; echo "BODY-RAN"; exit 1' "$target" >"$scratch/launcher-nonodes.sh"
+substitute 'nx1 nx2' 'case "$1" in nx1) : >"$3"; echo "Error [ERR_MODULE_NOT_FOUND]: Cannot find package playwright"; exit 1;; *) : >"$3"; echo "ASSERTION-FAILED: own message"; exit 1;; esac' "$target" >"$scratch/launcher-nonodes.sh"
 hygiene_run nonodes "$target" "$scratch/launcher-nonodes.sh"
-if ! grep -q 'nx1: unknown' "$scratch/nonodes.out" || grep -q 'nx1: red\|BODY-RAN' "$scratch/nonodes.out"; then
-  echo "FAIL: a tree needing node_modules with none anywhere was not reported unknown" >&2
+if ! grep -q 'nx1: unknown' "$scratch/nonodes.out" || grep -q 'nx1: red' "$scratch/nonodes.out" ||
+   ! grep -q 'nx2: red' "$scratch/nonodes.out"; then
+  echo "FAIL: a missing module was not unknown, or an unrelated failure in the same tree was not red" >&2
   cat "$scratch/nonodes.out" >&2; fail=1
 fi
 
@@ -674,6 +678,12 @@ substitute 'pp1' ': >"$3"; false | tail -1' "$target" >"$scratch/launcher-piped.
 hygiene_run piped "$target" "$scratch/launcher-piped.sh"
 grep -q 'pp1: red' "$scratch/piped.out" ||
   { echo "FAIL: a failing test piped through tail read as a pass (pipe status, not the test's)" >&2; cat "$scratch/piped.out" >&2; fail=1; }
+
+# A pipe reader that closes early can SIGPIPE the test: status 141 reads unknown, not red.
+substitute 'sp1' ': >"$3"; kill -PIPE $$' "$target" >"$scratch/launcher-sigpipe.sh"
+hygiene_run sigpipe "$target" "$scratch/launcher-sigpipe.sh"
+grep -q 'sp1: unknown' "$scratch/sigpipe.out" ||
+  { echo "FAIL: a SIGPIPE status was not reported unknown" >&2; cat "$scratch/sigpipe.out" >&2; fail=1; }
 
 # #1969: `--worker` writes worker-mutation rows, so the worker's own mutations need no hand outcome.
 wledger="$scratch/worker-ledger.jsonl"

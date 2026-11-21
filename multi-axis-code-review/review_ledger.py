@@ -1324,7 +1324,8 @@ def read_status(text: str) -> tuple[str, bool]:
 
 def cmd_append_mutation(args) -> int:
     """Write the one row of a mutation that just ran. Its outcome comes from a status file and
-    nothing else (#1969: no hand-written outcome), its wall clock from `--seconds`; there is no cache or transcript to read."""
+    nothing else (#1969: no hand-written outcome), its wall clock from `--seconds`; there is no
+    cache or transcript to read."""
     try:
         if not args.mutation_id or not _MUTATION_ID_RE.fullmatch(args.mutation_id):
             raise ValueError("a mutation row needs --mutation-id made of letters, digits, . - _")
