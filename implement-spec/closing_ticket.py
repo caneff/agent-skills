@@ -216,7 +216,7 @@ def _after_it_passes(spec, one_slice):
 
 
 def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
-         one_slice=False):
+         one_slice=False, keep_spec_open=False):
     """The closing check for one spec: the seam it drives, what that seam
     cannot see, and the spec-level review.
 
@@ -231,6 +231,11 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
     A one-slice spec has no integration branch: its slice lands on
     `<default>` with its own review wave, so `one_slice` makes a section
     for that slice's body with no spec-level review.
+
+    `keep_spec_open`: the spec stays open once it lands, so the section
+    forbids `Closes #<spec>` where it would demand one and still demands the
+    slices' own lines. The run file records no such ruling; the controller
+    passes the flag (`implement-spec/SKILL.md` § The closing check).
     """
     if surfaces is None:
         # Not defaulted to none: the failure this check exists to stop
@@ -250,20 +255,26 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
                 f"&& git merge --no-edit origin/{default} && git push origin "
                 f"{branch}")
 
+    keep_open = (f"The spec stays open after it lands, so there is no "
+                 f"`Closes #{spec}` line in the PR body or any commit.")
     if one_slice:
+        closing = (keep_open + " The slice's own `Closes` line stays."
+                   if keep_spec_open else
+                   f"Add a bare `Closes #{spec}` line to the PR body and to "
+                   "the last commit: the spec closes when this slice merges.")
         lines = ["## Closing check", "",
                  f"This is the only slice of spec #{spec}: its PR also carries "
                  "one end-to-end test at this repo's seam, and its own review "
-                 f"wave is the spec's review. Add a bare `Closes #{spec}` line "
-                 "to the PR body and to the last commit: the spec closes when "
-                 "this slice merges.", ""]
+                 f"wave is the spec's review. {closing}", ""]
     else:
+        closing = (f"{keep_open}" if keep_spec_open
+                   else f"It also carries a bare `Closes #{spec}`.")
         lines = ["## Closing check", "",
                  f"The closing check of spec #{spec}, run on its integration "
                  f"PR: base `{default}`, head `{branch}`, opened once every "
                  f"slice has landed on `{branch}`. Its body carries a bare "
-                 "`Closes #<slice>` line for every slice of the spec and a "
-                 f"bare `Closes #{spec}`.", ""]
+                 f"`Closes #<slice>` line for every slice of the spec. "
+                 f"{closing}", ""]
     lines += ["### The seam", "",
               f"- **Seam**: {seam}",
               f"- **Blind to**: {blind_to}",
@@ -348,6 +359,9 @@ def main(argv):
                                "repeatable")
     surfaces.add_argument("--no-surface", action="store_true",
                           help="the seam reaches every surface this spec touches")
+    parser.add_argument("--keep-spec-open", action="store_true",
+                        help="the spec stays open after it lands: forbid "
+                             "`Closes #<spec>` instead of demanding it")
     parser.add_argument("--seam", help="the seam, where the repo declares none")
     parser.add_argument("--blind-to", help="what that seam cannot see")
     args = parser.parse_args(argv[1:])
@@ -361,7 +375,8 @@ def main(argv):
             raise SeamError(f"{args.root} has no readable origin/HEAD: pass "
                             "--default <branch>")
         print(body(args.root, args.spec, args.surface, args.seam,
-                   args.blind_to, default=default, one_slice=args.one_slice),
+                   args.blind_to, default=default, one_slice=args.one_slice,
+                   keep_spec_open=args.keep_spec_open),
               end="")
     except SeamError as exc:
         print(f"closing_ticket.py: {exc}", file=sys.stderr)

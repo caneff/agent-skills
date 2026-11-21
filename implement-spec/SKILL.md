@@ -491,7 +491,9 @@ When the last slice has landed:
 4. **The integration PR.** Run step 1's block once more, and open it:
    `gh pr create --base <default> --head spec-<n>`. Its body is
    `implement/SKILL.md` § The PR's, keyed on the spec number, with a bare
-   `Closes #<slice>` line for every slice and a bare `Closes #<spec>`.
+   `Closes #<slice>` line for every slice and a bare `Closes #<spec>`, unless
+   the spec stays open once it lands: then no `Closes #<spec>` (the closing
+   check's `--keep-spec-open`, below).
    Report it to this run's own controller as "PR up" in that section's
    shape, with `fix-check.sh <spec> origin/spec-<spec>` as the controller's
    merge check. The controller merges it unchanged by
@@ -521,6 +523,15 @@ python3 implement-spec/closing_ticket.py <repo-root> <spec> --surface <what> [--
 python3 implement-spec/closing_ticket.py <repo-root> <spec> --no-surface
 python3 implement-spec/closing_ticket.py <repo-root> <spec> --one-slice --no-surface   # one-slice spec
 ```
+
+A spec that stays open once it lands takes `--keep-spec-open`: the section
+then forbids `Closes #<spec>` and still requires the slices' lines. Pass it
+only when the spec's body rules that outright, or the run's outcome is
+already a miss. A conditional miss ruling ("if the target is not met, keep it
+open") is unknown when the section is generated, before the end-to-end result
+exists: generate the default section, and amend the section and the PR body
+by hand if the run then misses. The run file records no ruling, so the
+controller reads the spec and passes the flag; nothing else carries it.
 
 `<default>` is read off the repo's `origin/HEAD`, or given with `--default`;
 the generator refuses rather than assume `main`.
