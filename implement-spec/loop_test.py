@@ -2133,14 +2133,14 @@ def wide_closure(n=5000):
 
 def test_cap_closures_drops_a_closure_over_a_quarter_and_says_so():
     big = {"tickets": [7], "files": ["a.py"], "closure": ["a.py", "b.py", "c.py"]}
-    kept, notes = loop.cap_closures([big], total=8)
+    kept, notes = loop.closure_mod.cap_closures([big], total=8)
     assert "closure" not in kept[0] and kept[0]["files"] == ["a.py"], kept
     assert len(notes) == 1 and "#7" in notes[0] and "cap" in notes[0], notes
 
 
 def test_cap_closures_keeps_a_closure_at_a_quarter_exactly():
     small = {"tickets": [7], "files": ["a.py"], "closure": ["a.py", "b.py"]}
-    kept, notes = loop.cap_closures([small], total=8)
+    kept, notes = loop.closure_mod.cap_closures([small], total=8)
     assert kept == [small] and notes == [], (kept, notes)
 
 
@@ -2190,12 +2190,12 @@ def test_a_candidate_closure_over_the_cap_holds_only_its_own_files(tmp):
 
 def test_a_closure_of_non_source_files_is_not_capped():
     html = {"tickets": [7], "files": ["a.html"], "closure": ["a.html", "b.html"]}
-    kept, notes = loop.cap_closures([html], total=0)
+    kept, notes = loop.closure_mod.cap_closures([html], total=0)
     assert kept == [html] and notes == [], (kept, notes)
 
 
 def test_source_total_is_none_for_a_directory_git_cannot_list(tmp):
-    assert loop.source_total(os.path.join(tmp, "missing")) is None
+    assert loop.closure_mod.source_total(os.path.join(tmp, "missing")) is None
 
 
 def test_dispatch_says_so_when_the_source_files_cannot_be_counted(tmp, monkeypatch, capsys):
@@ -2209,7 +2209,7 @@ def test_dispatch_says_so_when_the_source_files_cannot_be_counted(tmp, monkeypat
     cache = os.path.join(tmp, "cache")
     os.mkdir(cache)
     monkeypatch.setenv("SPEC_RUN_CACHE_DIR", cache)
-    monkeypatch.setattr(loop, "source_total", lambda repo: None)
+    monkeypatch.setattr(loop.closure_mod, "source_total", lambda repo: None)
     args = argparse.Namespace(
         candidates=cand, in_flight=live, run=fixture_run(cache, live), free=1,
         no_workspace_diff=True, processes=4, committed_gb=4.0)

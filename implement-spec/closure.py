@@ -573,6 +573,48 @@ def clumps(root, candidates, decl=None):
             "clumps": [clump(n) for n in sorted(named)]}
 
 
+# What counts as a tracked source file for the closure cap (#1981); the same
+# kinds `tests/suite-edges.py` scans.
+SOURCE_SUFFIXES = (".py", ".sh", ".rs", ".js", ".mjs", ".cjs", ".ts", ".tsx")
+CLOSURE_CAP = 4  # a closure may cover at most 1/CLOSURE_CAP of the source files
+
+
+def source_total(repo):
+    """How many tracked source files `repo` holds, or `None` when git cannot
+    list them (`closure.repo_files`'s refusal)."""
+    try:
+        return sum(f.endswith(SOURCE_SUFFIXES)
+                   for f in repo_files(repo))
+    except ClosureError:
+        return None
+
+
+def cap_closures(clumps, total):
+    """`(clumps, notes)`: a clump whose `closure` covers more than a quarter
+    of `total` source files holds only its own `files`, and one note per such
+    clump says the cap applied (#1981). A flat repo's closure can cover most
+    of the tree, and holding on it ran a whole spec near-serial. A clump with
+    no `files` keeps its closure and says so: there is nothing narrower to
+    hold on. The clumps passed in are not mutated."""
+    out, notes = [], []
+    for clump in clumps:
+        wide = clump.get("closure")
+        # Source files against source files: the total counts only those.
+        covered = (sum(f.endswith(SOURCE_SUFFIXES) for f in wide)
+                   if isinstance(wide, list) else 0)
+        if covered * CLOSURE_CAP <= total:
+            out.append(clump)
+            continue
+        label = f"#{min(clump["tickets"])}: closure of {covered} source files exceeds 1/{CLOSURE_CAP} of {total} source files"
+        if not clump.get("files"):
+            out.append(clump)
+            notes.append(f"closure cap not applied to {label}, and it names no files of its own")
+            continue
+        out.append({k: v for k, v in clump.items() if k != "closure"})
+        notes.append(f"closure cap applied to {label}; held on its own files only")
+    return out, notes
+
+
 def render(clumping):
     lines = [clumping["announcement"]]
     for clump in clumping["clumps"]:
