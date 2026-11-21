@@ -239,6 +239,19 @@ case "$line" in finished*rc=3*) ok "--status reads back the record the hook set 
   *) no "--status reads back the record the hook set up" "$line" ;;
 esac
 
+# #1703: a call the hook wrapped gets job-run's pipefail and stage naming.
+pipe_json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01PipeFailXxYyZz","tool_input":{"command":"false | cat","run_in_background":true}}'
+body=$(printf '%s' "$pipe_json" | PATH="$here/../../bin:$PATH" "$hook" 2>/dev/null)
+rewritten=$(printf '%s' "$body" | jq -r '.hookSpecificOutput.updatedInput.command')
+pipe_name=$(printf '%s' "$rewritten" | sed -n 's/.*--name \([^ ]*\).*/\1/p')
+( export HOME="$tmp/pipe-home"; mkdir -p "$HOME"
+  export PATH="$here/../../bin:$PATH"; eval "$rewritten" ) >/dev/null 2>&1
+pipe_rc=$?
+pipe_line=$(HOME="$tmp/pipe-home" PATH="$here/../../bin:$PATH" job-run --status "$pipe_name" 2>&1)
+[ "$pipe_rc" = 1 ] && [[ "$pipe_line" == *"rc=1"*"pipeline stage 1 of 2"* ]] \
+  && ok "a hook-wrapped call fails on a failed pipe stage and names the stage" \
+  || no "a hook-wrapped call fails on a failed pipe stage and names the stage" "rc=$pipe_rc $pipe_line cmd=$rewritten"
+
 # #1697: a rewritten background call sent beside Agent calls leaves those Agent
 # calls with no auto-mode verdict, so the review wave starts the Codex pass as an
 # explicit job-run call the hook leaves alone. The command under test is read

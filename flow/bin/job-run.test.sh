@@ -259,6 +259,49 @@ done
 "$job_run" --check -- sleep 1 >/dev/null 2>&1; rc=$?
 [ "$rc" = 0 ] && ok "a direct sleep command is not read as a poll loop" || no "a direct sleep command is not read as a poll loop" "rc=$rc"
 
+# #1703: a `bash -c` job runs with pipefail, so a failing stage is not hidden by
+# the stage after it, and the status names the stage.
+"$job_run" --name pf -- bash -c 'false | cat' >/dev/null 2>&1; pf_rc=$?
+[ "$pf_rc" = 1 ] && grep -q '^rc=1$' "$jobs_dir/pf/exit" \
+  && ok "a failed first stage of a pipe is the job's exit" \
+  || no "a failed first stage of a pipe is the job's exit" "rc=$pf_rc $(cat "$jobs_dir/pf/exit" 2>&1)"
+line=$("$job_run" --status pf)
+[[ "$line" == *"stage 1 of 2"* ]] \
+  && ok "--status names the failing pipeline stage" \
+  || no "--status names the failing pipeline stage" "$line"
+grep -q 'pipeline stage 1 of 2' "$jobs_dir/pf/progress" \
+  && ok "progress names the failing pipeline stage" \
+  || no "progress names the failing pipeline stage" "$(cat "$jobs_dir/pf/progress")"
+
+"$job_run" --name pf-last -- bash -c 'true | false' >/dev/null 2>&1
+line=$("$job_run" --status pf-last)
+[[ "$line" == finished*rc=1* && "$line" != *stage* ]] \
+  && ok "a failing last stage is a plain failure, no stage named" \
+  || no "a failing last stage is a plain failure, no stage named" "$line"
+
+"$job_run" --name pf-stale -- bash -c 'false | cat; true' >/dev/null 2>&1; stale_rc=$?
+line=$("$job_run" --status pf-stale)
+[ "$stale_rc" = 0 ] && [[ "$line" != *stage* ]] \
+  && ok "a tolerated pipe failure earlier in the script names no stage" \
+  || no "a tolerated pipe failure earlier in the script names no stage" "rc=$stale_rc $line"
+
+"$job_run" --name pf-sigpipe -- bash -c 'yes | head -1' >/dev/null 2>&1; sp_rc=$?
+line=$("$job_run" --status pf-sigpipe)
+[ "$sp_rc" = 141 ] && [[ "$line" == *cause=PIPE* ]] && grep -q 'SIGPIPE' "$jobs_dir/pf-sigpipe/progress" \
+  && ok "a pipe closed early is reported as a SIGPIPE stop" \
+  || no "a pipe closed early is reported as a SIGPIPE stop" "rc=$sp_rc $line $(cat "$jobs_dir/pf-sigpipe/progress")"
+
+# Only bash is touched: sh has no ERR trap, and a non-shell command is data.
+out=$("$job_run" --name pf-sh -- sh -c 'echo ok' 2>&1)
+[ "$out" = ok ] && ok "a non-bash shell runs unchanged" || no "a non-bash shell runs unchanged" "$out"
+out=$("$job_run" --name pf-args -- bash -c 'echo "$0 $1"' a b 2>&1)
+[ "$out" = "a b" ] && ok "arguments after the script keep their positions" || no "arguments after the script keep their positions" "$out"
+out=$("$job_run" --name pf-env -- env X=1 bash -c 'false | cat; echo "x=$X"' 2>&1); 
+[[ "$out" == x=1 ]] && ok "an env prefix still reaches the shell" || no "an env prefix still reaches the shell" "$out"
+"$job_run" --name pf-env2 -- env X=1 bash -c 'false | cat' >/dev/null 2>&1
+[[ "$("$job_run" --status pf-env2)" == *"stage 1 of 2"* ]] \
+  && ok "pipefail applies behind an env prefix" || no "pipefail applies behind an env prefix"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
 
@@ -625,6 +668,49 @@ refuse "--group cannot be combined with --wait" --wait a --group b
 [ ! -e "$jobs_dir/g3" ] \
   && ok "a refused --group creates no run directory" \
   || no "a refused --group creates no run directory"
+
+# #1703: a `bash -c` job runs with pipefail, so a failing stage is not hidden by
+# the stage after it, and the status names the stage.
+"$job_run" --name pf -- bash -c 'false | cat' >/dev/null 2>&1; pf_rc=$?
+[ "$pf_rc" = 1 ] && grep -q '^rc=1$' "$jobs_dir/pf/exit" \
+  && ok "a failed first stage of a pipe is the job's exit" \
+  || no "a failed first stage of a pipe is the job's exit" "rc=$pf_rc $(cat "$jobs_dir/pf/exit" 2>&1)"
+line=$("$job_run" --status pf)
+[[ "$line" == *"stage 1 of 2"* ]] \
+  && ok "--status names the failing pipeline stage" \
+  || no "--status names the failing pipeline stage" "$line"
+grep -q 'pipeline stage 1 of 2' "$jobs_dir/pf/progress" \
+  && ok "progress names the failing pipeline stage" \
+  || no "progress names the failing pipeline stage" "$(cat "$jobs_dir/pf/progress")"
+
+"$job_run" --name pf-last -- bash -c 'true | false' >/dev/null 2>&1
+line=$("$job_run" --status pf-last)
+[[ "$line" == finished*rc=1* && "$line" != *stage* ]] \
+  && ok "a failing last stage is a plain failure, no stage named" \
+  || no "a failing last stage is a plain failure, no stage named" "$line"
+
+"$job_run" --name pf-stale -- bash -c 'false | cat; true' >/dev/null 2>&1; stale_rc=$?
+line=$("$job_run" --status pf-stale)
+[ "$stale_rc" = 0 ] && [[ "$line" != *stage* ]] \
+  && ok "a tolerated pipe failure earlier in the script names no stage" \
+  || no "a tolerated pipe failure earlier in the script names no stage" "rc=$stale_rc $line"
+
+"$job_run" --name pf-sigpipe -- bash -c 'yes | head -1' >/dev/null 2>&1; sp_rc=$?
+line=$("$job_run" --status pf-sigpipe)
+[ "$sp_rc" = 141 ] && [[ "$line" == *cause=PIPE* ]] && grep -q 'SIGPIPE' "$jobs_dir/pf-sigpipe/progress" \
+  && ok "a pipe closed early is reported as a SIGPIPE stop" \
+  || no "a pipe closed early is reported as a SIGPIPE stop" "rc=$sp_rc $line $(cat "$jobs_dir/pf-sigpipe/progress")"
+
+# Only bash is touched: sh has no ERR trap, and a non-shell command is data.
+out=$("$job_run" --name pf-sh -- sh -c 'echo ok' 2>&1)
+[ "$out" = ok ] && ok "a non-bash shell runs unchanged" || no "a non-bash shell runs unchanged" "$out"
+out=$("$job_run" --name pf-args -- bash -c 'echo "$0 $1"' a b 2>&1)
+[ "$out" = "a b" ] && ok "arguments after the script keep their positions" || no "arguments after the script keep their positions" "$out"
+out=$("$job_run" --name pf-env -- env X=1 bash -c 'false | cat; echo "x=$X"' 2>&1); 
+[[ "$out" == x=1 ]] && ok "an env prefix still reaches the shell" || no "an env prefix still reaches the shell" "$out"
+"$job_run" --name pf-env2 -- env X=1 bash -c 'false | cat' >/dev/null 2>&1
+[[ "$("$job_run" --status pf-env2)" == *"stage 1 of 2"* ]] \
+  && ok "pipefail applies behind an env prefix" || no "pipefail applies behind an env prefix"
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

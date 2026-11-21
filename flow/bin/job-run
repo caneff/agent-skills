@@ -84,6 +84,18 @@
 # two tests and nothing else (exit 0 fine, 1 trailing &, 2 poll loop, message on
 # stderr), so the wrap hook asks job-run instead of keeping a copy.
 #
+# A `bash -c '<script>'` job (behind the same `env`, `nohup`, `time`, `timeout`
+# prefixes) runs as `bash -E -o pipefail -c`, with an ERR trap that saves the
+# failing pipeline's PIPESTATUS (#1703). A job whose exit comes from a stage
+# other than the last then says which: the `exit` file's `pipeline=` line, the
+# `--status` line (`pipeline stage 1 of 2 failed (PIPESTATUS=1 0)`) and a
+# progress line. An rc of 141 is also noted as a SIGPIPE stop, a reader that
+# closed its pipe early (`yes | head -1`). Only bash is touched, since sh has no
+# ERR trap; foreground Bash calls are not touched at all. The trap sits on the
+# script's first line, so line numbers in its errors do not shift. Limit: the
+# saved status is the last failing pipeline, so a tolerated `false | cat`
+# followed by a bare `exit 1` is named as the cause.
+#
 # Otherwise job-run records and does not prevent. No setsid, no detaching, no
 # keep-alive.
 set -uo pipefail
@@ -139,7 +151,7 @@ check_name() { # check_name <value> [<flag>]
 # --wait adds 13: interrupted while waiting, the run's state not known.
 # `verdict` is the one place that line and code are produced; --wait loops on it.
 verdict() { # verdict <name> ; prints the line, returns the code
-  local n="$1" dir="$jobs_dir/$1" up=0 rc cause ended pid last
+  local n="$1" dir="$jobs_dir/$1" up=0 rc cause ended pid last pipeline
   [ -d "$dir" ] || { echo "unknown $n: no run directory at $dir"; return 12; }
   # Liveness is read before the exit record: a wrapper writes `exit` and only
   # then dies, so a pid seen dead has its record on disk already. Reading them
@@ -149,7 +161,8 @@ verdict() { # verdict <name> ; prints the line, returns the code
     rc=$(sed -n 's/^rc=//p' "$dir/exit")
     cause=$(sed -n 's/^cause=//p' "$dir/exit")
     ended=$(sed -n 's/^ended=//p' "$dir/exit")
-    echo "finished $n rc=$rc cause=$cause ended=$ended"
+    pipeline=$(sed -n 's/^pipeline=//p' "$dir/exit")
+    echo "finished $n rc=$rc cause=$cause ended=$ended${pipeline:+ $pipeline}"
     return 0
   fi
   pid=$(cat "$dir/pid" 2>/dev/null)
@@ -266,6 +279,38 @@ esac
 refuse_script "$@"
 dir="$jobs_dir/$name"
 
+# `bash -c <script>` gets pipefail and an ERR trap that saves the failing
+# pipeline's PIPESTATUS (#1703). The command is walked like refuse_script walks
+# it: behind env/nohup/time/command/exec/timeout, then bash, its flags, -c. Any
+# other shape (sh, a script file, `bash -o x -c`) runs as given, in HARD.
+HARD=("$@")
+harden() { # harden <command> [args...] ; sets HARD
+  local a=("$@") i=0 n=$# j
+  while [ "$i" -lt "$n" ]; do
+    case "${a[i]##*/}" in
+      env|nohup|time|command|exec)
+        i=$((i + 1))
+        while [[ ${a[i]-} == -* || ${a[i]-} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do i=$((i + 1)); done ;;
+      timeout) i=$((i + 1)); while [[ ${a[i]-} == -* ]]; do i=$((i + 1)); done; i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  [ "$i" -lt "$n" ] && [ "${a[i]##*/}" = bash ] || return 0
+  j=$((i + 1))
+  while [ "$j" -lt "$n" ]; do
+    case "${a[j]}" in
+      -c|-[a-zA-Z]*c) break ;;
+      -*) j=$((j + 1)) ;;
+      *) return 0 ;;
+    esac
+  done
+  [ $((j + 1)) -lt "$n" ] || return 0
+  # shellcheck disable=SC2016  # the trap body expands in the job, not here
+  local trap_line='trap '\''printf "%s" "${PIPESTATUS[*]}" > "$JOB_PIPESTATUS"'\'' ERR; '
+  HARD=("${a[@]:0:i+1}" -E -o pipefail "${a[@]:i+1:j-i}" "$trap_line${a[j+1]}" "${a[@]:j+2}")
+}
+harden "$@"
+
 # Retention, on every start, so nobody has to remember it: a run directory
 # nothing has touched for 14 days goes — measured on the newest file inside the
 # run, because appending to progress never updates the directory's own mtime and
@@ -308,6 +353,8 @@ printf '%s\n' "$*" > "$dir/cmd"
 # looking at is complete before the sweep's time is spent.
 prune >/dev/null 2>&1 || true
 export JOB_PROGRESS="$dir/progress"
+export JOB_PIPESTATUS="$dir/pipestatus"
+rm -f "$JOB_PIPESTATUS"
 
 # Tee, not capture: every line goes on to the caller unchanged — a wrapped job
 # has to look exactly like the unwrapped one to whatever reads its output — and a
@@ -353,7 +400,23 @@ record() {
   elif [ "$rc" -gt 128 ] 2>/dev/null; then
     signame=$(kill -l $((rc - 128)) 2>/dev/null) && [ -n "$signame" ] && cause="$signame"
   fi
+  # A pipeline named only when its saved PIPESTATUS explains this rc: more than
+  # one stage, the rightmost failing stage is not the last, and its code is rc.
+  local codes=() k pipeline="" note=""
+  [ -r "$JOB_PIPESTATUS" ] && read -r -a codes < "$JOB_PIPESTATUS"
+  if [ "${#codes[@]}" -gt 1 ] && [ "$rc" != 0 ]; then
+    for ((k = ${#codes[@]} - 1; k >= 0; k--)); do
+      [ "${codes[k]}" != 0 ] || continue
+      [ "${codes[k]}" = "$rc" ] && [ "$k" -lt $((${#codes[@]} - 1)) ] \
+        && pipeline="pipeline stage $((k + 1)) of ${#codes[@]} failed (PIPESTATUS=${codes[*]})"
+      break
+    done
+  fi
+  [ "$rc" = 141 ] && note="stopped by SIGPIPE: a reader closed its pipe early (rc 141)"
+  [ -n "$pipeline$note" ] && printf '%s [job-run] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "${pipeline}${pipeline:+${note:+; }}${note}" >> "$JOB_PROGRESS"
   printf 'rc=%s\ncause=%s\nended=%s\n' "$rc" "$cause" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/exit"
+  [ -n "$pipeline" ] && printf 'pipeline=%s\n' "$pipeline" >> "$dir/exit"
 }
 
 # Forward the signal to the job and go on waiting. A job that ignores it keeps
@@ -370,7 +433,7 @@ cap_pid=$!
 # this shell's own (bash would give an async command /dev/null regardless), so a
 # job fed through a pipe sees what the unwrapped job would.
 if [ "$pass_stdin" = 1 ]; then exec 3<&0; else exec 3</dev/null; fi
-"$@" > "$pipe" 2>&1 <&3 &
+"${HARD[@]}" > "$pipe" 2>&1 <&3 &
 child=$!
 exec 3<&-
 

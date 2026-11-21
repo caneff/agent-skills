@@ -27,6 +27,9 @@
 # Every path exits 0. A bookkeeping hook must never be the reason a real command
 # does not run, so its own failure is never the tool call's.
 #
+# The job body runs under `bash -E -o pipefail` (job-run adds it, #1703), so a failed
+# pipe stage fails the job and `job-run --status` names the stage.
+#
 # Two limits of the wrapping, by design: the job body runs in a fresh `bash -c`,
 # so shell functions and aliases the session had defined are not in scope, and
 # job-run's tee is line-oriented, so binary output on stdout is not preserved.
