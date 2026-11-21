@@ -20,8 +20,8 @@ every later run. A command with no `--changed` is printed as declared.
 
 `seam-section --root <dir> --base-rev <a> --head-rev <b>` (#1911) compares the
 `## End-to-end seam` section's gate text (`gate_text`, #1975) at the two
-revs: exit 0 printing `same`, 1 printing `differs`, 2 with the reason on stderr when either rev cannot be
-read or has no section. The merge's seam-rerun skip reads it, so an edit
+revs: exit 0 printing `same`, 1 printing `differs`, 2 with the reason on
+stderr when either rev cannot be read or has no section. The merge's seam-rerun skip reads it, so an edit
 elsewhere in `AGENTS.md` no longer forces a rerun, and an unreadable side
 keeps the rerun (class 1).
 
