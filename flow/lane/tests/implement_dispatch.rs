@@ -648,6 +648,60 @@ fn a_stalled_prompt_that_persists_releases_the_claim_closes_the_pane_and_keeps_t
     assert!(calls.lines().any(|l| l.starts_with("herdr pane close ")), "the pane was left open: {calls}");
 }
 
+/// A step past the claim that fails through `Claim::fail`: a git whose
+/// `worktree add` errors and delegates everything else to the real one. The
+/// dispatch then prints the release line for every ticket.
+fn failed_workspace_add(f: &Fixture, repo: &std::path::Path, n: &str, extra: &[(&str, &str)]) -> std::process::Output {
+    let script = format!(
+        "#!/bin/sh\ncase \"$*\" in *\"worktree add\"*) echo 'fatal: cannot add worktree' >&2; exit 1;; esac\nexec {} \"$@\"\n",
+        which("git").display()
+    );
+    let path = f.tmp.path().join("bin/git");
+    std::fs::write(&path, script).unwrap();
+    let mut perms = std::fs::metadata(&path).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&path, perms).unwrap();
+    f.dispatch(&["--repo", repo.to_str().unwrap(), n], &with(&default_scenario(), extra))
+}
+
+#[test]
+fn a_failure_past_the_claim_prints_each_tickets_release_line() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = failed_workspace_add(&f, &repo, "412", &[]);
+    assert!(!out.status.success());
+    assert!(
+        out_text(&out).contains(&format!("release the ticket: gh issue edit 412 --repo {SLUG} --remove-label in-progress --add-label ready-for-agent --remove-assignee @me")),
+        "{}",
+        out_text(&out)
+    );
+}
+
+#[test]
+fn a_failure_past_the_claim_on_a_ready_for_human_ticket_prints_a_release_that_keeps_its_label() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = failed_workspace_add(&f, &repo, "413", &[("GH_LABELS", "ready-for-human")]);
+    assert!(!out.status.success());
+    let text = out_text(&out);
+    assert!(text.contains(&format!("release the ticket: gh issue edit 413 --repo {SLUG} --remove-label in-progress --remove-assignee @me")), "{text}");
+    assert!(!text.contains("--add-label ready-for-human"), "{text}");
+}
+
+#[test]
+fn a_claim_edit_that_fails_without_applying_releases_nothing_for_that_ticket() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_ISSUE_EDIT_FAIL", "442")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "442"], &scenario);
+    assert!(!out.status.success());
+    assert!(out_text(&out).contains("read back: the claim is not on"), "{}", out_text(&out));
+    assert!(!f.calls().contains("--remove-label in-progress"), "released a claim that was never set: {}", f.calls());
+}
+
 #[test]
 fn a_stalled_prompt_followed_by_a_successful_resend_dispatches_normally() {
     let f = Fixture::new();

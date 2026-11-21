@@ -376,7 +376,7 @@ fn run_gh(args: &[String]) -> ExitCode {
         // `GH_ISSUE_EDIT_APPLIED_FAIL` names the tickets whose claim edit is
         // applied server-side and then reports an error (a 502 on the reply).
         let applied = env::var("GH_ISSUE_EDIT_APPLIED_FAIL").unwrap_or_default();
-        if applied.split(',').any(|t| !t.is_empty() && t == n) && args.iter().any(|a| a == "--add-label") {
+        if applied.split(',').any(|t| !t.is_empty() && t == n) && args.windows(2).any(|w| w[0] == "--add-label" && w[1] == "in-progress") {
             eprintln!("gh: HTTP 502");
             return ExitCode::FAILURE;
         }

@@ -33,6 +33,11 @@ const HERDR_MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
 /// bound on the subprocess — this is the backstop for herdr's own wait
 /// logic hanging past the deadline it was told to keep.
 const HERDR_PROMPT_TIMEOUT: Duration = Duration::from_secs(130);
+/// How long the stalled-prompt path waits, after resending Enter, for the
+/// agent to start working (herdr's own `--timeout`), and the OS-level backstop
+/// on that subprocess.
+const STALL_RESEND_WAIT_MS: &str = "30000";
+const STALL_RESEND_WAIT_TIMEOUT: Duration = Duration::from_secs(40);
 /// Per-call bound inside `poll_worker_session_name`'s loop: short enough
 /// that one hung `herdr agent list` call can't eat the whole
 /// `SESSION_POLL_DEADLINE` by itself, since the loop's own elapsed check
@@ -114,7 +119,8 @@ The report's `send to (SendMessage): <name>` line is the address a controller
 passes to SendMessage: the worker's Claude session name, never its herdr agent
 name. The lookup is retried for up to 5 s (herdr's read-after-write lag); a
 miss after that prints `send to (SendMessage): not registered yet; ListAgents
-shows it as implement-<n>-…`, and the dispatch still succeeds.
+shows it as implement-<n>-…` (`spec-<n>-…` for a spec run), and the dispatch
+still succeeds.
 
 The claim swaps ready-for-agent for in-progress on every ticket in the clump.
 A ready-for-human ticket keeps ready-for-human and adds in-progress beside it,
@@ -770,13 +776,17 @@ fn release_args<'a>(t: &'a Ticket, slug: &'a str) -> Vec<&'a str> {
 /// Undoes the claims this run made, one `gh issue edit` per ticket, saying
 /// how to re-run any release that fails. Only tickets in `claimed` — never
 /// one this run did not set.
-fn release_claimed(claimed: &[&Ticket], slug: &str) {
+/// Whether every release succeeded.
+fn release_claimed(claimed: &[&Ticket], slug: &str) -> bool {
+    let mut all = true;
     for done in claimed {
         let release = release_args(done, slug);
         if !matches!(run_timeout("gh", &release, gh_mutation_timeout()), Ok(o) if o.success) {
             eprintln!("implement-dispatch: could not release #{}; re-run: gh {}", done.n, release.join(" "));
+            all = false;
         }
     }
+    all
 }
 
 /// The claimed clump: what a failure past the claim needs to say how to
@@ -1208,10 +1218,10 @@ fn poll_worker_session_name(
 /// The report's address line: the name `SendMessage` accepts (the Claude
 /// session name, never the herdr agent name), or, when the lookup still
 /// missed after its bounded retry, where to find the worker meanwhile.
-fn send_to_line(session: Option<&str>, ticket: &str) -> String {
+fn send_to_line(session: Option<&str>, prefix: &str, ticket: &str) -> String {
     match session {
         Some(name) => format!("send to (SendMessage): {name}"),
-        None => format!("send to (SendMessage): not registered yet; ListAgents shows it as implement-{ticket}-…"),
+        None => format!("send to (SendMessage): not registered yet; ListAgents shows it as {prefix}-{ticket}-…"),
     }
 }
 
@@ -1653,10 +1663,13 @@ fn run() -> Result<(), ExitCode> {
                 // fails proves nothing, so the ticket is left as it is and
                 // the message below says to check GitHub.
                 let mut to_release = claimed.clone();
-                let applied = matches!(
-                    lane::issue_state::read_timeout(&slug, &t.n, gh_query_timeout()),
-                    Ok(Some(i)) if i.has_label("in-progress")
-                );
+                let read_back = lane::issue_state::read_timeout(&slug, &t.n, gh_query_timeout());
+                let applied = matches!(&read_back, Ok(Some(i)) if i.has_label("in-progress"));
+                let verdict = match &read_back {
+                    Ok(Some(_)) if applied => "the edit had applied and its claim was released",
+                    Ok(Some(_)) => "read back: the claim is not on",
+                    _ => "the read-back failed, so whether the edit applied is unknown: check GitHub before retrying",
+                };
                 if applied {
                     to_release.push(t);
                 }
@@ -1669,10 +1682,7 @@ fn run() -> Result<(), ExitCode> {
                     Ok(c) => c.combined,
                     Err(e) => e.to_string(),
                 };
-                return Err(die(format!(
-                    "could not claim #{} (gh issue edit): {why} — check GitHub before retrying: the edit may have applied after this timed out",
-                    t.n
-                )));
+                return Err(die(format!("could not claim #{} (gh issue edit): {why} — {verdict}", t.n)));
             }
         }
     }
@@ -1815,19 +1825,22 @@ fn run() -> Result<(), ExitCode> {
     let stalled = matches!(&prompted, Ok(o) if !o.success && o.combined.contains("agent_prompt_stalled"));
     if stalled {
         let stall_text = prompted.as_ref().map(|o| o.combined.clone()).unwrap_or_default();
-        let _ = run_timeout("herdr", &["agent", "send-keys", &agent, "Enter"], HERDR_QUERY_TIMEOUT);
+        let resent = matches!(run_timeout("herdr", &["agent", "send-keys", &agent, "Enter"], HERDR_QUERY_TIMEOUT), Ok(o) if o.success);
         let working = matches!(
-            run_timeout("herdr", &["agent", "wait", &agent, "--until", "working", "--timeout", "30000"], Duration::from_secs(40)),
+            run_timeout("herdr", &["agent", "wait", &agent, "--until", "working", "--timeout", STALL_RESEND_WAIT_MS], STALL_RESEND_WAIT_TIMEOUT),
             Ok(o) if o.success
         );
         if !working {
             let to_release: Vec<&Ticket> = tickets.iter().collect();
-            release_claimed(&to_release, &slug);
-            if !matches!(run_timeout("herdr", &["pane", "close", &pane], HERDR_MUTATION_TIMEOUT), Ok(o) if o.success) {
-                eprintln!("implement-dispatch: could not close pane {pane}; close it by hand: herdr pane close {pane}");
-            }
+            let released = release_claimed(&to_release, &slug);
+            let closed = matches!(run_timeout("herdr", &["pane", "close", &pane], HERDR_MUTATION_TIMEOUT), Ok(o) if o.success);
             eprintln!("implement-dispatch: herdr agent prompt failed: {}", stall_text.trim());
-            eprintln!("the brief stayed unsubmitted after Enter was resent: the claim is released, pane {pane} closed");
+            eprintln!(
+                "the brief stayed unsubmitted ({}); {}; {}",
+                if resent { "Enter was resent" } else { "resending Enter failed" },
+                if released { "the claim is released" } else { "the claim could NOT be released, see above" },
+                if closed { format!("pane {pane} closed") } else { format!("pane {pane} NOT closed: herdr pane close {pane}") },
+            );
             if wt.exists() {
                 eprintln!("workspace left in place at {}", wt.display());
             }
@@ -1923,7 +1936,7 @@ fn run() -> Result<(), ExitCode> {
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");
-    safe_println!("{}", send_to_line(session.as_deref(), &n));
+    safe_println!("{}", send_to_line(session.as_deref(), mode.branch_prefix(), &n));
     safe_println!("cleanup:  {cleanup}");
     match (&base, mode) {
         (Base::Integration { created }, _) => {
@@ -2076,6 +2089,15 @@ print(json.dumps(out))
         );
         assert_eq!(name, None);
         assert!(start.elapsed() < Duration::from_millis(900), "took {:?}", start.elapsed());
-        assert_eq!(SESSION_POLL_DEADLINE, Duration::from_secs(5), "the stated bound, in OPERATIONS.md and --help");
+        assert_eq!(SESSION_POLL_DEADLINE, Duration::from_secs(5), "the stated bound, in --help");
+    }
+
+    #[test]
+    fn the_fallback_names_the_workers_own_prefix() {
+        assert_eq!(
+            send_to_line(None, "spec", "195"),
+            "send to (SendMessage): not registered yet; ListAgents shows it as spec-195-…"
+        );
+        assert_eq!(send_to_line(Some("implement-9-ab"), "implement", "9"), "send to (SendMessage): implement-9-ab");
     }
 }
