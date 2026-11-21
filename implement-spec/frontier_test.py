@@ -1144,6 +1144,36 @@ def test_native_blockers_that_cannot_be_listed_stay_blocked():
     assert numbers(got["blocked"]) == [2], got
 
 
+def test_an_empty_native_list_against_an_open_count_blocks_and_says_so():
+    # #1976: three runs read landed slices as blocked and the entry said only
+    # "native dependencies", so the cause could not be read off it afterwards.
+    got = read([issue(2, blocked_by=1, total_blocked_by=1)], landed=SPEC_483,
+               native={2: []}, parents={2: spec_parent(483)})
+    assert numbers(got["blocked"]) == [2], got
+    assert "listed none" in got["blocked"][0]["why"], got
+
+
+def test_an_unreadable_native_list_blocks_and_says_so():
+    got = read([issue(2, blocked_by=1, total_blocked_by=1)], landed=SPEC_483,
+               native={2: T.TrackerError("boom")}, parents={2: spec_parent(483)})
+    assert numbers(got["blocked"]) == [2], got
+    assert "could not be read: boom" in got["blocked"][0]["why"], got
+
+
+def test_spec_809_slices_whose_blockers_all_landed_are_not_blocked():
+    # Replayed from caneff/sudokumaker-custom-constraints spec-809, 2026-11-21:
+    # the real native edges (#815-#818 on #814, #819 on #814-#818) with every
+    # slice still open, and the real merged slice PRs' `Closes` lines. The
+    # replay did not reproduce the three misreads (#1976); this pins it.
+    spec = {"spec-809": {814, 815, 816, 817, 818}}
+    edges = {815: [814], 816: [814], 817: [814], 818: [814], 819: [814, 815, 816, 817, 818]}
+    issues = [issue(n, blocked_by=len(e), total_blocked_by=len(e)) for n, e in edges.items()]
+    got = read(issues, landed=spec, native=edges,
+               parents={n: spec_parent(809) for n in edges})
+    assert numbers(got["slice"]) == [815, 816, 817, 818, 819], got
+    assert got["blocked"] == [], got
+
+
 def test_a_failed_landing_lookup_keeps_the_ticket_blocked_and_says_so():
     got = read([issue(2, body=SECTION_ON_1)], states={1: "open"},
                landed={"spec-483": T.TrackerError("gh down")},
