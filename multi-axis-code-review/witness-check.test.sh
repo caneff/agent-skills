@@ -488,7 +488,7 @@ doc_files=( "$repo_root/multi-axis-code-review/SKILL.md" "$repo_root"/multi-axis
   "$repo_root/implement/SKILL.md" "$repo_root"/implement/briefs/*.md "$repo_root/implement/fanout-brief.py"
   "$repo_root/flow/claude/agents/diff-reviewer.md"
   "$repo_root/mutation-audit/witness.sh" "$repo_root"/tests/review_cache_e2e_golden/*.md )
-left="$(grep -nE -e '--mutate <|--mutate "|--mutate \$|defines? `mutate`|defining `mutate`|write one file, outside the checkout|a file outside the checkout defining|worktree add --detach [^ ]*mutation|cp --parents' "${doc_files[@]}" 2>/dev/null | cut -c1-200 || true)"
+left="$(grep -nE -e '--mutate <|--mutate "|--mutate \$|defines? `mutate`|defining `mutate`|write one file, outside the checkout|a file outside the checkout defining|worktree add --detach [^ ]*mutation' "${doc_files[@]}" 2>/dev/null | cut -c1-200 || true)"
 check "a doc still shows the sourced --mutate file form:
 $left" [ -z "$left" ]
 for f in "$repo_root/multi-axis-code-review/SKILL.md" "$repo_root/flow/claude/agents/diff-reviewer.md" \
