@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agents  # noqa: E402
 import loop  # noqa: E402
 import runfile  # noqa: E402
-from run_fixtures import drop_job  # noqa: E402
+from run_fixtures import SHA_A, drop_job  # noqa: E402
 from run_fixtures import drop_repo_field  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
 import fixture_identity  # noqa: E402
@@ -1237,7 +1237,7 @@ def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed(tmp, 
     runfile.clump("run-skip", [1258], "/w/1258", "a-1258", root=cache)
     runfile.clump("run-skip", [1293, 1294], "/w/1293", "a-1293", root=cache)
     runfile.clump("run-skip", [1278], "/w/1278", "a-1278", root=cache)
-    runfile.land("run-skip", 1258, "a1b2c3d", root=cache)
+    runfile.land("run-skip", 1258, SHA_A, root=cache)
     runfile.close("run-skip", 1293, "already fixed on main", root=cache)
     cand = os.path.join(tmp, "candidates.json")
     with open(cand, "w") as fh:
@@ -1397,7 +1397,7 @@ def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id(tmp):
     runfile.clump("run-sweep-run-fixture", [1], "/w/1", "skills-1", root=cache)
     runfile.clump("run-sweep-run-fixture", [3], "/w/3", "skills-3", root=cache)
     runfile.clump("run-sweep-run-fixture", [4], "/w/4", "skills-4", root=cache)
-    runfile.land("run-sweep-run-fixture", 4, "a1b2c3d", root=cache)
+    runfile.land("run-sweep-run-fixture", 4, SHA_A, root=cache)
     calls = os.path.join(tmp, "calls")
     env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
                CALLS=calls, SPEC_RUN_CACHE_DIR=cache)

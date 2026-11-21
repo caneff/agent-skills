@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
-from run_fixtures import drop_job, drop_repo_field, reopen_permissions  # noqa: E402
+from run_fixtures import SHA_A, SHA_B, drop_job, drop_repo_field, reopen_permissions  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
 # A real git checkout for every `start` that is not about the target repo: this
@@ -64,7 +64,7 @@ def three_clumps(cache):
     runfile.clump("run-1", [901, 902], "/w/a", "agent-a", root=cache)
     runfile.clump("run-1", [903], "/w/b", "agent-b", root=cache)
     runfile.clump("run-1", [905], "/w/c", "agent-c", root=cache)
-    runfile.land("run-1", 905, "abc1234", root=cache)
+    runfile.land("run-1", 905, SHA_A, root=cache)
     return cache
 
 
@@ -282,16 +282,15 @@ def test_a_clump_needs_at_least_one_ticket_number(cache, bad):
 def test_a_landing_records_the_clumps_squash_sha(cache):
     runfile.start("run-1", slots=2, root=cache, repo=REPO)
     runfile.clump("run-1", [901, 902], "/w/a", "agent-a", root=cache)
-    runfile.land("run-1", 901, "0123456789abcdef0123456789abcdef01234567",
-                 root=cache)
+    runfile.land("run-1", 901, SHA_A, root=cache)
     got = runfile.load("run-1", root=cache)["clumps"][0]
-    assert got["landed"] == "0123456789abcdef0123456789abcdef01234567", got
+    assert got["landed"] == SHA_A, got
 
 
 def test_a_landing_on_a_clump_the_run_never_dispatched_is_refused(cache):
     runfile.start("run-1", slots=2, root=cache, repo=REPO)
     with pytest.raises(runfile.RunFileError) as exc:
-        runfile.land("run-1", 901, "abc1234", root=cache)
+        runfile.land("run-1", 901, SHA_A, root=cache)
     assert "901" in str(exc.value), exc.value
 
 
@@ -299,12 +298,12 @@ def test_a_second_different_sha_for_a_landed_clump_is_refused(cache):
     # The squash sha is final. A second, different one is a stale writer.
     runfile.start("run-1", slots=2, root=cache, repo=REPO)
     runfile.clump("run-1", [901], "/w/a", "agent-a", root=cache)
-    runfile.land("run-1", 901, "abc1234", root=cache)
-    runfile.land("run-1", 901, "abc1234", root=cache)  # idempotent
+    runfile.land("run-1", 901, SHA_A, root=cache)
+    runfile.land("run-1", 901, SHA_A, root=cache)  # idempotent
     with pytest.raises(runfile.RunFileError) as exc:
-        runfile.land("run-1", 901, "def5678", root=cache)
-    assert "abc1234" in str(exc.value), exc.value
-    assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] == "abc1234"
+        runfile.land("run-1", 901, SHA_B, root=cache)
+    assert SHA_A in str(exc.value), exc.value
+    assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] == SHA_A
 
 
 @pytest.mark.parametrize("bad", ["", "HEAD", "abc123", "zzzzzzz", "abc1234 "])
@@ -317,12 +316,42 @@ def test_a_landing_sha_is_hex(cache, bad):
     assert got["landed"] is None, got
 
 
+def test_a_landing_sha_that_is_no_commit_in_the_target_repo_is_refused(cache):
+    # #1979: a well-formed 40-hex sha no object answers to was recorded, then blocked its own correction.
+    runfile.start("run-1", slots=2, root=cache, repo=REPO)
+    runfile.clump("run-1", [901], "/w/a", "agent-a", root=cache)
+    typo = "7c4a36c" + "0" * 33
+    with pytest.raises(runfile.RunFileError) as exc:
+        runfile.land("run-1", 901, typo, root=cache)
+    assert typo in str(exc.value), exc.value
+    assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] is None
+    runfile.land("run-1", 901, SHA_A, root=cache)  # the correction is accepted
+    assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] == SHA_A
+
+
+def test_a_landing_sha_that_names_a_tree_not_a_commit_is_refused(cache):
+    runfile.start("run-1", slots=2, root=cache, repo=REPO)
+    runfile.clump("run-1", [901], "/w/a", "agent-a", root=cache)
+    tree = subprocess.run(["git", "-C", REPO, "rev-parse", f"{SHA_A}^{{tree}}"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    with pytest.raises(runfile.RunFileError):
+        runfile.land("run-1", 901, tree, root=cache)
+
+
+def test_the_cli_refuses_a_landing_sha_that_is_no_commit(cache, cli):
+    cli("start", "--repo", REPO, "run-1")
+    cli("clump", "run-1", "--tickets", "901", "--workspace", "/w/a", "--agent", "agent-a")
+    got = cli("land", "run-1", "--clump", "901", "--sha", "7c4a36c" + "0" * 33)
+    assert got.returncode != 0 and "7c4a36c" in got.stderr, got
+    assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] is None
+
+
 def test_re_registering_a_landed_clump_keeps_its_sha(cache):
     runfile.start("run-1", slots=2, root=cache, repo=REPO)
     runfile.clump("run-1", [901], "/w/a", "agent-a", root=cache)
-    runfile.land("run-1", 901, "abc1234", root=cache)
+    runfile.land("run-1", 901, SHA_A, root=cache)
     runfile.clump("run-1", [901], "/w/a", "agent-a2", root=cache)
-    assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] == "abc1234"
+    assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] == SHA_A
 
 
 def test_resume_splits_live_from_vanished_workers_and_from_landings(three_clumps):
@@ -356,7 +385,7 @@ def test_a_landed_clump_is_never_re_announced_even_if_its_agent_is_alive(three_c
 def test_a_landing_frees_the_slot_a_vanished_clump_was_holding(three_clumps):
     root = three_clumps
     before = runfile.resume("run-1", ["agent-a"], root=root)["free"]
-    runfile.land("run-1", 903, "def5678", root=root)
+    runfile.land("run-1", 903, SHA_B, root=root)
     after = runfile.resume("run-1", ["agent-a"], root=root)["free"]
     assert (before, after) == (1, 2), (before, after)
 
@@ -394,7 +423,7 @@ def test_closing_a_landed_clump_is_refused(three_clumps):
     root = three_clumps
     with pytest.raises(runfile.RunFileError) as exc:
         runfile.close("run-1", 905, "x", root=root)
-    assert "abc1234" in str(exc.value), exc.value
+    assert SHA_A in str(exc.value), exc.value
     assert runfile.load("run-1", root=root)["clumps"][2]["closed"] is None
 
 
@@ -402,7 +431,7 @@ def test_landing_a_closed_clump_is_refused(three_clumps):
     root = three_clumps
     runfile.close("run-1", 903, "dup", root=root)
     with pytest.raises(runfile.RunFileError) as exc:
-        runfile.land("run-1", 903, "def5678", root=root)
+        runfile.land("run-1", 903, SHA_B, root=root)
     assert "closed" in str(exc.value), exc.value
     assert runfile.load("run-1", root=root)["clumps"][1]["landed"] is None
 
@@ -515,7 +544,7 @@ def test_a_write_that_dies_before_it_finishes_leaves_the_old_run_intact(cache, m
 
     monkeypatch.setattr(os, "replace", power_cut)
     with pytest.raises(runfile.RunFileError):
-        runfile.land("run-1", 901, "abc1234", root=root)
+        runfile.land("run-1", 901, SHA_A, root=root)
     monkeypatch.undo()
 
     assert open(runfile.path("run-1", root=root)).read() == before
@@ -533,7 +562,7 @@ def test_a_run_killed_mid_flight_is_recovered_by_a_second_process(cli):
     assert cli("clump", "run-1", "--tickets", "905",
                "--workspace", "/w/c", "--agent", "agent-c").returncode == 0
     assert cli("land", "run-1", "--clump", "905",
-               "--sha", "abc1234").returncode == 0
+               "--sha", SHA_A).returncode == 0
 
     got = cli("resume", "run-1", "--live", "agent-a",
               "--controller", "run-ctl-f3")
@@ -543,7 +572,7 @@ def test_a_run_killed_mid_flight_is_recovered_by_a_second_process(cli):
     assert "run-ctl-f3" in out, out
     assert "re-announce  agent-a" in out, out
     assert "#901,#902" in out and "/w/a" in out, out
-    assert "landed" in out and "abc1234" in out, out
+    assert "landed" in out and SHA_A in out, out
 
 
 def test_the_cli_reports_a_vanished_worker_by_its_herdr_agent_name(cli):

@@ -194,6 +194,27 @@ class TestEscape:
         repo.publish()
         assert [e["ticket"] for e in repo.escapes()["escapes"]] == [11]
 
+    def test_a_binary_file_in_a_fix_commit_does_not_stop_the_table(self, repo):
+        # #1979: `git show <fix>^:<path>` of a PNG is not UTF-8; the whole table used to be lost.
+        png = repo.repo / "logo.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x80")
+        repo.git(repo.repo, "add", "logo.png")
+        repo.git(repo.repo, "commit", "-q", "-m", "add logo", when=T0 + 3 * DAY)
+        png.write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x80\x81")
+        (repo.repo / "a.py").write_text("a1\nFIXED\na3\na4\na5\na6\n")
+        repo.git(repo.repo, "add", "logo.png", "a.py")
+        repo.git(repo.repo, "commit", "-q", "-m", "fix: crash in a.py and the logo", when=T0 + 4 * DAY)
+        repo.publish()
+        got = repo.escapes()
+        assert [(e["ticket"], e["files"]) for e in got["escapes"]] == [(11, ["a.py"])]
+
+    def test_a_crash_in_the_history_read_exits_non_zero_with_the_reason(self, repo, monkeypatch):
+        repo.land({"a.py": "a1\nFIXED\na3\na4\na5\na6\n"}, "fix: crash in a.py", 4)
+        repo.publish()
+        r = repo.run("escapes", "--repo-dir", repo.repo / "missing-dir", "--ledger", repo.ledger)
+        assert r.returncode != 0
+        assert "review_ledger escapes:" in r.stderr, r.stderr
+
     def test_a_landing_is_found_by_the_ticket_in_its_subject_when_the_body_has_no_closes(self, repo):
         repo.land({"e.py": "e1\ne2\ne3\n"}, "e: add the thing (#15) (#35)", 3)
         repo.skip(15, "spec", "ablation")

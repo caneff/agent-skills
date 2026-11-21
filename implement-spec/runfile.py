@@ -555,13 +555,28 @@ def checked_sha(sha):
     return sha
 
 
+def _require_commit(repo, sha):
+    """Refuse a sha that is no commit in the run's target repo (#1979): a typed one would be
+    recorded, then refuse its own correction as a second sha."""
+    try:
+        done = shellcmd.git(["-C", repo, "cat-file", "-e", f"{sha}^{{commit}}"],
+                            ok=(0, 1, 128), timeout=30)
+    except shellcmd.CmdError as exc:
+        raise RunFileError(f"cannot check {sha} in {repo}: {exc}") from None
+    if done.returncode != 0:
+        raise RunFileError(f"{sha} is not a commit in {repo}")
+
+
 def land(run_id, lowest, sha, root=None):
-    """Record a clump's squash sha. The sha is final: a second, different one
-    is a stale writer, not a correction."""
+    """Record a clump's squash sha, which must be a commit in the run's target
+    repo. The sha is final: a second, different one is a stale writer, not a
+    correction."""
     checked_sha(sha)
     with locked(run_id, root):
         run = load(run_id, root)
         entry = clump_entry(run, lowest)
+        if entry["landed"] != sha:
+            _require_commit(target_repo(run), sha)
         if entry["landed"] not in (None, sha):
             raise RunFileError(
                 f"clump #{lowest} already landed at {entry['landed']}")
