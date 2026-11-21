@@ -248,9 +248,10 @@ defines them.
   something: in spec-300 (2026-11-07) three re-subscriptions gave three
   identical notices. The idle notice reaches the controller only. On it, read that worker's pane
   (`herdr agent read <name>`) and say nothing to Chris unless the pane holds
-  a question for him. The `Stop` hook `worker-stop-alert.sh` stays installed
-  but unregistered, because typing into the controller's pane landed in
-  Chris's own input; re-adding its `Stop` entry restores it. Its
+  a question for him. The `Stop` hook `worker-stop-alert.sh` is registered:
+  Chris retired it on 2026-10-04 because typing into the controller's pane
+  landed in his own input, and re-registered it on 2026-11-17. Its delivery
+  moves off typing in #1946, and its false repeats are #1945. Its
   send-time sibling `worker-send-alert.sh` (`PostToolUse` on `SendMessage`,
   #1540) is registered; its header states when it fires.
 - Dirty-stop guard (#1907): the registered `Stop` hook `worker-dirty-stop.sh`
