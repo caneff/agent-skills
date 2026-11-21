@@ -9,7 +9,7 @@
 #                    (--file <path> --old <string> --new <string> | --patch <file>)
 #                    (--repo <repo> --ticket <n> [--round <k>] [--ledger <path>] | --no-ledger)
 #                    [--slots <k>] [--baseline-seconds <s> | --timeout <s>]
-#                    [--call-site | --worker]
+#                    [--with-working-tree] [--call-site | --worker]
 #
 # `--file` is a path inside the reviewed tree (relative, tracked at HEAD); `--old` is replaced by
 # `--new` once, literally: bytes only, no regex, no escapes, no shell, no newline stripped. `--old`
@@ -20,8 +20,13 @@
 # run as `bash -o pipefail -c` from the witness's top level, for the covering suite only. Several
 # mutations are several calls (loop in your own shell; `--slots` bounds how many run at once).
 #
+# `--with-working-tree` builds the witness from the reviewed tree as it stands, uncommitted edits
+# and untracked files included (but not `.scratch/`), instead of from HEAD alone: for a fan-out
+# sub-worker (implement/briefs/fanout-worker.md), which cannot commit. `--old` is then counted
+# in the working file, not HEAD's copy, and the file need not be tracked.
+#
 # `--call-site` types the ledger row call-site-mutation instead of witness-mutation, and `--worker`
-# worker-mutation (a worker's own mutations, implement/SKILL.md § Build): the outcome of every row is
+# worker-mutation (a worker's own mutations, implement/SKILL.md § Build); not both. The outcome of every row is
 # this script's own, from the covering command's exit status, never a hand `--outcome` (#1969).
 #
 # Before the mutation lands, the witness gets the setup a fresh worktree lacks
@@ -48,8 +53,8 @@
 # The outcome is the covering command's own exit status, `pipefail` set: a command piped
 # through `tail` reports the test's status, not the filter's (#1969). A reader that exits
 # early (`head`, `grep -q`) can SIGPIPE the test: status 141 reads `unknown`; write the
-# output to a file instead. A command that fails having printed nothing has no message to read
-# and is `unknown` too.
+# output to a file instead. A command that fails having printed nothing (`grep -q`, `cmp -s`) has
+# no message to read and is `unknown` too: make it print.
 #
 # The covering command's suite runs under a time limit (#1854); SKILL.md § 4 *The time
 # limit* gives the reason. `--baseline-seconds <s>` (the unmutated run's own
@@ -66,9 +71,8 @@
 # Each run with `--repo` first prunes the repo's cache-home `witness.*`
 # directories older than 7 days (#1547); the code below says how.
 #
-# Per-call cost (#1708): every call makes its own worktree and setup, so a repeat call pays it
-# again rather than sharing a tree whose earlier mutation could leak into the next. Measured at
-# #1708 on this repo (923 tracked files, a uv.lock): 0.35 s per call, setup and teardown included.
+# Every call makes its own worktree and setup; SKILL.md § 4 *What a call costs* says why and what
+# that costs.
 #
 # Exit: 0 the mutation was run and reported (red, HOLLOW or unknown — read the
 # output); 1 setup failed before it ran; 2 bad arguments; 3 a throwaway worktree could not be
@@ -79,7 +83,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() { sed -n '/^#   witness-check.sh/,/^#$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# //' >&2; exit 2; }
 die() { echo "witness check: $*" >&2; exit 2; }
 kind=witness-mutation
-worktree="" id="" file="" old="" new="" patch="" test_cmd="" have_old=0 have_new=0
+worktree="" id="" file="" old="" new="" patch="" test_cmd="" have_old=0 have_new=0 with_wt=0 worker=0 call_site=0
 no_ledger=0 repo_name="" max_slots="" limit="" baseline=""
 ledger_args=()
 while [ $# -gt 0 ]; do
@@ -100,17 +104,22 @@ while [ $# -gt 0 ]; do
       case "${2-}" in ''|*[!0-9]*|0) die "$1 needs a positive integer, got '${2-}'" ;; esac
       if [ "$1" = --timeout ]; then limit="$2"; else baseline="$2"; fi; shift 2 ;;
     --no-ledger) no_ledger=1; shift ;;
-    --worker) [ "$kind" = call-site-mutation ] || kind=worker-mutation; shift ;;
-    --call-site) kind=call-site-mutation; shift ;;
+    --worker) worker=1; shift ;;
+    --call-site) call_site=1; shift ;;
+    --with-working-tree) with_wt=1; shift ;;
     *) echo "witness check: unknown argument '$1'" >&2; usage ;;
   esac
 done
 [ -n "$worktree" ] || die "--worktree is required"
+[ "$worker" -eq 0 ] || [ "$call_site" -eq 0 ] || die "--worker and --call-site: not both, a row has one type"
+[ "$worker" -eq 0 ] || kind=worker-mutation
+[ "$call_site" -eq 0 ] || kind=call-site-mutation
 [ -n "$id" ] || die "--id is required"
 # An id names a directory and an output file, so it is checked before anything exists: a pytest
 # nodeid (`tests/a.py::t1[x]`) would put the output file inside its own worktree. Refused by
 # name — map the test to a short id and report the mapping — never mangled. A `*` reaches here
 # only when the caller's shell left it unexpanded, and is refused the same way.
+case "$id" in .|..) die "'$id' is not usable as a mutation id (it names the directory itself)" ;; esac
 case "$id" in *[!A-Za-z0-9._-]*) die "'$id' is not usable as a mutation id (letters, digits, . - _)" ;; esac
 [ -n "$test_cmd" ] || die "--test is required: the command that runs only the covering suite"
 if [ -n "$patch" ]; then
@@ -118,11 +127,12 @@ if [ -n "$patch" ]; then
   [ -f "$patch" ] && [ -r "$patch" ] || die "cannot read patch '$patch'"
   patch=$(realpath "$patch")
 else
-  [ -n "$file" ] && [ "$have_old" -eq 1 ] && [ "$have_new" -eq 1 ] ||
-    die "give the one mutation as --file <path> --old <string> --new <string> (--new '' deletes), or --patch <file>; --new is required"
+  [ -n "$file" ] || die "no mutation: give --file <path> --old <string> --new <string> (--new '' deletes), or --patch <file>; --file is missing"
+  [ "$have_old" -eq 1 ] || die "--old is missing: give the text to replace"
+  [ "$have_new" -eq 1 ] || die "--new is missing: give the replacement (--new '' deletes)"
   [ -n "$old" ] || die "--old is empty: it would occur everywhere, give the text to replace"
   [ "$old" != "$new" ] || die "--old and --new are identical: that mutation changes nothing"
-  case "$file" in /*|..|../*|*/..|*/../*) die "--file '$file' must be a path inside the reviewed tree, relative and without .." ;; esac
+  case "$file" in /*|..|../*|*/..|*/../*) die "--file '$file' is outside the reviewed tree: give a relative path without .." ;; esac
 fi
 # The per-mutant limit (#1854). 240 s with nothing to scale from, so one hung mutant
 # ends well inside the 600 s a foreground Bash call allows (#1921).
@@ -144,10 +154,15 @@ top=$(git -C "$worktree" rev-parse --show-toplevel) || exit 1
 # The one occurrence is counted in HEAD's copy, the tree every witness is built from, before
 # anything is created: a mutation that cannot land is refused, never run and read as a pass.
 if [ -z "$patch" ]; then
-  git -C "$top" cat-file -e "HEAD:$file" 2>/dev/null || die "--file '$file' is not tracked at HEAD in $top"
-  occurs=$(git -C "$top" cat-file blob "HEAD:$file" | python3 "$here/witness_replace.py" count "$old") ||
-    die "could not count --old in '$file'"
-  [ "$occurs" -eq 1 ] || die "--old occurs $occurs times in '$file' at HEAD, not once: give enough surrounding text to match exactly one place (nothing was run, no ledger row written)"
+  if [ "$with_wt" -eq 1 ]; then
+    [ -f "$top/$file" ] || die "--file '$file' does not exist in $top"
+    occurs=$(python3 "$here/witness_replace.py" count "$old" <"$top/$file"); where="the working tree"
+  else
+    git -C "$top" cat-file -e "HEAD:$file" 2>/dev/null || die "--file '$file' is not tracked at HEAD in $top"
+    occurs=$(git -C "$top" cat-file blob "HEAD:$file" | python3 "$here/witness_replace.py" count "$old"); where=HEAD
+  fi
+  case "$occurs" in ''|*[!0-9]*) die "could not count --old in '$file'" ;; esac
+  [ "$occurs" -eq 1 ] || die "--old occurs $occurs times in '$file' at $where, not once: give enough surrounding text to match exactly one place (nothing was run, no ledger row written)"
 fi
 
 # Job control, so the background mutation is its own process group and an interrupt can reach
@@ -255,11 +270,15 @@ slots=$(( (28 - busy) / 3 )); [ "$slots" -gt 4 ] && slots=4; [ "$slots" -lt 1 ] 
 # loaded is worse than a slow one. The covering command is started without the descriptor, so a
 # process it leaves behind never holds a slot.
 slot_dir="${HOME:-/tmp}/.cache/agent-reviews/.witness-slots"
+command -v flock >/dev/null || { echo "witness check: flock is not installed - cannot bound concurrent calls" >&2; exit 1; }
 mkdir -p "$slot_dir" || { echo "witness check: cannot create $slot_dir" >&2; exit 1; }
 while :; do
   for n in $(seq 1 "$slots"); do
     exec {slot_fd}>"$slot_dir/slot.$n" || { echo "witness check: cannot open a slot file in $slot_dir" >&2; exit 1; }
-    if flock -n "$slot_fd"; then break 2; fi
+    flock -n "$slot_fd"; rc=$?
+    [ "$rc" -ne 0 ] || break 2
+    # 1 is contention; anything else (no flock, a filesystem that cannot lock) would wait forever.
+    [ "$rc" -eq 1 ] || { echo "witness check: flock failed (exit $rc) on $slot_dir/slot.$n - cannot bound concurrent calls" >&2; exit 1; }
     exec {slot_fd}>&-
   done
   sleep 0.2
@@ -314,6 +333,14 @@ prepare() { # <witness>
 git -C "$worktree" cat-file -e HEAD:uv.lock 2>/dev/null ||
   echo "witness check: no uv.lock at HEAD - .venv is left unset in the witness" >&2
 
+# `--with-working-tree`: the committed HEAD is already checked out, so carry the uncommitted
+# edits over (deletions and renames included, binary-safe) and then the untracked files that
+# are not ignored, `.scratch/` excepted, as the fan-out recipe this replaced did.
+carry_working_tree() {
+  git -C "$top" diff HEAD --binary | git -C "$witness" apply || return 1
+  git -C "$top" ls-files -o --exclude-standard -z -- . ':!.scratch' |
+    (cd "$top" && xargs -0 -r -I% cp --parents % "$witness/")
+}
 # The mutation lands, then the covering command runs, in that order and nowhere else. `reached`
 # is set on the line before the command starts: a witness that never got that far (a worktree
 # that failed to create, a setup that failed, a patch that did not apply) is `unknown`, whatever
@@ -322,7 +349,9 @@ reached=0 status="" timed_out=0
 started=$(date +%s)
 if git -C "$worktree" worktree add --detach -q "$witness" HEAD && prepare "$witness"; then
   applied=0
-  if [ -n "$patch" ]; then
+  if [ "$with_wt" -eq 1 ] && ! carry_working_tree; then
+    echo "witness check: could not carry the reviewed tree's uncommitted state into the witness" >"$out"
+  elif [ -n "$patch" ]; then
     if git -C "$witness" apply "$patch" >"$out" 2>&1; then applied=1
     else echo "witness check: the patch does not apply at HEAD" >>"$out"; fi
   else
@@ -357,7 +386,6 @@ show() {
        tail -25 "$out"
   fi 2>/dev/null | awk -v p="  $id| " '{print p $0}'
 }
-mkdir -p "$root/outcome" || exit 1
 outcome=unknown
 if [ "$reached" -eq 0 ]; then
   printf '%s: unknown — it never reached its covering command, whatever it exited with\n' "$id"
@@ -388,13 +416,13 @@ fi
 # One ledger row (#1270), written here because cleanup removes the files. The outcome is the word
 # the report above wrote, so the mapping from exit status to outcome has this one home; a missing
 # outcome file or wall clock is refused by `append`, never written as a stand-in.
-append_failed=0
+append_ok=1
 if [ "$no_ledger" -eq 0 ]; then
-  printf '%s\n' "$outcome" >"$root/outcome/$id"
+  printf '%s\n' "$outcome" >"$root/outcome"
   python3 "$here/review_ledger.py" append "${ledger_args[@]}" --type "$kind" \
-    --mutation-id "$id" --status-file "$root/outcome/$id" --seconds "$seconds" || append_failed=1
+    --mutation-id "$id" --status-file "$root/outcome" --seconds "$seconds" || append_ok=0
 fi
 cleanup || exit 3
 trap - EXIT INT TERM
-[ "$append_failed" -eq 0 ] || { echo "witness check: 1 mutation row(s) not appended - put the refusal above on the first line of your summary" >&2; exit 4; }
+[ "$append_ok" -eq 1 ] || { echo "witness check: the mutation row was not appended - put the refusal above on the first line of your summary" >&2; exit 4; }
 exit 0

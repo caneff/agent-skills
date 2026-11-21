@@ -258,7 +258,7 @@ No PR and no reviewer; Chris reads the log after.
   `--old` becomes `--new` once, literally, in the throwaway worktree
   the script made, and `--test` runs only the covering suite; `--old`
   occurring other than once is refused with its count. It is the only
-  mutation runner: never a hand-rolled worktree, loop or ledger row.
+  mutation runner: never a hand-rolled worktree, mutation script or ledger row.
   The script owns the worktree and its removal, the `node_modules` and
   `__pycache__` setup (#1219), `CARGO_TARGET_DIR` (#1696), the time and the
   ledger row: its row is typed `worker-mutation` by `--worker`, and the

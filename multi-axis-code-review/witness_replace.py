@@ -25,29 +25,23 @@ def occurrences(text: bytes, old: bytes) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) >= 3 and argv[1] == "count" and len(argv) == 3:
-        old = os.fsencode(argv[2])
-        if not old:
-            print("witness_replace: empty <old>", file=sys.stderr)
-            return 2
-        print(occurrences(sys.stdin.buffer.read(), old))
+    mode, args = (argv[1], argv[2:]) if len(argv) > 1 else ("", [])
+    if (mode, len(args)) not in (("count", 1), ("apply", 3)) or not os.fsencode(args[-2 if mode == "apply" else 0]):
+        print(__doc__, file=sys.stderr)  # a wrong shape, or an empty <old>
+        return 2
+    if mode == "count":
+        print(occurrences(sys.stdin.buffer.read(), os.fsencode(args[0])))
         return 0
-    if len(argv) == 5 and argv[1] == "apply":
-        path, old, new = argv[2], os.fsencode(argv[3]), os.fsencode(argv[4])
-        if not old:
-            print("witness_replace: empty <old>", file=sys.stderr)
-            return 2
-        with open(path, "rb") as f:
-            text = f.read()
-        n = occurrences(text, old)
-        if n != 1:
-            print(f"witness_replace: <old> occurs {n} times in {path}, not once", file=sys.stderr)
-            return 1
-        with open(path, "wb") as f:
-            f.write(text.replace(old, new, 1))
-        return 0
-    print(__doc__, file=sys.stderr)
-    return 2
+    path, old, new = args[0], os.fsencode(args[1]), os.fsencode(args[2])
+    with open(path, "rb") as f:
+        text = f.read()
+    n = occurrences(text, old)
+    if n != 1:
+        print(f"witness_replace: <old> occurs {n} times in {path}, not once", file=sys.stderr)
+        return 1
+    with open(path, "wb") as f:
+        f.write(text.replace(old, new, 1))
+    return 0
 
 
 if __name__ == "__main__":

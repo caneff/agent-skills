@@ -488,8 +488,8 @@ it, written without reproducing the original denial (#1324 could not be
 reproduced from a worker session), so a reviewer that is still refused reports
 the refusal verbatim and stops, never reaching the removal another way.
 
-*Isolation.* `git worktree add --detach` a throwaway worktree per mutation,
-undone with `git worktree remove --force`: that is the one rule, the same in
+*Isolation.* `witness-check.sh` makes a throwaway `git worktree add --detach`
+worktree per mutation and undoes it with `git worktree remove --force`: that is the one rule, the same in
 `implement/briefs/fanout-worker.md` and `implement/SKILL.md` § Build, #1696.
 `witness-check.sh` sets `CARGO_TARGET_DIR=<mutation worktree>/target` in each
 witness, since the worktree isolates the tree and not cargo's build dir. **Never
@@ -515,7 +515,8 @@ a loop of calls in one tool call must fit inside it, or each call goes in its ow
 A call-site mutation (correctness brief, (e)) is one more call, one per protected entry
 point, enumerated beside the constraint mutation it accompanies and passed `--call-site`. Each
 gets its own id, its own worktree and its own output. No two mutations, call-site or
-constraint, ever share an id.
+constraint, share an id: a repeated id on one ticket and round replaces that
+row (`append` keys rows by id), so the earlier outcome is lost.
 
 Two things must not be lost. **The message stays paired with its mutation**: reading the
 message rather than the exit status is what catches defect class 3, and every output line is
@@ -525,9 +526,9 @@ a command that failed having printed nothing. Reported by name, never folded in 
 assertions that genuinely held — that is defect class 1, and it is the failure this whole
 block is most exposed to.
 
-There is **nothing to restore**: nothing is shared, and each worktree is discarded whole. No step here reaches back into the
-checkout to undo anything, and reintroducing one would be the `cp -a` defect by
-another route.
+There is **nothing to restore**: nothing is shared, and each worktree is
+discarded whole. No step here reaches back into the checkout to undo
+anything, and reintroducing one would be the `cp -a` defect by another route.
 
 *The bound.* The box cap is 28 claude processes machine-wide, counted
 `ps -eo comm= | grep -cx claude` — by command name, never `ps aux | grep`,
@@ -540,35 +541,47 @@ the sequential check this replaces, slower but still run. So does a box whose
 process table cannot be read at all: an unreadable count is treated as a full
 machine, never as an idle one, which is class 1 applied to the bound itself.
 It never refuses: a witness check that declines because the machine is loaded
-is worse than a slow one. The bound is enforced across calls: each call holds one of that
-many `flock`ed slot files under `~/.cache/agent-reviews/.witness-slots/` while it runs and
-waits for a free one, so calls started side by side never exceed it. `--slots <k>` lowers it.
+is worse than a slow one. The bound is enforced across calls: each call holds
+one of that many `flock`ed slot files under
+`~/.cache/agent-reviews/.witness-slots/` while it runs and waits for a free
+one, so calls started side by side never exceed it. `--slots <k>` lowers it.
+A `flock` that fails for any reason but contention stops the call with an
+error rather than waiting.
 
 The check is a script shipped with this skill,
-[`witness-check.sh`](witness-check.sh); its header holds the full contract. **No other runner
-may be used** (#1708): it is the only way to run a mutation. No sourced file, no `git worktree add` of your own, no
-hand-made runner, no hand-written ledger row. A hand-rolled probe gets refused by the git
-guard, and a row written around the script is refused by `append`; either refusal is correct,
-never worked around. One call is one mutation, given by flags:
+[`witness-check.sh`](witness-check.sh); its header holds the full contract.
+**No other runner may be used** (#1708): it is the only way to run a mutation.
+No sourced file, no worktree of your own, no hand-made runner, no
+hand-written ledger row. A guard that refuses a hand-rolled probe is correct
+(#1906): report the refusal, never reach the probe another way. One call is
+one mutation, given by flags:
 
 ```
 bash ~/.agents/skills/multi-axis-code-review/witness-check.sh \
   --worktree <the worktree under review> --id <id> \
   --file <path in the tree> --old '<text, once>' --new '<its replacement>' \
   --test '<the command that runs only the covering suite>' \
-  --repo <repo> --ticket <n> [--baseline-seconds <s>] [--slots <k>] [--call-site | --worker]
+  --repo <repo> --ticket <n> [--baseline-seconds <s>] [--slots <k>] \
+  [--with-working-tree] [--call-site | --worker]
 ```
 
-`--old` is replaced by `--new` once, literally: quotes, `$`, backslashes and newlines are
-text, and `--new ''` deletes. `--old` must occur exactly once in the file at `HEAD`; a count of
-zero or two is refused with the count, before anything runs, and writes no row. Give enough
-surrounding text to match one place. `--file` is relative to the tree and tracked at `HEAD`,
-the revision the captured diff ends at (commit first: an uncommitted edit is not in the
-witness). A mutation that is already a unified diff goes in as `--patch <file>` instead of
-`--file/--old/--new` (`mutation-audit/witness.sh` is that wrapper). `--test` runs from the
-witness's top level under `bash -o pipefail -c`; the script puts the mutation in, then runs it,
-and writes the covering command's own exit status down as the outcome. To run several
-mutations, loop in your shell:
+`--old` is replaced by `--new` once, literally: quotes, `$`, backslashes and
+newlines are text, and `--new ''` deletes. `--old` must occur exactly once in
+the file at `HEAD`; a count of zero or two is refused with the count, before
+anything runs, and writes no row. Give enough surrounding text to match one
+place. `--file` is relative to the tree and tracked at `HEAD`, the revision
+the captured diff ends at (commit first: an uncommitted edit is not in the
+witness; `--with-working-tree` builds the witness from the tree as it stands
+instead, for a fan-out sub-worker that cannot commit, and counts `--old` in
+the working file). A mutation that is already a unified diff goes in as
+`--patch <file>` instead of `--file/--old/--new` (`mutation-audit/witness.sh`
+is that wrapper). `--test` runs from the witness's top level under `bash -o
+pipefail -c`; the script puts the mutation in, then runs it, and writes the
+covering command's own exit status down as the outcome. A command that fails
+having printed nothing (`grep -q`, `cmp -s`) reads `unknown`, so make it
+print. `--call-site` and `--worker` are not both. To run several mutations,
+loop in your shell over calls to the script, never a loop that does the
+mutating itself:
 
 ```
 for spec in ...; do bash ~/.agents/skills/multi-axis-code-review/witness-check.sh ... ; done
@@ -580,14 +593,17 @@ unmutated run's own time of the target files; the header holds the rest (the
 3x rule, the 240 s default, `red (timeout)`).
 
 `--repo` and `--ticket` are the ledger's, as in § 4's append line; `--no-ledger`
-replaces them only outside a review. `--call-site` types the row a call-site mutation.
+replaces them only outside a review. `--call-site` types the row a call-site
+mutation.
 Exit 0 means the mutation ran and was reported — `<id>: red` with its own message,
 `<id>: HOLLOW`, or `<id>: unknown` — so read the output, not the status; the header lists
 the other exit codes.
 
 *What a call costs* (#1708). Every call makes its own worktree and setup rather than reusing
 a shared one: a tree an earlier mutation edited could leak into the next, which is class 3.
-Measured at #1708 on this repo (923 tracked files, a `uv.lock`): 0.35 s per call for the worktree, link and sync together, three runs, so the setup is noise beside any covering suite.
+Measured at #1708 on this repo (923 tracked files, a `uv.lock`): 0.35 s per
+call on an idle box and 0.75 s under review load, worktree, link and sync
+together, so the setup is noise beside any covering suite.
 
 Each witness gets the setup a fresh worktree lacks (#1219), which the script's
 header states: no Python bytecode, no `__pycache__`, and a link to the
