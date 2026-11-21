@@ -249,49 +249,31 @@ No PR and no reviewer; Chris reads the log after.
 - For each acceptance criterion, write the failing test and see it red before
   the code that makes it pass. Once green, strip the constraint it verifies
   and see it fail — a test that passed with the fix reverted has shipped as
-  proof of a fix it never checked. Commit the work first, then mutate in a
-  throwaway worktree, one per mutation:
+  proof of a fix it never checked. Commit the work first, then run every mutation through the
+  witness check, one id each (#1969):
 
   ```
-  git worktree remove --force .scratch/mutation-<id> 2>/dev/null
-  git worktree add --detach .scratch/mutation-<id> HEAD
+  bash ~/.agents/skills/multi-axis-code-review/witness-check.sh --worktree . --mutate <file> --repo <repo> --ticket <n> --worker --baseline-seconds <s> -- <id>...
   ```
 
-  The first line clears a worktree an earlier run left registered at that
-  path, which would make `worktree add` refuse. If the add still refuses,
-  stop and pick another `<id>`: the path holds a directory git does not
-  know or a locked worktree, and a mutation there would read a stale tree. Strip the constraint
-  there, run only the covering suite there, and
-  `git worktree remove --force .scratch/mutation-<id>` whether it went red
-  or not. The worktree holds only tracked files, so set up there whatever
-  the suite needs from the checkout's untracked or ignored state, such as
-  `node_modules` or a clean bytecode cache (#1219). A Rust suite there sets
-  `CARGO_TARGET_DIR=<mutation worktree>/target`: the worktree isolates the
-  tree, not cargo's build, and a shared target dir keeps the mutated build for
-  the next seam run (#1696). Then read the red
-  message: it must be your stripped assertion, not a missing file or a
-  denied path (`AGENTS.md` § Recurring defect classes,
-  class 3). Nothing is restored in the live checkout:
-  `git checkout -- <file>`, `git restore` and `git stash` all return a file
-  to its last commit, so any uncommitted edit in it goes with the mutation
-  (#1261). The worktree sits under `.scratch/`, not the review recipe's path
-  outside the checkout, because this workspace is yours and § Before the PR
-  step 3 clears it. Otherwise follow the *Isolation* paragraph of
-  `multi-axis-code-review/SKILL.md`'s witness check: never a byte copy of
-  the tree. Time each mutation: `started=$(date +%s)` before its suite, then
-  `secs=$(( $(date +%s) - started ))` after it. Never write command
-  substitution with backticks in a Bash call: Claude Code's safety check
-  cannot parse them and refuses the whole command as a possible dangerous
-  `rm` (#1923). Once it has gone red, green or never reached its suite,
-  record it (#1270):
-
-  ```
-  python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py append --repo <repo> --ticket <n> --type worker-mutation --mutation-id <id> --outcome red|green|unknown --seconds <s>
-  ```
-
-  `<repo>` is the review cache's directory name, as in § The PR. A mutation
-  that never reached its suite is `unknown`, never `red`. `<id>` is letters,
-  digits, `.`, `-` or `_`. A refusal goes to the controller, never skipped.
+  `<file>` is yours, outside the checkout, defining `mutate` as
+  `multi-axis-code-review/witness-check.sh`'s header says: it strips the
+  constraint in the throwaway worktree the script made, creates the marker
+  on the line before the covering suite, and runs only that suite. The
+  script owns the worktree and its removal, the `node_modules` and
+  `__pycache__` setup (#1219), `CARGO_TARGET_DIR` (#1696), the time and the
+  ledger row: its row is typed `worker-mutation` by `--worker`, and the
+  outcome is the covering command's own exit status, never a word you type
+  (an `append` with a hand `--outcome` is refused). Read each id's message:
+  a red must be your stripped assertion, not a missing file or a denied
+  path (`AGENTS.md` § Recurring defect classes, class 3). Nothing is
+  restored in the live checkout: `git checkout -- <file>`, `git restore` and
+  `git stash` all return a file to its last commit, so any uncommitted edit
+  in it goes with the mutation (#1261); the mutation never touches it. A
+  mutation that never reached its suite is `unknown`, never `red`. `<id>`
+  is letters, digits, `.`, `-` or `_`. A refusal (exit 4) goes to the
+  controller, never skipped.
+  `<repo>` is the review cache's directory name, as in § The PR.
   A row already written with the wrong outcome is never edited: `review_ledger.py
   correct --repo <repo> --ticket <n> --row <row_id> --outcome red|green|unknown
   --reason <why>` appends a row that supersedes it (#1658), and every reader of

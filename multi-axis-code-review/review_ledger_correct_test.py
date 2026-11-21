@@ -19,10 +19,17 @@ def run(tmp_path, *args):
     return subprocess.run([sys.executable, SCRIPT, *map(str, args)], capture_output=True, text=True, env=env)
 
 
+def append_mutation(tmp_path, ledger, mutation_id, outcome, seconds, ticket=130):
+    """A mutation row the only way `append` takes one: from a status file."""
+    status = tmp_path / f"status-{mutation_id}"
+    status.write_text(outcome + "\n")
+    return run(tmp_path, "append", "--repo", "skills", "--ticket", ticket, "--type", "worker-mutation",
+               "--mutation-id", mutation_id, "--status-file", status, "--seconds", seconds, "--ledger", ledger)
+
+
 def ledger_with_false_red(tmp_path):
     ledger = tmp_path / "ledger.jsonl"
-    r = run(tmp_path, "append", "--repo", "skills", "--ticket", 130, "--type", "worker-mutation",
-            "--mutation-id", "fixm2", "--outcome", "red", "--seconds", 5, "--ledger", ledger)
+    r = append_mutation(tmp_path, ledger, "fixm2", "red", 5)
     assert r.returncode == 0, r.stderr
     return ledger
 
@@ -67,8 +74,7 @@ def test_a_later_correction_supersedes_an_earlier_one(tmp_path):
 def test_a_later_append_or_harvest_write_keeps_the_correction_row(tmp_path):
     ledger = ledger_with_false_red(tmp_path)
     assert correct(tmp_path, ledger).returncode == 0
-    r = run(tmp_path, "append", "--repo", "skills", "--ticket", 130, "--type", "worker-mutation",
-            "--mutation-id", "other", "--outcome", "red", "--seconds", 1, "--ledger", ledger)
+    r = append_mutation(tmp_path, ledger, "other", "red", 1)
     assert r.returncode == 0, r.stderr
     assert len(ledger.read_text().splitlines()) == 3
     assert sorted(r["outcome"] for r in review_ledger.read_ledger(ledger)) == ["green", "red"]
@@ -132,8 +138,7 @@ def test_a_hand_built_row_with_no_row_id_still_reads(tmp_path):
 def test_a_mutation_re_run_under_the_same_id_is_not_read_as_corrected(tmp_path):
     ledger = ledger_with_false_red(tmp_path)
     assert correct(tmp_path, ledger, "green").returncode == 0
-    r = run(tmp_path, "append", "--repo", "skills", "--ticket", 130, "--type", "worker-mutation",
-            "--mutation-id", "fixm2", "--outcome", "red", "--seconds", 6, "--ledger", ledger)
+    r = append_mutation(tmp_path, ledger, "fixm2", "red", 6)
     assert r.returncode == 0, r.stderr
     [row] = review_ledger.read_ledger(ledger)
     assert row["outcome"] == "red" and "corrected" not in row
@@ -199,3 +204,12 @@ def test_harvest_keeps_the_correction_row(tmp_path):
     raw = review_ledger.read_ledger_raw(ledger)
     assert sorted(r["type"] for r in raw) == ["correction", "standards", "worker-mutation"]  # harvest ran
     assert [r["outcome"] for r in review_ledger.read_ledger(ledger) if r["type"] == "worker-mutation"] == ["green"]
+
+
+def test_append_refuses_a_hand_written_outcome_on_a_mutation_row(tmp_path):
+    """#1969: a mutation row's outcome comes from a status file, never from the caller's word."""
+    ledger = tmp_path / "ledger.jsonl"
+    r = run(tmp_path, "append", "--repo", "skills", "--ticket", 130, "--type", "worker-mutation",
+            "--mutation-id", "fixm2", "--outcome", "red", "--seconds", 5, "--ledger", ledger)
+    assert r.returncode == 2 and "unrecognized arguments: --outcome" in r.stderr, (r.returncode, r.stderr)
+    assert not ledger.exists()

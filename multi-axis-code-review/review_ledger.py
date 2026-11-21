@@ -5,7 +5,7 @@
     review_ledger.py append  --repo R --ticket N --type standards|spec|correctness|verification
                              [--round K] [--cache DIR] [--transcripts DIR] [--ledger PATH]
     review_ledger.py append  --repo R --ticket N --type witness-mutation|call-site-mutation|worker-mutation
-                             --mutation-id ID --seconds S (--status-file PATH | --outcome red|green|unknown)
+                             --mutation-id ID --seconds S --status-file PATH
                              [--round K] [--ledger PATH]
     review_ledger.py append  --repo R --ticket N --type codex-gate|codex-second
                              [--skip-reason WHY | --refusal WHY] [--cache DIR] [--ledger PATH]
@@ -1323,17 +1323,17 @@ def read_status(text: str) -> tuple[str, bool]:
 
 
 def cmd_append_mutation(args) -> int:
-    """Write the one row of a mutation that just ran. Its outcome comes from a status file or
-    `--outcome`, its wall clock from `--seconds`; there is no cache or transcript to read."""
+    """Write the one row of a mutation that just ran. Its outcome comes from a status file and
+    nothing else (#1969: no hand-written outcome), its wall clock from `--seconds`; there is no cache or transcript to read."""
     try:
         if not args.mutation_id or not _MUTATION_ID_RE.fullmatch(args.mutation_id):
             raise ValueError("a mutation row needs --mutation-id made of letters, digits, . - _")
-        if (args.status_file is None) == (args.outcome is None):
-            raise ValueError("give exactly one of --status-file and --outcome")
+        if args.status_file is None:
+            raise ValueError("a mutation row needs --status-file, the witness check's status file for the id")
         seconds = _finite_nonneg(args.seconds)
         if seconds is None:
             raise ValueError("a mutation row needs --seconds, its wall clock as a finite number of seconds")
-        outcome, timed_out = (args.outcome, False) if args.outcome else read_status(args.status_file.read_text())
+        outcome, timed_out = read_status(args.status_file.read_text())
     except (OSError, ValueError) as e:
         print(f"review_ledger append: {e}", file=sys.stderr)
         return 2
@@ -2022,7 +2022,6 @@ _APPEND_ARGS = {
     "--transcripts": ({"type": Path, "help": f"default {DEFAULT_TRANSCRIPTS}"}, ("axis", "verification")),
     "--mutation-id": ({"help": "the id the mutation is reported by"}, ("mutation",)),
     "--status-file": ({"type": Path, "help": "the witness check's status file for the id"}, ("mutation",)),
-    "--outcome": ({"choices": MUTATION_OUTCOMES, "help": "the outcome, when no status file"}, ("mutation",)),
     "--seconds": ({"type": float, "help": "the mutation's wall clock"}, ("mutation",)),
     "--refusal": ({"help": "the run was refused (raced, stale), and why; its usage still counts"},
                   ("codex", "audit")),

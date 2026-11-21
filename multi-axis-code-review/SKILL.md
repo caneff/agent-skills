@@ -270,7 +270,9 @@ days, and a review outside a spec run has no closing report, so that row is gone
 
 **A witness check ends with one `append` per mutation** (#1270). The script
 under *Isolation* below runs `review_ledger.py append --type witness-mutation`
-(`call-site-mutation` for an id passed with `--call-site`) once per mutation id,
+(`call-site-mutation` for an id passed with `--call-site`, `worker-mutation` for every
+id under `--worker`) once per mutation id, with `--status-file` (an `append` takes no
+hand-written `--outcome`, #1969),
 reading the outcome its report loop wrote for that id and its wall clock, before it removes them. The row
 holds the outcome `red`, `green` or `unknown` and no tokens, which stay with the
 correctness row. An `unknown` stays `unknown`. A refusal is reported like the
@@ -580,8 +582,12 @@ message, `<id>: HOLLOW`, or `<id>: unknown` — so read the output, not the
 status; the header lists the other exit codes.
 
 Each witness gets the setup a fresh worktree lacks (#1219), which the script's
-header states: no Python bytecode, no `__pycache__`, and a link to the reviewed
-tree's `node_modules`. A tree whose HEAD has a `uv.lock` gets `uv sync
+header states: no Python bytecode, no `__pycache__`, and a link to the
+`node_modules` Node would find from the reviewed tree: the nearest one walking up
+from its top level, else the primary checkout's (#1969). A tree whose `package.json`
+declares dependencies and has none anywhere leaves every mutation `unknown`. The
+covering command runs under `pipefail`, so a pipe through `tail` or `grep` still
+reports the test's own exit status. A tree whose HEAD has a `uv.lock` gets `uv sync
 --frozen` run in each witness, so every witness has its own `.venv`; one
 with no `uv.lock` leaves `.venv` unset and the run says so (#1528). The
 reviewed tree's `.venv` is never symlinked in: an editable install there

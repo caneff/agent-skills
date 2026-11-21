@@ -7,19 +7,26 @@
 #   witness-check.sh --worktree <reviewed tree> --mutate <file>
 #                    (--repo <repo> --ticket <n> [--round <k>] [--ledger <path>] | --no-ledger)
 #                    [--slots <k>] [--baseline-seconds <s> | --timeout <s>]
-#                    [--call-site <id>]... -- <id>...
+#                    [--call-site <id>]... [--worker] -- <id>...
 #
 # <file> is sourced and must define `mutate`: $1 the id, $2 the witness
 # worktree, $3 a marker path. It strips that test's constraint in $2, creates
 # the marker with `: >"$3"` on the line IMMEDIATELY before the covering suite's
 # command, and runs only that suite. A `--call-site` id is one of the ids, and
-# its ledger row is typed call-site-mutation instead of witness-mutation.
+# its ledger row is typed call-site-mutation instead of witness-mutation. `--worker` types
+# every row worker-mutation instead: a worker's own mutations (implement/SKILL.md § Build)
+# take their outcome from this script's status file like a reviewer's, never from a hand
+# `--outcome` (#1969).
 #
 # Before `mutate` runs, every witness gets the setup a fresh worktree lacks
 # (#1219): PYTHONDONTWRITEBYTECODE=1 and no `__pycache__` (why: at the export
-# below), and, when the reviewed tree's top level has a `node_modules` and the
-# witness has none, a symlink to it, so a Node suite fails on the mutation, not
-# a missing module. The link is shared with the reviewed tree, not a copy: a
+# below), and, when the witness has no `node_modules`, a symlink to the one Node
+# would find from the reviewed tree (#1969): the nearest `node_modules` walking up
+# from its top level, else the primary checkout's (the git common dir's parent), so
+# a review run from a worktree under `.claude/worktrees/` still finds the
+# checkout's. A tree whose HEAD `package.json` declares dependencies and has none
+# anywhere leaves every mutation `unknown`, never a `red` from a module that
+# failed to load. So a Node suite fails on the mutation, not a missing module. The link is shared with the reviewed tree, not a copy: a
 # workspace package that `node_modules` links back into the tree resolves to
 # the reviewed tree's files, a tool cache written through it lands there, and
 # the link shows as untracked where `.gitignore` says `node_modules/`
@@ -29,6 +36,9 @@
 # (#1528): its own `.venv`, never a link to the reviewed tree's, whose editable
 # install would import the reviewed tree's code. With no `uv.lock` at HEAD the
 # `.venv` stays unset and the run says so. `vendor` is not set up.
+#
+# The outcome is the covering command's own exit status, `pipefail` set: a command piped
+# through `tail` or `grep` reports the test's status, not the filter's (#1969).
 #
 # Each mutation's suite runs under a time limit (#1854); SKILL.md § 4 *The time
 # limit* gives the reason. `--baseline-seconds <s>` (the unmutated run's own
@@ -48,7 +58,7 @@ set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() { sed -n '/^#   witness-check.sh/,/^#$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# //' >&2; exit 2; }
-worktree="" mutate_file="" no_ledger=0 repo_name="" max_slots="" limit="" baseline=""
+worker_rows=0 worktree="" mutate_file="" no_ledger=0 repo_name="" max_slots="" limit="" baseline=""
 ledger_args=() call_site_ids=" "
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -63,6 +73,7 @@ while [ $# -gt 0 ]; do
       case "${2-}" in ''|*[!0-9]*|0) echo "witness check: $1 needs a positive integer, got '${2-}'" >&2; exit 2 ;; esac
       if [ "$1" = --timeout ]; then limit="$2"; else baseline="$2"; fi; shift 2 ;;
     --no-ledger) no_ledger=1; shift ;;
+    --worker) worker_rows=1; shift ;;
     --call-site) [ $# -ge 2 ] || usage; call_site_ids="$call_site_ids$2 "; shift 2 ;;
     --) shift; break ;;
     *) echo "witness check: unknown argument '$1'" >&2; usage ;;
@@ -243,11 +254,32 @@ show() {
 export PYTHONDONTWRITEBYTECODE=1
 # The witness setup a fresh worktree lacks. Any failure leaves the mutation
 # unreached, so it is reported `unknown` by the marker check below.
+# The `node_modules` Node would find for the reviewed tree (#1969), or empty: the nearest one
+# walking up from its top level, else the primary checkout's.
+nm_source=""
+dir="$top"
+while :; do
+  if [ -d "$dir/node_modules" ]; then nm_source="$dir/node_modules"; break; fi
+  [ "$dir" != / ] || break
+  dir=$(dirname "$dir")
+done
+if [ -z "$nm_source" ] && common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+   [ -d "$(dirname "$common")/node_modules" ]; then
+  nm_source="$(dirname "$common")/node_modules"
+fi
+# A tree that declares dependencies and has no `node_modules` to link cannot run its suite.
+nm_missing=0
+if [ -z "$nm_source" ] && git -C "$worktree" cat-file -e HEAD:package.json 2>/dev/null &&
+   git -C "$worktree" show HEAD:package.json | grep -Eq '"(dependencies|devDependencies)"'; then
+  nm_missing=1
+  echo "witness check: package.json declares dependencies but no node_modules was found from $top or the primary checkout - every mutation is unknown" >&2
+fi
 prepare() { # <witness>
   find "$1" -name __pycache__ -type d -prune -exec rm -rf {} + || {
     echo "witness check: could not clear __pycache__ in $1" >&2; return 1; }
-  if [ -d "$top/node_modules" ] && [ ! -e "$1/node_modules" ] && [ ! -L "$1/node_modules" ]; then
-    ln -s "$top/node_modules" "$1/node_modules" || {
+  [ "$nm_missing" -eq 0 ] || return 1
+  if [ -n "$nm_source" ] && [ ! -e "$1/node_modules" ] && [ ! -L "$1/node_modules" ]; then
+    ln -s "$nm_source" "$1/node_modules" || {
       echo "witness check: could not link node_modules into $1" >&2; return 1; }
   fi
   # `uv sync` in the witness itself (#1528); the header says why never a link.
@@ -284,7 +316,7 @@ for id in "${mutations[@]}"; do
   # `timeout` leaves this job's group, so an interrupt reaches it only through the
   # trap below, which hands the TERM on; `timeout` then signals the suite's group.
   { suite_started=$(date +%s)
-    CARGO_TARGET_DIR="$witness/target" timeout -k 5 "$limit" bash -c '. "$1"; mutate "$2" "$3" "$4"' _ \
+    CARGO_TARGET_DIR="$witness/target" timeout -k 5 "$limit" bash -c 'set -o pipefail; . "$1"; mutate "$2" "$3" "$4"' _ \
       "$mutate_file" "$id" "$witness" "$root/ran/$id" </dev/null >"$root/output/$id" 2>&1 &
     tp=$!
     trap 'kill -TERM "$tp" 2>/dev/null' TERM INT
@@ -338,6 +370,7 @@ append_failed=0
 if [ "$no_ledger" -eq 0 ]; then
   for id in "${mutations[@]}"; do
     kind=witness-mutation
+    [ "$worker_rows" -eq 0 ] || kind=worker-mutation
     case "$call_site_ids" in *" $id "*) kind=call-site-mutation ;; esac
     python3 "$here/review_ledger.py" append "${ledger_args[@]}" --type "$kind" \
       --mutation-id "$id" --status-file "$root/outcome/$id" --seconds "$(cat "$root/seconds/$id" 2>/dev/null)" \

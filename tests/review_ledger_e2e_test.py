@@ -136,7 +136,7 @@ class LedgerEndToEnd(Env):
         body.update(usage_before=f"10 {WINDOW}", usage_after=f"12.5 {WINDOW}")
         rec.write_text(json.dumps(body) + "\n")
         (self.tmp / "status").mkdir()
-        for mid, text in (("w1", "red\n"), ("w2", "unknown\n"), ("c1", "green\n")):
+        for mid, text in (("m1", "red\n"), ("m2", "green\n"), ("w1", "red\n"), ("w2", "unknown\n"), ("c1", "green\n")):
             (self.tmp / "status" / mid).write_text(text)
 
     def append_forward_rows(self):
@@ -146,8 +146,8 @@ class LedgerEndToEnd(Env):
             self.append("--ticket", 701, "--type", "verification"),
             self.append("--ticket", 701, "--type", "codex-second"),
             self.append("--ticket", 702, "--type", "codex-second", "--skip-reason", "usage capped until 2026-10-03"),
-            self.append("--ticket", 701, "--type", "worker-mutation", "--mutation-id", "m1", "--outcome", "red", "--seconds", 20),
-            self.append("--ticket", 701, "--type", "worker-mutation", "--mutation-id", "m2", "--outcome", "green", "--seconds", 10),
+            self.append("--ticket", 701, "--type", "worker-mutation", "--mutation-id", "m1", "--status-file", st / "m1", "--seconds", 20),
+            self.append("--ticket", 701, "--type", "worker-mutation", "--mutation-id", "m2", "--status-file", st / "m2", "--seconds", 10),
             self.append("--ticket", 701, "--type", "witness-mutation", "--mutation-id", "w1", "--status-file", st / "w1", "--seconds", 30),
             self.append("--ticket", 701, "--type", "witness-mutation", "--mutation-id", "w2", "--status-file", st / "w2", "--seconds", 5),
             self.append("--ticket", 701, "--type", "call-site-mutation", "--mutation-id", "c1", "--status-file", st / "c1", "--seconds", 15),
