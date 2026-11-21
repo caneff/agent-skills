@@ -434,6 +434,40 @@ def test_command_base_says_so_when_the_command_takes_its_ref_another_way(tmp_pat
 
 
 def test_an_edit_in_a_subsection_of_the_seam_section_is_a_change(tmp_path):
-    before = declared() + "\n### Scope\n\nall suites\n\n## Next\n\nx\n"
+    before = declared() + "\n### Scope\n\nA doc edit runs all suites.\n\n## Next\n\nx\n"
     root = two_revs(tmp_path, before, before.replace("all suites", "one suite"))
+    assert seam_section_run(root).returncode == 1
+
+
+# --- #1975: only the commands the merge would run are compared --------------
+
+def test_a_prose_only_edit_to_the_seam_section_reads_same(tmp_path):
+    before = declared() + "\nThe gate is slow but thorough; see the history.\n"
+    after = (declared().replace("the live editor", "the live editor and the CDN")
+             .replace("over the changed suites", "over every changed suite")
+             + "\nThe gate is thorough but slow.\n")
+    r = seam_section_run(two_revs(tmp_path, before, after))
+    assert (r.returncode, r.stdout.strip()) == (0, "same")
+
+
+def test_a_changed_narrowed_command_reads_differs(tmp_path):
+    root = two_revs(tmp_path, declared(), declared().replace("--changed origin/main", "--changed origin/dev"))
+    r = seam_section_run(root)
+    assert r.returncode == 1 and "differs" in r.stdout
+
+
+def test_a_changed_seam_command_reads_differs(tmp_path):
+    root = two_revs(tmp_path, declared(), declared().replace("`bash tests/all.sh`", "`bash tests/other.sh`"))
+    assert seam_section_run(root).returncode == 1
+
+
+def test_an_added_extra_run_sentence_reads_differs(tmp_path):
+    extra = "\nA change to `package.json` also runs `npm run test:live`.\n"
+    root = two_revs(tmp_path, declared(), declared() + extra)
+    assert seam_section_run(root).returncode == 1
+
+
+def test_a_removed_extra_run_sentence_reads_differs(tmp_path):
+    extra = "\nA change to `package.json` also runs `npm run test:live`.\n"
+    root = two_revs(tmp_path, declared() + extra, declared())
     assert seam_section_run(root).returncode == 1

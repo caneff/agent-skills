@@ -19,7 +19,9 @@ declared command, so a slice on a spec's integration branch diffs against
 every later run. A command with no `--changed` is printed as declared.
 
 `seam-section --root <dir> --base-rev <a> --head-rev <b>` (#1911) compares the
-`## End-to-end seam` section's text at the two revs: exit 0 printing `same`,
+`## End-to-end seam` section's gate text at the two revs (#1975: the `Seam` and
+`Narrowed` commands and every scope or extra-run sentence, not the prose
+around them): exit 0 printing `same`,
 1 printing `differs`, 2 with the reason on stderr when either rev cannot be
 read or has no section. The merge's seam-rerun skip reads it, so an edit
 elsewhere in `AGENTS.md` no longer forces a rerun, and an unreadable side
@@ -66,7 +68,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 # fence reader: a second copy of the grammar is a second place for its bugs.
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "implement-spec"))
 from closing_ticket import SEAM_HEADING, declaration  # noqa: E402
-from frontier import HEADING, unfenced  # noqa: E402
+from frontier import HEADING, key_line, unfenced  # noqa: E402
 
 sys.path.insert(0, os.path.join(_HERE, os.pardir, "common"))
 import shellcmd  # noqa: E402
@@ -207,12 +209,40 @@ def seam_section(text):
     return None if start is None else "\n".join(raw[start:]).rstrip()
 
 
+# A section line that can choose what a merge runs besides the two declared
+# commands: a scope or extra-run sentence ("a puzzle update runs only ...",
+# "a `package.json` change also runs `npm test`"), recognised by the word `run`
+# or a backticked command (#1975).
+_RUN_SENTENCE = re.compile(r"`|\bruns?\b|\brunning\b", re.IGNORECASE)
+
+
+def gate_text(section):
+    """What of a seam `section` the merge would run, as a normalised string:
+    the `Seam` and `Narrowed` commands (their trailing prose dropped), then
+    every other line that names a command or says it runs something, which is
+    a scope or extra-run sentence (#1898). The rest of the section is prose
+    about the gate and changes nothing it does (#1975). A `Blind to` line is
+    prose: it says what the gate cannot see."""
+    lines = []
+    for _, line in unfenced(section.splitlines()):
+        if HEADING.match(line):
+            continue
+        pair = key_line(line)
+        if pair and pair[0] in ("seam", "narrowed"):
+            lines.append(f"{pair[0]}: {command_of(pair[1])}")
+        elif pair and pair[0] == "blind to":
+            continue
+        elif _RUN_SENTENCE.search(line):
+            lines.append(" ".join(line.split()))
+    return "\n".join(lines)
+
+
 def seam_section_same(root, base_rev, head_rev):
-    """`(True|False, None)`: whether the seam section reads the same at both
-    revs; or `(None, why)` when either side cannot be read or has no section,
-    which the merge reads as "rerun" (#1911), never as "unchanged". The text is
-    compared as written: a section that exists, even one declaring no
-    parseable `Seam`/`Narrowed` line, and reads the same on both sides is
+    """`(True|False, None)`: whether the seam section's gate text reads the
+    same at both revs (`gate_text`, #1975); or `(None, why)` when either side
+    cannot be read or has no section, which the merge reads as "rerun"
+    (#1911), never as "unchanged". A section that exists, even one declaring
+    no parseable `Seam`/`Narrowed` line, and gates the same on both sides is
     `same`, since nothing in it changed what gates the PR."""
     sections = []
     for rev in (base_rev, head_rev):
@@ -222,7 +252,7 @@ def seam_section_same(root, base_rev, head_rev):
         section = seam_section(text)
         if section is None:
             return None, f"AGENTS.md has no `## End-to-end seam` section at {rev}"
-        sections.append(section)
+        sections.append(gate_text(section))
     return sections[0] == sections[1], None
 
 
