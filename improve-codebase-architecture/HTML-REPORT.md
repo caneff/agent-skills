@@ -66,13 +66,7 @@ Pick the pattern that fits the candidate. Mix them — don't make every diagram 
 
 **Quote any label holding punctuation.** A node or edge label with `()`, `[]`, `{}`, `|` or `:` goes in double quotes: `-->|"read_text().strip()"|`, `A["list(x.values())"]`. Unquoted, the parens end the label early and the whole diagram renders as Mermaid's "Syntax error" box.
 
-**Render the report before handing it over.** A prose rule alone let two broken diagrams ship, so run the check on the finished file and fix every block it names:
-
-```
-python3 ~/.agents/skills/all-audits/harness/pagelib.py check-mermaid <report.html>
-```
-
-Run it only on a report that draws diagrams: it exits non-zero on a bad block, and on a report with none. See [`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
+**The sweep renders the report for you.** The all-audits driver runs `check-mermaid` on every report it collects and shows a broken block in the sweep index. Outside a sweep, run `python3 ~/.agents/skills/all-audits/harness/pagelib.py check-mermaid <report.html>` before handing the report over; see [`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
 
 ```html
 <div class="vt-mermaid">
