@@ -77,3 +77,51 @@ def test_three_mis_cuts_are_keyed():
     assert by_row[("sample.py", 1)][2] != GONE, "the docstring is a salvage, not a whole delete"
     assert by_row[("test_sample.py", 5)][:2] == ("keep", "why")
     assert by_row[("sample.rs", 1)][:2] == ("keep", "api-contract")
+
+
+SKILL = Path(__file__).parent / "SKILL.md"
+RULE_TOPICS = [  # one topic per standing apply rule, in list order
+    r"text, never (?:its|a) line number",
+    r"comments only",
+    r"load-bearing",
+    r"ignore file",
+    r"salvage",
+    r"imported",
+    r"current fact",
+    r"in doubt, keep",
+    r"lint",
+]
+
+
+def _applying_section():
+    text = SKILL.read_text(encoding="utf-8")
+    m = re.search(r"^## Applying the cuts.*?(?=^## )", text, re.S | re.M)
+    assert m, "no 'Applying the cuts' section"
+    return m.group(0)
+
+
+def _numbered_rules():
+    return re.findall(r"^(\d+)\. (.*?)(?=^\d+\. |^\S|\Z)", _applying_section(),
+                      re.S | re.M)
+
+
+def test_apply_rules_are_one_numbered_list():
+    rules = _numbered_rules()
+    assert [n for n, _ in rules] == [str(i) for i in range(1, len(RULE_TOPICS) + 1)]
+
+
+@pytest.mark.parametrize("i,topic", list(enumerate(RULE_TOPICS)))
+def test_each_rule_is_stated_in_its_place(i, topic):
+    _, body = _numbered_rules()[i]
+    assert re.search(topic, " ".join(body.split()), re.I)
+
+
+def test_section_states_the_brief_shape():
+    section = " ".join(_applying_section().split())
+    assert "rows slice" in section
+    assert "apply per comment-audit's Applying the cuts" in section
+
+
+def test_opt_in_contract_is_still_referenced():
+    section = " ".join(_applying_section().split())
+    assert "all-audits/SKILL.md`'s \"Opt-in edits\" section" in section

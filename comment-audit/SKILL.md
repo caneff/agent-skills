@@ -238,14 +238,41 @@ Only when the user asks to apply — see `~/.agents/skills/all-audits/SKILL.md`'
 working tree — the comments-only guarantee below only holds when nothing else
 is uncommitted.
 
-Apply: delete the cuts. For every keeper, tighten the prose to the fewest
-words that still read clearly, and correct any text that has gone stale while
-its *why* stays true. Touch comments only — leave the code itself, its
-formatting, and every keeper that already reads true exactly as they are.
+A controller's apply brief holds two things: a **rows slice** (the findings
+rows to apply, each as `file:line [category] verdict: comment text`) and the
+line "apply per comment-audit's Applying the cuts". It retypes none of the
+rules below; a brief that does is the drift this list exists to end.
 
-Verify before the PR: the final diff must touch comments and nothing else —
-confirm with `git diff`. Run the repo's build/lint/test so a load-bearing
-line you misread turns the loop red before review, not after.
+Apply: delete the cuts. For every keeper, tighten the prose to the fewest
+words that still read clearly. The standing rules:
+
+1. **Locate each row by its comment's text, never its line number.** Earlier
+   edits shift lines. Skip a row whose comment or file is already gone, and
+   say so.
+2. **Edit comments only.** Leave the code, its formatting and every keeper
+   that already reads true exactly as they are. Confirm with
+   `git diff --word-diff`: comment lines and nothing else.
+3. **Never touch a load-bearing line** (§ Load-bearing — directives, pragmas,
+   license headers, doc markers, and any marker a tool reads such as
+   shellcheck or `# all.sh:` lines), and never cut a comment the repo's
+   ignore file (`.audit-ignore.md`) lists.
+4. **Keep an issue citation when the repo's ignore file or the ticket says
+   citations stay.** That ruling outranks the audit's default of stripping
+   them. `ADR-NNNN` always stays.
+5. **Salvage a citation that carries a why; never cut it whole.** Strip every
+   ticket, PR and review-round number, keep the why as plain prose, and write
+   the clause yourself where the recorded `after` is a placeholder. A whole
+   delete is only for a citation where nothing but the number remains.
+6. **Keep the docstring of a symbol another module imports.** Tighten it; do
+   not delete it.
+7. **Rewrite a historical or stale comment to the current fact.** Cut it only
+   when no rule is left once the history is gone.
+8. **When in doubt, keep.** A row marked `rejudge` is re-read against its
+   code: keep a reason, contract, invariant or test intent the code beside it
+   does not state; cut pure restatement.
+9. **Run the repo's lint, build and tests after.** A load-bearing line you
+   misread turns the loop red here, before review. Start from a clean working
+   tree, so rule 2's diff holds.
 
 ## When a comment props up unclear code
 
