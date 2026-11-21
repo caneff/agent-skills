@@ -26,9 +26,11 @@ import shutil
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 
 import agents  # noqa: E402
+import closure as closure_mod  # noqa: E402
 import runfile  # noqa: E402
 import shellcmd  # noqa: E402
 
@@ -723,6 +725,15 @@ def cmd_dispatch(args):
     root = runfile.env_root()
     run = load_run(args.run, root)
     repo = run_target(run)
+    total = closure_mod.source_total(repo)
+    if total is None:
+        print("closure cap: not applied — could not count the tracked source "
+              f"files of {repo}")
+    else:
+        candidates, notes = closure_mod.cap_closures(candidates, total)
+        in_flight, live_notes = closure_mod.cap_closures(in_flight, total)
+        for note in notes + live_notes:
+            print(note)
     in_flight = with_run_jobs(in_flight, run)
     candidates, skipped = without_settled(candidates, run)
     for lowest in skipped:

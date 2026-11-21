@@ -55,9 +55,20 @@ repo's convention.
   edges, and a `.py` file that does not parse fails the resolve by name rather
   than reading as "imports nothing"; so does a `.py` file that does not read
   as text. `importlib.util.spec_from_file_location`
-  loads are not read. **Paths** picks the base: `repo-root` for scripts that
+  loads are not read. A `sys.path.insert(i, X)` or `sys.path.append(X)` in the
+  file adds `X`'s directory as a further base (#1981), so `import helper`
+  reaches `common/helper.py` after an insert of `common/`. `X` is read
+  statically: string constants, `__file__`, names bound once at module level
+  (`HERE = ...`), `os.path.dirname/abspath/realpath/normpath/join`, `str`,
+  `Path`, `.resolve()`, `.parent`, `.parents[n]` and `/`. Any other form
+  adds nothing, and so does an insert that leaves the repo. `os.pardir` reads as `..`. A `.py` under a directory named `fixtures` that does
+  not parse is skipped, since it may be broken on purpose; one that parses is
+  read like any other, and a file that does not parse anywhere else fails the
+  resolve.
+  **Paths** picks the base: `repo-root` for scripts that
   put the repo root on `sys.path`, the default (the including file's
-  directory) otherwise; only one base is tried. One hop and never empirical,
+  directory) otherwise; one **Paths** base, plus each `sys.path` directory the
+  file inserts. One hop and never empirical,
   as for every directive.
 - **Paths** says what the reference is relative to: `relative to the
   including file` (the default, and what `../_shared/line-kind.js` means) or

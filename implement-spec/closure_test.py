@@ -850,3 +850,73 @@ def test_python_imports_give_each_clump_the_importers_of_its_target(repo):
                    [candidate(1, "codec.py"), candidate(2, "toolkit.py")])
     assert [c["closure"] for c in got["clumps"]] == [
         ["codec.py", "one.py"], ["toolkit.py", "two.py"]], got
+
+
+# `sys.path` inserts (#1981): a skill's script puts a sibling directory on the
+# path and imports a helper from it, so the module name resolves against that
+# directory and against neither the repo root nor the importing file's own.
+AGENT_SKILLS = ("## Include closure\n\n- **Directive**: `python imports`\n"
+                "- **Paths**: relative to the including file\n")
+SKILLS_SHAPED = {
+    "common/helper.py": "X = 1\n",
+    "other/unrelated.py": "Y = 1\n",
+    "implement/tool.py": (
+        "import os, sys\n"
+        "sys.path.insert(0, os.path.join(os.path.dirname("
+        "os.path.abspath(__file__)), \"..\", \"common\"))\n"
+        "import helper\n"),
+    "implement/tool_test.py": (
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent.parent"
+        " / \"common\"))\nimport helper\n"),
+    "implement/third.py": (
+        "import os, sys\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+        "sys.path.append(os.path.join(HERE, \"..\", \"common\"))\n"
+        "from helper import X\n"),
+    "implement/bare.py": "import helper\n",
+}
+
+
+def test_a_helper_imported_through_a_sys_path_insert_is_in_the_closure(py_closure):
+    got = py_closure(SKILLS_SHAPED, "common/helper.py", agents=AGENT_SKILLS)
+    assert got == {"common/helper.py", "implement/tool.py",
+                   "implement/tool_test.py", "implement/third.py"}, got
+
+
+def test_an_unparsable_file_under_a_fixtures_directory_is_skipped(py_closure):
+    # tests/fixtures/ holds deliberately broken files (#1981); their imports
+    # reach no real code, so they must not fail every resolve.
+    files = {"codec.py": "x\n", "a.py": "import codec\n",
+             "tests/fixtures/x/broken.py": "def f(:\n    pass\n"}
+    assert py_closure(files) == {"codec.py", "a.py"}
+
+
+def test_an_unparsable_file_elsewhere_still_fails_the_resolve(py_closure):
+    with pytest.raises(C.ClosureError) as exc:
+        py_closure({"codec.py": "x\n", "tools/broken.py": "def f(:\n"})
+    assert "tools/broken.py" in str(exc.value), exc.value
+
+
+def test_an_os_pardir_insert_is_read_as_the_parent(py_closure):
+    files = {"common/helper.py": "X = 1\n",
+             "implement/tool.py": ("import os, sys\nsys.path.insert(0, os.path.join("
+                                   "os.path.dirname(__file__), os.pardir, \"common\"))\n"
+                                   "import helper\n")}
+    assert py_closure(files, "common/helper.py", agents=AGENT_SKILLS) \
+        == {"common/helper.py", "implement/tool.py"}
+
+
+def test_a_parents_index_insert_is_read(py_closure):
+    files = {"common/helper.py": "X = 1\n",
+             "a/b/tool.py": ("import sys\nfrom pathlib import Path\n"
+                             "sys.path.insert(0, str(Path(__file__).resolve()"
+                             ".parents[2] / \"common\"))\nimport helper\n")}
+    assert py_closure(files, "common/helper.py", agents=AGENT_SKILLS) \
+        == {"common/helper.py", "a/b/tool.py"}
+
+
+def test_a_parsable_fixture_keeps_its_edges(py_closure):
+    files = {"tests/fixtures/x/sample.py": "X = 1\n",
+             "tests/fixtures/x/test_sample.py": "import sample\n"}
+    assert py_closure(files, "tests/fixtures/x/sample.py", agents=AGENT_SKILLS) \
+        == {"tests/fixtures/x/sample.py", "tests/fixtures/x/test_sample.py"}

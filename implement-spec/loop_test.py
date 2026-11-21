@@ -2123,3 +2123,96 @@ def test_a_leaked_git_dir_does_not_repoint_the_loops_git(tmp, monkeypatch):
     monkeypatch.setenv("GIT_DIR", os.path.join(other, ".git"))
     assert want != "elsewhere"
     assert loop.git(["branch", "--show-current"], cwd=work).strip() == want
+
+
+# The closure cap (#1981): a closure past a quarter of the repo's tracked
+# source files holds only the candidate's own files.
+def wide_closure(n=5000):
+    return [f"wide/f{i}.py" for i in range(n)]
+
+
+def test_cap_closures_drops_a_closure_over_a_quarter_and_says_so():
+    big = {"tickets": [7], "files": ["a.py"], "closure": ["a.py", "b.py", "c.py"]}
+    kept, notes = loop.closure_mod.cap_closures([big], total=8)
+    assert "closure" not in kept[0] and kept[0]["files"] == ["a.py"], kept
+    assert len(notes) == 1 and "#7" in notes[0] and "cap" in notes[0], notes
+
+
+def test_cap_closures_keeps_a_closure_at_a_quarter_exactly():
+    small = {"tickets": [7], "files": ["a.py"], "closure": ["a.py", "b.py"]}
+    kept, notes = loop.closure_mod.cap_closures([small], total=8)
+    assert kept == [small] and notes == [], (kept, notes)
+
+
+def cap_dispatch(tmp, live_closure):
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [500], "files": ["shared.py"],
+                    "closure": ["shared.py"]}], fh)
+    with open(live, "w") as fh:
+        json.dump([{"tickets": [351], "workspace": "/w/351", "agent": "sm-351",
+                    "files": ["own.py"], "closure": live_closure,
+                    "job": NO_JOB}], fh)
+    return loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                   "--free", "2", "--processes", "4", "--committed-gb", "4")
+
+
+def test_a_live_closure_over_the_cap_holds_only_its_own_files(tmp):
+    got = cap_dispatch(tmp, ["own.py", "shared.py", *wide_closure()])
+    assert got.returncode == 0, got
+    assert "dispatch  #500" in got.stdout, got.stdout
+    assert "closure cap" in got.stdout and "#351" in got.stdout, got.stdout
+
+
+def test_a_live_closure_under_the_cap_holds_as_before(tmp):
+    got = cap_dispatch(tmp, ["own.py", "shared.py"])
+    assert got.returncode == 0, got
+    assert "dispatch  #500" not in got.stdout, got.stdout
+    assert "closure cap" not in got.stdout, got.stdout
+    assert "held" in got.stdout and "shared.py" in got.stdout, got.stdout
+
+
+def test_a_candidate_closure_over_the_cap_holds_only_its_own_files(tmp):
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [500], "files": ["mine.py"],
+                    "closure": ["mine.py", "shared.py", *wide_closure()]}], fh)
+    with open(live, "w") as fh:
+        json.dump([{"tickets": [351], "workspace": "/w/351", "agent": "sm-351",
+                    "files": ["shared.py"], "job": NO_JOB}], fh)
+    got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                  "--free", "2", "--processes", "4", "--committed-gb", "4")
+    assert got.returncode == 0, got
+    assert "dispatch  #500" in got.stdout and "closure cap" in got.stdout, got.stdout
+
+
+def test_a_closure_of_non_source_files_is_not_capped():
+    html = {"tickets": [7], "files": ["a.html"], "closure": ["a.html", "b.html"]}
+    kept, notes = loop.closure_mod.cap_closures([html], total=0)
+    assert kept == [html] and notes == [], (kept, notes)
+
+
+def test_source_total_is_none_for_a_directory_git_cannot_list(tmp):
+    assert loop.closure_mod.source_total(os.path.join(tmp, "missing")) is None
+
+
+def test_dispatch_says_so_when_the_source_files_cannot_be_counted(tmp, monkeypatch, capsys):
+    import argparse
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [20], "closure": ["b.js"]}], fh)
+    with open(live, "w") as fh:
+        json.dump([], fh)
+    cache = os.path.join(tmp, "cache")
+    os.mkdir(cache)
+    monkeypatch.setenv("SPEC_RUN_CACHE_DIR", cache)
+    monkeypatch.setattr(loop.closure_mod, "source_total", lambda repo: None)
+    args = argparse.Namespace(
+        candidates=cand, in_flight=live, run=fixture_run(cache, live), free=1,
+        no_workspace_diff=True, processes=4, committed_gb=4.0)
+    assert loop.cmd_dispatch(args) == 0
+    out = capsys.readouterr().out
+    assert "closure cap: not applied" in out and "dispatch  #20" in out, out

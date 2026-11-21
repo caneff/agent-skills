@@ -171,6 +171,96 @@ def python_references(rel, text):
     return out
 
 
+def _path_value(node, rel, env):
+    """A `sys.path` argument's directory as a repo-relative posix string, or
+    `None` when this reader cannot say. Reads the forms this repo's scripts
+    use: string constants, `__file__`, names bound once at module level,
+    `os.path.dirname/abspath/realpath/normpath/join`, `str`, `Path`,
+    `.resolve()`, `.parent`, `.parents[n]` and the `/` operator. Anything
+    else is unresolved, and an unresolved insert adds no edge."""
+    def val(n):
+        return _path_value(n, rel, env)
+
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.Name):
+        return rel if node.id == "__file__" else env.get(node.id)
+    if isinstance(node, ast.Attribute) and ast.unparse(node) in ("os.pardir", "os.path.pardir"):
+        return ".."
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left, right = val(node.left), val(node.right)
+        return None if left is None or right is None \
+            else posixpath.normpath(posixpath.join(left, right))
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        inner = val(node.value)
+        return None if inner is None else posixpath.dirname(inner)
+    if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "parents"
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, int) and node.slice.value >= 0):
+        inner = val(node.value.value)
+        if inner is None:
+            return None
+        for _ in range(node.slice.value + 1):
+            inner = posixpath.dirname(inner)
+        return inner
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "resolve" and not node.args):
+        return val(node.func.value)
+    if isinstance(node, ast.Call) and not node.keywords:
+        func = ast.unparse(node.func)
+        args = [val(a) for a in node.args]
+        if None in args or (not args and func != "os.path.join"):
+            return None
+        if func in ("os.path.abspath", "os.path.realpath", "os.path.normpath",
+                    "str", "Path", "pathlib.Path") and len(args) == 1:
+            return posixpath.normpath(args[0])
+        if func == "os.path.dirname" and len(args) == 1:
+            return posixpath.dirname(args[0])
+        if func == "os.path.join" and args:
+            return posixpath.normpath(posixpath.join(*args))
+    return None
+
+
+def path_bases(rel, text):
+    """The repo-relative directories a Python file puts on `sys.path` with
+    `sys.path.insert(i, X)` or `sys.path.append(X)`: a module the file
+    imports may live in any of them (#1981). Names bound once at module level
+    (`HERE = ...`) are followed. An insert this reader cannot evaluate, or
+    one that points outside the repo, adds nothing. Every insert in the file
+    counts, wherever it sits, as the over-matching direction is the safe one.
+    A file that does not parse is `imported_modules`' refusal, not this one's."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError):
+        return []
+    env = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            value = _path_value(node.value, rel, env)
+            if value is not None:
+                env[node.targets[0].id] = value
+    bases = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and ast.unparse(node.func) in ("sys.path.insert", "sys.path.append")):
+            continue
+        arg = None
+        if node.func.attr == "insert" and len(node.args) == 2:
+            arg = node.args[1]
+        elif node.func.attr == "append" and len(node.args) == 1:
+            arg = node.args[0]
+        base = None if arg is None else _path_value(arg, rel, env)
+        if base is not None:
+            base = posixpath.normpath(base)
+            if base != ".." and not base.startswith("../") and not base.startswith("/"):
+                bases.append("" if base == "." else base)
+    return list(dict.fromkeys(bases))
+
+
 def directive_pattern(directive):
     """The repo's include line as a regex with the path captured. The
     declaration is a template — `#include <path>`, `{% include "<path>" %}` —
@@ -341,17 +431,30 @@ def include_edges(root, decl, limit=SCAN_LIMIT):
                 raise ClosureError(f"cannot read imports of {rel}: not text")
             continue
         if python:
-            references = python_references(rel, text)
+            try:
+                references = python_references(rel, text)
+            except ClosureError:
+                # A fixture may be broken on purpose (#1981); every other
+                # file that does not parse fails the resolve by name.
+                if "fixtures" in rel.split("/")[:-1]:
+                    continue
+                raise
+            inserted = path_bases(rel, text)
         else:
             references = [m.group(1).strip()
                           for line in scanned_lines(rel, text)
                           for m in pattern.finditer(line)]
         for reference in references:
-            target = resolve_reference(rel, reference, decl.relative_to)
-            # A Python name with no tracked file is stdlib or third-party.
-            if python and target not in tracked:
-                continue
-            edges.setdefault(target, set()).add(rel)
+            targets = [resolve_reference(rel, reference, decl.relative_to)]
+            if python:
+                # Also the directories this file puts on `sys.path` (#1981).
+                targets += [posixpath.normpath(posixpath.join(b, reference))
+                            for b in inserted]
+            for target in targets:
+                # A Python name with no tracked file is stdlib or third-party.
+                if python and target not in tracked:
+                    continue
+                edges.setdefault(target, set()).add(rel)
     return edges
 
 
@@ -468,6 +571,48 @@ def clumps(root, candidates, decl=None):
 
     return {"mode": how, "announcement": announcement(decl),
             "clumps": [clump(n) for n in sorted(named)]}
+
+
+# What counts as a tracked source file for the closure cap (#1981); the same
+# kinds `tests/suite-edges.py` scans.
+SOURCE_SUFFIXES = (".py", ".sh", ".rs", ".js", ".mjs", ".cjs", ".ts", ".tsx")
+CLOSURE_CAP = 4  # a closure may cover at most 1/CLOSURE_CAP of the source files
+
+
+def source_total(repo):
+    """How many tracked source files `repo` holds, or `None` when git cannot
+    list them (`closure.repo_files`'s refusal)."""
+    try:
+        return sum(f.endswith(SOURCE_SUFFIXES)
+                   for f in repo_files(repo))
+    except ClosureError:
+        return None
+
+
+def cap_closures(clumps, total):
+    """`(clumps, notes)`: a clump whose `closure` covers more than a quarter
+    of `total` source files holds only its own `files`, and one note per such
+    clump says the cap applied (#1981). A flat repo's closure can cover most
+    of the tree, and holding on it ran a whole spec near-serial. A clump with
+    no `files` keeps its closure and says so: there is nothing narrower to
+    hold on. The clumps passed in are not mutated."""
+    out, notes = [], []
+    for clump in clumps:
+        wide = clump.get("closure")
+        # Source files against source files: the total counts only those.
+        covered = (sum(f.endswith(SOURCE_SUFFIXES) for f in wide)
+                   if isinstance(wide, list) else 0)
+        if covered * CLOSURE_CAP <= total:
+            out.append(clump)
+            continue
+        label = f"#{min(clump["tickets"])}: closure of {covered} source files exceeds 1/{CLOSURE_CAP} of {total} source files"
+        if not clump.get("files"):
+            out.append(clump)
+            notes.append(f"closure cap not applied to {label}, and it names no files of its own")
+            continue
+        out.append({k: v for k, v in clump.items() if k != "closure"})
+        notes.append(f"closure cap applied to {label}; held on its own files only")
+    return out, notes
 
 
 def render(clumping):
