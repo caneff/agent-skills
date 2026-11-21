@@ -17,6 +17,12 @@ fails=0
 ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; [ $# -gt 1 ] && printf '  %s\n' "$2"; fails=1; }
 
+# The file ends in one summary and one exit. A second pair partway down ends the
+# run before the cases after it (#1987), and the suite still prints ALL PASS.
+[ "$(grep -c '^exit "\$fails"$' "${BASH_SOURCE[0]}")" = 1 ] \
+  && ok "the suite has one exit, at its end" \
+  || no "the suite has one exit, at its end" "an exit \"\$fails\" partway down skips the cases after it"
+
 "$job_run" --name hello -- sh -c 'echo out; echo err >&2' >/dev/null 2>&1
 [ -d "$jobs_dir/hello" ] && ok "a run creates its directory" || no "a run creates its directory"
 grep -q 'echo out' "$jobs_dir/hello/cmd" \
@@ -341,9 +347,6 @@ out=$("$job_run" --name pf-env -- env X=1 bash -c 'false | cat; echo "x=$X"' 2>&
 "$job_run" --name pf-env2 -- env X=1 bash -c 'false | cat' >/dev/null 2>&1
 [[ "$("$job_run" --status pf-env2)" == *"stage 1 of 2"* ]] \
   && ok "pipefail applies behind an env prefix" || no "pipefail applies behind an env prefix"
-
-[ "$fails" = 0 ] && echo "ALL PASS"
-exit "$fails"
 
 # A job whose child outlives it makes the wrapper write the one progress line it
 # does not write from inside the tee; under a non-UTC TZ that line must still be
