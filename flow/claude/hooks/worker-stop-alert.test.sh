@@ -120,6 +120,16 @@ interim() { printf '{"type":"user","origin":{"kind":"task-notification"},"messag
 # bash_cmd <text> : a Bash call whose command merely mentions text.
 bash_cmd() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"bc-1","name":"Bash","input":{"command":"%s"}}]}}\n' "$1"; }
 
+# dispatch <agent> : an `implement-dispatch` call and its report, the shape a
+# spec run's transcript carries for each worker it starts (#1945).
+dispatch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"dp-%s","name":"Bash","input":{"command":"implement-dispatch 1 --run r"}}]}}\n' "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"dp-%s","content":"dispatched"}]},"toolUseResult":{"stdout":"dispatched #1 (sonnet, heavy tier, run r, controller skills-b6)\\nworktree: /w/implement-1\\nbranch:   implement-1\\nagent:    %s\\nsession:  implement-1-3c\\ncleanup:  merge-cleanup implement-1","stderr":""}}\n' "$1" "$1"; }
+# agents_live <name>... : the herdr list with the controller's pane and these
+# named worker agents.
+agents_live() { local a='{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}}' nm
+  for nm in "$@"; do a="$a,{\"name\":\"$nm\",\"pane_id\":\"w5:p1\",\"agent_session\":{\"value\":\"x-$nm\"}}"; done
+  printf '{"result":{"agents":[%s]}}\n' "$a" > "$tmp/agent-list.json"; }
+
 fails=0
 # run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
 # (the recorded prompt's target and alert, empty if no prompt was sent)
@@ -183,7 +193,10 @@ run "same stop again" "$t"
 expect_none "a re-evaluated stop that already alerted does not re-fire"
 assistant_text "woke on a notification, still no report" >> "$t"
 run "a later stop" "$t"
-expect_alert "a later stop, still without a report, alerts again"
+expect_none "a later stop in the same turn does not alert again (#1945)"
+human "next prompt" >> "$t"; assistant_text "again no report" >> "$t"
+run "a later turn" "$t"
+expect_alert "a stop in a later turn, still without a report, alerts"
 
 # stop_hook_active: the harness is re-running Stop hooks for this stop.
 reset_log
@@ -873,5 +886,71 @@ out=$(jq -n --arg t "$t" '{hook_event_name:"Stop",session_id:"w",transcript_path
 pane=$(cat "$tmp/prompt.pane" 2>/dev/null || true)
 text=$(cat "$tmp/prompt.text" 2>/dev/null || true)
 expect_alert "a hook symlinked alone into another directory finds its lib beside the target and alerts"
+
+# #1945: a spec run waiting on the workers it dispatched is not stopped.
+reset_log
+t="$tmp/spec-wait.jsonl"
+{ human "$brief"; dispatch skills-985; dispatch skills-986; work; assistant_text "workers out, ending the turn"; } > "$t"
+agents_live skills-985 skills-986
+run "workers out, stop 1" "$t"
+expect_reported "a spec run with two dispatched workers still live does not alert"
+for k in 2 3 4 5; do
+  { peer_from "uds:/run/w.sock" "skills-985" "job: 4 cores"; assistant_text "noted $k"; } >> "$t"
+  run "workers out, stop $k" "$t"
+  expect_reported "stop $k of the same wait stays silent while a worker is live"
+done
+agents_live skills-986
+run "one worker left" "$t"
+expect_reported "one dispatched worker still live keeps the wait"
+agents_live
+{ assistant_text "all landed, nothing sent"; } >> "$t"
+run "every worker landed" "$t"
+expect_alert "the same transcript with every worker gone and no report alerts"
+
+# An unreadable agent list names nobody alive: judged as before, silent.
+reset_log
+printf 'not json\n' > "$tmp/agent-list.json"
+run "agent list unreadable" "$t"
+expect_none "an unreadable herdr list does not hold a stop as a wait"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+
+# #1945: several genuinely silent stops in one turn send one alert.
+reset_log
+t="$tmp/many-stops.jsonl"
+{ human "$brief"; work; assistant_text "stop one"; } > "$t"
+run "turn stop 1" "$t"; expect_alert "first silent stop of a turn alerts"
+for k in 2 3; do
+  assistant_text "stop $k" >> "$t"
+  run "turn stop $k" "$t"; expect_none "silent stop $k of the same turn does not alert again"
+done
+if [ "$(grep -c $'\tsent\t' "$log")" = 1 ]; then echo "PASS: the log holds one sent alert for the turn"
+else echo "FAIL: want one sent line for the turn: $(cat "$log")"; fails=1; fi
+
+# A delivery that failed does not use up the turn's alert.
+reset_log
+printf '{"result":{"agents":[]}}\n' > "$tmp/agent-list.json"
+t="$tmp/failed-delivery.jsonl"
+{ human "$brief"; work; assistant_text "stop one"; } > "$t"
+run "unsent stop 1" "$t"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+assistant_text "stop two" >> "$t"
+run "unsent stop 2" "$t"
+expect_alert "a stop after a not-sent alert in the same turn is tried again"
+
+# #1945: controller drain is no session; the hook skips it and says so once.
+reset_log
+drain_brief=${brief//skills-b6/drain}
+t="$tmp/drain.jsonl"
+{ human "$drain_brief"; work; assistant_text "PR up, going idle"; } > "$t"
+run "drain stop 1" "$t"
+expect_none "a worker under controller drain sends no delivery attempt"
+assistant_text "second stop" >> "$t"
+run "drain stop 2" "$t"
+expect_none "a second stop under drain still sends nothing"
+if [ "$(wc -l < "$log")" = 1 ] && grep -q 'drain watches the pane' "$log" && ! grep -q 'no herdr pane' "$log"; then
+  echo "PASS: drain leaves one log line saying drain watches the pane"
+else
+  echo "FAIL: drain log line — $(cat "$log" 2>/dev/null)"; fails=1
+fi
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

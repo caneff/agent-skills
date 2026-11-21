@@ -91,6 +91,18 @@ IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 # `resolve-controller` first. (`worker_alert_resolve_controller`'s comment
 # holds the hops and why a nameless record counts.)
 controller="$(worker_alert_current_controller "$transcript" "$controller")"
+
+# `drain` is no session: drain's briefs name it on purpose and drain watches
+# the pane itself (its idle grace and wall clock, `drain/drain.py`), so there
+# is nobody to alert and no pane to look up (#1945). Logged once per session,
+# so the log says why and does not fill with a `not-sent` per stop.
+if [ "$controller" = drain ]; then
+  dkey="$session"$'\t'"drain"
+  grep -qF -- "$dkey"$'\t' "$log" 2>/dev/null \
+    || worker_alert_logline "$log" "$dkey" skipped "controller drain: drain watches the pane, so no alert is sent"
+  exit 0
+fi
+
 worker_alert_resolve_controller "$controller"
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
@@ -99,7 +111,7 @@ worker_alert_resolve_controller "$controller"
 # name), `$names` every resolved session name and `$socks` every resolved
 # `uds:` address — a report is counted against any of them, since nothing
 # here requires a worker to have resolved before sending.
-IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
+IFS=$'\t' read -r verdict stop turn < <(entries | jq -r --arg c "$controller" \
   --argjson names "$(jq -nc '$ARGS.positional' --args -- ${names[@]+"${names[@]}"})" \
   --argjson socks "$(jq -nc '$ARGS.positional' --args -- ${sockets[@]+"${sockets[@]}"})" '
   # A peer message starts a turn only when the brief'"'"'s controller sent it: a
@@ -243,12 +255,33 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
      elif (($unresolved | length) + ($unfinished | length)) > 0 then "waiting"
      elif $holding then "waiting"
      else "silent" end) as $verdict
-  | "\($verdict)\t\(last.uuid // "line \(length)")"')
+  | "\($verdict)\t\(last.uuid // "line \(length)")\t\($all[$start].value.uuid // "line \($start)")"')
 [ "${verdict:-}" = "silent" ] || exit 0
 
 # One alert per stop: a stop already in the log never alerts again.
 key="$session"$'\t'"$stop"
 grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
+
+# And one per turn (#1945): a turn that already sent its alert stays quiet for
+# its later stops, a backstop against any misread that leaves several stops
+# in one turn. Only a `sent` line counts, so a delivery that failed is tried
+# again at the next stop. The turn is the id of the entry that started it,
+# the fourth field of the log line (date, session, stop, turn, status, text).
+awk -F'\t' -v s="$session" -v t="turn=$turn" '$2 == s && $4 == t && $5 == "sent" { f = 1 } END { exit !f }' \
+  "$log" 2>/dev/null && exit 0
+
+# A worker waiting on workers it dispatched through herdr is waiting, not
+# stopped (#1945): every `agent:` line of an `implement-dispatch` report in
+# this transcript names one, and an agent still in `herdr agent list` is
+# alive (merge-cleanup closes its pane when it lands). A list that cannot be
+# read names nobody alive, so the stop is judged as it was before: silent.
+dispatched="$(entries | jq -r '.[] | select(.type == "user") | .toolUseResult? | objects
+  | .stdout? | strings | select(test("(^|\n)dispatched "))
+  | split("\n")[] | capture("^agent:\\s+(?<a>\\S+)\\s*$") | .a' 2>/dev/null)"
+if [ -n "$dispatched" ]; then
+  live="$(timeout 2 herdr agent list 2>/dev/null | jq -r '.result.agents[]? | .name // empty' 2>/dev/null)"
+  [ -n "$live" ] && grep -qxFf <(printf '%s\n' "$dispatched") <<<"$live" && exit 0
+fi
 
 # Every herdr call below ends by a 10 s deadline, measured from here — not
 # 12 s, because the controller resolution above already spent up to its own
@@ -259,5 +292,5 @@ deadline=$((SECONDS + 10))
 worker_agent="$(worker_alert_worker_agent_name)"
 alert="[worker-stop-alert] worker #$n stopped without reporting to $controller (herdr agent $worker_agent)"
 
-worker_alert_deliver "$log" "$key" "$controller" "$alert" "$deadline"
+worker_alert_deliver "$log" "$key"$'\t'"turn=$turn" "$controller" "$alert" "$deadline"
 exit 0
