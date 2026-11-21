@@ -132,10 +132,9 @@ owner's word turns it on.
   never `/tmp`, never a shared scratchpad path. Two exceptions live in the
   review cache, `~/.cache/agent-reviews/<repo>/`, under a ticket-named file.
   The Codex pass's record and output (§ The Codex pass), which must outlive
-  the clearing of `.scratch/`. And
-  the PR body, `pr-body-<n>.md` (§ The PR): a body left in `.scratch/` makes
-  `merge-cleanup` refuse the removal on every heavy landing, forcing the
-  controller to re-run it with `--discard` by hand. The name is
+  the discarding of `.scratch/` (§ Before the PR step 3). And
+  the PR body, `pr-body-<n>.md` (§ The PR), kept beside the Codex record.
+  The name is
   ticket-specific because a shared `pr-body.md` can be overwritten by
   another session between the write and `gh pr create`, and the PR then
   goes up with another ticket's body and closes that ticket instead.
@@ -566,9 +565,8 @@ alone cannot tell a clean read from one you committed underneath, and a run
 that failed and returned writes an output file that looks like any other, so
 **commit nothing while the pass reads**: the fix round starts after the pass
 has finished. Both files go in `~/.cache/agent-reviews/<repo>/`, never this
-workspace's `.scratch/`: § Before the PR step 3 deletes it, which would take an
-in-flight pass's output with it, and a `.scratch/` file left behind stalls
-`merge-cleanup`, which refuses ignored content without `--discard`. That cache
+workspace's `.scratch/`, which is discarded at landing (§ Before the PR
+step 3) and would take the record with it. That cache
 directory's 14-day prune covers both files, so nothing here is cleaned up by
 hand, `rm` or `rmdir`.
 
@@ -623,18 +621,13 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
 2. **Scope check**: `git diff --name-only origin/<default>...HEAD` names only
    the ticket's files, or each extra one is listed under Decisions made — a
    file the ticket never named lands with no reviewer looking for it.
-3. **Clear `.scratch/`**: write any reusable finding into `docs/research/`
-   (or the relevant note) and commit it, then delete this workspace's
-   `.scratch/`. Why: `merge-cleanup` refuses to remove ignored `.scratch/`
-   content without `--discard` — an irreversible deletion that should never
-   be the default way a run ends. If something you cannot commit and must
-   keep is left in `.scratch/`, run `PRE_REPORT_KEEP_SCRATCH="<why>" bash
-   ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 5 instead of
-   the bare form, and name it, with the same `<why>`, in the PR-up report.
-   (The Codex pass's record and output live in
-   `~/.cache/agent-reviews/<repo>/`, outside the workspace, so clearing this
-   directory cannot destroy them; only the rendered ticket it read, under
-   `.scratch/`, goes.)
+3. **Keep what must outlive the workspace out of `.scratch/`**: write any
+   reusable finding into `docs/research/` (or the relevant note) and commit
+   it. Do not delete `.scratch/`: `merge-cleanup` discards it, and lists
+   each file, once the branch is confirmed landed (#1699), so the deletion
+   is not a step a worker has to remember or run. (The Codex pass's record
+   and output live in `~/.cache/agent-reviews/<repo>/`, outside the
+   workspace, for the same reason.)
 4. **Read your own diff against the three recurring defect classes** named
    in `AGENTS.md` § Recurring defect classes;
    `docs/agents/defect-classes.md` carries the checks and every instance.
@@ -654,8 +647,8 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    files are uncommitted, so fix the cause and rerun.
 5. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
-   the tree, not on the branch, or left content behind in `.scratch/` with
-   no `PRE_REPORT_KEEP_SCRATCH` naming why. It also runs the merge check
+   the tree, or not on the branch; it does not check `.scratch/`. It also
+   runs the merge check
    (`fix-check.sh`, § Review step 3) on an `implement-<n>` branch, or on a
    spec run's `spec-<n>` keyed on the spec number, and
    refuses, exit 1, naming each problem: a finding with no disposition, a
@@ -702,10 +695,10 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    line at all means the dry run never reached them, not that nothing
    blocks: say so in the report rather than writing `none`. Your own
    session shows as a `live-session` blocker and clears when you go idle;
-   keep the line anyway. Anything else — an ignored build artifact, e2e
-   evidence, a kept `.scratch/` — is what `merge-cleanup` would refuse
-   after the merge, when you are gone and only Chris's `--discard` can
-   clear it.
+   keep the line anyway. A `scratch` line is no blocker (step 3). Anything
+   else — an ignored build artifact, e2e evidence — is what `merge-cleanup`
+   would refuse after the merge, when you are gone and only Chris's
+   `--discard` can clear it.
 
 The final commit body carries `Closes #<n>` — one line per ticket the brief
 named — and so does the PR body (see below). A "done" report where only the
@@ -722,7 +715,7 @@ the repo's own name, folded: the last component of
 `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py cache-dir`,
 not the worktree's directory name), never under
 this workspace's `.scratch/`. The file's content is already the PR body on
-GitHub, and § Before the PR step 3 makes you clear `.scratch/` anyway. A
+GitHub. A
 `gh pr edit` reuses the same file.
 
 ```
@@ -783,8 +776,7 @@ Mutation check: <the change that made it fail, that you saw it fail, and
 Parallel jobs: <one "<what it was> — <n> cores" line per parallel job you
   launched — or "none">
 Cleanup blockers: <every "blocker: " line of § Before the PR step 7's dry
-  run, verbatim, a "scratch" line followed by its PRE_REPORT_KEEP_SCRATCH
-  reason — or "none", only when the dry run printed "blockers: none">
+  run, verbatim — or "none", only when the dry run printed "blockers: none">
 Controller: you dispatched me; merge this PR per implement/SKILL.md § The merge
   (squash, answer my outstanding questions, wait for my idle notice), then run:
   cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
@@ -843,10 +835,7 @@ Controller: Chris merges this PR; you dispatched me, so hand him the merge
   Codex pass are four parallel jobs.
 - **The cleanup blockers** (#1032, folding in #831) — what `merge-cleanup`
   would refuse the workspace's removal over, named while you can still act
-  on it rather than found in the refusal after the merge. A kept `.scratch/`
-  carries the same `<why>` you gave `PRE_REPORT_KEEP_SCRATCH`
-  (§ Before the PR step 3), since the dry run can name the files but not
-  the reason.
+  on it rather than found in the refusal after the merge.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, that you saw it
   fail, and the throwaway worktree the mutation ran in. Nothing else in the
@@ -923,7 +912,8 @@ closed.
    no review files (§ Review). A Codex-lane PR is
    exempt: its worker's waiver is in the "PR up" report. Then read the report's
    `Cleanup blockers` field: every line but the worker's own `live-session` is
-   ruled on now, while the worker is alive to commit or move it — kept
+   ruled on now, while the worker is alive to commit or move it, bar a
+   `scratch` line (§ Before the PR step 7) — kept
    evidence moved out, or Chris asked whether `--discard` may take it — never
    discovered from `merge-cleanup`'s refusal after the merge. Read the
    report's `Codex pass` line too: a refused pass names a refusal, and the
