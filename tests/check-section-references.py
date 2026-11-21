@@ -208,6 +208,11 @@ def inside_code_span(spans: list[tuple[int, int]], position: int) -> bool:
     return any(start <= position < end for start, end in spans)
 
 
+# Never read as a source of references (#1970); still a valid target.
+# Why it is exempt: docs/agents/section-references.md.
+FRICTION_LOG = "docs/agents/friction-log.md"
+
+
 def tracked_markdown() -> list[Path]:
     output = subprocess.check_output(
         ["git", "ls-files", "--", "*.md"], cwd=ROOT, text=True
@@ -359,6 +364,8 @@ def main() -> int:
     failures: list[str] = []
 
     for source in files:
+        if source.relative_to(ROOT).as_posix() == FRICTION_LOG:
+            continue
         source = source.resolve()
         latest_named_file: Path | None = None
         previous_line_named_file: Path | None = None
