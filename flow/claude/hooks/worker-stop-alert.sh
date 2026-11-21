@@ -27,11 +27,19 @@
 # its own background work") is not its hand-back, and a worker whose last
 # delivered send is an open request ("ready for seam", a question) that the
 # controller has only held ("wait: ... you're next") is waiting for its "go".
+# Three more rules (#1945). A worker whose own dispatched workers are alive is
+# waiting, not stopped: each `agent:` line of an `implement-dispatch` report
+# in the transcript names one, and a name still in `herdr agent list` is live
+# (an unreadable list names nobody, so the stop is judged silent). At most one
+# alert is sent per turn, whatever the stops in it. And controller `drain` is
+# no session (drain watches the pane itself): the hook logs one line per
+# session saying so and attempts no delivery.
 # Otherwise submit one line into the controller's herdr pane with `herdr agent
 # prompt` — a hook command, so the auto-mode classifier never sees it (a
 # report sent that way was once denied there). One alert per stop: every
 # attempt is logged to ~/.claude/worker-stop-alerts.log keyed by session
-# and the transcript's last entry, and a logged stop never alerts again.
+# and the transcript's last entry (plus the turn's id), and a logged stop
+# never alerts again.
 # Always exit 0 — a hook failure must never block the worker's own stop.
 
 set -u
@@ -275,9 +283,17 @@ awk -F'\t' -v s="$session" -v t="turn=$turn" '$2 == s && $4 == t && $5 == "sent"
 # this transcript names one, and an agent still in `herdr agent list` is
 # alive (merge-cleanup closes its pane when it lands). A list that cannot be
 # read names nobody alive, so the stop is judged as it was before: silent.
-dispatched="$(entries | jq -r '.[] | select(.type == "user") | .toolUseResult? | objects
-  | .stdout? | strings | select(test("(^|\n)dispatched "))
-  | split("\n")[] | capture("^agent:\\s+(?<a>\\S+)\\s*$") | .a' 2>/dev/null)"
+# The report is read as text from any tool result, not only a `stdout`
+# object: a dispatch that exited non-zero is saved as an `Error: Exit code N`
+# string, and a controller's own loop may prefix each line with `[<n>] `
+# (both shapes in the #1945 evidence transcript). Only lines that mention
+# `dispatched #` are parsed at all, so the scan stays cheap on a big
+# transcript.
+dispatched="$(grep -F 'dispatched #' "$transcript" 2>/dev/null | jq -Rr 'fromjson? | objects
+  | select(.type == "user") | .message.content | arrays[] | select(.type == "tool_result")
+  | .content | if type == "string" then . else ([.[]? | .text? // empty] | join("\n")) end
+  | select(test("(^|\n)(\\[[0-9]+\\] )?dispatched #"))
+  | split("\n")[] | capture("^(\\[[0-9]+\\] )?agent:\\s+(?<a>\\S+)\\s*$") | .a' 2>/dev/null)"
 if [ -n "$dispatched" ]; then
   live="$(timeout 2 herdr agent list 2>/dev/null | jq -r '.result.agents[]? | .name // empty' 2>/dev/null)"
   [ -n "$live" ] && grep -qxFf <(printf '%s\n' "$dispatched") <<<"$live" && exit 0
@@ -285,8 +301,9 @@ fi
 
 # Every herdr call below ends by a 10 s deadline, measured from here — not
 # 12 s, because the controller resolution above already spent up to its own
-# 2 s budget on the same 15 s hook timeout, and this deadline has to leave
-# room for that whether or not the stop turned out silent.
+# 2 s budget, and the dispatched-worker check up to another 2 s, on the same
+# 15 s hook timeout; this deadline has to leave room for both whether or not
+# the stop turned out silent.
 deadline=$((SECONDS + 10))
 
 worker_agent="$(worker_alert_worker_agent_name)"

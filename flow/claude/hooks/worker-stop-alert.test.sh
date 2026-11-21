@@ -123,7 +123,14 @@ bash_cmd() { printf '{"type":"assistant","message":{"role":"assistant","content"
 # dispatch <agent> : an `implement-dispatch` call and its report, the shape a
 # spec run's transcript carries for each worker it starts (#1945).
 dispatch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"dp-%s","name":"Bash","input":{"command":"implement-dispatch 1 --run r"}}]}}\n' "$1"
-  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"dp-%s","content":"dispatched"}]},"toolUseResult":{"stdout":"dispatched #1 (sonnet, heavy tier, run r, controller skills-b6)\\nworktree: /w/implement-1\\nbranch:   implement-1\\nagent:    %s\\nsession:  implement-1-3c\\ncleanup:  merge-cleanup implement-1","stderr":""}}\n' "$1" "$1"; }
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"dp-%s","content":"dispatched #1 (sonnet, heavy tier, run r, controller skills-b6)\\nworktree: /w/implement-1\\nbranch:   implement-1\\nagent:    %s\\nsession:  implement-1-3c\\ncleanup:  merge-cleanup implement-1"}]},"toolUseResult":{"stdout":"x","stderr":""}}\n' "$1" "$1" "$1"; }
+# dispatch_error <agent> : the same report saved as a failed command's string
+# result, each line prefixed `[<n>] ` the way a controller's loop prints it
+# (both shapes in the #1945 evidence transcript, session 967545ab).
+dispatch_error() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"de-%s","name":"Bash","input":{"command":"for n in 1; do implement-dispatch $n | sed s/^/[$n]/; done"}}]}}\n' "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"de-%s","content":"Exit code 5\\n[1] dispatched #1 (sonnet, run r)\\n[1] worktree: /w/implement-1\\n[1] agent:    %s\\n[1] session:  s"}]},"toolUseResult":"Error: Exit code 5\\n[1] dispatched #1 (sonnet, run r)\\n[1] agent:    %s"}\n' "$1" "$1" "$1"; }
+# not_dispatch <name> : unrelated command output with an `agent:` line.
+not_dispatch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"nd-1","content":"config\\nagent:    %s\\n"}]},"toolUseResult":{"stdout":"x","stderr":""}}\n' "$1"; }
 # agents_live <name>... : the herdr list with the controller's pane and these
 # named worker agents.
 agents_live() { local a='{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}}' nm
@@ -911,8 +918,34 @@ expect_alert "the same transcript with every worker gone and no report alerts"
 reset_log
 printf 'not json\n' > "$tmp/agent-list.json"
 run "agent list unreadable" "$t"
-expect_none "an unreadable herdr list does not hold a stop as a wait"
+if grep -q $'\tnot-sent\t' "$log"; then echo "PASS: an unreadable herdr list does not hold a stop as a wait (the alert was attempted)"
+else echo "FAIL: an unreadable herdr list held the stop as a wait — log: $(cat "$log" 2>/dev/null)"; fails=1; fi
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+
+# #1945 evidence shapes: a dispatch saved as an error string with `[n] `-prefixed
+# lines still names its worker.
+reset_log
+t="$tmp/spec-wait-error.jsonl"
+{ human "$brief"; dispatch_error skills-986; assistant_text "worker out, ending the turn"; } > "$t"
+agents_live skills-986
+run "error-shaped dispatch, worker live" "$t"
+expect_reported "a dispatch report saved as an error string with [n] prefixes names a live worker"
+
+# Only a dispatch report names workers; another command's `agent:` line does not.
+reset_log
+t="$tmp/not-dispatch.jsonl"
+{ human "$brief"; not_dispatch skills-985; assistant_text "no workers"; } > "$t"
+agents_live skills-985
+run "agent line outside a dispatch report" "$t"
+expect_alert "an \`agent:\` line outside an implement-dispatch report holds no stop"
+
+# A live agent whose name merely starts with the dispatched one is not it.
+reset_log
+t="$tmp/prefix-name.jsonl"
+{ human "$brief"; dispatch skills-98; assistant_text "landed"; } > "$t"
+agents_live skills-985
+run "dispatched name is a prefix of a live one" "$t"
+expect_alert "a live agent skills-985 does not keep a landed skills-98 counted as out"
 
 # #1945: several genuinely silent stops in one turn send one alert.
 reset_log
