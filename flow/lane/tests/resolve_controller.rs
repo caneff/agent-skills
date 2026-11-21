@@ -14,6 +14,15 @@ fn resolve(f: &Fixture, arg: &str) -> std::process::Output {
 /// that needs an extra environment variable (`HERDR_LIST_FAIL`, say) adds it
 /// here instead of re-inlining the base environment.
 fn resolve_with_env(f: &Fixture, arg: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
+    resolve_cmd(f, arg, extra_env, None)
+}
+
+/// `resolve-controller` run from inside `dir`, as a worker runs it.
+fn resolve_in(f: &Fixture, arg: &str, dir: &std::path::Path) -> std::process::Output {
+    resolve_cmd(f, arg, &[], Some(dir))
+}
+
+fn resolve_cmd(f: &Fixture, arg: &str, extra_env: &[(&str, &str)], dir: Option<&std::path::Path>) -> std::process::Output {
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_resolve-controller"));
     cmd.arg(arg)
         .env_clear()
@@ -23,6 +32,9 @@ fn resolve_with_env(f: &Fixture, arg: &str, extra_env: &[(&str, &str)]) -> std::
         .env("HERDR_AGENTS", f.agents_file());
     for (k, v) in extra_env {
         cmd.env(k, v);
+    }
+    if let Some(d) = dir {
+        cmd.current_dir(d);
     }
     cmd.output().unwrap()
 }
@@ -59,6 +71,95 @@ fn a_herdr_agent_name_resolves_to_the_sessions_current_name() {
     let out = resolve(&f, "skills-dc");
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(stdout(&out), "controller-50");
+}
+
+/// Records one dispatched worker under the live test-process session, as
+/// `implement-dispatch` does, with its workspace at `workspace`.
+fn record_worker(f: &Fixture, workspace: &std::path::Path) {
+    record_worker_started(f, workspace, &f.own_proc_start());
+}
+
+fn record_worker_started(f: &Fixture, workspace: &std::path::Path, proc_start: &str) {
+    let pid = std::process::id();
+    let rec = serde_json::json!({
+        "agent": "w", "tickets": ["94"], "branch": "implement-94",
+        "workspace": lane::workers::canonical_workspace_path(&workspace.display().to_string()),
+        "repo": "o/r", "cleanup": "c", "chris_merges": false, "dispatched_at": "",
+        "proc_start": proc_start,
+    });
+    std::fs::write(f.home().join(".claude/sessions").join(format!("{pid}.workers.jsonl")), format!("{rec}\n")).unwrap();
+}
+
+#[test]
+fn a_controller_and_a_worker_sharing_a_name_resolve_to_the_controllers_session() {
+    let f = Fixture::new();
+    // Slice #94's herdr agent is named like the controller's session; the
+    // agent's own session is not live, so the old herdr-name-first order
+    // printed an error (or, with a live worker, the worker).
+    f.set_agents(r#"[{"name":"penpa-edit-94","agent_session":{"value":"sid-worker"}}]"#);
+    let _inbox = live_session(&f, "sid-ctl", "penpa-edit-94");
+    let ws = f.tmp.path().join("ws");
+    std::fs::create_dir_all(&ws).unwrap();
+    record_worker(&f, &ws);
+    let out = resolve_in(&f, "penpa-edit-94", &ws);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "penpa-edit-94");
+}
+
+#[test]
+fn a_controller_named_by_its_herdr_agent_resolves_from_the_workers_workspace() {
+    let f = Fixture::new();
+    f.set_agents(r#"[{"name":"ctl-agent","agent_session":{"value":"sid-ctl"}}]"#);
+    let _inbox = live_session(&f, "sid-ctl", "ctl-session");
+    let ws = f.tmp.path().join("ws");
+    std::fs::create_dir_all(&ws).unwrap();
+    record_worker(&f, &ws);
+    // Recorded first: the answer is the recorded session even beside a stale
+    // agent listing, and the name asked for is the agent that session runs.
+    let out = resolve_in(&f, "ctl-agent", &ws);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "ctl-session");
+}
+
+#[test]
+fn a_record_whose_pid_was_reused_by_another_process_is_not_the_controller() {
+    let f = Fixture::new();
+    f.set_agents(r#"[{"name":"penpa-edit-94","agent_session":{"value":"sid-worker"}}]"#);
+    let _inbox = live_session(&f, "sid-ctl", "penpa-edit-94");
+    let ws = f.tmp.path().join("ws");
+    std::fs::create_dir_all(&ws).unwrap();
+    record_worker_started(&f, &ws, "1");
+    let out = resolve_in(&f, "penpa-edit-94", &ws);
+    assert!(!out.status.success(), "a stale record answered: {}", out_text(&out));
+}
+
+#[test]
+fn the_recorded_controller_is_found_from_inside_the_workspace_but_not_from_above_it() {
+    let f = Fixture::new();
+    f.set_agents(r#"[{"name":"penpa-edit-94","agent_session":{"value":"sid-worker"}}]"#);
+    let _inbox = live_session(&f, "sid-ctl", "penpa-edit-94");
+    let ws = f.tmp.path().join("outer/ws");
+    let inside = ws.join("sub/dir");
+    std::fs::create_dir_all(&inside).unwrap();
+    record_worker(&f, &ws);
+    let out = resolve_in(&f, "penpa-edit-94", &inside);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "penpa-edit-94");
+    // A directory above the workspace is not a worker running in it.
+    let out = resolve_in(&f, "penpa-edit-94", ws.parent().unwrap());
+    assert!(!out.status.success(), "a parent of the workspace matched: {}", out_text(&out));
+}
+
+#[test]
+fn a_recorded_controller_session_is_not_used_for_a_name_it_does_not_bear() {
+    let f = Fixture::new();
+    f.set_agents(r#"[{"name":"other-agent","agent_session":{"value":"sid-other"}}]"#);
+    let _inbox = live_session(&f, "sid-ctl", "ctl-name");
+    let ws = f.tmp.path().join("ws");
+    std::fs::create_dir_all(&ws).unwrap();
+    record_worker(&f, &ws);
+    let out = resolve_in(&f, "other-agent", &ws);
+    assert!(!out.status.success(), "a recorded controller must not answer for another name: {}", out_text(&out));
 }
 
 #[test]

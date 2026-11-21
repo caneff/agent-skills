@@ -45,6 +45,8 @@ gh issue list --repo <owner/name> --label ready-for-agent --state open \
 
 `implement-dispatch` claims the ticket, creates the workspace, starts the
 worker in a herdr pane, and puts the tier and your session name in the brief.
+Its report's `send to (SendMessage):` line is the address `SendMessage` takes
+for that worker, never the `agent:` line's herdr name.
 On a `ready-for-human` ticket the report says "Chris merges" (§ The brief):
 the claim keeps that label alongside `in-progress`, so § The merge: it still
 reads it off the live labels after the claim.

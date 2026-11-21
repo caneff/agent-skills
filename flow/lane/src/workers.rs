@@ -191,6 +191,25 @@ pub fn canonical_workspace_path(path: &str) -> String {
     std::fs::canonicalize(path).ok().map(|p| p.display().to_string()).unwrap_or_else(|| path.to_string())
 }
 
+/// The controllers that dispatched the worker whose workspace holds `cwd`:
+/// each `(pid, proc_start)` of a `<pid>.workers.jsonl` carrying a record
+/// whose workspace is `cwd` or an ancestor of it. This is the session link
+/// dispatch recorded, so a worker can name its controller by session and not
+/// by a name that another session or agent may bear too (#1980).
+pub fn controllers_of_workspace_holding(home: &Path, cwd: &str) -> Vec<(String, String)> {
+    let Ok(dir) = std::fs::read_dir(home.join(".claude/sessions")) else { return Vec::new() };
+    let cwd = canonical_workspace_path(cwd);
+    let mut out = Vec::new();
+    for e in dir.filter_map(Result::ok) {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(pid) = name.strip_suffix(".workers.jsonl") else { continue };
+        if let Some(r) = read(home, pid).into_iter().find(|r| crate::sessions::in_tree(&cwd, &r.workspace)) {
+            out.push((pid.to_string(), r.proc_start));
+        }
+    }
+    out
+}
+
 /// Removes every record naming `workspace`, across every controller's
 /// `<pid>.workers.jsonl` under `<home>/.claude/sessions` — `merge-cleanup`
 /// knows only the workspace path it just tore down, not which controller
