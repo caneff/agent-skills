@@ -239,5 +239,35 @@ case "$line" in finished*rc=3*) ok "--status reads back the record the hook set 
   *) no "--status reads back the record the hook set up" "$line" ;;
 esac
 
+# #1697: a rewritten background call sent beside Agent calls leaves those Agent
+# calls with no auto-mode verdict, so the review wave starts the Codex pass as an
+# explicit job-run call the hook leaves alone. The command under test is read
+# out of implement/SKILL.md, so the skill text and the hook cannot drift apart.
+skill="$here/../../../implement/SKILL.md"
+codex_launch=$(awk '/^job-run --name codex-<n> -- /{on=1} on{print} on&&!/\\$/{exit}' "$skill" \
+  | sed 's/<n>/1697/g; s/<default>/main/g; s/<[^>]*>/X/g')
+codex_json=$(jq -nc --arg c "$codex_launch" \
+  '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_use_id:"toolu_01CodexLaunchXx",tool_input:{command:$c,run_in_background:true}}')
+got=$(fire withjr "$codex_json"); rc=${got%%|*}; body=${got#*|}
+[ -n "$codex_launch" ] && [[ "$codex_launch" == job-run\ --name\ codex-1697\ --\ python3\ *codex-gate-run.py* ]] \
+  && ok "implement/SKILL.md gives the Codex launch as an explicit job-run call" \
+  || no "implement/SKILL.md gives the Codex launch as an explicit job-run call" "launch=$codex_launch"
+[ "$rc" = 0 ] && ! printf '%s' "$body" | grep -q updatedInput \
+  && ok "the skill's Codex launch passes the hook with no updatedInput" \
+  || no "the skill's Codex launch passes the hook with no updatedInput" "rc=$rc body=$body"
+bare_codex=$(jq -nc '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_use_id:"toolu_01CodexBareXxYy",tool_input:{command:"python3 ~/.agents/skills/implement/codex-gate-run.py --ticket 1 --body-file b --base origin/main",run_in_background:true}}')
+got=$(fire withjr "$bare_codex"); body=${got#*|}
+[[ "$(printf '%s' "$body" | jq -r '.hookSpecificOutput.updatedInput.command // ""')" == job-run\ --name\ *"codex-gate-run.py"* ]] \
+  && ok "a bare background Codex call is still wrapped" \
+  || no "a bare background Codex call is still wrapped" "$body"
+# No doc may show the pass launched bare: every codex-gate-run.py command line in
+# a Markdown file sits under a job-run line or inside a job-run call.
+repo_root="$(cd "$here/../../.." && pwd)"
+bare_docs=$(cd "$repo_root" && git ls-files '*.md' | grep -v '^docs/research/' \
+  | xargs grep -n -B1 '^python3 .*codex-gate-run\.py' 2>/dev/null | grep -v -- '-job-run ' | grep 'codex-gate-run\.py')
+[ -z "$bare_docs" ] \
+  && ok "no doc shows the Codex pass launched as a bare background call" \
+  || no "no doc shows the Codex pass launched as a bare background call" "$bare_docs"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

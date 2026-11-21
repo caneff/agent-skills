@@ -539,10 +539,14 @@ lives there, not in the script; `handleReviewCommand` parses
 `--wait`/`--background` as booleans and never reads them, always running
 foreground. The script passes `--wait` anyway to say what's intended; it's a
 harmless no-op on this path. The run goes in the background of your own shell (`run_in_background`),
-which is what lets the axes run beside it:
+which is what lets the axes run beside it. Launch it as this explicit `job-run`
+call, never as the bare `python3` command (#1697): the background-job hook
+rewrites a bare background call, and Agent calls sent in the same response as a
+rewritten call get no auto-mode verdict, so all three axes would be reissued.
+The hook leaves a call that already starts with `job-run` unchanged:
 
 ```
-python3 ~/.agents/skills/implement/codex-gate-run.py --ticket <n> \
+job-run --name codex-<n> -- python3 ~/.agents/skills/implement/codex-gate-run.py --ticket <n> \
   --body-file <absolute path you wrote the ticket body, comments and appendix to> \
   --base origin/<default>
 ```
