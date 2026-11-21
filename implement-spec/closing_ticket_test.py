@@ -126,6 +126,30 @@ def test_the_integration_pr_closes_every_slice_and_the_spec(repo):
     assert "`Closes #<slice>`" in got, got
 
 
+def test_a_miss_ruling_requires_the_slice_lines_and_refuses_the_spec_line(repo):
+    # A Miss ruling keeps the spec open (backlog), so the section must not
+    # demand `Closes #<spec>`: it forbids it, and still demands the slices'.
+    got = body(repo(), spec=366, surfaces=[], keep_spec_open=True)
+    assert "`Closes #<slice>`" in got, got
+    assert "no `Closes #366`" in got, got
+    assert "a bare `Closes #366`" not in got, got
+
+
+def test_a_miss_ruling_on_a_one_slice_spec_refuses_the_spec_line(repo):
+    got = body(repo(), spec=366, surfaces=[], one_slice=True,
+               keep_spec_open=True)
+    assert "no `Closes #366`" in got, got
+    assert "Add a bare `Closes #366`" not in got, got
+
+
+def test_the_cli_takes_keep_spec_open(repo):
+    out = subprocess.run([sys.executable, GENERATOR, repo(), "366",
+                          "--one-slice", "--no-surface", "--keep-spec-open"],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert "no `Closes #366`" in out.stdout, out.stdout
+
+
 def test_the_default_branch_is_the_one_named(repo):
     got = body(repo(), spec=366, surfaces=[], default="trunk")
     assert "`origin/trunk...spec-366`" in got, got

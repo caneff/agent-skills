@@ -491,7 +491,9 @@ When the last slice has landed:
 4. **The integration PR.** Run step 1's block once more, and open it:
    `gh pr create --base <default> --head spec-<n>`. Its body is
    `implement/SKILL.md` § The PR's, keyed on the spec number, with a bare
-   `Closes #<slice>` line for every slice and a bare `Closes #<spec>`.
+   `Closes #<slice>` line for every slice and a bare `Closes #<spec>`, unless
+   the spec's own Miss ruling keeps it open: then no `Closes #<spec>` (the
+   closing check's `--keep-spec-open`, below).
    Report it to this run's own controller as "PR up" in that section's
    shape, with `fix-check.sh <spec> origin/spec-<spec>` as the controller's
    merge check. The controller merges it unchanged by
@@ -521,6 +523,11 @@ python3 implement-spec/closing_ticket.py <repo-root> <spec> --surface <what> [--
 python3 implement-spec/closing_ticket.py <repo-root> <spec> --no-surface
 python3 implement-spec/closing_ticket.py <repo-root> <spec> --one-slice --no-surface   # one-slice spec
 ```
+
+A spec whose own body rules that a miss keeps it open (relabelled `backlog`)
+takes `--keep-spec-open`: the section then forbids `Closes #<spec>` and still
+requires the slices' lines. The run file records no ruling, so the controller
+reads the spec's `## Miss` section and passes the flag.
 
 `<default>` is read off the repo's `origin/HEAD`, or given with `--default`;
 the generator refuses rather than assume `main`.
