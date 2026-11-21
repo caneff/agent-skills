@@ -217,6 +217,10 @@ class WorkerGone(DrainError):
     """The worker's herdr agent is gone and its build has no PR."""
 
 
+class IdleAfterResume(DrainError):
+    """A spec run went idle with no PR again after drain's one resume prompt: no second try."""
+
+
 def refs(tickets):
     """`#1 #2`: tickets as they are written in a line of output."""
     return " ".join(f"#{n}" for n in tickets)
@@ -311,9 +315,42 @@ def read_queue(ctx):
     queue = [(t["number"], t["title"], kind) for kind, bucket in ((TICKET, "unblocked"), (SPEC, "spec"))
              for t in buckets[bucket]]
     queue = sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
+    barren = barren_specs(ctx, issues, buckets, {n for n, _, k in queue if k == SPEC})
+    queue = [t for t in queue if t[0] not in barren]
     waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
     stranded = [(t["number"], t["why"]) for t in buckets["stranded"]]
-    return queue, sorted(waiting), stranded, passed_over(issues, buckets)
+    return queue, sorted(waiting), stranded, sorted(passed_over(issues, buckets) + list(barren.items()))
+
+
+def barren_specs(ctx, issues, buckets, specs):
+    """`{spec: why}` for each of `specs` (clear spec parents) with no unblocked slice on the
+    frontier, so a spec run would open with nothing to build and end idle with no PR (#1974).
+    The decision rests on the `slice` bucket alone. The `why` names the spec's blocked slices
+    and their blockers when their parents can be read; a read that fails only shortens it, and
+    never keeps a barren spec in the queue."""
+    ready = {t["spec"] for t in buckets["slice"]}
+    barren = [n for n in sorted(specs) if n not in ready]
+    if not barren:
+        return {}
+    blocked = {t["number"]: t for name in ("blocked", "unresolved") for t in buckets[name]}
+    held = {n: [] for n in barren}
+    for n, entry in blocked.items():
+        try:
+            parent = frontier.fetch_parent(ctx.tracker, issues[n])
+        except tracker.TrackerError:
+            continue
+        if parent and parent["number"] in held:
+            held[parent["number"]].append((n, entry))
+    why = {}
+    for spec in barren:
+        slices = held[spec]
+        if not slices:
+            why[spec] = "spec with no dispatchable slice (it has no ready slice)"
+            continue
+        named = "; ".join(f"#{n} " + (("blocked by " + ", ".join(f"#{b}" for b in e["blockers"])) if e["blockers"]
+                                      else f"blocked: {e['why']}") for n, e in slices)
+        why[spec] = f"spec with no dispatchable slice: {named}"
+    return why
 
 
 class Listed:
@@ -693,9 +730,11 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
     herdr) is tried again; `LOOK_ERRORS` in a row end the wait. `spec` is the spec number when the worker is a spec run:
     its wall clock is `SPEC_WALL_CLOCK_SECONDS`, and a slice worker at work
     restarts its idle grace, as does a live `job-run` job in the workspace of an
-    idle worker (`live_job`): the wall clock still ends the wait."""
+    idle worker (`live_job`): the wall clock still ends the wait. A spec run idle past
+    the grace with no PR is prompted once (`resume`) and its grace restarts; idle again
+    past it is an `IdleAfterResume` (#1710). A ticket's worker is never resumed."""
     limit = SPEC_WALL_CLOCK_SECONDS if spec else WALL_CLOCK_SECONDS
-    deadline, stalled_since, errors = time.monotonic() + limit, None, 0
+    deadline, stalled_since, errors, resumed = time.monotonic() + limit, None, 0, False
     while True:
         try:
             status = agent_status(agent)
@@ -725,7 +764,14 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
             if (status in IDLE or status in STALLED) and not busy:
                 stalled_since = stalled_since or time.monotonic()
                 if time.monotonic() - stalled_since >= IDLE_GRACE_SECONDS:
-                    raise DrainError(f"the worker {agent} is {status} with no PR")
+                    if spec and status in IDLE and not resumed:
+                        resume(ctx, agent)
+                        resumed, stalled_since = True, None
+                    elif resumed:
+                        raise IdleAfterResume(f"the worker {agent} is {status} with no PR, and drain's one "
+                                              "resume prompt did not help")
+                    else:
+                        raise DrainError(f"the worker {agent} is {status} with no PR")
             else:
                 stalled_since = None
         if time.monotonic() > deadline:
@@ -1022,6 +1068,20 @@ def finish(ctx, anchor, branch, view, kind):
     return [{"tickets": view["closes"], "via": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED}]
 
 
+def resume(ctx, agent):
+    """Prompt an idle spec run once to continue or say what blocks it, and say so (#1710)."""
+    code, text = run_group(["herdr", "agent", "prompt", agent, RESUME_TEXT,
+                            "--wait", "--until", "working", "--until", "blocked", "--timeout", "30000"],
+                           ctx.root, 60)
+    if code:
+        raise DrainError(f"herdr agent prompt {agent} failed: {one_line(text, 150)}")
+    say(f"resumed: {agent} was idle with no integration PR; sent it one prompt and restarted the idle grace")
+
+
+RESUME_TEXT = ("Unattended drain, no controller: you are idle with no integration PR. Continue /implement-spec "
+               "for this spec now, or report what blocks you and stop. Send no messages.")
+
+
 def nudge_text(reason, pr_up, kind):
     head = "Unattended drain, no controller: "
     if pr_up:
@@ -1101,6 +1161,11 @@ def work(ctx, anchor, others, resumed, started, kind):
                 raise DrainError(f"{view['url']} {exc}") from exc
         except DrainError as exc:
             reason = one_line(exc)
+            if isinstance(exc, IdleAfterResume):  # the resume was the second try
+                if not started:
+                    announce(ctx, anchor, bundle, kind)
+                    started[:] = bundle
+                return None, reason
             if not started:  # a failure before the announce (a dispatch that failed after the claim): the bundle was still worked
                 announce(ctx, anchor, bundle, kind)
                 started[:] = bundle

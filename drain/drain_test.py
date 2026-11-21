@@ -1569,6 +1569,28 @@ def test_a_blocked_spec_is_not_dispatched(sb):
     assert sb.dispatch_runs() == []
 
 
+def test_a_spec_whose_only_slice_is_blocked_is_passed_over_not_anchored(sb):
+    sb.write_state({1: SPEC, 2: {"parent": 1, "body": "## Blocked by\n\n- #9\n"}, 9: {"labels": []}})
+    r = sb.drain()
+    assert sb.dispatch_runs() == []
+    assert "passed over: #1 spec with no dispatchable slice: #2 blocked by #9" in r.stdout
+    assert "drain anchor: spec-1" not in [b for _, b in sb.state()["comments"]]
+
+
+def test_a_spec_with_no_slice_at_all_is_passed_over_and_the_drain_goes_on(sb):
+    sb.write_state({1: SPEC, 3: {}})
+    r = sb.drain("--once")
+    assert r.returncode == 0, r.stderr
+    assert "passed over: #1 spec with no dispatchable slice (it has no ready slice)" in r.stdout
+    assert [c["argv"][-1] for c in sb.dispatch_runs()] == ["3"], "the ticket behind it still runs"
+
+
+def test_a_spec_with_one_unblocked_slice_beside_a_blocked_one_is_anchored(sb):
+    sb.write_state({1: SPEC, 2: {"parent": 1}, 3: {"parent": 1, "body": "## Blocked by\n\n- #9\n"}, 9: {"labels": []}})
+    sb.drain("--once")
+    assert [c["argv"] for c in sb.dispatch_runs()] == [["--repo", sb.repo, "--controller", "drain", "--spec", "1"]]
+
+
 def test_a_spec_pr_may_close_more_tickets_than_bundle_max_when_all_are_its_slices(sb):
     sb.spec_state(slices=(2, 3, 4, 5))
     r = sb.drain("--once", "--bundle-max", "2", env={"SPEC_SLICES": "2 3 4 5"})
@@ -1826,6 +1848,8 @@ def test_the_same_idle_wait_with_no_slice_working_fails_at_the_grace(d, ctx, mon
     monkeypatch.setattr(d, "agent_status", lambda name: "idle")
     monkeypatch.setattr(d, "slices_working", lambda ctx, spec: False)
     monkeypatch.setattr(d, "open_pr", lambda ctx, branch: None)
+    monkeypatch.setattr(d, "run_group", lambda *a, **k: (0, ""))  # the one resume prompt
+    monkeypatch.setattr(d, "say", lambda text: None)
     with pytest.raises(d.DrainError) as caught:
         d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1)
     assert "is idle with no PR" in str(caught.value)
@@ -1840,6 +1864,83 @@ def test_a_spec_run_gets_the_spec_wall_clock_not_the_tickets(d, ctx, monkeypatch
         d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1)
     assert "passed the 0.4s wall clock" in str(caught.value)
     assert time.monotonic() - started >= 0.4
+
+
+class ResumeRig:
+    """A spec run idle with no PR on a stepped clock, `herdr agent prompt` recorded, not run."""
+
+    def __init__(self, d, ctx, monkeypatch, grace=3, pr_at=None):
+        self.clock, self.prompts, self.said = SteppedClock(), [], []
+        monkeypatch.setattr(d, "time", self.clock)
+        monkeypatch.setattr(d, "IDLE_GRACE_SECONDS", grace)
+        monkeypatch.setattr(d, "SPEC_WALL_CLOCK_SECONDS", 100)
+        monkeypatch.setattr(d, "WALL_CLOCK_SECONDS", 100)
+        monkeypatch.setattr(d, "agent_status", lambda name: "idle")
+        monkeypatch.setattr(d, "slices_working", lambda ctx, spec: False)
+        monkeypatch.setattr(d, "live_job", lambda ws: None)
+        monkeypatch.setattr(d, "say", self.said.append)
+        monkeypatch.setattr(d, "run_group", lambda cmd, cwd, timeout, preexec=None: (self.prompts.append(cmd), (0, ""))[1])
+        monkeypatch.setattr(d, "open_pr", lambda ctx, branch: {"number": 1} if pr_at is not None and self.clock.tick >= pr_at else None)
+
+
+def test_an_idle_spec_run_with_no_pr_gets_one_resume_prompt_and_a_progress_line(d, ctx, monkeypatch):
+    rig = ResumeRig(d, ctx, monkeypatch, pr_at=5)
+    assert d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1) == "pr"
+    assert len(rig.prompts) == 1
+    assert rig.prompts[0][:4] == ["herdr", "agent", "prompt", "repo-spec-1"]
+    assert "idle with no integration PR" in rig.prompts[0][4]
+    assert [t for t in rig.said if t.startswith("resumed: repo-spec-1")], rig.said
+
+
+def test_a_spec_run_idle_again_after_the_resume_is_handed_over_naming_the_resume(d, ctx, monkeypatch):
+    rig = ResumeRig(d, ctx, monkeypatch)
+    with pytest.raises(d.DrainError) as caught:
+        d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1)
+    assert len(rig.prompts) == 1, "exactly one resume, however long it stays idle"
+    assert "drain's one resume prompt did not help" in str(caught.value)
+    assert rig.clock.tick >= 6, "the grace restarted after the resume: two full graces, not one"
+
+
+def test_a_non_spec_worker_is_never_resumed(d, ctx, monkeypatch):
+    rig = ResumeRig(d, ctx, monkeypatch)
+    with pytest.raises(d.DrainError) as caught:
+        d.wait_for_worker(ctx, "implement-1", "repo-1", [1])
+    assert rig.prompts == []
+    assert str(caught.value) == "the worker repo-1 is idle with no PR"
+
+
+def test_a_blocked_spec_run_is_not_resumed(d, ctx, monkeypatch):
+    rig = ResumeRig(d, ctx, monkeypatch)
+    monkeypatch.setattr(d, "agent_status", lambda name: "blocked")
+    with pytest.raises(d.DrainError) as caught:
+        d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1)
+    assert rig.prompts == [] and "is blocked with no PR" in str(caught.value)
+
+
+def test_the_wall_clock_still_bounds_a_resumed_spec_run(d, ctx, monkeypatch):
+    rig = ResumeRig(d, ctx, monkeypatch, grace=50)
+    monkeypatch.setattr(d, "SPEC_WALL_CLOCK_SECONDS", 60)
+    with pytest.raises(d.DrainError) as caught:
+        d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1)
+    assert len(rig.prompts) == 1 and "wall clock" in str(caught.value)
+
+
+def test_work_hands_a_spec_over_after_the_resume_without_a_second_try(d, monkeypatch):
+    calls = []
+
+    def wait(ctx, branch, agent, tickets, spec=None):
+        calls.append(spec)
+        raise d.IdleAfterResume("the worker repo-spec-1 is idle with no PR, and drain's one resume prompt did not help")
+    ctx = type("Ctx", (), {"repo": "o/r", "root": "/x", "log_dir": "/l", "tracker": None})()
+    monkeypatch.setattr(d, "wait_for_worker", wait)
+    monkeypatch.setattr(d, "dispatch", lambda ctx, bundle, kind: None)
+    monkeypatch.setattr(d, "announce", lambda *a: None)
+    monkeypatch.setattr(d, "nudge", lambda *a: calls.append("nudge"))
+    monkeypatch.setattr(d, "agent_name", lambda ctx, lead, kind: "repo-spec-1")
+    started = []
+    results, reason = d.work(ctx, 1, [], False, started, d.SPEC)
+    assert results is None and "resume prompt did not help" in reason
+    assert calls == [1], "one wait, no nudge: the resume was the second try"
 
 
 def test_run_group_kills_what_a_command_started(d, tmp_path):
