@@ -994,12 +994,12 @@ closed.
    it. The third condition keeps a PR from choosing its own gate: the
    worker's run reads the command from the PR's own `AGENTS.md`, step 3 from
    the base's, and only the `## End-to-end seam` section chooses it (#1911),
-   so an edit elsewhere in `AGENTS.md` keeps the skip. The comparison covers
-   the section's gate text only (#1975): the `Seam` and `Narrowed` commands and
-   every scope or extra-run sentence (a line with a backticked command or the
-   word "run"), so a prose-only reword keeps the skip. A repo states every
-   extra rerun rule in that section, never in a file it points to. Exit 1 (the
-   gate text differs) and exit 2 (a side missing or unreadable) both keep the rerun.
+   so an edit elsewhere in `AGENTS.md` keeps the skip. The comparison reads
+   the section's gate text only (#1975), as `selector_check.py`'s `gate_text`
+   defines it: a prose-only reword keeps the skip. A repo states every extra
+   rerun rule in that section, in a sentence that says what "runs", never in
+   a file it points to. Exit 1 (the gate text differs) and exit 2 (a side
+   missing or unreadable) both keep the rerun.
    Record the skip with `gh pr comment <pr> --repo <owner/name>
    --body "seam rerun skipped: origin/<default> <sha> is in the head
    <headRefOid>, worker's run at <headRefOid>"`. It is not a `selector:`

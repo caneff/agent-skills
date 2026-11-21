@@ -19,10 +19,8 @@ declared command, so a slice on a spec's integration branch diffs against
 every later run. A command with no `--changed` is printed as declared.
 
 `seam-section --root <dir> --base-rev <a> --head-rev <b>` (#1911) compares the
-`## End-to-end seam` section's gate text at the two revs (#1975: the `Seam` and
-`Narrowed` commands and every scope or extra-run sentence, not the prose
-around them): exit 0 printing `same`,
-1 printing `differs`, 2 with the reason on stderr when either rev cannot be
+`## End-to-end seam` section's gate text (`gate_text`, #1975) at the two
+revs: exit 0 printing `same`, 1 printing `differs`, 2 with the reason on stderr when either rev cannot be
 read or has no section. The merge's seam-rerun skip reads it, so an edit
 elsewhere in `AGENTS.md` no longer forces a rerun, and an unreadable side
 keeps the rerun (class 1).
@@ -209,32 +207,57 @@ def seam_section(text):
     return None if start is None else "\n".join(raw[start:]).rstrip()
 
 
-# A section line that can choose what a merge runs besides the two declared
-# commands: a scope or extra-run sentence ("a puzzle update runs only ...",
-# "a `package.json` change also runs `npm test`"), recognised by the word `run`
-# or a backticked command (#1975).
-_RUN_SENTENCE = re.compile(r"`|\bruns?\b|\brunning\b", re.IGNORECASE)
+# A scope or extra-run sentence says that something runs: "a puzzle update
+# runs only ...", "a lib edit reruns ...". That wording is the grammar (#1975):
+# a command named in backticks with no such word is prose to the comparison.
+_RUN_WORD = re.compile(r"\b(?:re)?(?:run|runs|running)\b|\bexecut(?:e|es|ing)\b", re.IGNORECASE)
+_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+
+
+def gate_blocks(section):
+    """The section's blocks as `(fenced, text)`: a paragraph, a list item
+    (with its wrapped lines) or one fenced line, the text
+    whitespace-normalised. A sentence that wraps is one block, so an
+    edit on its second line is an edit to it."""
+    raw = section.splitlines()
+    reachable = {index for index, _ in unfenced(raw)}
+    blocks, current = [], []
+
+    def flush():
+        if current:
+            blocks.append((False, " ".join(current)))
+            current.clear()
+
+    for index, line in enumerate(raw):
+        if index not in reachable:  # a fenced line is a command or an example
+            flush()
+            blocks.append((True, " ".join(line.split())))
+        elif not line.strip() or HEADING.match(line):
+            flush()
+        else:
+            if _ITEM.match(line):
+                flush()
+            current.append(line.strip())
+    flush()
+    return blocks
 
 
 def gate_text(section):
-    """What of a seam `section` the merge would run, as a normalised string:
-    the `Seam` and `Narrowed` commands (their trailing prose dropped), then
-    every other line that names a command or says it runs something, which is
-    a scope or extra-run sentence (#1898). The rest of the section is prose
-    about the gate and changes nothing it does (#1975). A `Blind to` line is
-    prose: it says what the gate cannot see."""
-    lines = []
-    for _, line in unfenced(section.splitlines()):
-        if HEADING.match(line):
-            continue
-        pair = key_line(line)
+    """What of a seam `section` the merge would run, as one normalised string
+    (#1975): the `Seam` and `Narrowed` commands (trailing prose dropped),
+    every fenced line, and every block that says something runs (`_RUN_WORD`),
+    which is a scope or extra-run sentence (#1898). Anything else is prose
+    about the gate; a `Blind to` item is prose however it is worded."""
+    kept = []
+    for fenced, block in gate_blocks(section):
+        pair = None if fenced else key_line(block)
         if pair and pair[0] in ("seam", "narrowed"):
-            lines.append(f"{pair[0]}: {command_of(pair[1])}")
+            kept.append(f"{pair[0]}: {command_of(pair[1])}")
         elif pair and pair[0] == "blind to":
             continue
-        elif _RUN_SENTENCE.search(line):
-            lines.append(" ".join(line.split()))
-    return "\n".join(lines)
+        elif fenced or _RUN_WORD.search(block):
+            kept.append(block)
+    return "\n".join(kept)
 
 
 def seam_section_same(root, base_rev, head_rev):
