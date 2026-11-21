@@ -208,6 +208,11 @@ def inside_code_span(spans: list[tuple[int, int]], position: int) -> bool:
     return any(start <= position < end for start, end in spans)
 
 
+# A dated record of events in other repos: a "§" in it usually names another
+# repo's heading, which never resolves here (#1970).
+FRICTION_LOG = "docs/agents/friction-log.md"
+
+
 def tracked_markdown() -> list[Path]:
     output = subprocess.check_output(
         ["git", "ls-files", "--", "*.md"], cwd=ROOT, text=True
@@ -215,7 +220,8 @@ def tracked_markdown() -> list[Path]:
     return [
         ROOT / name
         for name in output.splitlines()
-        if not name.startswith(("docs/research/", "tests/fixtures/"))
+        if name != FRICTION_LOG
+        and not name.startswith(("docs/research/", "tests/fixtures/"))
     ]
 
 

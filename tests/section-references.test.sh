@@ -31,6 +31,7 @@ run_fixture double-backtick-name-valid
 run_fixture step-locator-inline-code-valid
 run_fixture multiline-code-span-valid
 run_fixture code-span-table-mismatch-valid
+run_fixture friction-log-exempt-valid
 
 # Each invalid fixture is rejected for its own reason: a fixture that fails on
 # a crash or a setup error would otherwise count as "rejected". Pairs of
@@ -59,7 +60,8 @@ for pair in \
   'conjunction-inline-code-invalid|§ Build and is cut at inline code' \
   'step-duplicate-exact-invalid|§ Merge is ambiguous in target.md: matches Merge, Merge' \
   'step-prefix-ambiguous-invalid|§ Mer is ambiguous in target.md: matches Merge, Mermaid' \
-  'multiline-code-span-unterminated-invalid|§ Build is cut at inline code'; do
+  'multiline-code-span-unterminated-invalid|§ Build is cut at inline code' \
+  'friction-log-other-file-invalid|§ Build typo not found in docs/agents/target.md'; do
   fixture=${pair%%|*}
   want=${pair#*|}
   if output=$(run_fixture "$fixture" 2>&1); then
