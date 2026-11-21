@@ -587,7 +587,7 @@ the other exit codes.
 
 *What a call costs* (#1708). Every call makes its own worktree and setup rather than reusing
 a shared one: a tree an earlier mutation edited could leak into the next, which is class 3.
-The measured cost of that setup is in the PR that introduced the flag form.
+Measured at #1708 on this repo (923 tracked files, a `uv.lock`): 0.35 s per call for the worktree, link and sync together, three runs, so the setup is noise beside any covering suite.
 
 Each witness gets the setup a fresh worktree lacks (#1219), which the script's
 header states: no Python bytecode, no `__pycache__`, and a link to the

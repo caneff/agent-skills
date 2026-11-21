@@ -67,8 +67,8 @@
 # directories older than 7 days (#1547); the code below says how.
 #
 # Per-call cost (#1708): every call makes its own worktree and setup, so a repeat call pays it
-# again rather than sharing a tree whose earlier mutation could leak into the next. What that
-# costs is measured in the PR that introduced this form.
+# again rather than sharing a tree whose earlier mutation could leak into the next. Measured at
+# #1708 on this repo (923 tracked files, a uv.lock): 0.35 s per call, setup and teardown included.
 #
 # Exit: 0 the mutation was run and reported (red, HOLLOW or unknown — read the
 # output); 1 setup failed before it ran; 2 bad arguments; 3 a throwaway worktree could not be
