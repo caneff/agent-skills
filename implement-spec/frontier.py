@@ -336,10 +336,10 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             return set(), f" (landing lookup failed: {exc})"
 
     def native_open(issue, landed):
-        """`(open native blockers not landed, why)`; the list is `None`, with
-        `why` naming which, when it could not be read or came back empty
-        against a summary that counted an open blocker: an unknown blocker is
-        not a met one, and the entry must say it is unknown (#1976)."""
+        """`(open native blockers not landed, why)`. The list is `None` when
+        the blockers could not be read, or came back empty against a summary
+        that counted an open one: an unknown blocker is not a met one. `why`
+        then names which of the two happened (#1976), else it is empty."""
         try:
             listed = native_blockers_of(issue)
         except tracker_mod.TrackerError as exc:
