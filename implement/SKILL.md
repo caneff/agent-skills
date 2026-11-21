@@ -304,7 +304,9 @@ No PR and no reviewer; Chris reads the log after.
   none) are in its `--help`, and one worker is a valid split. A finding that
   spans workers is split by sub-ids you mint (`F3a`, `F3b`), one per worker,
   never one id given twice, so each sub-id gets exactly one report line;
-  `dispositions-<n>.jsonl` still names the review's own id (`F3`) once. A fan-out
+  `dispositions-<n>.jsonl` still names the review's own id (`F3`) once, `fixed`
+  only when every part is, else `disputed` or `moved` for the part that is not.
+  A fan-out
   sub-worker mutates in the same throwaway worktree, never a byte copy: its
   brief carries the recipe (#1696). `--workers` (default 1) and
   `--ceiling` (default 600 seconds) cap any test run the sub-worker makes.
