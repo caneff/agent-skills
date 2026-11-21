@@ -1928,7 +1928,7 @@ def test_the_wall_clock_still_bounds_a_resumed_spec_run(d, ctx, monkeypatch):
 def test_work_hands_a_spec_over_after_the_resume_without_a_second_try(d, monkeypatch):
     calls = []
 
-    def wait(ctx, branch, agent, tickets, spec=None):
+    def wait(ctx, branch, agent, tickets, spec=None, resumed=None):
         calls.append(spec)
         raise d.IdleAfterResume("the worker repo-spec-1 is idle with no PR, and drain's one resume prompt did not help")
     ctx = type("Ctx", (), {"repo": "o/r", "root": "/x", "log_dir": "/l", "tracker": None})()
@@ -1941,6 +1941,54 @@ def test_work_hands_a_spec_over_after_the_resume_without_a_second_try(d, monkeyp
     results, reason = d.work(ctx, 1, [], False, started, d.SPEC)
     assert results is None and "resume prompt did not help" in reason
     assert calls == [1], "one wait, no nudge: the resume was the second try"
+
+
+def test_a_failed_resume_prompt_is_the_one_resume_across_a_bundles_waits(d, ctx, monkeypatch):
+    rig = ResumeRig(d, ctx, monkeypatch)
+    monkeypatch.setattr(d, "run_group", lambda cmd, cwd, timeout, preexec=None: (rig.prompts.append(cmd), (1, "no start"))[1])
+    shared = set()
+    for _ in range(2):  # work()'s two attempts: the second wait must not resume again
+        with pytest.raises(d.DrainError):
+            d.wait_for_worker(ctx, "spec-1", "repo-spec-1", [1], spec=1, resumed=shared)
+    assert len(rig.prompts) == 1
+
+
+def test_resume_of_a_gone_worker_is_a_worker_gone_not_a_prompt(d, ctx, monkeypatch):
+    rig = ResumeRig(d, ctx, monkeypatch)
+    monkeypatch.setattr(d, "agent_status", lambda name: None)
+    with pytest.raises(d.WorkerGone):
+        d.resume(ctx, "repo-spec-1")
+    assert rig.prompts == []
+
+
+def _barren_ctx(issues, broken=None):
+    import tracker
+    return type("Ctx", (), {"repo": "o/r", "tracker": tracker.MemoryTracker(issues, broken=broken)})()
+
+
+def test_a_barren_spec_names_each_blocked_slice_with_its_blockers_and_its_own_wording(d):
+    issues = [mem_issue(1, ["spec"]), mem_issue(2, [], parent=1, blockers=[7]), mem_issue(3, [], parent=1)]
+    ctx = _barren_ctx(issues)
+    by_number = {i["number"]: i for i in issues}
+    buckets = {"slice": [], "blocked": [{"number": 2, "blockers": [], "why": "native dependencies"}],
+               "unresolved": [{"number": 3, "blockers": [], "why": "no Blocked by"}]}
+    why = d.barren_specs(ctx, by_number, buckets, {1})
+    assert why == {1: "spec with no dispatchable slice: #2 blocked by #7; #3 blocker state unresolved: no Blocked by"}
+
+
+def test_a_barren_spec_whose_slice_parents_cannot_be_read_does_not_claim_it_has_no_slice(d):
+    issues = [mem_issue(1, ["spec"]), mem_issue(2, [], parent=1)]
+    ctx = _barren_ctx(issues, broken={"parent_link:2": "boom"})
+    buckets = {"slice": [], "blocked": [{"number": 2, "blockers": [3], "why": ""}], "unresolved": []}
+    why = d.barren_specs(ctx, {i["number"]: i for i in issues}, buckets, {1})
+    assert "could not be read" in why[1] and "#2" in why[1] and "has no ready slice" not in why[1]
+
+
+def test_anchor_naming_a_barren_spec_is_refused_with_the_pass_over_reason(sb):
+    sb.write_state({1: SPEC, 2: {"parent": 1, "body": "## Blocked by\n\n- #9\n"}, 9: {"labels": []}})
+    r = sb.drain("--anchor", "1", "--once")
+    assert "--anchor #1 is passed over: spec with no dispatchable slice" in (r.stdout + r.stderr)
+    assert sb.dispatch_runs() == []
 
 
 def test_run_group_kills_what_a_command_started(d, tmp_path):
