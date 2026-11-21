@@ -239,5 +239,49 @@ case "$line" in finished*rc=3*) ok "--status reads back the record the hook set 
   *) no "--status reads back the record the hook set up" "$line" ;;
 esac
 
+# #1703: a call the hook wrapped gets job-run's pipefail and stage naming.
+pipe_json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01PipeFailXxYyZz","tool_input":{"command":"false | cat","run_in_background":true}}'
+body=$(printf '%s' "$pipe_json" | PATH="$here/../../bin:$PATH" "$hook" 2>/dev/null)
+rewritten=$(printf '%s' "$body" | jq -r '.hookSpecificOutput.updatedInput.command')
+pipe_name=$(printf '%s' "$rewritten" | sed -n 's/.*--name \([^ ]*\).*/\1/p')
+( export HOME="$tmp/pipe-home"; mkdir -p "$HOME"
+  export PATH="$here/../../bin:$PATH"; eval "$rewritten" ) >/dev/null 2>&1
+pipe_rc=$?
+pipe_line=$(HOME="$tmp/pipe-home" PATH="$here/../../bin:$PATH" job-run --status "$pipe_name" 2>&1)
+[ "$pipe_rc" = 1 ] && [[ "$pipe_line" == *"rc=1"*"pipeline stage 1 of 2"* ]] \
+  && ok "a hook-wrapped call fails on a failed pipe stage and names the stage" \
+  || no "a hook-wrapped call fails on a failed pipe stage and names the stage" "rc=$pipe_rc $pipe_line cmd=$rewritten"
+
+# #1697: a rewritten background call sent beside Agent calls leaves those Agent
+# calls with no auto-mode verdict, so the review wave starts the Codex pass as an
+# explicit job-run call the hook leaves alone. The command under test is read
+# out of implement/SKILL.md, so the skill text and the hook cannot drift apart.
+skill="$here/../../../implement/SKILL.md"
+codex_launch=$(awk '/^job-run --name codex-<n> -- /{on=1} on{print} on&&!/\\$/{exit}' "$skill" \
+  | sed 's/<n>/1697/g; s/<default>/main/g; s/<[^>]*>/X/g')
+codex_json=$(jq -nc --arg c "$codex_launch" \
+  '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_use_id:"toolu_01CodexLaunchXx",tool_input:{command:$c,run_in_background:true}}')
+got=$(fire withjr "$codex_json"); rc=${got%%|*}; body=${got#*|}
+[ -n "$codex_launch" ] && [[ "$codex_launch" == job-run\ --name\ codex-1697\ --\ python3\ *codex-gate-run.py* ]] \
+  && ok "implement/SKILL.md gives the Codex launch as an explicit job-run call" \
+  || no "implement/SKILL.md gives the Codex launch as an explicit job-run call" "launch=$codex_launch"
+[ "$rc" = 0 ] && ! printf '%s' "$body" | grep -q updatedInput \
+  && ok "the skill's Codex launch passes the hook with no updatedInput" \
+  || no "the skill's Codex launch passes the hook with no updatedInput" "rc=$rc body=$body"
+bare_codex=$(jq -nc '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_use_id:"toolu_01CodexBareXxYy",tool_input:{command:"python3 ~/.agents/skills/implement/codex-gate-run.py --ticket 1 --body-file b --base origin/main",run_in_background:true}}')
+got=$(fire withjr "$bare_codex"); body=${got#*|}
+[[ "$(printf '%s' "$body" | jq -r '.hookSpecificOutput.updatedInput.command // ""')" == job-run\ --name\ *"codex-gate-run.py"* ]] \
+  && ok "a bare background Codex call is still wrapped" \
+  || no "a bare background Codex call is still wrapped" "$body"
+# No doc may show the pass launched bare: a Markdown line (any indent) holding a
+# `python3 ... codex-gate-run.py` command must hold `job-run` as well. A line that
+# only names the script (a prose mention) is not a command.
+repo_root="$(cd "$here/../../.." && pwd)"
+bare_docs=$(cd "$repo_root" && git ls-files '*.md' | grep -v '^docs/research/' \
+  | xargs grep -n -E 'python3 [^ ]*codex-gate-run\.py' 2>/dev/null | grep -v 'job-run ')
+[ -z "$bare_docs" ] \
+  && ok "no doc shows the Codex pass launched as a bare background call" \
+  || no "no doc shows the Codex pass launched as a bare background call" "$bare_docs"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
