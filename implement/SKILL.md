@@ -132,9 +132,9 @@ owner's word turns it on.
   never `/tmp`, never a shared scratchpad path. Two exceptions live in the
   review cache, `~/.cache/agent-reviews/<repo>/`, under a ticket-named file.
   The Codex pass's record and output (§ The Codex pass), which must outlive
-  the discarding of `.scratch/` at landing. And
-  the PR body, `pr-body-<n>.md` (§ The PR): kept beside the Codex record so
-  every heavy PR's durable files live in one place. The name is
+  the discarding of `.scratch/` (§ Before the PR step 3). And
+  the PR body, `pr-body-<n>.md` (§ The PR), kept beside the Codex record.
+  The name is
   ticket-specific because a shared `pr-body.md` can be overwritten by
   another session between the write and `gh pr create`, and the PR then
   goes up with another ticket's body and closes that ticket instead.
@@ -565,8 +565,8 @@ alone cannot tell a clean read from one you committed underneath, and a run
 that failed and returned writes an output file that looks like any other, so
 **commit nothing while the pass reads**: the fix round starts after the pass
 has finished. Both files go in `~/.cache/agent-reviews/<repo>/`, never this
-workspace's `.scratch/`: `merge-cleanup` discards that directory once the
-branch lands, which would take the record with it. That cache
+workspace's `.scratch/`, which is discarded at landing (§ Before the PR
+step 3) and would take the record with it. That cache
 directory's 14-day prune covers both files, so nothing here is cleaned up by
 hand, `rm` or `rmdir`.
 
@@ -647,7 +647,8 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    files are uncommitted, so fix the cause and rerun.
 5. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
-   the tree, or not on the branch; it does not check `.scratch/`. It also runs the merge check
+   the tree, or not on the branch; it does not check `.scratch/`. It also
+   runs the merge check
    (`fix-check.sh`, § Review step 3) on an `implement-<n>` branch, or on a
    spec run's `spec-<n>` keyed on the spec number, and
    refuses, exit 1, naming each problem: a finding with no disposition, a
@@ -694,11 +695,10 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    line at all means the dry run never reached them, not that nothing
    blocks: say so in the report rather than writing `none`. Your own
    session shows as a `live-session` blocker and clears when you go idle;
-   keep the line anyway. A `scratch` line is informational: the landed
-   branch's `.scratch/` is discarded without `--discard`. Anything else — an
-   ignored build artifact, e2e evidence — is what `merge-cleanup` would
-   refuse after the merge, when you are gone and only Chris's `--discard`
-   can clear it.
+   keep the line anyway. A `scratch` line is no blocker (step 3). Anything
+   else — an ignored build artifact, e2e evidence — is what `merge-cleanup`
+   would refuse after the merge, when you are gone and only Chris's
+   `--discard` can clear it.
 
 The final commit body carries `Closes #<n>` — one line per ticket the brief
 named — and so does the PR body (see below). A "done" report where only the
@@ -715,7 +715,7 @@ the repo's own name, folded: the last component of
 `python3 ~/.agents/skills/multi-axis-code-review/review_ledger.py cache-dir`,
 not the worktree's directory name), never under
 this workspace's `.scratch/`. The file's content is already the PR body on
-GitHub, and `.scratch/` is discarded at landing anyway. A
+GitHub. A
 `gh pr edit` reuses the same file.
 
 ```
@@ -835,8 +835,7 @@ Controller: Chris merges this PR; you dispatched me, so hand him the merge
   Codex pass are four parallel jobs.
 - **The cleanup blockers** (#1032, folding in #831) — what `merge-cleanup`
   would refuse the workspace's removal over, named while you can still act
-  on it rather than found in the refusal after the merge. A `scratch` line
-  is not one: the landing discards it.
+  on it rather than found in the refusal after the merge.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, that you saw it
   fail, and the throwaway worktree the mutation ran in. Nothing else in the
@@ -914,7 +913,7 @@ closed.
    exempt: its worker's waiver is in the "PR up" report. Then read the report's
    `Cleanup blockers` field: every line but the worker's own `live-session` is
    ruled on now, while the worker is alive to commit or move it, bar a
-   `scratch` line, which the landing discards — kept
+   `scratch` line (§ Before the PR step 7) — kept
    evidence moved out, or Chris asked whether `--discard` may take it — never
    discovered from `merge-cleanup`'s refusal after the merge. Read the
    report's `Codex pass` line too: a refused pass names a refusal, and the

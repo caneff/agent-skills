@@ -7,7 +7,7 @@ use lane::herdr::{self, Agent};
 use lane::runner::{on_path, quiet_code_bounded, quiet_ok, quiet_stderr_ok, quiet_stdout, status_bounded};
 use lane::sessions::{self, in_tree};
 use lane::worktree::{self, Worktrees};
-use lane::worktree_files::{CACHE_DIRS, DirtyKind, WorktreeFiles, collapse_nested_worktrees, first_names, is_scratch, names_shown};
+use lane::worktree_files::{CACHE_DIRS, DirtyKind, WorktreeFiles, collapse_nested_worktrees, first_names, names_shown};
 use lane::{safe_print, safe_println};
 use std::env;
 use std::io::IsTerminal;
@@ -60,8 +60,9 @@ A linked worktree with modified, untracked or ignored files is never removed
 covered below. The single-branch form refuses, naming them, and
 --discard removes it anyway (--force only skips the merged check); --sweep
 lists it "dirty, not removed" even with --yes. Ignored files include every
-ignored name except .scratch/ on a landed branch (below) and the regenerable caches: an ignored entry is one only when a path
-component of it is named {cache_names} and, unless that component is the
+ignored name except .scratch/ on a landed branch (below) and the regenerable
+caches: an ignored entry is one only when a path component of it is named
+{cache_names} and, unless that component is the
 entry itself, that directory's own .gitignore is `*`. Both are required: a `*`
 .gitignore alone makes nothing a cache. A cache never refuses — it is removed with the
 worktree, and its count and first names are printed as cache file(s), distinct
@@ -396,7 +397,7 @@ impl Cleanup {
     /// them at PR-up while the branch is unmerged; `blockers: none` when
     /// there are none, so a run that printed nothing is never read as a
     /// clean one.
-    fn report_blockers(&self, listing: Result<&Worktrees, &String>, b: &str) {
+    fn report_blockers(&self, repo: &str, listing: Result<&Worktrees, &String>, b: &str) {
         let mut lines = Vec::new();
         // A listing git could not produce is a blocker, not "no workspace".
         let held = match listing {
@@ -410,9 +411,11 @@ impl Cleanup {
         if let Some((wt, primary)) = held {
             match WorktreeFiles::read(wt, primary) {
                 None => lines.push("unreadable git status failed".to_string()),
-                Some(files) => {
-                    let (scratch, ignored): (Vec<String>, Vec<String>) =
-                        files.ignored.iter().cloned().partition(|f| is_scratch(f));
+                Some(mut files) => {
+                    // A landed branch's scratch is discarded, not a blocker.
+                    let landed = self.is_merged(repo, b).is_some();
+                    files.drop_scratch();
+                    let (ignored, scratch) = (files.ignored.clone(), if landed { Vec::new() } else { files.scratch.clone() });
                     // Names are shown as the refusal shows them
                     // (`names_shown`). A scratch
                     // tree can hold thousands of files: the count stays the
@@ -530,14 +533,18 @@ impl Cleanup {
     /// fails reads as a new ignored entry, so it refuses here as it does
     /// there. The window between this read and git's removal is not zero;
     /// only dropping `--force` would close it, and that was ruled out.
-    fn recheck(&self, wt: &str, primary: &str, approved: &WorktreeFiles, closed: &[(String, String)], landed: bool) -> bool {
+    fn recheck(&self, wt: &str, primary: &str, approved: &mut WorktreeFiles, closed: &[(String, String)], landed: bool) -> bool {
         const LATE: &str = " (appeared after the guards passed)";
         let Some(mut now) = WorktreeFiles::read(wt, primary) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there{LATE}");
             return false;
         };
         if landed {
+            // A file that appeared since the guards is discarded too, and
+            // named with the rest.
             now.drop_scratch();
+            let new: Vec<String> = now.scratch.iter().filter(|f| !approved.scratch.contains(f)).cloned().collect();
+            approved.scratch.extend(new);
         }
         let late = now.since(approved);
         if late.is_dirty() {
@@ -563,7 +570,9 @@ impl Cleanup {
 
     /// The uncommitted-files guard. `git worktree remove --force` discards
     /// everything git does not hold, so modified, untracked or ignored
-    /// files refuse the removal unless --discard — `.scratch/` included.
+    /// files refuse the removal unless --discard — `.scratch/` included,
+    /// except on a `landed` branch, whose scratch is moved aside into
+    /// `scratch` (#1699) and goes without asking.
     /// Caches (`is_cache`) never refuse; their count and first names are
     /// printed as "cache file(s)", since they go too — a label distinct
     /// from the non-cache "ignored file(s)" refusal above, so a name
@@ -588,7 +597,8 @@ impl Cleanup {
     ///
     /// `None` refuses. Otherwise what it read, which is what it approved:
     /// `recheck` compares against it, and its empty ignored directories are
-    /// for the caller to name once the removal has actually happened: the ruling
+    /// for the caller to name once the removal has actually happened, as it
+    /// does the scratch: the ruling
     /// asks that the output stay a full account of what cleanup touched, and
     /// this guard runs before `guard_live`, so a line printed here would
     /// announce a removal that a live session then goes on to refuse.
@@ -597,8 +607,11 @@ impl Cleanup {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
             return None;
         };
-        // Scratch is judged apart: a landed branch's goes unasked, below.
-        let scratch = if landed { files.drop_scratch() } else { Vec::new() };
+        // Judged apart: a landed branch's scratch goes unasked, and is named
+        // by the caller once the removal has happened.
+        if landed {
+            files.drop_scratch();
+        }
         if files.is_dirty() {
             if !self.discard {
                 eprintln!("merge-cleanup: refusing to remove {wt} — {} (--discard overrides){}", files.dirty_text(), files.declare_hint());
@@ -607,14 +620,6 @@ impl Cleanup {
             safe_println!("--discard: {wt} — {}", files.dirty_text());
         }
         let would = if self.dry { "would discard" } else { "discarding" };
-        if !scratch.is_empty() {
-            // Every file, one per line, nested worktrees collapsed as in the
-            // blocker lines: the loss is irreversible, so none is capped.
-            safe_println!("{would} {} scratch file(s) in {wt}:", scratch.len());
-            for f in collapse_nested_worktrees(wt, &scratch) {
-                safe_println!("  {f}");
-            }
-        }
         for (kind, names) in [("cache", &files.caches), ("declared-discardable", &files.declared)] {
             if !names.is_empty() {
                 safe_println!("{would} {} {kind} file(s) in {wt}: {}", names.len(), first_names(names));
@@ -997,14 +1002,18 @@ impl Cleanup {
         if in_tree(&cwd_path(), &resolved(wt)) {
             return Some("this run's own directory, not removed".into());
         }
-        if self.is_merged(anchor, b).is_none() && self.moot_without_commits(anchor, b).is_none() {
+        let landed = self.is_merged(anchor, b).is_some();
+        if !landed && self.moot_without_commits(anchor, b).is_none() {
             return Some("not merged, not removed".into());
         }
         match WorktreeFiles::read(wt, anchor) {
             None => return Some("unreadable, not removed: git status failed".into()),
             Some(mut files) => {
-                // Merged is confirmed above, so its scratch goes like a single removal's.
-                files.drop_scratch();
+                // Only a landed branch's scratch goes unasked, as in a single
+                // removal: a no-commit branch is not landed.
+                if landed {
+                    files.drop_scratch();
+                }
                 if files.is_dirty() {
                     return Some(format!("dirty, not removed: {}", files.dirty_text()));
                 }
@@ -1214,7 +1223,7 @@ impl Cleanup {
             let wt_canonical = lane::workers::canonical_workspace_path(&wt);
             // Before the live-session guard, which closes idle panes: a
             // removal refused for its files must not have touched herdr.
-            let Some(approved) = self.guard_files(&wt, primary, merged.is_some()) else {
+            let Some(mut approved) = self.guard_files(&wt, primary, merged.is_some()) else {
                 return false;
             };
             let Some(closed) = self.guard_live(&wt) else {
@@ -1227,9 +1236,10 @@ impl Cleanup {
                 // that appears after the guards passed.
                 let _ = std::process::Command::new("sh").arg("-c").arg(cmd).status();
             }
-            if !self.recheck(&wt, primary, &approved, &closed, merged.is_some()) {
+            if !self.recheck(&wt, primary, &mut approved, &closed, merged.is_some()) {
                 return false;
             }
+            let scratch_names = collapse_nested_worktrees(&wt, &approved.scratch);
             // Inner first: `remove --force` on the parent deletes a nested
             // worktree's files but leaves it registered. Each is removed
             // against its own repo, which may not be this one.
@@ -1253,6 +1263,16 @@ impl Cleanup {
                 let verb = if self.dry { "would remove" } else { "removing" };
                 for dir in &approved.empty_dirs {
                     safe_println!("{verb} the empty ignored directory at {wt}/{}", dir);
+                }
+                if !approved.scratch.is_empty() {
+                    // Every file, one per line, none capped: the loss is
+                    // irreversible. Collapsed before the removal, which took
+                    // the `.git` entries the collapse reads.
+                    let verb = if self.dry { "would discard" } else { "discarded" };
+                    safe_println!("{verb} {} scratch file(s) in {wt}:", approved.scratch.len());
+                    for f in &scratch_names {
+                        safe_println!("  {f}");
+                    }
                 }
                 // A dispatch's controller/worker record is bookkeeping
                 // alongside the workspace, not something worth its own
@@ -1896,7 +1916,7 @@ fn main() -> ExitCode {
     // step after them ask it, rather than each listing for itself.
     let listing = worktree::list(&repo);
     if a.dry {
-        c.report_blockers(listing.as_ref(), &branch);
+        c.report_blockers(&repo, listing.as_ref(), &branch);
     }
     let ok = match &listing {
         Ok(listing) => c.cleanup_branch(&repo, &branch, listing),

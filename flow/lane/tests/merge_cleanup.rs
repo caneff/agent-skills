@@ -1165,14 +1165,14 @@ fn blocker_lines(run: &support::cleanup::Run) -> Vec<String> {
 #[test]
 fn a_dry_run_names_an_ignored_non_cache_file_as_a_blocker_and_changes_nothing() {
     let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r40", "implement-1032a");
+    let (r, wt) = unlanded_workspace(&c, "r40", "implement-1032a");
     std::fs::write(r.join(".git/info/exclude"), "build/\n.scratch/\n").unwrap();
     std::fs::create_dir_all(wt.join("build")).unwrap();
     std::fs::write(wt.join("build/fast.so"), "artifact\n").unwrap();
     std::fs::create_dir_all(wt.join(".scratch")).unwrap();
     std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
     let origin = c.root().join("r40.origin.git");
-    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--dry-run"], &[]);
     assert_eq!(
         blocker_lines(&run),
         vec!["blocker: ignored 1 file(s): build/fast.so".to_string(), "blocker: scratch 1 file(s): .scratch/evidence.log".to_string()],
@@ -1180,19 +1180,31 @@ fn a_dry_run_names_an_ignored_non_cache_file_as_a_blocker_and_changes_nothing() 
         run.text()
     );
     assert!(wt.join("build/fast.so").is_file() && wt.join(".scratch/evidence.log").is_file(), "{}", run.text());
-    assert!(c.has_branch(&r, "caneff/merged-one") && c.has_branch(&origin, "caneff/merged-one"), "{}", run.text());
+    assert!(c.has_branch(&r, "caneff/open-one") && c.has_branch(&origin, "caneff/open-one"), "{}", run.text());
+}
+
+#[test]
+fn a_dry_run_on_a_landed_branch_does_not_call_its_scratch_a_blocker() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r40b", "implement-1699a");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+    std::fs::write(wt.join(".scratch/evidence.log"), "x\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert!(run.ok && blocker_lines(&run) == vec!["blockers: none".to_string()], "{}", run.text());
+    assert!(run.has(&format!("would discard 1 scratch file(s) in {}:", wt.display())), "{}", run.text());
 }
 
 #[test]
 fn a_dry_run_caps_the_scratch_blocker_at_the_first_names() {
     let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r42", "implement-1210a");
+    let (r, wt) = unlanded_workspace(&c, "r42", "implement-1210a");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
     std::fs::create_dir_all(wt.join(".scratch")).unwrap();
     for i in 1..=8 {
         std::fs::write(wt.join(format!(".scratch/f{i}.log")), "kept\n").unwrap();
     }
-    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--dry-run"], &[]);
     assert_eq!(
         blocker_lines(&run),
         vec!["blocker: scratch 8 file(s): .scratch/f1.log, .scratch/f2.log, .scratch/f3.log, .scratch/f4.log, .scratch/f5.log and 3 more".to_string()],
@@ -1204,7 +1216,7 @@ fn a_dry_run_caps_the_scratch_blocker_at_the_first_names() {
 #[test]
 fn a_dry_run_names_a_nested_git_worktree_in_scratch_as_one_entry() {
     let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r43", "implement-1210b");
+    let (r, wt) = unlanded_workspace(&c, "r43", "implement-1210b");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
     let nested = wt.join(".scratch/verify-mut");
     std::fs::create_dir_all(nested.join("src/deep")).unwrap();
@@ -1213,7 +1225,7 @@ fn a_dry_run_names_a_nested_git_worktree_in_scratch_as_one_entry() {
         std::fs::write(nested.join(format!("src/deep/f{i}.rs")), "x\n").unwrap();
     }
     std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
-    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--dry-run"], &[]);
     assert_eq!(
         blocker_lines(&run),
         vec!["blocker: scratch 10 file(s): .scratch/evidence.log, .scratch/verify-mut/".to_string()],
@@ -1225,14 +1237,14 @@ fn a_dry_run_names_a_nested_git_worktree_in_scratch_as_one_entry() {
 #[test]
 fn a_dry_run_names_the_outermost_of_two_nested_git_worktrees() {
     let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r44", "implement-1210c");
+    let (r, wt) = unlanded_workspace(&c, "r44", "implement-1210c");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
     let inner = wt.join(".scratch/outer/inner");
     std::fs::create_dir_all(&inner).unwrap();
     std::fs::write(wt.join(".scratch/outer/.git"), "gitdir: /elsewhere\n").unwrap();
     std::fs::write(inner.join(".git"), "gitdir: /elsewhere\n").unwrap();
     std::fs::write(inner.join("f.rs"), "x\n").unwrap();
-    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--dry-run"], &[]);
     assert_eq!(blocker_lines(&run), vec!["blocker: scratch 3 file(s): .scratch/outer/".to_string()], "{}", run.text());
 }
 
@@ -2012,18 +2024,6 @@ fn an_unlanded_worktree_holding_scratch_is_refused_naming_it() {
 }
 
 #[test]
-fn a_landed_worktree_holding_only_a_scratch_pr_body_is_removed_and_the_file_named() {
-    let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r26b", "implement-26");
-    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
-    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
-    std::fs::write(wt.join(".scratch/pr-body-26.md"), "Closes #26\n").unwrap();
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    assert!(run.has("  .scratch/pr-body-26.md"), "{}", run.text());
-}
-
-#[test]
 fn a_landed_branchs_scratch_is_discarded_without_discard_and_each_file_listed() {
     // #1699: scratch is evidence only until the branch lands; after that
     // everything worth keeping is in the review cache.
@@ -2040,7 +2040,7 @@ fn a_landed_branchs_scratch_is_discarded_without_discard_and_each_file_listed() 
 
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    assert!(run.has(&format!("discarding 2 scratch file(s) in {}:", wt.display())), "{}", run.text());
+    assert!(run.has(&format!("discarded 2 scratch file(s) in {}:", wt.display())), "{}", run.text());
     assert!(run.has("  .scratch/a.log") && run.has("  .scratch/sub/b.log"), "{}", run.text());
     assert!(!run.stderr.contains("refusing"), "{}", run.text());
 }
@@ -2048,9 +2048,7 @@ fn a_landed_branchs_scratch_is_discarded_without_discard_and_each_file_listed() 
 #[test]
 fn an_unlanded_branchs_scratch_still_blocks_and_force_does_not_discard_it() {
     let c = Cleanup::new();
-    let r = c.mkfixture("r26d");
-    let wt = r.join(".claude/worktrees/implement-27");
-    c.worktree_add(&r, &[s(&wt), "caneff/open-one"]);
+    let (r, wt) = unlanded_workspace(&c, "r26d", "implement-27");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
     std::fs::create_dir_all(wt.join(".scratch")).unwrap();
     std::fs::write(wt.join(".scratch/a.log"), "x\n").unwrap();
@@ -2138,19 +2136,18 @@ fn an_ignored_file_under_a_folder_merely_named_like_a_cache_is_refused() {
 }
 
 #[test]
-fn scratch_alongside_many_caches_is_listed_by_name_before_the_cache_count() {
-    // Scratch and caches are two distinctly labelled lines, scratch first and
-    // every file named, so `.scratch/` never hides in the cache list's
+fn scratch_alongside_many_caches_is_listed_by_name_apart_from_the_cache_count() {
+    // Scratch and caches are two distinctly labelled lines, every scratch file named, so `.scratch/` never hides in the cache list's
     // "and N more" tail.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r31", "implement-31");
     ignored_dirs(&r, &wt, &[".scratch", "node_modules", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"]);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    let scratch_idx = run.stdout.lines().position(|l| l.contains("discarding 1 scratch file(s)"));
+    let scratch_idx = run.stdout.lines().position(|l| l.contains("discarded 1 scratch file(s)"));
     let name_idx = run.stdout.lines().position(|l| l == "  .scratch/x");
-    let cache_line_idx = run.stdout.lines().position(|l| l.contains("discarding 6 cache file(s)"));
-    assert!(scratch_idx.is_some() && name_idx > scratch_idx && cache_line_idx > name_idx, "{}", run.text());
+    assert!(scratch_idx.is_some() && name_idx > scratch_idx, "{}", run.text());
+    assert!(run.stdout.lines().any(|l| l.contains("discarding 6 cache file(s)")), "{}", run.text());
 }
 
 #[test]
@@ -2370,7 +2367,7 @@ fn a_sweep_with_yes_removes_a_landed_worktree_holding_only_scratch_and_caches() 
     let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--yes"], &[]);
     let row = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 0 untracked, 0 ignored, 1 cache";
     assert!(run.ok && run.stdout.lines().any(|l| l == row), "{}", run.text());
-    assert!(run.has("discarding 1 scratch file(s)") && run.has("  .scratch/x"), "{}", run.text());
+    assert!(run.has("discarded 1 scratch file(s)") && run.has("  .scratch/x"), "{}", run.text());
     assert!(!wt.exists() && !c.has_branch(&other, "caneff/merged-one"), "{}", run.text());
 }
 
@@ -3015,7 +3012,8 @@ fn a_nested_worktree_in_scratch_with_uncommitted_work_is_discarded_and_named_whe
     std::fs::write(nested.join("result.txt"), "3.2s\n").unwrap();
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists(), "{}", run.text());
-    assert!(run.has("  .scratch/timing/"), "{}", run.text());
+    let listed: Vec<&str> = run.stdout.lines().filter(|l| l.starts_with("  .scratch/")).collect();
+    assert_eq!(listed, vec!["  .scratch/timing/"], "{}", run.text());
     assert!(!registered_names(&c, &r).contains("timing"), "{}", registered_names(&c, &r));
 }
 
@@ -3069,7 +3067,9 @@ fn a_copied_worktree_is_files_not_a_nested_worktree() {
     let copy = wt.join(".scratch/copy");
     assert!(support::cleanup::output(std::process::Command::new("cp").args(["-a", s(&real), s(&copy)])).unwrap().status.success());
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    assert!(run.ok && !wt.exists() && run.has("  .scratch/copy/"), "{}", run.text());
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    let listed: Vec<&str> = run.stdout.lines().filter(|l| l.starts_with("  .scratch/")).collect();
+    assert_eq!(listed, vec!["  .scratch/copy/"], "{}", run.text());
 }
 
 #[test]
@@ -3554,6 +3554,70 @@ fn reap_removes_a_moot_workspace_and_keeps_one_with_a_commit() {
     let run = c.mc(Tools::Full, &["--repo", d, "--reap", "--yes"], CLOSED_CLAIMED);
     assert!(!wt0.exists() && !c.has_branch(&r, "implement-1550"), "{}", run.text());
     assert!(wt1.exists() && c.has_branch(&r, "implement-1551"), "{}", run.text());
+}
+
+#[test]
+fn a_live_session_refusal_prints_no_discard_line_and_keeps_the_scratch() {
+    // The listing names files that went; a removal a live session refuses
+    // took none of them.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1699b", "implement-1699b");
+    ignored_dirs(&r, &wt, &[".scratch"]);
+    c.session("r1699b", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start()));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains("a live session is in it"), "{}", run.text());
+    assert!(!run.stdout.contains("scratch file(s)") && wt.join(".scratch/x").is_file(), "{}", run.text());
+}
+
+#[test]
+fn a_scratch_file_that_appears_late_on_a_landed_branch_is_discarded_and_named() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1699c", "implement-1699c");
+    ignored_dirs(&r, &wt, &[".scratch"]);
+    let late = wt.join(".scratch/late.log");
+    let run = mc_with_late(&c, &r, &[], &format!("echo x > '{}'", late.display()));
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(run.has("discarded 2 scratch file(s)") && run.has("  .scratch/late.log"), "{}", run.text());
+}
+
+#[test]
+fn a_scratch_file_that_appears_late_on_an_unlanded_branch_refuses_even_with_discard() {
+    let c = Cleanup::new();
+    let (r, wt) = unlanded_workspace(&c, "r1699d", "implement-1699d");
+    ignored_dirs(&r, &wt, &[".scratch"]);
+    let late = wt.join(".scratch/late.log");
+    let run = c.mc(
+        Tools::NoHerdr,
+        &["--repo", s(&r), "caneff/open-one", "--force", "--discard"],
+        &[("MERGE_CLEANUP_AFTER_GUARDS", &format!("echo x > '{}'", late.display()))],
+    );
+    assert!(!run.ok && run.stderr.contains(".scratch/late.log") && late.is_file(), "{}", run.text());
+}
+
+#[test]
+fn reap_removes_a_landed_workspace_holding_scratch() {
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r1699e", &["101"]);
+    let wt = r.join(".claude/worktrees/implement-101");
+    ignored_dirs(&r, &wt, &[".scratch"]);
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(run.has(&format!("  {}  reaped", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn reap_holds_a_no_commit_workspace_holding_scratch_instead_of_failing() {
+    // Not landed, so its scratch is not discarded; the plan must say so
+    // rather than promise a removal the guard then refuses.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1699f");
+    mk_unmerged_branch(&c, &r, "1550", 0);
+    let wt = r.join(".claude/worktrees/implement-1550");
+    c.worktree_add(&r, &[s(&wt), "implement-1550"]);
+    ignored_dirs(&r, &wt, &[".scratch"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "--reap", "--yes"], CLOSED_CLAIMED);
+    assert!(run.ok && run.has(&format!("  {}  dirty, not removed", wt.display())), "{}", run.text());
+    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&r, "implement-1550"), "{}", run.text());
 }
 
 #[test]

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # The pre-report gate: run from the worktree before reporting a sha.
-# Fails unless the tree is clean, <sha> is an ancestor of <tip>, and — on an implement-<n> branch, or a spec
-# run's spec-<n> keyed on the spec number — the merge check (fix-check.sh)
-# passes: every review finding has one disposition, a `fixed` sha is a
-# commit on the branch, a `moved` ticket is open: the ways a "done" report
-# has described work that was not on the branch, left cleanup for later,
-# or dropped a finding. A slice of a spec run, its base recorded as
-# spec-<p>, has no review to dispose of, and fix-check.sh says so; every
-# other check here still runs. The workspace's .scratch/ is not checked:
-# merge-cleanup discards it once the branch has landed (#1699).
+# Fails unless the tree is clean, <sha> is an ancestor of <tip>, and — on
+# an implement-<n> branch, or a spec run's spec-<n> keyed on the spec
+# number — the merge check (fix-check.sh) passes: every review finding has
+# one disposition, a `fixed` sha is a commit on the branch, a `moved`
+# ticket is open: the ways a "done" report has described work that was not
+# on the branch, left cleanup for later, or dropped a finding. A slice of
+# a spec run, its base recorded as spec-<p>, has no review to dispose of,
+# and fix-check.sh says so; every other check here still runs. The
+# workspace's .scratch/ is not checked: merge-cleanup discards it once the
+# branch has landed (#1699).
 # PRE_REPORT_TREE_ONLY=1 stops after the clean-tree check (exit 0 + a pass
 # line): the Stop hook worker-dirty-stop.sh (#1907) runs it on every worker
 # stop, where a stop for a question has no sha, scratch or dispositions yet.
@@ -40,11 +41,13 @@ if [ -n "${PRE_REPORT_TREE_ONLY:-}" ]; then
 fi
 
 top=$(git rev-parse --show-toplevel) || { echo "pre-report gate: cannot resolve the repo root" >&2; exit 2; }
-# `.scratch/` is not checked (#1699): merge-cleanup discards it and lists
-# each file once the branch has landed. The status only says what is left.
 scratch_status=".scratch/ clear"
-if [ -n "$(ls -A "$top/.scratch" 2>/dev/null)" ]; then
-  scratch_status=".scratch/ left for merge-cleanup"
+if [ -d "$top/.scratch" ]; then
+  if listing=$(ls -A "$top/.scratch" 2>&1); then
+    [ -z "$listing" ] || scratch_status=".scratch/ left for merge-cleanup"
+  else
+    scratch_status=".scratch/ unreadable"
+  fi
 fi
 
 if ! git merge-base --is-ancestor "$sha" "$tip_sha"; then

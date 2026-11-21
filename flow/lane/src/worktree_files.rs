@@ -29,6 +29,9 @@ pub struct WorktreeFiles {
     /// Ignored entries the repo's own AGENTS.md declares discardable,
     /// listed apart from `caches` so the output says who approved the loss.
     pub declared: Vec<String>,
+    /// Ignored entries under `.scratch/` that `drop_scratch` took out of
+    /// `ignored`, for the caller to name once the removal has happened.
+    pub scratch: Vec<String>,
     /// Registered linked worktrees nested anywhere beneath this one, outer
     /// before inner. `git worktree remove --force` on the parent deletes their
     /// files and leaves each registered, so they are removed first, inner
@@ -336,15 +339,15 @@ impl WorktreeFiles {
         !self.modified.is_empty() || !self.untracked.is_empty() || !self.ignored.is_empty()
     }
 
-    /// Takes every ignored entry under `.scratch/` out of `ignored` and
-    /// returns it. For a branch confirmed landed only (#1699): scratch is
-    /// evidence until then, and after it everything worth keeping lives in
-    /// the review cache, so a landed removal discards it unasked and lists
-    /// what it took. The caller owns that condition; this does not check it.
-    pub fn drop_scratch(&mut self) -> Vec<String> {
+    /// Moves every ignored entry under `.scratch/` from `ignored` to
+    /// `scratch`. For a branch confirmed landed only (#1699): scratch is
+    /// evidence until then, and after it everything worth keeping is in the
+    /// review cache, so a landed removal discards it unasked and lists what
+    /// it took. The caller owns that condition; this does not check it.
+    pub fn drop_scratch(&mut self) {
         let (scratch, rest) = std::mem::take(&mut self.ignored).into_iter().partition(|f| is_scratch(f));
         self.ignored = rest;
-        scratch
+        self.scratch.extend(scratch);
     }
 
     /// The modified, untracked and non-cache ignored entries of `self` that

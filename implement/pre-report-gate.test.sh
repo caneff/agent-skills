@@ -83,6 +83,25 @@ mkdir -p "$repo/.scratch"
 run "empty .scratch/ dir passes" 0 "$tip" ".scratch/ clear"
 rmdir "$repo/.scratch"
 
+# An unreadable .scratch/ is not called clear: the line is informational
+# now, but it must not claim what it could not read (root ignores
+# directory permissions, so this case is skipped under root).
+if [ "$(id -u)" != "0" ]; then
+  mkdir -p "$repo/.scratch"
+  echo hidden > "$repo/.scratch/hidden.txt"
+  chmod 000 "$repo/.scratch"
+  out=$(cd "$repo" && bash "$gate" "$tip" 2>&1); rc=$?
+  chmod 755 "$repo/.scratch"
+  if [ "$rc" = 0 ] && [[ "$out" == *".scratch/ unreadable"* ]] && [[ "$out" != *".scratch/ clear"* ]]; then
+    echo "PASS: an unreadable .scratch/ is not reported clear"
+  else
+    echo "FAIL: unreadable .scratch/ — want exit 0 and '.scratch/ unreadable', got $rc: $out"; fails=1
+  fi
+  rm -rf "$repo/.scratch"
+else
+  echo "SKIP: unreadable .scratch/ case (running as root)"
+fi
+
 # The merge check: on an implement-<n> branch the gate runs fix-check.sh,
 # so a finding with no disposition, or a `fixed` sha off the branch,
 # stops the worker before "PR up". The check itself has its own suite
