@@ -73,6 +73,11 @@ impl IgnoredEntry {
     }
 }
 
+/// Whether an `ignored` entry sits under the workspace's `.scratch/`.
+pub fn is_scratch(name: &str) -> bool {
+    name == ".scratch/" || name.starts_with(".scratch/")
+}
+
 pub const NAMES_SHOWN: usize = 5;
 
 /// The ignored directory names a removal may discard unasked. Deny by
@@ -329,6 +334,17 @@ impl WorktreeFiles {
     /// after a merge.
     pub fn is_dirty(&self) -> bool {
         !self.modified.is_empty() || !self.untracked.is_empty() || !self.ignored.is_empty()
+    }
+
+    /// Takes every ignored entry under `.scratch/` out of `ignored` and
+    /// returns it. For a branch confirmed landed only (#1699): scratch is
+    /// evidence until then, and after it everything worth keeping lives in
+    /// the review cache, so a landed removal discards it unasked and lists
+    /// what it took. The caller owns that condition; this does not check it.
+    pub fn drop_scratch(&mut self) -> Vec<String> {
+        let (scratch, rest) = std::mem::take(&mut self.ignored).into_iter().partition(|f| is_scratch(f));
+        self.ignored = rest;
+        scratch
     }
 
     /// The modified, untracked and non-cache ignored entries of `self` that

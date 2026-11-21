@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
 # The pre-report gate: run from the worktree before reporting a sha.
-# Fails unless the tree is clean, <sha> is an ancestor of <tip>, the
-# workspace's .scratch/ is empty, and — on an implement-<n> branch, or a spec
+# Fails unless the tree is clean, <sha> is an ancestor of <tip>, and — on an implement-<n> branch, or a spec
 # run's spec-<n> keyed on the spec number — the merge check (fix-check.sh)
 # passes: every review finding has one disposition, a `fixed` sha is a
 # commit on the branch, a `moved` ticket is open: the ways a "done" report
 # has described work that was not on the branch, left cleanup for later,
 # or dropped a finding. A slice of a spec run, its base recorded as
 # spec-<p>, has no review to dispose of, and fix-check.sh says so; every
-# other check here still runs. A non-empty .scratch/ the worker cannot
-# commit and must keep is named in the PR-up report by setting
-# PRE_REPORT_KEEP_SCRATCH="<why>", which passes the check and folds the
-# reason into the pass line itself.
+# other check here still runs. The workspace's .scratch/ is not checked:
+# merge-cleanup discards it once the branch has landed (#1699).
 # PRE_REPORT_TREE_ONLY=1 stops after the clean-tree check (exit 0 + a pass
 # line): the Stop hook worker-dirty-stop.sh (#1907) runs it on every worker
 # stop, where a stop for a question has no sha, scratch or dispositions yet.
@@ -43,23 +40,11 @@ if [ -n "${PRE_REPORT_TREE_ONLY:-}" ]; then
 fi
 
 top=$(git rev-parse --show-toplevel) || { echo "pre-report gate: cannot resolve the repo root" >&2; exit 2; }
-scratch_dir="$top/.scratch"
+# `.scratch/` is not checked (#1699): merge-cleanup discards it and lists
+# each file once the branch has landed. The status only says what is left.
 scratch_status=".scratch/ clear"
-if [ -d "$scratch_dir" ]; then
-  scratch_listing=$(ls -A "$scratch_dir" 2>&1)
-  ls_rc=$?
-  if [ "$ls_rc" -ne 0 ]; then
-    echo "pre-report gate: .scratch/ exists but could not be read (ls exit $ls_rc) — fix its permissions or remove it before reporting: $scratch_listing" >&2
-    exit 1
-  fi
-  if [ -n "$scratch_listing" ]; then
-    if [ -n "${PRE_REPORT_KEEP_SCRATCH:-}" ]; then
-      scratch_status=".scratch/ kept, acknowledged: $PRE_REPORT_KEEP_SCRATCH"
-    else
-      echo "pre-report gate: .scratch/ still has content — commit any reusable finding into docs/research/ (or the relevant note) and delete .scratch/, or set PRE_REPORT_KEEP_SCRATCH=\"<why>\" and name it in the PR-up report" >&2
-      exit 1
-    fi
-  fi
+if [ -n "$(ls -A "$top/.scratch" 2>/dev/null)" ]; then
+  scratch_status=".scratch/ left for merge-cleanup"
 fi
 
 if ! git merge-base --is-ancestor "$sha" "$tip_sha"; then

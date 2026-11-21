@@ -7,7 +7,7 @@ use lane::herdr::{self, Agent};
 use lane::runner::{on_path, quiet_code_bounded, quiet_ok, quiet_stderr_ok, quiet_stdout, status_bounded};
 use lane::sessions::{self, in_tree};
 use lane::worktree::{self, Worktrees};
-use lane::worktree_files::{CACHE_DIRS, DirtyKind, WorktreeFiles, collapse_nested_worktrees, first_names, names_shown};
+use lane::worktree_files::{CACHE_DIRS, DirtyKind, WorktreeFiles, collapse_nested_worktrees, first_names, is_scratch, names_shown};
 use lane::{safe_print, safe_println};
 use std::env;
 use std::io::IsTerminal;
@@ -59,8 +59,8 @@ A linked worktree with modified, untracked or ignored files is never removed
 — bar an ignored directory holding no file at all, which loses nothing and is
 covered below. The single-branch form refuses, naming them, and
 --discard removes it anyway (--force only skips the merged check); --sweep
-lists it "dirty, not removed" even with --yes. Ignored files include .scratch/ and every other ignored name
-except the regenerable caches: an ignored entry is one only when a path
+lists it "dirty, not removed" even with --yes. Ignored files include every
+ignored name except .scratch/ on a landed branch (below) and the regenerable caches: an ignored entry is one only when a path
 component of it is named {cache_names} and, unless that component is the
 entry itself, that directory's own .gitignore is `*`. Both are required: a `*`
 .gitignore alone makes nothing a cache. A cache never refuses — it is removed with the
@@ -71,6 +71,13 @@ other. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 The single-branch refusal over an ignored name outside .scratch/ names the
 standing fix: the `**Discardable**:` line below.
+
+.scratch/ is evidence only until the branch lands (#1699). Once the branch is
+confirmed merged (the check above; --force and a no-commit branch do not
+count), its ignored files are discarded without --discard, and the output
+lists "discarding <n> scratch file(s)" with each file on its own line
+(nested worktrees collapsed to one entry). Before that, .scratch/ is a
+refusal and a --dry-run "scratch" blocker, as any ignored file is.
 
 A repo may declare more ignored paths discardable (#1326): a line of its
 primary checkout's AGENTS.md starting `**Discardable**:` whose backtick spans
@@ -405,7 +412,7 @@ impl Cleanup {
                 None => lines.push("unreadable git status failed".to_string()),
                 Some(files) => {
                     let (scratch, ignored): (Vec<String>, Vec<String>) =
-                        files.ignored.iter().cloned().partition(|f| f == ".scratch/" || f.starts_with(".scratch/"));
+                        files.ignored.iter().cloned().partition(|f| is_scratch(f));
                     // Names are shown as the refusal shows them
                     // (`names_shown`). A scratch
                     // tree can hold thousands of files: the count stays the
@@ -523,12 +530,15 @@ impl Cleanup {
     /// fails reads as a new ignored entry, so it refuses here as it does
     /// there. The window between this read and git's removal is not zero;
     /// only dropping `--force` would close it, and that was ruled out.
-    fn recheck(&self, wt: &str, primary: &str, approved: &WorktreeFiles, closed: &[(String, String)]) -> bool {
+    fn recheck(&self, wt: &str, primary: &str, approved: &WorktreeFiles, closed: &[(String, String)], landed: bool) -> bool {
         const LATE: &str = " (appeared after the guards passed)";
-        let Some(now) = WorktreeFiles::read(wt, primary) else {
+        let Some(mut now) = WorktreeFiles::read(wt, primary) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there{LATE}");
             return false;
         };
+        if landed {
+            now.drop_scratch();
+        }
         let late = now.since(approved);
         if late.is_dirty() {
             eprintln!("merge-cleanup: refusing to remove {wt} — {}{LATE}", late.dirty_text());
@@ -582,11 +592,13 @@ impl Cleanup {
     /// asks that the output stay a full account of what cleanup touched, and
     /// this guard runs before `guard_live`, so a line printed here would
     /// announce a removal that a live session then goes on to refuse.
-    fn guard_files(&self, wt: &str, primary: &str) -> Option<WorktreeFiles> {
-        let Some(files) = WorktreeFiles::read(wt, primary) else {
+    fn guard_files(&self, wt: &str, primary: &str, landed: bool) -> Option<WorktreeFiles> {
+        let Some(mut files) = WorktreeFiles::read(wt, primary) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
             return None;
         };
+        // Scratch is judged apart: a landed branch's goes unasked, below.
+        let scratch = if landed { files.drop_scratch() } else { Vec::new() };
         if files.is_dirty() {
             if !self.discard {
                 eprintln!("merge-cleanup: refusing to remove {wt} — {} (--discard overrides){}", files.dirty_text(), files.declare_hint());
@@ -595,6 +607,14 @@ impl Cleanup {
             safe_println!("--discard: {wt} — {}", files.dirty_text());
         }
         let would = if self.dry { "would discard" } else { "discarding" };
+        if !scratch.is_empty() {
+            // Every file, one per line, nested worktrees collapsed as in the
+            // blocker lines: the loss is irreversible, so none is capped.
+            safe_println!("{would} {} scratch file(s) in {wt}:", scratch.len());
+            for f in collapse_nested_worktrees(wt, &scratch) {
+                safe_println!("  {f}");
+            }
+        }
         for (kind, names) in [("cache", &files.caches), ("declared-discardable", &files.declared)] {
             if !names.is_empty() {
                 safe_println!("{would} {} {kind} file(s) in {wt}: {}", names.len(), first_names(names));
@@ -982,8 +1002,13 @@ impl Cleanup {
         }
         match WorktreeFiles::read(wt, anchor) {
             None => return Some("unreadable, not removed: git status failed".into()),
-            Some(files) if files.is_dirty() => return Some(format!("dirty, not removed: {}", files.dirty_text())),
-            Some(_) => {}
+            Some(mut files) => {
+                // Merged is confirmed above, so its scratch goes like a single removal's.
+                files.drop_scratch();
+                if files.is_dirty() {
+                    return Some(format!("dirty, not removed: {}", files.dirty_text()));
+                }
+            }
         }
         let live = self.occupancy(wt).live_items();
         (!live.is_empty()).then(|| format!("live session, not removed: {}", live.join(", ")))
@@ -1189,7 +1214,7 @@ impl Cleanup {
             let wt_canonical = lane::workers::canonical_workspace_path(&wt);
             // Before the live-session guard, which closes idle panes: a
             // removal refused for its files must not have touched herdr.
-            let Some(approved) = self.guard_files(&wt, primary) else {
+            let Some(approved) = self.guard_files(&wt, primary, merged.is_some()) else {
                 return false;
             };
             let Some(closed) = self.guard_live(&wt) else {
@@ -1202,7 +1227,7 @@ impl Cleanup {
                 // that appears after the guards passed.
                 let _ = std::process::Command::new("sh").arg("-c").arg(cmd).status();
             }
-            if !self.recheck(&wt, primary, &approved, &closed) {
+            if !self.recheck(&wt, primary, &approved, &closed, merged.is_some()) {
                 return false;
             }
             // Inner first: `remove --force` on the parent deletes a nested
@@ -1460,7 +1485,11 @@ fn worktree_plan(listing: Option<&Worktrees>, b: &str) -> (Option<String>, Optio
     let Some((wt, primary)) = listing.and_then(|w| Some((w.linked_holding(b)?, w.primary()))) else { return (None, None) };
     match WorktreeFiles::read(wt, primary) {
         None => (Some("git status failed".into()), Some("unreadable, not removed")),
-        Some(f) => (Some(f.counts()), f.is_dirty().then_some("dirty, not removed")),
+        // Only merged branches are planned, so scratch is not work here.
+        Some(mut f) => {
+            f.drop_scratch();
+            (Some(f.counts()), f.is_dirty().then_some("dirty, not removed"))
+        }
     }
 }
 

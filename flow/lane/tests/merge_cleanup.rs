@@ -829,7 +829,7 @@ fn help_prints_the_header_and_exits_zero() {
     assert!(run.stdout.contains("`git branch <branch> refs/deleted/<branch>@<short sha>` restores."), "{}", run.stdout);
     assert!(run.stdout.contains("  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run] [--quiet]\n"), "{}", run.stdout);
     assert!(run.stdout.contains("--discard removes it anyway"), "{}", run.stdout);
-    assert!(run.stdout.contains("Ignored files include .scratch/"), "{}", run.stdout);
+    assert!(run.stdout.contains(".scratch/ is evidence only until the branch lands"), "{}", run.stdout);
     assert!(run.stdout.contains("printed as cache file(s), distinct\nfrom the ignored file(s) count above"), "{}", run.stdout);
 }
 
@@ -1974,6 +1974,15 @@ fn force_alone_still_refuses_a_dirty_worktree_and_discard_removes_it() {
     assert!(run.has(&format!("--discard: {} — 1 modified, 1 untracked file(s) would be lost: f, notes", wt.display())), "{}", run.text());
 }
 
+/// A workspace on `caneff/open-one`, which no PR landed: `--force` skips the
+/// merged check, so a removal there has no landing to discard scratch under.
+fn unlanded_workspace(c: &Cleanup, rel: &str, name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let r = c.mkfixture(rel);
+    let wt = r.join(".claude/worktrees").join(name);
+    c.worktree_add(&r, &[s(&wt), "caneff/open-one"]);
+    (r, wt)
+}
+
 fn ignored_dirs(r: &std::path::Path, wt: &std::path::Path, names: &[&str]) {
     let exclude: String = names.iter().map(|n| format!("{n}/\n")).collect();
     std::fs::write(r.join(".git/info/exclude"), exclude).unwrap();
@@ -1984,38 +1993,85 @@ fn ignored_dirs(r: &std::path::Path, wt: &std::path::Path, names: &[&str]) {
 }
 
 #[test]
-fn a_worktree_holding_scratch_is_refused_naming_it() {
+fn an_unlanded_worktree_holding_scratch_is_refused_naming_it() {
     let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r26", "implement-26");
+    let (r, wt) = unlanded_workspace(&c, "r26", "implement-26");
     ignored_dirs(&r, &wt, &[".scratch", "node_modules"]);
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/open-one", "--force"], &[]);
     let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: .scratch/x (--discard overrides)", wt.display());
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
-    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&r, "caneff/open-one"), "{}", run.text());
 
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/open-one", "--force", "--dry-run"], &[]);
     assert!(!run.ok && run.stderr.contains(&want) && !run.has("would remove"), "{}", run.text());
-    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&r, "caneff/open-one"), "{}", run.text());
 
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
-    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/open-one", "--force", "--discard"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/open-one"), "{}", run.text());
     assert!(run.has(&format!("--discard: {} — 1 ignored file(s) would be lost: .scratch/x", wt.display())), "{}", run.text());
 }
 
 #[test]
-fn a_worktree_holding_only_a_scratch_pr_body_is_still_refused() {
-    // The worker's PR body lives in the review cache, so a landing never hits
-    // this; the refusal itself stays, since a note in `.scratch/` is still
-    // worth one.
+fn a_landed_worktree_holding_only_a_scratch_pr_body_is_removed_and_the_file_named() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r26b", "implement-26");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
     std::fs::create_dir_all(wt.join(".scratch")).unwrap();
     std::fs::write(wt.join(".scratch/pr-body-26.md"), "Closes #26\n").unwrap();
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: .scratch/pr-body-26.md (--discard overrides)", wt.display());
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(run.has("  .scratch/pr-body-26.md"), "{}", run.text());
+}
+
+#[test]
+fn a_landed_branchs_scratch_is_discarded_without_discard_and_each_file_listed() {
+    // #1699: scratch is evidence only until the branch lands; after that
+    // everything worth keeping is in the review cache.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r26c", "implement-26");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    std::fs::create_dir_all(wt.join(".scratch/sub")).unwrap();
+    std::fs::write(wt.join(".scratch/a.log"), "x\n").unwrap();
+    std::fs::write(wt.join(".scratch/sub/b.log"), "x\n").unwrap();
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert!(run.ok && wt.join(".scratch/a.log").is_file(), "{}", run.text());
+    assert!(run.has(&format!("would discard 2 scratch file(s) in {}:", wt.display())), "{}", run.text());
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(run.has(&format!("discarding 2 scratch file(s) in {}:", wt.display())), "{}", run.text());
+    assert!(run.has("  .scratch/a.log") && run.has("  .scratch/sub/b.log"), "{}", run.text());
+    assert!(!run.stderr.contains("refusing"), "{}", run.text());
+}
+
+#[test]
+fn an_unlanded_branchs_scratch_still_blocks_and_force_does_not_discard_it() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r26d");
+    let wt = r.join(".claude/worktrees/implement-27");
+    c.worktree_add(&r, &[s(&wt), "caneff/open-one"]);
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+    std::fs::write(wt.join(".scratch/a.log"), "x\n").unwrap();
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/open-one", "--dry-run"], &[]);
+    assert!(blocker_lines(&run).contains(&"blocker: scratch 1 file(s): .scratch/a.log".to_string()), "{}", run.text());
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/open-one", "--force"], &[]);
+    assert!(!run.ok && run.stderr.contains("1 ignored file(s) would be lost: .scratch/a.log"), "{}", run.text());
+    assert!(wt.join(".scratch/a.log").is_file(), "{}", run.text());
+}
+
+#[test]
+fn a_landed_branch_with_scratch_and_another_ignored_file_still_refuses_without_discard() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r26e", "implement-26");
+    ignored_dirs(&r, &wt, &[".scratch", "build"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: build/x", wt.display());
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
-    assert!(wt.join(".scratch/pr-body-26.md").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(wt.join(".scratch/x").is_file() && wt.join("build/x").is_file(), "{}", run.text());
 }
 
 #[test]
@@ -2082,20 +2138,19 @@ fn an_ignored_file_under_a_folder_merely_named_like_a_cache_is_refused() {
 }
 
 #[test]
-fn scratch_alongside_many_caches_is_never_elided_behind_the_cache_count() {
-    // The two counts must not share the "ignored file(s)" label, or a reader
-    // cannot tell whether `.scratch/` sat in the small non-cache list or the
-    // long cache list's own "and N more" tail. They're printed as two
-    // distinctly labelled lines, non-cache first, so `.scratch/` always
-    // appears by name regardless of how many caches follow it.
+fn scratch_alongside_many_caches_is_listed_by_name_before_the_cache_count() {
+    // Scratch and caches are two distinctly labelled lines, scratch first and
+    // every file named, so `.scratch/` never hides in the cache list's
+    // "and N more" tail.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r31", "implement-31");
     ignored_dirs(&r, &wt, &[".scratch", "node_modules", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"]);
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    let dirty_line_idx = run.stdout.lines().position(|l| l.contains("--discard:") && l.contains("1 ignored file(s) would be lost: .scratch/x"));
+    let scratch_idx = run.stdout.lines().position(|l| l.contains("discarding 1 scratch file(s)"));
+    let name_idx = run.stdout.lines().position(|l| l == "  .scratch/x");
     let cache_line_idx = run.stdout.lines().position(|l| l.contains("discarding 6 cache file(s)"));
-    assert!(dirty_line_idx.is_some() && cache_line_idx.is_some() && dirty_line_idx < cache_line_idx, "{}", run.text());
+    assert!(scratch_idx.is_some() && name_idx > scratch_idx && cache_line_idx > name_idx, "{}", run.text());
 }
 
 #[test]
@@ -2103,35 +2158,31 @@ fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
     // dirty_text's name list must put ignored first in the chain: chained
     // after modified and untracked, 5+ of those names fill first_names'
     // NAMES_SHOWN and .scratch/ (the scarcest, least-recoverable class) falls
-    // into "and N more" with nothing else naming it. Ignored goes first, so
-    // it always shows regardless of how many modified/untracked names follow.
+    // into "and N more" with nothing else naming it. Only an unlanded branch
+    // refuses over scratch now, hence `--force`.
     let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r32", "implement-32");
+    let (r, wt) = unlanded_workspace(&c, "r32", "implement-32");
     ignored_dirs(&r, &wt, &[".scratch"]);
     dirty(&wt, "modified");
     for name in ["a", "b", "c", "d"] {
         std::fs::write(wt.join(name), "unsaved\n").unwrap();
     }
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    let want = format!(
-        "merge-cleanup: refusing to remove {} — 1 modified, 4 untracked, 1 ignored file(s) would be lost: .scratch/x, f, a, b, c, d (--discard overrides)",
-        wt.display()
-    );
-    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/open-one", "--force"], &[]);
+    assert!(!run.ok && run.stderr.contains("1 ignored file(s) would be lost: .scratch/x,"), "{}", run.text());
 }
 
 #[test]
 fn six_or_more_ignored_names_are_all_shown_none_elided() {
     // Ignored names must not share the NAMES_SHOWN-capped list: six or more
-    // non-cache ignored entries would push one — .scratch/ included — into
+    // non-cache ignored entries would push one into
     // "and N more". Non-cache ignored is exactly what --discard destroys
     // unseen, so none of it may be capped; only modified/untracked names are.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r33", "implement-33");
-    ignored_dirs(&r, &wt, &[".scratch", "z1", "z2", "z3", "z4", "z5"]);
+    ignored_dirs(&r, &wt, &["z1", "z2", "z3", "z4", "z5", "z6"]);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     let want = format!(
-        "merge-cleanup: refusing to remove {} — 6 ignored file(s) would be lost: .scratch/x, z1/x, z2/x, z3/x, z4/x, z5/x (--discard overrides)",
+        "merge-cleanup: refusing to remove {} — 6 ignored file(s) would be lost: z1/x, z2/x, z3/x, z4/x, z5/x, z6/x (--discard overrides)",
         wt.display()
     );
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
@@ -2310,17 +2361,17 @@ fn a_sibling_holding_only_caches_is_not_listed_stale() {
 }
 
 #[test]
-fn a_sweep_with_yes_never_removes_a_worktree_holding_scratch() {
+fn a_sweep_with_yes_removes_a_landed_worktree_holding_only_scratch_and_caches() {
     let c = Cleanup::new();
     let root = sweep_root(&c);
     let other = root.join("other");
     let wt = other.join(".claude/worktrees/implement-9");
     ignored_dirs(&other, &wt, &[".scratch", "node_modules"]);
     let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--yes"], &[]);
-    let held = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 0 untracked, 1 ignored, 1 cache (dirty, not removed)";
-    assert!(run.ok && run.stdout.lines().any(|l| l == held), "{}", run.text());
-    assert!(run.has("  other  caneff/merged-one  dirty, not removed  0 commits past PR #7"), "{}", run.text());
-    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&other, "caneff/merged-one"), "{}", run.text());
+    let row = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 0 untracked, 0 ignored, 1 cache";
+    assert!(run.ok && run.stdout.lines().any(|l| l == row), "{}", run.text());
+    assert!(run.has("discarding 1 scratch file(s)") && run.has("  .scratch/x"), "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&other, "caneff/merged-one"), "{}", run.text());
 }
 
 #[test]
@@ -2890,13 +2941,15 @@ fn an_ignored_file_outside_the_declared_list_still_refuses() {
 #[test]
 fn a_declaration_naming_git_or_scratch_discards_nothing_extra() {
     let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r1326c", "implement-1326c");
+    let (r, wt) = unlanded_workspace(&c, "r1326c", "implement-1326c");
     declare_discardable_and_ignore(&r, "**Discardable**: `.scratch/`, `*`, `.git`");
     std::fs::create_dir_all(wt.join(".scratch")).unwrap();
     std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
-    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    assert!(!run.ok && run.stderr.contains(".scratch/evidence.log"), "{}", run.text());
-    assert!(wt.join(".scratch/evidence.log").is_file(), "{}", run.text());
+    std::fs::write(wt.join("keep.log"), "kept\n").unwrap();
+    // Unlanded, so scratch has no landing to go under; `*` must not take keep.log either.
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--force"], &[]);
+    assert!(!run.ok && run.stderr.contains(".scratch/evidence.log") && run.stderr.contains("keep.log"), "{}", run.text());
+    assert!(wt.join(".scratch/evidence.log").is_file() && wt.join("keep.log").is_file(), "{}", run.text());
 }
 
 fn registered_names(c: &Cleanup, repo: &std::path::Path) -> String {
@@ -2937,18 +2990,32 @@ fn a_clean_worktree_of_another_repo_nested_in_a_workspace_is_removed_too() {
 
 #[test]
 fn a_nested_worktree_holding_uncommitted_work_refuses_until_discard() {
+    // Outside `.scratch/`, so a landing does not discard it unasked.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r1326f", "implement-1326f");
+    let nested = wt.join("timing");
+    c.worktree_add(&r, &["--detach", s(&nested), "origin/main"]);
+    std::fs::write(nested.join("result.txt"), "3.2s\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains("timing/result.txt"), "{}", run.text());
+    assert!(nested.join("result.txt").is_file() && wt.exists(), "{}", run.text());
+
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(!registered_names(&c, &r).contains("timing"), "{}", registered_names(&c, &r));
+}
+
+#[test]
+fn a_nested_worktree_in_scratch_with_uncommitted_work_is_discarded_and_named_when_landed() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326l", "implement-1326l");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
     let nested = wt.join(".scratch/timing");
     c.worktree_add(&r, &["--detach", s(&nested), "origin/main"]);
     std::fs::write(nested.join("result.txt"), "3.2s\n").unwrap();
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    assert!(!run.ok && run.stderr.contains(".scratch/timing/result.txt"), "{}", run.text());
-    assert!(nested.join("result.txt").is_file() && wt.exists(), "{}", run.text());
-
-    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
     assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(run.has("  .scratch/timing/"), "{}", run.text());
     assert!(!registered_names(&c, &r).contains("timing"), "{}", registered_names(&c, &r));
 }
 
@@ -2967,11 +3034,11 @@ fn a_dry_run_reports_no_blocker_for_a_clean_nested_worktree() {
 fn a_glob_declaration_cannot_reach_scratch() {
     for decl in [".*", ".scr*", "*h"] {
         let c = Cleanup::new();
-        let (r, wt) = lane_workspace(&c, "r1326h", "implement-1326h");
+        let (r, wt) = unlanded_workspace(&c, "r1326h", "implement-1326h");
         declare_discardable_and_ignore(&r, &format!("**Discardable**: `{decl}`"));
         std::fs::create_dir_all(wt.join(".scratch")).unwrap();
         std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
-        let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+        let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--force"], &[]);
         assert!(!run.ok && wt.join(".scratch/evidence.log").is_file(), "{decl}: {}", run.text());
     }
 }
@@ -2979,13 +3046,13 @@ fn a_glob_declaration_cannot_reach_scratch() {
 #[test]
 fn a_declared_name_does_not_discard_beneath_scratch() {
     let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r1326i", "implement-1326i");
+    let (r, wt) = unlanded_workspace(&c, "r1326i", "implement-1326i");
     declare_discardable_and_ignore(&r, "**Discardable**: `out/`");
     // Only `out/` is ignored, so git lists `.scratch/out/` itself.
     std::fs::write(r.join(".git/info/exclude"), "out/\n").unwrap();
     std::fs::create_dir_all(wt.join(".scratch/out")).unwrap();
     std::fs::write(wt.join(".scratch/out/evidence.log"), "kept\n").unwrap();
-    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--force"], &[]);
     assert!(!run.ok && wt.join(".scratch/out/evidence.log").is_file(), "{}", run.text());
 }
 
@@ -3002,9 +3069,7 @@ fn a_copied_worktree_is_files_not_a_nested_worktree() {
     let copy = wt.join(".scratch/copy");
     assert!(support::cleanup::output(std::process::Command::new("cp").args(["-a", s(&real), s(&copy)])).unwrap().status.success());
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    assert!(!run.ok && run.stderr.contains(".scratch/copy/") && copy.is_dir(), "{}", run.text());
-    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
-    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(run.ok && !wt.exists() && run.has("  .scratch/copy/"), "{}", run.text());
 }
 
 #[test]
@@ -3515,8 +3580,8 @@ fn an_ignored_name_refusal_names_the_discardable_line_as_the_fix() {
 fn a_scratch_refusal_does_not_offer_the_discardable_line() {
     // .scratch/ is evidence, never something to declare discardable.
     let c = Cleanup::new();
-    let (r2, wt2) = lane_workspace(&c, "r1545g", "implement-1547");
+    let (r2, wt2) = unlanded_workspace(&c, "r1545g", "implement-1547");
     ignored_dirs(&r2, &wt2, &[".scratch"]);
-    let run = c.mc(Tools::Full, &["--repo", s(&r2), "caneff/merged-one"], &[]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r2), "caneff/open-one", "--force"], &[]);
     assert!(!run.ok && !run.stderr.contains("**Discardable**:"), "{}", run.text());
 }
