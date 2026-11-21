@@ -32,12 +32,17 @@ claimed, not blocked), so only they anchor: a spec without the ready label, or
 one a session already runs, leaves its slices unbuilt, as a slice never is built as
 a lone ticket. `drain` starts it with `implement-dispatch --spec <n>` (that
 command's own slot default) and no chooser, since the spec's slices are its
-bundle. When nothing else is startable, a `waiting:` line names each spec whose
+bundle. A spec with no unblocked slice on the frontier (none at all, or every one blocked, a
+blocker in another repo included) never anchors: it is a `passed over:` line naming its blocked
+slices and their blockers, since its run would open with nothing to build and end idle with no
+PR (#1974). When nothing else is startable, a `waiting:` line names each spec whose
 slices are ready but which `drain` cannot start. The spec
 run is the worker: pane `<repo-short>-spec-<n>`, workspace and branch
 `spec-<n>`, and it drives its slices itself (`implement-spec/SKILL.md`). Its
 stop is the integration PR up and the pane idle, and the wait differs in three
-ways: the half-hour idle grace does not run while a slice worker is `working`,
+ways: the half-hour idle grace does not run while a slice worker is `working`, a run idle past it with
+no PR is prompted once through herdr (a `resumed:` line) and gets the grace again, and idle
+again is a failed build with no second nudge (#1710),
 the wall clock is twelve hours (`SPEC_WALL_CLOCK_SECONDS`), and the PR must
 close the spec and may close any number of its slices (a ticket whose parent is
 the spec), with no `--bundle-max` cap, since the spec's size is its own. A
@@ -217,6 +222,11 @@ class WorkerGone(DrainError):
     """The worker's herdr agent is gone and its build has no PR."""
 
 
+class IdleAfterResume(DrainError):
+    """A spec run was still idle or blocked with no PR a grace after drain's one resume
+    prompt: no second try."""
+
+
 def refs(tickets):
     """`#1 #2`: tickets as they are written in a line of output."""
     return " ".join(f"#{n}" for n in tickets)
@@ -311,9 +321,54 @@ def read_queue(ctx):
     queue = [(t["number"], t["title"], kind) for kind, bucket in ((TICKET, "unblocked"), (SPEC, "spec"))
              for t in buckets[bucket]]
     queue = sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
+    barren = barren_specs(ctx, issues, buckets, {n for n, _, k in queue if k == SPEC})
+    queue = [t for t in queue if t[0] not in barren]
     waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
     stranded = [(t["number"], t["why"]) for t in buckets["stranded"]]
-    return queue, sorted(waiting), stranded, passed_over(issues, buckets)
+    return queue, sorted(waiting), stranded, sorted(passed_over(issues, buckets) + list(barren.items()))
+
+
+def barren_specs(ctx, issues, buckets, specs):
+    """`{spec: why}` for each of `specs` (clear spec parents) with no unblocked slice on the
+    frontier, so a spec run would open with nothing to build and end idle with no PR (#1974).
+    The decision rests on the `slice` bucket alone. The `why` names the spec's blocked slices
+    and their blockers when their parents can be read; a read that fails only shortens it, and
+    never keeps a barren spec in the queue."""
+    ready = {t["spec"] for t in buckets["slice"]}
+    barren = [n for n in sorted(specs) if n not in ready]
+    if not barren:
+        return {}
+    blocked = {t["number"]: (name, t) for name in ("blocked", "unresolved") for t in buckets[name]}
+    held, unread = {n: [] for n in barren}, []
+    for n, (name, entry) in blocked.items():
+        try:
+            parent = frontier.fetch_parent(ctx.tracker, issues[n])
+        except tracker.TrackerError:
+            unread.append(n)
+            continue
+        if parent and parent["number"] in held:
+            held[parent["number"]].append((n, name, entry))
+    why = {}
+    for spec in barren:
+        named = "; ".join(f"#{n} " + held_reason(name, e, native_blockers(ctx, issues[n]) if name == "blocked" else ())
+                          for n, name, e in held[spec])
+        if named:
+            why[spec] = f"spec with no dispatchable slice: {named}"
+        elif unread:
+            why[spec] = ("spec with no dispatchable slice found (the parent of " + refs(unread)
+                         + " could not be read, so its blocked slices are not named)")
+        else:
+            why[spec] = "spec with no dispatchable slice (it has no ready slice)"
+    return why
+
+
+def native_blockers(ctx, issue):
+    """The open native blockers of `issue` that sit in this repo, `()` when the tracker cannot
+    list them (a blocker in another repo raises): the reason then stays unnamed, not wrong."""
+    try:
+        return ctx.tracker.native_blockers(issue)
+    except tracker.TrackerError:
+        return ()
 
 
 class Listed:
@@ -331,15 +386,25 @@ class Listed:
         return list(self._listing)
 
 
+def held_reason(bucket, entry, native=()):
+    """Why a `blocked` or `unresolved` frontier entry is held, the one wording `passed_over`
+    and `barren_specs` share. `native` is the open native blockers read for an entry whose
+    own list is empty (a native dependency)."""
+    if bucket == "unresolved":
+        return f"blocker state unresolved: {entry['why']}"
+    named = entry["blockers"] or list(native)
+    if named:
+        return "blocked by " + ", ".join(f"#{n}" for n in named)
+    return f"blocked: {entry['why']}"
+
+
 def passed_over(issues, buckets):
     """`[(number, why)]` for each open ready ticket that is not in the queue and
     not a slice (its spec run builds it, or `waiting:` / `stranded:` name it)."""
     why = {}
-    for t in buckets["blocked"]:
-        why[t["number"]] = ("blocked by " + ", ".join(f"#{n}" for n in t["blockers"])
-                            if t["blockers"] else f"blocked: {t['why']}")
-    for t in buckets["unresolved"]:
-        why[t["number"]] = f"blocker state unresolved: {t['why']}"
+    for name in ("blocked", "unresolved"):
+        for t in buckets[name]:
+            why[t["number"]] = held_reason(name, t)
     placed = {t["number"] for bucket in buckets.values() for t in bucket}
     for n, issue in issues.items():
         labels = labels_of(issue)
@@ -684,7 +749,7 @@ def live_job(workspace):
     return None
 
 
-def wait_for_worker(ctx, branch, agent, bundle, spec=None):
+def wait_for_worker(ctx, branch, agent, bundle, spec=None, resumed=None):
     """`"pr"` once the branch has an open PR and its worker has gone idle (or is
     gone), `"closed"` when it went idle with every ticket closed and no PR
     (the light tier lands on main itself, or a ticket was closed as moot). A
@@ -693,9 +758,14 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
     herdr) is tried again; `LOOK_ERRORS` in a row end the wait. `spec` is the spec number when the worker is a spec run:
     its wall clock is `SPEC_WALL_CLOCK_SECONDS`, and a slice worker at work
     restarts its idle grace, as does a live `job-run` job in the workspace of an
-    idle worker (`live_job`): the wall clock still ends the wait."""
+    idle worker (`live_job`): the wall clock still ends the wait. A spec run idle past
+    the grace with no PR is prompted once (`resume`) and its grace restarts; idle again
+    past it, or blocked, is an `IdleAfterResume` (#1710). `resumed` is the set of agents already
+    resumed, which a bundle's waits share so the run is resumed once, not once per wait.
+    A ticket's worker is never resumed."""
     limit = SPEC_WALL_CLOCK_SECONDS if spec else WALL_CLOCK_SECONDS
     deadline, stalled_since, errors = time.monotonic() + limit, None, 0
+    resumed = set() if resumed is None else resumed  # the agents resumed so far, shared by a bundle's waits
     while True:
         try:
             status = agent_status(agent)
@@ -725,7 +795,15 @@ def wait_for_worker(ctx, branch, agent, bundle, spec=None):
             if (status in IDLE or status in STALLED) and not busy:
                 stalled_since = stalled_since or time.monotonic()
                 if time.monotonic() - stalled_since >= IDLE_GRACE_SECONDS:
-                    raise DrainError(f"the worker {agent} is {status} with no PR")
+                    if spec and status in IDLE and agent not in resumed:
+                        resumed.add(agent)  # before the prompt: one that failed was still the one
+                        stalled_since = None
+                        resume(ctx, agent)
+                    elif agent in resumed:
+                        raise IdleAfterResume(f"the worker {agent} is {status} with no PR, and drain's one "
+                                              "resume prompt did not help")
+                    else:
+                        raise DrainError(f"the worker {agent} is {status} with no PR")
             else:
                 stalled_since = None
         if time.monotonic() > deadline:
@@ -1022,6 +1100,16 @@ def finish(ctx, anchor, branch, view, kind):
     return [{"tickets": view["closes"], "via": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED}]
 
 
+def resume(ctx, agent):
+    """Prompt an idle spec run once to continue or say what blocks it, and say so (#1710)."""
+    prompt_agent(ctx, agent, RESUME_TEXT)
+    say(f"resumed: {agent} was idle with no integration PR; sent it one prompt and restarted the idle grace")
+
+
+RESUME_TEXT = ("Unattended drain, no controller: you are idle with no integration PR. Continue /implement-spec "
+               "for this spec now, or report what blocks you and stop. Send no messages.")
+
+
 def nudge_text(reason, pr_up, kind):
     head = "Unattended drain, no controller: "
     if pr_up:
@@ -1037,13 +1125,18 @@ def nudge_text(reason, pr_up, kind):
 def nudge(ctx, agent, branch, reason, kind):
     """Prompt the worker with why the first try failed and wait for it to start
     working, so the next look at it is not the idle it was in before the prompt."""
+    prompt_agent(ctx, agent, nudge_text(reason, bool(open_pr(ctx, branch)), kind))
+
+
+def prompt_agent(ctx, agent, text):
+    """Send `text` to `agent` through herdr and wait for it to start working or block."""
     if agent_status(agent) is None:
         raise WorkerGone(f"the worker {agent} is gone; nothing to prompt")
-    code, text = run_group(["herdr", "agent", "prompt", agent, nudge_text(reason, bool(open_pr(ctx, branch)), kind),
-                            "--wait", "--until", "working", "--until", "blocked", "--timeout", "30000"],
-                           ctx.root, 60)
+    code, out = run_group(["herdr", "agent", "prompt", agent, text,
+                           "--wait", "--until", "working", "--until", "blocked", "--timeout", "30000"],
+                          ctx.root, 60)
     if code:
-        raise DrainError(f"herdr agent prompt {agent} failed: {one_line(text, 150)}")
+        raise DrainError(f"herdr agent prompt {agent} failed: {one_line(out, 150)}")
 
 
 def say(text):
@@ -1073,6 +1166,7 @@ def work(ctx, anchor, others, resumed, started, kind):
     there); attempt 2 prompts the same worker with the first failure's reason,
     since its workspace exists and a second dispatch would refuse it."""
     branch, agent, reason, bundle = branch_of(anchor, kind), agent_name(ctx, anchor, kind), "", [anchor]
+    resumed_agents = set()
     # The worker's branch and agent are named for the lowest ticket in the
     # bundle, so every ticket bundled with the anchor is a higher number.
     others = [t for t in others if t[0] > anchor]
@@ -1091,7 +1185,8 @@ def work(ctx, anchor, others, resumed, started, kind):
             if attempt == 1:
                 announce(ctx, anchor, tickets, kind)
                 started[:] = tickets
-            if wait_for_worker(ctx, branch, agent, tickets, spec=anchor if kind == SPEC else None) == "closed":
+            if wait_for_worker(ctx, branch, agent, tickets, spec=anchor if kind == SPEC else None,
+                               resumed=resumed_agents) == "closed":
                 return finish_closed(ctx, branch, tickets), None
             view = verify_pr(ctx, branch, anchor, kind)
             try:
@@ -1104,6 +1199,8 @@ def work(ctx, anchor, others, resumed, started, kind):
             if not started:  # a failure before the announce (a dispatch that failed after the claim): the bundle was still worked
                 announce(ctx, anchor, bundle, kind)
                 started[:] = bundle
+            if isinstance(exc, IdleAfterResume):  # the resume was the second try
+                return None, reason
         else:
             return finish(ctx, anchor, branch, view, kind), None
     return None, reason
@@ -1221,6 +1318,8 @@ def drain(ctx, limit, limit_name):
         if prog.want:  # refuse before any work, and not only when the loop gets there
             queue, waiting, _, candidates, passed = survey(ctx)
             prog.seen = (queue, waiting, passed)
+            if not any(t[0] == prog.want for t in candidates) and dict(passed).get(prog.want, "").startswith("spec with no"):
+                raise DrainError(f"--anchor #{prog.want} is passed over: {dict(passed)[prog.want]}")
             put_first(candidates, prog.want)
         while prog.done < limit:
             pick = next_anchor(ctx, prog)
