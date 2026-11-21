@@ -331,6 +331,26 @@ def collect_from_manifest(manifests_dir, name, collection_dir, dest_name):
     return None
 
 
+def diagram_check_note(report_path):
+    """The sweep index's diagram-check status for one collected report, "" when
+    nothing is wrong. `pagelib.check_mermaid` is `pagelib.py check-mermaid`
+    in-process, so its answers map one to one: exit 0 and 3 (no blocks) are a
+    pass and say nothing, exit 1 names the failed blocks, exit 2 (the check
+    could not run) is shown as such, never as a pass. A page that never says
+    `vt-mermaid` has no block to render, so no browser is started for it."""
+    try:
+        with open(report_path, encoding="utf-8", errors="replace") as f:
+            if "vt-mermaid" not in f.read():
+                return ""
+        result = pagelib.check_mermaid(report_path)
+    except (RuntimeError, OSError) as e:
+        return f"diagram check could not run: {e}"
+    if not result["failed"]:
+        return ""
+    blocks = ", ".join(f"block {i + 1} of {result['total']}" for i in result["failed"])
+    return f"DIAGRAM CHECK FAILED: {blocks}"
+
+
 INCONCLUSIVE_INSTRUCTION = (
     "\nAlways write findings.jsonl beside the report, empty when no mutant survived. "
     'If `audit.py --run` exited 3 with `INCONCLUSIVE: <why>`, still write the report (one line '
@@ -475,6 +495,7 @@ class IndexModel:
     mutation_corrupt: int = 0
     notest_count: int = 0
     notest_error: str = None
+    diagram_note: dict = dataclasses.field(default_factory=dict)  # audit -> diagram-check status
 
 
 def build_index(model):
@@ -482,7 +503,7 @@ def build_index(model):
     out.append("<thead><tr><th>Audit</th><th>Report</th><th>Status</th></tr></thead><tbody>\n")
     for name in AUDIT_NAMES:
         link = model.report_link.get(name, "")
-        note = model.skip_note.get(name, "")
+        note = " ".join(n for n in (model.skip_note.get(name, ""), html.escape(model.diagram_note.get(name, ""))) if n)
         if link:
             out.append(f'<tr><td>{name}</td><td><a href="{link}">open report</a></td><td>{note}</td></tr>\n')
         else:
@@ -811,6 +832,9 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
     report_link = report_links(collection)
     mut = scan_mutation(collection)
 
+    diagram_note = {n: note for n in AUDIT_NAMES
+                    if report_link[n] and (note := diagram_check_note(os.path.join(collection, report_link[n])))}
+
     report_files = [os.path.join(collection, report_link[n]) for n in AUDIT_NAMES if report_link[n]]
     synthesis = ""
     synthesis_path = os.path.join(collection, SYNTHESIS_FILE)
@@ -838,6 +862,7 @@ def collect(run, repo, plan, base=None, key=None, reuse_synthesis=False, index_l
         report_link=report_link,
         skip_note={**plan.skip_note, **na_note, **manifest_note},
         synthesis=synthesis,
+        diagram_note=diagram_note,
         mutation_modules=mut.modules,
         mutation_survivors_sum=mut.survivors_sum,
         mutation_inconclusive=mut.inconclusive,

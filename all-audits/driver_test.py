@@ -784,6 +784,53 @@ def test_collect_copies_both_report_kinds_and_returns_the_index(tmp_path):
     assert "no manifest" in text, "duplication ran and wrote no manifest — a named failure row"
 
 
+def _collect_one_report(tmp_path, report_html):
+    """Collect one `dead-code` report through its manifest; returns the index text."""
+    tmp, srcdir = _mkdirs(tmp_path, "tmp", "srcdir")
+    run = _seed_run_dir(tmp)
+    ran = os.path.join(srcdir, "ran")
+    os.makedirs(ran)
+    open(os.path.join(ran, "report.html"), "w").write(report_html)
+    manifest = driver.manifest_path_for(run.manifests, "dead-code")
+    os.makedirs(os.path.dirname(manifest))
+    json.dump({"report_path": os.path.join(ran, "report.html"), "count": 1, "headline": "h"}, open(manifest, "w"))
+    index = driver.collect(run, "/some/repo", driver.Plan(to_run=["dead-code"]), base=os.path.join(tmp, "cache"))
+    assert os.path.isfile(os.path.join(run.collection, "dead-code", "report.html")), "still collected"
+    return open(index).read()
+
+
+MERMAID_REPORT = '<html><div class="vt-mermaid">flowchart LR\n A --> B</div></html>'
+
+
+def test_a_report_with_a_broken_mermaid_block_shows_the_failure_in_the_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver.pagelib, "check_mermaid", lambda path: {"total": 3, "failed": [1]})
+    text = _collect_one_report(tmp_path, MERMAID_REPORT)
+    assert "DIAGRAM CHECK FAILED" in text and "block 2 of 3" in text
+
+
+def test_a_report_with_no_mermaid_blocks_shows_no_diagram_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver.pagelib, "check_mermaid", lambda path: {"total": 0, "failed": []})
+    text = _collect_one_report(tmp_path, MERMAID_REPORT)
+    assert "DIAGRAM CHECK" not in text.upper() and "diagram check" not in text
+    # A page with no `vt-mermaid` text is never even rendered.
+    monkeypatch.setattr(driver.pagelib, "check_mermaid", lambda path: pytest.fail("rendered a diagram-free report"))
+    (tmp_path / "b").mkdir()
+    assert "DIAGRAM CHECK" not in _collect_one_report(tmp_path / "b", "<html>dead-code</html>").upper()
+
+
+def test_a_clean_mermaid_report_shows_no_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver.pagelib, "check_mermaid", lambda path: {"total": 2, "failed": []})
+    assert "FAILED" not in _collect_one_report(tmp_path, MERMAID_REPORT)
+
+
+def test_a_diagram_check_that_cannot_run_is_could_not_run_never_a_pass(tmp_path, monkeypatch):
+    def boom(path):
+        raise RuntimeError("shot-scraper is not installed")
+    monkeypatch.setattr(driver.pagelib, "check_mermaid", boom)
+    text = _collect_one_report(tmp_path, MERMAID_REPORT)
+    assert "diagram check could not run" in text and "shot-scraper is not installed" in text
+
+
 def test_index_only_rebuild_spawns_nothing_and_needs_no_run_branch(tmp_path):
     """`index --out DIR` calls the collect step over an existing
     collection. Nothing is spawned — the PATH here holds no `claude` and no
