@@ -84,20 +84,23 @@ required `### Over-engineering` subsection), **spec** (missing, partial,
 unasked-for, or wrongly implemented against the originating issue), or
 **correctness** — bugs, behaviour the ticket did not ask for, and every new
 test checked as a witness: strip the constraint under test and see whether the
-assertion still passes. One that survives is a hollow witness. Run the
-mutations with `multi-axis-code-review/witness-check.sh`, which puts each in
-its own throwaway worktree: never in the checkout and never in a copy of it,
-since a byte copy of a linked worktree shares the checkout's index, so a
-staged mutation lands in the real repository.
+assertion still passes. One that survives is a hollow witness. Run the mutations with `multi-axis-code-review/witness-check.sh`, one call
+per mutation (`--id <id> --file <path> --old '<text>' --new '<text>' --test
+'<covering command>'`, `multi-axis-code-review/SKILL.md` § 4). It is the
+only runner: no other runner may be used, never a hand-rolled worktree or
+ledger row. It puts each in its own throwaway worktree: never in the
+checkout and never in a copy of it, since a byte copy of a linked worktree
+shares the checkout's index, so a staged mutation lands in the real
+repository.
 
 **Run `witness-check.sh` in the foreground, never `run_in_background`** (#1921).
 A backgrounded run whose completion notice never arrives leaves you waiting on
 nothing, and the whole review wave behind you. The Bash tool's own `timeout`
 (its maximum, 600000 ms) is your ceiling. The script's per-mutant limit (240 s
 by default, `--baseline-seconds` to scale it; see
-`multi-axis-code-review/SKILL.md` § 4) ends one hung mutant inside it; with more
-mutants than slots the batches run one after another, so pass `--timeout` small
-enough that batches x limit fits. A
+`multi-axis-code-review/SKILL.md` § 4) ends one hung mutant inside it; calls beyond
+the slot bound wait for a free slot, so pass `--timeout` small enough that calls x limit
+fits. A
 run that still exceeds the ceiling is not waited on: record `witness not run
 (timeout)` for those mutations in your report, rate nothing from them, and
 finish the rest of the review.

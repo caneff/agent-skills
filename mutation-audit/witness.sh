@@ -36,14 +36,10 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$patch" ] && [ -n "$test_cmd" ] || usage
 [ -f "$patch" ] && [ -r "$patch" ] || { echo "single-diff witness: cannot read patch '$patch'" >&2; exit 2; }
-[ "$call_site" -eq 1 ] && pass+=( --call-site "$id" )
-
-WITNESS_PATCH="$(realpath "$patch")"
-WITNESS_TEST="$test_cmd"
-export WITNESS_PATCH WITNESS_TEST
+[ "$call_site" -eq 1 ] && pass+=( --call-site )
 
 report="$(bash "$here/../multi-axis-code-review/witness-check.sh" \
-  --worktree "$worktree" --mutate "$here/witness-mutate.sh" "${pass[@]}" -- "$id")"
+  --worktree "$worktree" --id "$id" --patch "$patch" --test "$test_cmd" ${pass[@]+"${pass[@]}"})"
 status=$?
 [ -n "$report" ] && printf '%s\n' "$report"
 [ "$status" -eq 0 ] || exit "$status"

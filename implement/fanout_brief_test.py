@@ -109,13 +109,15 @@ def test_an_empty_test_command_is_refused(wt):
     assert "test command" in refused(wt, "alpha=a.py", "beta=c.py", test_command="  ")
 
 
-def test_the_mutation_rule_names_the_throwaway_worktree_and_its_removal(wt):
+def test_the_mutation_rule_names_the_witness_check_as_the_only_runner(wt):
     _, out, _ = run(wt, "alpha=a.py", "beta=c.py")
     text, _ = brief_at(out)
-    assert f"git -C {wt} worktree add --detach {wt}/.scratch/mutation-" in text, text
-    assert "worktree remove --force" in text and "':!.scratch'" in text, text
+    assert f"witness-check.sh --worktree {wt} --with-working-tree" in text, text
+    assert "--old" in text and "--new" in text and "--test" in text, text
+    assert "only way to run a mutation" in text, text
+    # the hand-made recipe is gone: no worktree add, no cp of untracked files
+    assert "worktree add" not in text and "cp --parents" not in text and "mutation-alpha" not in text, text
     assert "cp -a" not in text and "mktemp" not in text and "scratch copy" not in text, text
-    assert f"CARGO_TARGET_DIR={wt}/.scratch/mutation-alpha-<id>/target" in text, text
     assert "{worker}" not in text and "{worktree}" not in text, text
     assert "not run" in text, text
 

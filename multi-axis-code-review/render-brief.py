@@ -225,10 +225,10 @@ AXIS_COUNT = len(AXES)
 def correctness_limits(a):
     """The correctness axis alone runs tests, so it carries the budget of all three axes."""
     lines = [
-        f"- Run the witness check with `--slots {a.workers * AXIS_COUNT}`: only this axis runs tests (the spec and "
+        f"- Run every witness check call with `--slots {a.workers * AXIS_COUNT}`: only this axis runs tests (the spec and "
         f"standards reviewers run none), so it takes the whole review's budget of {AXIS_COUNT} axes x "
         f"{a.workers} worker{'s' if a.workers != 1 else ''}; for the witness check this replaces the worker count above, "
-        "and the script still lowers it when the box is busy.",
+        "and the script still lowers it when the box is busy. One call is one mutation; no other runner may be used.",
         "- Time the unmutated run of the test files your mutants target and pass it as "
         "`--baseline-seconds <s>`: each mutant is killed at 3x that (60 s at least; 240 s with no baseline) and reads "
         "`red (timeout)`, so a hung mutant cannot stall the review."]

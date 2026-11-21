@@ -1,536 +1,64 @@
 #!/usr/bin/env bash
-# Guards #939 and #957: the hollow-witness check re-runs the covering suite in
-# a throwaway git worktree rather than the whole gate over a whole-tree copy,
-# and runs its mutations concurrently — each with its own worktree, its own
-# captured output, and an unreached mutation reported as `unknown` rather than
-# as a pass. Runs the script for real.
+# Guards the witness check (#939, #957, #1708): one mutation per call, given by flags
+# (--id --file --old --new --test), applied as one literal string replacement in a throwaway
+# git worktree, its covering command run there, and an unreached mutation reported as
+# `unknown` rather than as a pass. Runs the script for real.
 # BASH_SOURCE rather than `git rev-parse --show-toplevel`, and GIT_* scrubbed:
 # a caller's leaked GIT_DIR/GIT_WORK_TREE would point git at the caller's repo
 # (#620).
 set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-skill="$here/SKILL.md"
-
-for f in "$skill"; do
-  [ -f "$f" ] || { echo "FAIL: missing $f" >&2; exit 1; }
-done
-
+repo_root="$(cd "$here/.." && pwd)"
 fail=0
 
-# Prose can claim isolation and concurrency; only running the check witnesses
-# either. The check is a script shipped beside SKILL.md (#1219), so every run
-# below calls the script the skill tells reviewers to call, never a copy.
+# Prose can claim isolation; only running the check witnesses it. Every run below calls the
+# script the skill tells reviewers to call, never a copy.
 checker="$here/witness-check.sh"
 [ -f "$checker" ] || { echo "FAIL: missing $checker" >&2; exit 1; }
 
 scratch="$(mktemp -d)" || { echo "FAIL: mktemp -d" >&2; exit 1; }
 trap 'git -C "$scratch/repo" worktree prune 2>/dev/null; rm -rf "$scratch"' EXIT
-(
-  cd "$scratch"
-  git init -q -b main repo
-  cd repo
-  . "$here/../tests/fixture-identity.sh"
-  fixture_identity "$scratch/repo" "$scratch" || exit 1
-  printf 'assert 1 == 1\n' >m1.py
-  printf 'assert 1 == 1\n' >m2.py
-  git add m1.py m2.py
-  git commit -qm base
-  # The reviewed tree is a LINKED worktree, which is what every review in this
-  # lane runs on. Its `.git` is a file holding a gitdir pointer, so a byte copy
-  # of it shares this repo's index — the failure `cp -a` hides and the reason
-  # the launcher is a worktree (2026-09-20: a worker's two `git rm --cached` runs
-  # inside its "isolated" copy staged deletions in the real checkout).
-  git worktree add -q --detach "$scratch/reviewed" HEAD
-) || { echo "FAIL: could not build the scratch repo" >&2; exit 1; }
-repo="$scratch/reviewed"
-# Every run below gets a scratch HOME, so nothing a run writes reaches the real one, and a
-# ledger path is always substituted in, never the real one.
-home="$scratch/home"; mkdir -p "$home/.agents"; ln -s "$(cd "$here/.." && pwd)" "$home/.agents/skills"
-[ -f "$repo/.git" ] ||
-  { echo "FAIL: the fixture's reviewed tree is not a linked worktree" >&2; exit 1; }
-
-# The stand-in for "strip this test's constraint and run its covering suite".
-# It records the pair (id, worktree), waits for its sibling to start, and notes
-# whether both worktrees were on disk at that instant — the honest witness that
-# the launch really was concurrent, rather than a wall-clock assertion that
-# goes flaky on a loaded box. Then it fails, with a message of its own: a
-# working witness check MAKES the covering suite fail.
-cat >"$scratch/mutate.sh" <<MUTATE
-#!/usr/bin/env bash
-id="\$1"; wt="\$2"
-scratch="$scratch"
-printf '%s\n' "\$wt" >"\$scratch/\$id.wt"
-: >"\$scratch/\$id.up"
-other="\${id%?}"; case "\$id" in *1) other="\${other}2";; *2) other="\${other}1";; esac
-# A two-phase barrier, not "the sibling started": in a SERIAL run the second
-# mutation still finds the first one's marker and its worktree on disk, since
-# nothing is removed until the whole run ends. Only a sibling that reaches the
-# barrier too is a sibling still running, and neither can pass the barrier
-# unless both were launched — which is the assertion, with no timing window.
-for _ in \$(seq 1 50); do [ -e "\$scratch/\$other.up" ] && break; sleep 0.1; done
-if [ -e "\$scratch/\$other.up" ]; then
-  : >"\$scratch/\$id.barrier"
-  for _ in \$(seq 1 50); do [ -e "\$scratch/\$other.barrier" ] && break; sleep 0.1; done
-  if [ -e "\$scratch/\$other.barrier" ] && [ -d "\$wt" ] &&
-     [ -d "\$(cat "\$scratch/\$other.wt" 2>/dev/null)" ]; then
-    : >"\$scratch/\$id.overlap"
-  fi
-fi
-printf 'assert 1 == 2\n' >"\$wt/\$id.py"
-git -C "\$wt" rm -q --cached "\$id.py" 2>/dev/null
-: >"\$3"
-echo "MUTANT-\$id: covering suite red, its own message"
-exit 1
-MUTATE
-
-# <ids> <mutate body> [<reviewed worktree>] -> on stdout, a runnable script that calls the checker
-# with a mutate file defining that body. `set -f` in the emitted script keeps
-# an id such as `*` literal all the way to the checker's own id check.
-sub_n=0
-substitute() {
-  sub_n=$(( sub_n + 1 ))
-  local mf="$scratch/mutate-def-$sub_n.sh" cs="" id
-  printf 'mutate() { %s; }\n' "$2" >"$mf"
-  for id in cs1 cs2; do
-    case " $1 " in *" $id "*) cs="$cs --call-site $id" ;; esac
-  done
-  printf 'set -f\nexec bash %q --worktree %q --mutate %q --repo skills --ticket 1 --round 1 --ledger %q%s -- %s\n' \
-    "$checker" "${3:-$repo}" "$mf" "${ledger_path:-$scratch/ledger.jsonl}" "$cs" "$1"
+. "$here/../tests/fixture-identity.sh"
+make_repo() { # <name> <setup commands, run in the new repo> -> the reviewed worktree's path
+  # The reviewed tree is a LINKED worktree, which is what every review in this lane runs on: its
+  # `.git` is a file holding a gitdir pointer, so a byte copy of it would share this repo's index.
+  (
+    cd "$scratch" && git init -q -b main "$1" && cd "$1" &&
+    fixture_identity "$scratch/$1" "$scratch" && eval "$2" &&
+    git add -A && git commit -qm base &&
+    git worktree add -q --detach "$scratch/$1-reviewed" HEAD
+  ) >/dev/null 2>&1 || { echo "FAIL: could not build fixture repo $1" >&2; exit 1; }
+  printf '%s\n' "$scratch/$1-reviewed"
 }
+base_setup='printf "assert 1 == 1\n" >m1.py
+printf "assert 1 == 1\n" >m2.py
+printf "x = 1\nx = 1\n" >dup.py
+printf "aaa\n" >ov.txt
+printf "start\nold line\nend\n" >lit.txt'
+repo="$(make_repo repo "$base_setup")"
+[ -f "$repo/.git" ] || { echo "FAIL: the fixture's reviewed tree is not a linked worktree" >&2; exit 1; }
 
-# The launcher computes its bound from the live process table, so on a loaded box
-# it degrades to sequential — the behaviour #957 mandates — and an unconditional
-# overlap assertion would go red for the machine's state rather than the code's.
-# A `ps` shim pins the box instead: this run gets an idle one, the run below a
-# full one, and both assertions become deterministic.
-mkdir -p "$scratch/bin"
+# A scratch HOME so nothing a run writes reaches the real one, and a ledger path always
+# substituted in, never the real one. The idle-box `ps` shim pins the box: the bound reads the
+# live process table, so on a loaded box an overlap assertion would go red for the machine's state.
+home="$scratch/home"; mkdir -p "$home/.agents" "$scratch/bin"
+ln -s "$repo_root" "$home/.agents/skills"
+printf '#!/usr/bin/env bash\nprintf "claude\\nbash\\ninit\\n"\n' >"$scratch/bin/ps"; chmod +x "$scratch/bin/ps"
 real_git="$(command -v git)"
-cat >"$scratch/bin/ps" <<'IDLE'
-#!/usr/bin/env bash
-printf 'claude\nbash\ninit\n'
-IDLE
-chmod +x "$scratch/bin/ps"
+cache="$home/.cache/agent-reviews/skills"
 
-substitute 'm1 m2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/launcher.sh"
-# This run's own exit status is not what is asserted, but what it left behind.
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher.sh" ) >"$scratch/run.out" 2>&1 || true
-
-# Concurrent, asserted by the two worktrees existing at the same instant.
-# Serialising the launch fails exactly here, and for its own reason: the first
-# mutation waits out its 10s for a sibling that has not been started yet.
-for id in m1 m2; do
-  [ -e "$scratch/$id.overlap" ] || {
-    echo "FAIL: $id never saw the other mutation's worktree — the launch was serial" >&2
-    fail=1; }
-done
-
-# #1324: with `--repo`, the throwaway worktrees live under the review cache's one
-# home, `~/.cache/agent-reviews/<repo>/`, not an anonymous /tmp directory a hook
-# or a reboot can strand; and the run leaves nothing there after it.
-for id in m1 m2; do
-  case "$(cat "$scratch/$id.wt" 2>/dev/null)" in
-    "$home/.cache/agent-reviews/skills/"*) ;;
-    *) echo "FAIL: $id's worktree '$(cat "$scratch/$id.wt" 2>/dev/null)' is not under $home/.cache/agent-reviews/skills/" >&2
-       fail=1 ;;
-  esac
-done
-left="$(find "$home/.cache/agent-reviews/skills" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
-[ "$left" -eq 0 ] || { echo "FAIL: the run left $left entr(ies) in the review cache home" >&2; fail=1; }
-
-# #1325/#1324: `--slots <k>` caps the witness check's concurrency at the worker count a
-# brief states. On the idle box the shim above reports, two mutations would
-# overlap; with `--slots 1` the log must read start, end, start, end.
-substitute 'sl1 sl2' "echo \"start \$1\" >>\"$scratch/slots.log\"; : >\"\$3\"; sleep 0.4; echo \"end \$1\" >>\"$scratch/slots.log\"; exit 1" |
-  sed 's| -- sl1 sl2| --slots 1 -- sl1 sl2|' >"$scratch/launcher-slots.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-slots.sh" ) >"$scratch/slots.out" 2>&1 || true
-if [ "$(awk '{print $1}' "$scratch/slots.log" 2>/dev/null | paste -sd' ')" != "start end start end" ]; then
-  echo "FAIL: --slots 1 did not serialise the mutations; the log reads: $(paste -sd'|' "$scratch/slots.log" 2>/dev/null)" >&2
-  cat "$scratch/slots.out" >&2
-  fail=1
-fi
-if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash -c "$(sed 's| -- sl1 sl2| --slots 0 -- sl1 sl2|' "$scratch/launcher-slots.sh")" ) >"$scratch/slots0.out" 2>&1; then
-  echo "FAIL: --slots 0 was accepted" >&2; fail=1
-elif ! grep -q -- '--slots' "$scratch/slots0.out"; then
-  echo "FAIL: --slots 0 was refused without naming the flag: $(cat "$scratch/slots0.out")" >&2; fail=1
-fi
-
-# Each message stays paired with the mutation that produced it. Reading the
-# message rather than the exit code is what catches defect class 3, and N
-# concurrent reds collected into one stream is how that pairing is lost.
-for id in m1 m2; do
-  other=m1; [ "$id" = m1 ] && other=m2
-  if ! grep -q "MUTANT-$id" "$scratch/run.out"; then
-    echo "FAIL: the run never reported $id's own failure message" >&2
-    fail=1
-  fi
-  # The message LINE itself carries its id: a header above a bare concatenation
-  # of N suite outputs satisfies a looser needle and loses exactly the pairing
-  # this check exists for, once two mutations are red at the same time.
-  if ! grep -q "$id|.*MUTANT-$id" "$scratch/run.out"; then
-    echo "FAIL: $id's message line is not tagged with $id in the run output" >&2
-    fail=1
-  fi
-  if grep -q "$id|.*MUTANT-$other" "$scratch/run.out"; then
-    echo "FAIL: $other's message was attributed to $id" >&2
-    fail=1
-  fi
-done
-
-for id in m1 m2; do
-  if [ "$(cat "$repo/$id.py")" != 'assert 1 == 1' ]; then
-    echo "FAIL: the witness launcher wrote $id's mutation back into the checkout" >&2
-    fail=1
-  fi
-done
-if [ -n "$(git -C "$repo" status --porcelain)" ]; then
-  echo "FAIL: the witness launcher left the checkout dirty" >&2
-  fail=1
-fi
-# The index directly, because porcelain catches a staged removal only by luck:
-# a `git config`, ref, or object write inside a `cp -a` copy leaves porcelain
-# clean and the real repository changed anyway.
-if [ -n "$(git -C "$repo" diff --cached --name-only)" ]; then
-  echo "FAIL: the witness launcher staged its mutation in the reviewed tree's index" >&2
-  git -C "$repo" diff --cached --name-only >&2
-  fail=1
-fi
-# A worktree left registered stalls the next `git worktree remove` and any
-# later `merge-cleanup` on this repo; a bare `rm -rf` would leave exactly that.
-# Every mutation failed here — the ordinary outcome of a check that works — so
-# this is the failure path's cleanup, N traps and not one.
-trees="$(git -C "$repo" worktree list | wc -l)"
-if [ "$trees" -ne 2 ]; then
-  echo "FAIL: the witness launcher left $trees worktrees registered, not the fixture's 2" >&2
-  git -C "$repo" worktree list >&2
-  fail=1
-fi
-for id in m1 m2; do
-  if [ -e "$(cat "$scratch/$id.wt" 2>/dev/null)" ]; then
-    echo "FAIL: the covering suite failing left $id's throwaway worktree on disk" >&2
-    fail=1
-  fi
-done
-
-# Defect class 1, the one this ticket would refuse a PR over: a mutation whose
-# worktree never got created must report as `unknown` by name, never as a pass.
-# The `git` shim refuses exactly one `worktree add`, so the failure is the one
-# under test and not a broken fixture.
-mkdir -p "$scratch/bin-git"
-cat >"$scratch/bin-git/git" <<SHIM
-#!/usr/bin/env bash
-adding=0
-for a in "\$@"; do [ "\$a" = add ] && adding=1; done
-if [ "\$adding" = 1 ]; then
-  for a in "\$@"; do case "\$a" in */bad) echo "fatal: shim refuses \$a" >&2; exit 128;; esac; done
-fi
-exec "$real_git" "\$@"
-SHIM
-chmod +x "$scratch/bin-git/git"
-
-substitute 'ok bad' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/launcher-unknown.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin-git:$scratch/bin:$PATH" bash "$scratch/launcher-unknown.sh" ) \
-  >"$scratch/unknown.out" 2>&1 || true
-if ! grep -i 'unknown' "$scratch/unknown.out" | grep -q 'bad'; then
-  echo "FAIL: a mutation whose worktree could not be created was not reported as unknown" >&2
-  cat "$scratch/unknown.out" >&2
-  fail=1
-fi
-if ! grep -q 'MUTANT-ok' "$scratch/unknown.out"; then
-  echo "FAIL: the reachable mutation was lost when its sibling could not start" >&2
-  fail=1
-fi
-trees_after="$(git -C "$repo" worktree list | wc -l)"
-if [ "$trees_after" -ne 2 ]; then
-  echo "FAIL: the unknown-mutation run left $trees_after worktrees registered, not 2" >&2
-  git -C "$repo" worktree list >&2
-  fail=1
-fi
-
-# Class 1 on the bound itself (C3): a process table that cannot be read must
-# mean a full box, not an idle one. The buggy form counts 0 claude processes and
-# runs at maximum concurrency on an unknown machine, so the witness is the
-# ABSENCE of overlap — these two mutations must run one after the other.
-mkdir -p "$scratch/bin-nops"
-{ echo '#!/usr/bin/env bash'; echo 'exit 1'; } >"$scratch/bin-nops/ps"
-chmod +x "$scratch/bin-nops/ps"
-substitute 'u1 u2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/launcher-nops.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin-nops:$PATH" bash "$scratch/launcher-nops.sh" ) \
-  >"$scratch/nops.out" 2>&1 || true
-for id in u1 u2; do
-  if ! grep -q "MUTANT-$id" "$scratch/nops.out"; then
-    echo "FAIL: with no readable process table the witness check lost mutation $id" >&2
-    fail=1
-  fi
-  if [ -e "$scratch/$id.overlap" ]; then
-    echo "FAIL: an unreadable process table was read as an idle box — $id ran concurrently" >&2
-    fail=1
-  fi
-done
-
-# A full box degrades to sequential and still runs every mutation. The ticket
-# refuses the other reading: a check that declines because the machine is loaded
-# is worse than a slow one, and nothing else here would notice a refusal.
-mkdir -p "$scratch/bin-busy"
-{ echo '#!/usr/bin/env bash'; echo 'for _ in $(seq 1 30); do echo claude; done'; } >"$scratch/bin-busy/ps"
-chmod +x "$scratch/bin-busy/ps"
-substitute 'b1 b2' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/launcher-busy.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin-busy:$PATH" bash "$scratch/launcher-busy.sh" ) \
-  >"$scratch/busy.out" 2>&1 || true
-for id in b1 b2; do
-  if ! grep -q "MUTANT-$id" "$scratch/busy.out"; then
-    echo "FAIL: on a full box the witness check lost mutation $id instead of running it sequentially" >&2
-    cat "$scratch/busy.out" >&2
-    fail=1
-  fi
-done
-
-# The EXIT/INT/TERM trap, witnessed: the normal tail cleans up by itself, so
-# only an interrupted run proves the trap is wired. A minutes-long check ended
-# with ctrl-C is the ordinary way this happens, and N leaked worktrees stall the
-# next `worktree remove` and any later `merge-cleanup`.
-cat >"$scratch/sleeper.sh" <<SLEEP
-#!/usr/bin/env bash
-printf '%s\n' "\$2" >"$scratch/\$1.wt"
-printf '%s\n' "\$\$" >"$scratch/\$1.pid"
-: >"\$3"
-: >"$scratch/\$1.up"
-sleep 8
-: >"$scratch/\$1.late"
-SLEEP
-substitute 'k1 k2' "bash \"$scratch/sleeper.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/launcher-kill.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" exec bash "$scratch/launcher-kill.sh" ) >/dev/null 2>&1 &
-killpid=$!
-for _ in $(seq 1 100); do
-  [ -e "$scratch/k1.up" ] && [ -e "$scratch/k2.up" ] && break
-  sleep 0.1
-done
-if [ ! -e "$scratch/k1.up" ] || [ ! -e "$scratch/k2.up" ]; then
-  echo "FAIL: the interrupted run never got both mutations started" >&2
-  fail=1
-fi
-kill -TERM "$killpid" 2>/dev/null || true
-wait "$killpid" 2>/dev/null || true
-trees_killed="$(git -C "$repo" worktree list | wc -l)"
-if [ "$trees_killed" -ne 2 ]; then
-  echo "FAIL: an interrupted run left $trees_killed worktrees registered, not the fixture's 2" >&2
-  git -C "$repo" worktree list >&2
-  fail=1
-fi
-for id in k1 k2; do
-  if [ -e "$(cat "$scratch/$id.wt" 2>/dev/null)" ]; then
-    echo "FAIL: an interrupted run left $id's throwaway worktree on disk" >&2
-    fail=1
-  fi
-  # Registrations and directories cannot see a surviving child: a covering suite
-  # still running after its worktree was force-removed holds the box and writes
-  # into deleted paths. The run has exited by now, so the process must be gone.
-  child="$(cat "$scratch/$id.pid" 2>/dev/null)"
-  if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then
-    echo "FAIL: $id's covering suite was still running after the interrupted run returned" >&2
-    kill -KILL "$child" 2>/dev/null || true
-    fail=1
-  fi
-done
-
-# An id that cannot name a directory and an output file is refused by name,
-# before anything is created — never mangled into a path inside its own
-# worktree, which is how a message gets attached to the wrong mutation.
-substitute 'tests/a.py::t1' ": >\"\$3\"; echo \"MUTANT-\$1\"; exit 1" >"$scratch/launcher-badid.sh"
-if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-badid.sh" ) \
-     >"$scratch/badid.out" 2>&1; then
-  echo "FAIL: a pytest nodeid was accepted as a mutation id" >&2
-  cat "$scratch/badid.out" >&2
-  fail=1
-elif ! grep -q 'tests/a.py::t1' "$scratch/badid.out"; then
-  echo "FAIL: the unusable mutation id was refused without naming it" >&2
-  cat "$scratch/badid.out" >&2
-  fail=1
-fi
-
-# Class 1 again, one layer out (#961): the wrapper that never reached the suite.
-# A mutation that exits nonzero having printed nothing did not demonstrate an
-# assertion — there is no message to read — so it is `unknown`, by name, not a
-# red. Status alone cannot tell the two apart.
-substitute 's1' "exit 4" >"$scratch/launcher-silent.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-silent.sh" ) \
-  >"$scratch/silent.out" 2>&1 || true
-if ! grep -i 'unknown' "$scratch/silent.out" | grep -q 's1'; then
-  echo "FAIL: a mutation that exited nonzero with no output was not reported as unknown" >&2
-  cat "$scratch/silent.out" >&2
-  fail=1
-fi
-if grep -q 's1: red' "$scratch/silent.out"; then
-  echo "FAIL: a silent nonzero mutation was reported as a red with no message to read" >&2
-  fail=1
-fi
-
-# Two ids that are both legal and collide in a shared namespace: worktree
-# `x.out` and mutation `x`'s output file want the same path, and whichever the
-# parent creates first makes the other fail — a red with no suite behind it and
-# an output file inside a worktree, both at once. Disjoint directories are what
-# make this pair ordinary.
-substitute 'x x.out' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/launcher-collide.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-collide.sh" ) \
-  >"$scratch/collide.out" 2>&1 || true
-for id in x x.out; do
-  if ! grep -q "$id|.*MUTANT-$id" "$scratch/collide.out"; then
-    echo "FAIL: colliding-but-legal id $id lost its own message" >&2
-    cat "$scratch/collide.out" >&2
-    fail=1
-  fi
-done
-
-# The same id twice would have one mutation overwrite the other's output, so it
-# is refused by name rather than silently halving the check.
-substitute 'd1 d1' "exit 1" >"$scratch/launcher-dup.sh"
-if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-dup.sh" ) \
-     >"$scratch/dup.out" 2>&1; then
-  echo "FAIL: a duplicated mutation id was accepted" >&2
-  fail=1
-elif ! grep -q 'twice' "$scratch/dup.out"; then
-  echo "FAIL: a duplicated mutation id was refused without saying why" >&2
-  cat "$scratch/dup.out" >&2
-  fail=1
-fi
-
-# Cleanup's own failure path. `git worktree remove` failing and `rm -rf` running
-# anyway is how a stale registration gets created by the launcher whose prose
-# forbids exactly that — and the run would exit 0 having created it. This shim
-# fails every removal; the run must exit non-zero and name the worktree it could
-# not deregister.
-mkdir -p "$scratch/bin-norm"
-cat >"$scratch/bin-norm/git" <<NORM
-#!/usr/bin/env bash
-prev=""
-for a in "\$@"; do
-  if [ "\$prev" = worktree ] && [ "\$a" = remove ]; then
-    echo "fatal: shim refuses worktree remove" >&2; exit 128
-  fi
-  prev="\$a"
-done
-exec "$real_git" "\$@"
-NORM
-chmod +x "$scratch/bin-norm/git"
-cp "$scratch/bin/ps" "$scratch/bin-norm/ps"
-substitute 'r1' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/launcher-norm.sh"
-if ( cd "$repo" && HOME="$home" PATH="$scratch/bin-norm:$PATH" bash "$scratch/launcher-norm.sh" ) \
-     >"$scratch/norm.out" 2>&1; then
-  echo "FAIL: a witness run whose worktree removal failed still exited 0" >&2
-  cat "$scratch/norm.out" >&2
-  fail=1
-fi
-if ! grep -q 'could not remove worktree' "$scratch/norm.out"; then
-  echo "FAIL: a failed worktree removal was not reported" >&2
-  cat "$scratch/norm.out" >&2
-  fail=1
-fi
-# The directory is still there because git never deregistered it — that is the
-# point of the fix, and the proof that nothing was `rm -rf`d out from under a
-# live registration. Clean it up with the real git so the fixture's own count
-# assertions above stay meaningful for the next reader.
-kept="$(sed -n 's/.*keeping \([^ ]*\) -.*/\1/p' "$scratch/norm.out" | head -1)"
-if [ -z "$kept" ] || [ ! -d "$kept" ]; then
-  echo "FAIL: the failed-removal run did not keep its root directory for a by-hand cleanup" >&2
-  cat "$scratch/norm.out" >&2
-  fail=1
-else
-  for w in "$kept"/worktrees/*/; do
-    [ -d "$w" ] && git -C "$repo" worktree remove --force "${w%/}" 2>/dev/null
-  done
-  rm -rf "$kept"
-fi
-trees_norm="$(git -C "$repo" worktree list | wc -l)"
-if [ "$trees_norm" -ne 2 ]; then
-  echo "FAIL: after the by-hand cleanup $trees_norm worktrees are registered, not the fixture's 2" >&2
-  git -C "$repo" worktree list >&2
-  fail=1
-fi
-
-# Non-empty output was a proxy for "the suite ran", and it is the wrong proxy:
-# a wrapper that dies before invoking the covering suite — a missing test path, a
-# denied command — writes its error to stderr and exits nonzero, which is
-# indistinguishable from a red unless the mutation says for itself that it got
-# as far as the suite. The marker is that statement.
-substitute 'p1' "echo 'bash: no such test file' >&2; exit 2" >"$scratch/launcher-presuite.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-presuite.sh" ) \
-  >"$scratch/presuite.out" 2>&1 || true
-if ! grep -i 'unknown' "$scratch/presuite.out" | grep -q 'p1'; then
-  echo "FAIL: a mutation that died before its covering suite was not reported as unknown" >&2
-  cat "$scratch/presuite.out" >&2
-  fail=1
-fi
-if grep -q 'p1: red' "$scratch/presuite.out"; then
-  echo "FAIL: a pre-suite failure with stderr output was reported as a red" >&2
-  cat "$scratch/presuite.out" >&2
-  fail=1
-fi
-
-# An empty list is a failed enumeration upstream. Run as a success it is the
-# whole ticket's defect inside the tool the ticket builds: a check that
-# witnessed nothing, reporting clean.
-substitute '' ": >\"\$3\"; exit 1" >"$scratch/launcher-empty.sh"
-if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-empty.sh" ) \
-     >"$scratch/empty.out" 2>&1; then
-  echo "FAIL: an empty mutation list exited 0 as a clean witness check" >&2
-  cat "$scratch/empty.out" >&2
-  fail=1
-elif ! grep -q 'no mutations supplied' "$scratch/empty.out"; then
-  echo "FAIL: an empty mutation list was refused without saying so" >&2
-  cat "$scratch/empty.out" >&2
-  fail=1
-fi
-
-# The marker proves the wrapper reached the line before the suite, not that the
-# suite started. A command that does not exist writes the marker, exits 127, and
-# without the kernel's own answer being read that is a red whose failure message
-# is "command not found" — the same unreached-suite defect, one line further on.
-substitute 'e1' ": >\"\$3\"; /nonexistent/covering-suite" >"$scratch/launcher-noexec.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-noexec.sh" ) \
-  >"$scratch/noexec.out" 2>&1 || true
-if ! grep -i 'unknown' "$scratch/noexec.out" | grep -q 'e1'; then
-  echo "FAIL: a marked mutation whose suite command never executed was not reported as unknown" >&2
-  cat "$scratch/noexec.out" >&2
-  fail=1
-fi
-if grep -q 'e1: red' "$scratch/noexec.out"; then
-  echo "FAIL: a command-not-found was reported as a red with its own failure message" >&2
-  cat "$scratch/noexec.out" >&2
-  fail=1
-fi
-
-# `ids='*'` must not expand before validation: unquoted, it becomes the
-# checkout's filenames, every one of which passes the character check, and the
-# run mutates a set nobody asked for while omitting the requested id.
-substitute '*' ": >\"\$3\"; echo \"MUTANT-\$1\"; exit 1" >"$scratch/launcher-glob.sh"
-if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-glob.sh" ) \
-     >"$scratch/glob.out" 2>&1; then
-  echo "FAIL: ids='*' was accepted" >&2
-  cat "$scratch/glob.out" >&2
-  fail=1
-fi
-if grep -q 'MUTANT-' "$scratch/glob.out"; then
-  echo "FAIL: ids='*' expanded to the checkout's files and mutated them" >&2
-  cat "$scratch/glob.out" >&2
-  fail=1
-fi
-if ! grep -q 'not usable as a mutation id' "$scratch/glob.out"; then
-  echo "FAIL: ids='*' was rejected for some reason other than the id check" >&2
-  cat "$scratch/glob.out" >&2
-  fail=1
-fi
-trees_glob="$(git -C "$repo" worktree list | wc -l)"
-if [ "$trees_glob" -ne 2 ]; then
-  echo "FAIL: the ids='*' run created $trees_glob worktrees, not the fixture's 2" >&2
-  git -C "$repo" worktree list >&2
-  fail=1
-fi
-
-# #1270: the launcher appends one ledger row per mutation, before cleanup removes the
-# status files.
-ledger_path="$scratch/rows.jsonl"
-row_field() { # <mutation id> <dotted field path>... -> the values, space-joined, or MISSING
-  python3 - "$ledger_path" "$@" <<'PY'
+run() { # <reviewed tree> <checker args...>: stdout+stderr of one call; exit status is the call's
+  local tree="$1"; shift
+  ( cd "$tree" && env -u PYTHONDONTWRITEBYTECODE HOME="$home" PATH="${shim:-$scratch/bin}:$PATH" \
+      bash "$checker" --worktree "$tree" "$@" 2>&1 )
+}
+trees() { git -C "$repo" worktree list | wc -l; }
+ledger="$scratch/ledger.jsonl"
+LA=(--repo skills --ticket 1 --round 1 --ledger "$ledger")
+break_m1=(--file m1.py --old 'assert 1 == 1' --new 'assert 1 == 2')
+row_field() { # <ledger> <mutation id> <dotted field>... -> the values, space-joined, or MISSING
+  python3 - "$@" <<'PY'
 import json, os, sys
 path, mid, *fields = sys.argv[1:]
 rows = [json.loads(l) for l in open(path)] if os.path.exists(path) else []
@@ -542,183 +70,298 @@ def get(row, dotted):
 print(" ".join(str(get(hit[0], f)) for f in fields) if len(hit) == 1 else "MISSING")
 PY
 }
-body='case "$1" in early) exit 4;; esac; : >"$3"; echo "MUTANT-$1"; case "$1" in g1) exit 0;; esac; exit 1'
-substitute 'r1 g1 cs1 cs2 early' "$body" >"$scratch/launcher-rows.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-rows.sh" ) \
-  >"$scratch/rows.out" 2>&1 || { echo "FAIL: the ledger-appending run exited non-zero" >&2; cat "$scratch/rows.out" >&2; fail=1; }
-for want in "r1|witness-mutation red" "g1|witness-mutation green" "cs1|call-site-mutation red" "cs2|call-site-mutation red" "early|witness-mutation unknown"; do
-  id="${want%%|*}"; got="$(row_field "$id" type outcome)"
-  [ "$got" = "${want#*|}" ] || { echo "FAIL: mutation $id's ledger row is '$got', wanted '${want#*|}'" >&2; fail=1; }
+rows_in() { [ -s "$1" ] && wc -l <"$1" || echo 0; }
+check() { # <description> <command...>: fails the suite with the description when the command is false
+  local why="$1"; shift
+  "$@" || { echo "FAIL: $why" >&2; fail=1; }
+}
+
+# --- the one-shot interface: a test that catches the mutation reads red, one that misses it green ---
+out="$(run "$repo" --id r1 "${break_m1[@]}" --test 'python3 m1.py' "${LA[@]}")" ||
+  { echo "FAIL: a red mutation exited non-zero" >&2; echo "$out" >&2; fail=1; }
+check "a catching test did not read 'r1: red' with its own AssertionError tagged r1" \
+  bash -c 'grep -q "^r1: red" <<<"$1" && grep -q "r1|.*AssertionError" <<<"$1"' _ "$out"
+check "the ledger row of the red mutation is not witness-mutation/red" \
+  [ "$(row_field "$ledger" r1 type outcome)" = "witness-mutation red" ]
+check "the row carries no known wall clock" [ "$(row_field "$ledger" r1 cost.wall_clock.status)" = known ]
+out="$(run "$repo" --id g1 "${break_m1[@]}" --test 'python3 m2.py' "${LA[@]}")" || true
+check "a test that misses the mutation did not read HOLLOW" grep -q '^g1: HOLLOW' <<<"$out"
+check "the missed mutation's ledger row is not green" [ "$(row_field "$ledger" g1 outcome)" = green ]
+# The reviewed checkout is untouched: the mutation lives in the witness only.
+check "the mutation reached the reviewed tree's file" [ "$(cat "$repo/m1.py")" = 'assert 1 == 1' ]
+check "the run left the reviewed tree dirty" [ -z "$(git -C "$repo" status --porcelain)" ]
+check "the run staged something in the reviewed tree's index" [ -z "$(git -C "$repo" diff --cached --name-only)" ]
+check "the run left throwaway worktrees registered, not the fixture's 2" [ "$(trees)" -eq 2 ]
+# #1324: the witness lives under the review cache's one home and the run leaves nothing there.
+out="$(run "$repo" --id loc1 "${break_m1[@]}" --test 'pwd; exit 1' "${LA[@]}")" || true
+case "$out" in *"loc1| $home/.cache/agent-reviews/skills/witness."*"/worktrees/loc1"*) ;;
+  *) echo "FAIL: the witness did not run under $home/.cache/agent-reviews/skills/witness.*/: $out" >&2; fail=1 ;; esac
+check "the run left entries in the review cache home" \
+  [ "$(find "$cache" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)" -eq 0 ]
+# The covering command's own message stays paired with the id that produced it.
+out="$(run "$repo" --id pair1 "${break_m1[@]}" --test 'echo MUTANT-pair1; exit 1' --no-ledger)" || true
+check "the message line is not tagged with its id" grep -q 'pair1|.*MUTANT-pair1' <<<"$out"
+
+# --- --old that does not occur exactly once is refused before anything runs, and no row is written ---
+before_rows="$(rows_in "$ledger")"
+refused() { # <why> <message needle> <checker args...>
+  local why="$1" needle="$2"; shift 2
+  local rc=0 o
+  o="$(run "$repo" "$@")" || rc=$?
+  { [ "$rc" -eq 2 ] && grep -qF -- "$needle" <<<"$o"; } ||
+    { echo "FAIL: $why was not refused with exit 2 and '$needle' (exit $rc)" >&2; echo "$o" >&2; fail=1; }
+  check "$why: ran something (a worktree is registered)" [ "$(trees)" -eq 2 ]
+  check "$why: left something in the cache home" [ "$(find "$cache" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)" -eq 0 ]
+}
+refused '--old occurring zero times' 'occurs 0 times' --id z0 --file m1.py --old 'no such text' --new x --test 'exit 1' "${LA[@]}"
+refused '--old occurring twice' 'occurs 2 times' --id z2 --file dup.py --old 'x = 1' --new 'x = 2' --test 'exit 1' "${LA[@]}"
+refused '--old occurring twice, overlapping' 'occurs 2 times' --id z3 --file ov.txt --old 'aa' --new y --test 'exit 1' "${LA[@]}"
+check "a refused --old wrote a ledger row" [ "$(rows_in "$ledger")" -eq "$before_rows" ]
+refused 'an empty --old' '--old' --id e0 --file m1.py --old '' --new x --test 'exit 1' --no-ledger
+refused 'an --old equal to --new' 'identical' --id eq --file m1.py --old 'assert 1 == 1' --new 'assert 1 == 1' --test 'exit 1' --no-ledger
+refused 'an absolute --file' 'is outside the reviewed tree' --id ab --file /etc/hostname --old a --new b --test 'exit 1' --no-ledger
+refused 'a --file that climbs out of the tree' 'is outside the reviewed tree' --id up --file ../x --old a --new b --test 'exit 1' --no-ledger
+refused 'a --file not tracked at HEAD' 'not tracked at HEAD' --id nt --file nope.py --old a --new b --test 'exit 1' --no-ledger
+refused 'a call with no --test' '--test' --id nt1 "${break_m1[@]}" --no-ledger
+refused 'a call with no --id' '--id is required' "${break_m1[@]}" --test 'exit 1' --no-ledger
+refused 'a call with no --file' '--file is missing' --id nm --old a --new b --test 'exit 1' --no-ledger
+refused 'a call with no --old' '--old is missing' --id no --file m1.py --new b --test 'exit 1' --no-ledger
+refused 'a call with no --new' '--new is missing' --id nn --file m1.py --old 'assert 1 == 1' --test 'exit 1' --no-ledger
+refused 'an id of .' 'not usable as a mutation id' --id . "${break_m1[@]}" --test 'exit 1' --no-ledger
+refused 'an id of ..' 'not usable as a mutation id' --id .. "${break_m1[@]}" --test 'exit 1' --no-ledger
+refused '--worker with --call-site' 'not both' --id wc "${break_m1[@]}" --test 'exit 1' --no-ledger --worker --call-site
+refused 'the removed --mutate file form' 'unknown argument' --id mu --mutate /dev/null --test 'exit 1' --no-ledger
+refused 'a mutation given by --patch and by --old together' 'not both' --id pb --patch /dev/null "${break_m1[@]}" --test 'exit 1' --no-ledger
+refused 'two mutations in one call (a second positional id)' 'unknown argument' --id two "${break_m1[@]}" --test 'exit 1' --no-ledger -- other
+refused 'an id that names a pytest nodeid' 'tests/a.py::t1' --id 'tests/a.py::t1' "${break_m1[@]}" --test 'exit 1' --no-ledger
+refused "an id of '*'" 'not usable as a mutation id' --id '*' "${break_m1[@]}" --test 'exit 1' --no-ledger
+refused 'ledger rows without --repo/--ticket' 'need --repo and --ticket' --id nl "${break_m1[@]}" --test 'exit 1'
+refused '--no-ledger with ledger arguments' '--no-ledger with ledger arguments' --id nl2 "${break_m1[@]}" --test 'exit 1' --no-ledger --repo skills
+refused 'a non-numeric --timeout' '--timeout needs a positive integer' --id t1 "${break_m1[@]}" --test 'exit 1' --no-ledger --timeout x
+refused 'a non-numeric --baseline-seconds' '--baseline-seconds needs a positive integer' --id t2 "${break_m1[@]}" --test 'exit 1' --no-ledger --baseline-seconds x
+refused '--timeout together with --baseline-seconds' 'not both' --id t3 "${break_m1[@]}" --test 'exit 1' --no-ledger --timeout 5 --baseline-seconds 5
+refused '--slots 0' '--slots' --id s0 "${break_m1[@]}" --test 'exit 1' --no-ledger --slots 0
+
+# --- strings with quotes, $, newlines and backslashes apply literally ---
+old_lit=$'old line'
+new_lit=$'a "dq" \'sq\' $HOME $(echo SUBST) `echo BT` \\n *.py\nsecond\\ line  '
+out="$(run "$repo" --id lit1 --file lit.txt --old "$old_lit" --new "$new_lit" --test 'cat lit.txt; exit 1' --no-ledger)" || true
+got="$(printf '%s\n' "$out" | sed -n 's/^  lit1| //p')"
+check "quotes, \$, backticks, backslashes and a newline did not arrive literally; got: $got" \
+  [ "$got" = "$(printf 'start\n%s\nend' "$new_lit")" ]
+# An --old holding the same characters matches literally too (here: a multi-line --old).
+out="$(run "$repo" --id lit2 --file lit.txt --old $'start\nold line' --new 'S' --test 'cat lit.txt; exit 1' --no-ledger)" || true
+got="$(printf '%s\n' "$out" | sed -n 's/^  lit2| //p' | paste -sd'|')"
+check "a multi-line --old did not match literally; got: $got" [ "$got" = 'S|end' ]
+# The same characters in --old match literally too: it takes a separate path (the count at HEAD).
+cat >"$scratch/mk_special.py" <<'MKPY'
+open("sp.txt", "w").write("q \"a\" 'b' $HOME $(x) `y` \\n *\n")
+MKPY
+special_repo="$(make_repo specialrepo "python3 '$scratch/mk_special.py'")"
+sp_old="$(cat "$special_repo/sp.txt")"
+out="$(run "$special_repo" --id sp2 --file sp.txt --old "$sp_old" --new 'REPLACED' --test 'cat sp.txt; exit 1' --no-ledger)" || true
+got="$(printf '%s\n' "$out" | sed -n 's/^  sp2| //p')"
+check "an --old with quotes, \$, backticks and a backslash did not match literally; got: $got" [ "$got" = REPLACED ]
+# A deletion (--new '') is a valid mutation.
+out="$(run "$repo" --id lit3 --file lit.txt --old $'old line\n' --new '' --test 'cat lit.txt; exit 1' --no-ledger)" || true
+got="$(printf '%s\n' "$out" | sed -n 's/^  lit3| //p' | paste -sd'|')"
+check "an empty --new did not delete the text; got: $got" [ "$got" = 'start|end' ]
+
+# --- --patch: the second way to give the one mutation (mutation-audit/witness.sh hands it over) ---
+patch_repo="$(make_repo patchrepo 'printf "def f():\n    return 1\n" >mod.py
+printf "import mod\nassert mod.f() == 1, \"MUTANT-mod: mod.f() no longer returns 1\"\n" >test_mod.py')"
+sed 's/return 1/return 2/' "$patch_repo/mod.py" >"$scratch/mod.new"
+( cd "$patch_repo" && diff -u mod.py "$scratch/mod.new" | sed '1s|.*|--- a/mod.py|; 2s|.*|+++ b/mod.py|' ) >"$scratch/breaks.patch" || true
+out="$(run "$patch_repo" --id pt1 --patch "$scratch/breaks.patch" --test 'python3 test_mod.py' --no-ledger)" || true
+check "a --patch mutation did not read red with its own assertion" bash -c 'grep -q "^pt1: red" <<<"$1" && grep -q "MUTANT-mod" <<<"$1"' _ "$out"
+printf -- '--- a/absent.py\n+++ b/absent.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n' >"$scratch/stale.patch"
+out="$(run "$patch_repo" --id pt2 --patch "$scratch/stale.patch" --test 'python3 test_mod.py' --no-ledger)" || true
+check "a --patch that does not apply was not reported unknown" bash -c 'grep -q "^pt2: unknown" <<<"$1" && ! grep -q "^pt2: red" <<<"$1"' _ "$out"
+check "a --patch that does not apply never ran the covering command" bash -c '! grep -q "MUTANT-mod" <<<"$1"' _ "$out"
+
+# --- ledger rows: the type is the flag's, the outcome the covering command's own status ---
+wl="$scratch/kinds.jsonl"
+KA=(--repo skills --ticket 2 --ledger "$wl")
+run "$repo" --id k1 "${break_m1[@]}" --test 'exit 1' "${KA[@]}" >/dev/null || true
+run "$repo" --id k2 "${break_m1[@]}" --test 'echo x; exit 1' --call-site "${KA[@]}" >/dev/null || true
+run "$repo" --id k3 "${break_m1[@]}" --test 'echo x; exit 1' --worker "${KA[@]}" >/dev/null || true
+for want in "k2|call-site-mutation red" "k3|worker-mutation red"; do
+  check "mutation ${want%%|*}'s ledger row is '$(row_field "$wl" "${want%%|*}" type outcome)', wanted '${want#*|}'" \
+    [ "$(row_field "$wl" "${want%%|*}" type outcome)" = "${want#*|}" ]
 done
-# `early` exited 4 without reaching its suite, so the marker is absent and the row must be
-# `unknown`. This holds the marker check only: `decode_status` reads a raw exit status
-# as `unknown` too, so a launcher that handed `append` the raw exit-status file
-# (`status/<id>`) instead of the outcome word (`outcome/<id>`) still passes here. That
-# wiring is witnessed by the `r1`, `g1` and call-site rows above (#1306).
-[ "$(grep -c 'appended 1 row' "$scratch/rows.out")" -eq 5 ] ||
-  { echo "FAIL: the run did not append exactly five rows" >&2; cat "$scratch/rows.out" >&2; fail=1; }
-[ "$(row_field r1 cost.wall_clock.status)" = known ] ||
-  { echo "FAIL: a mutation row carries no known wall clock" >&2; fail=1; }
+# A refused append is reported, not skipped: exit 4 and a line saying so.
+corrupt="$scratch/corrupt.jsonl"; printf 'not json\n' >"$corrupt"
+rc=0; out="$(run "$repo" --id ra "${break_m1[@]}" --test 'echo x; exit 1' --repo skills --ticket 1 --ledger "$corrupt")" || rc=$?
+{ [ "$rc" -eq 4 ] && grep -q 'mutation row was not appended' <<<"$out"; } ||
+  { echo "FAIL: a refused ledger append did not exit 4 and say so (exit $rc)" >&2; echo "$out" >&2; fail=1; }
+check "the refused-append run left worktrees registered" [ "$(trees)" -eq 2 ]
 
-# A refused append is reported, not skipped: the run exits 4 and says so.
-ledger_path="$scratch/corrupt.jsonl"; printf 'not json\n' >"$ledger_path"
-substitute 'r1' "$body" >"$scratch/launcher-refused.sh"
-if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-refused.sh" ) >"$scratch/refused.out" 2>&1; then
-  echo "FAIL: a refused ledger append left the launcher exiting 0" >&2; fail=1
-elif ! grep -q 'mutation row(s) not appended' "$scratch/refused.out"; then
-  echo "FAIL: a refused ledger append was not reported" >&2; cat "$scratch/refused.out" >&2; fail=1
+# --- class 1: a mutation that never reached its covering command is `unknown`, never a pass ---
+out="$(run "$repo" --id sil1 "${break_m1[@]}" --test 'exit 4' --no-ledger)" || true
+check "a covering command that failed silently was not reported unknown" \
+  bash -c 'grep -q "^sil1: unknown" <<<"$1" && ! grep -q "^sil1: red" <<<"$1"' _ "$out"
+out="$(run "$repo" --id ne1 "${break_m1[@]}" --test '/nonexistent/covering-suite' --no-ledger)" || true
+check "a covering command that never executed was not reported unknown" \
+  bash -c 'grep -q "^ne1: unknown" <<<"$1" && ! grep -q "^ne1: red" <<<"$1"' _ "$out"
+# A `git worktree add` that fails (a shim refusing exactly this path) is unknown, with a row.
+mkdir -p "$scratch/bin-git"
+cat >"$scratch/bin-git/git" <<SHIM
+#!/usr/bin/env bash
+adding=0
+for a in "\$@"; do [ "\$a" = add ] && adding=1; done
+if [ "\$adding" = 1 ]; then
+  for a in "\$@"; do case "\$a" in */bad) echo "fatal: shim refuses \$a" >&2; exit 128;; esac; done
 fi
-trees_rows="$(git -C "$repo" worktree list | wc -l)"
-[ "$trees_rows" -eq 2 ] || { echo "FAIL: the append runs left $trees_rows worktrees registered, not 2" >&2; fail=1; }
+exec "$real_git" "\$@"
+SHIM
+chmod +x "$scratch/bin-git/git"; cp "$scratch/bin/ps" "$scratch/bin-git/ps"
+uw="$scratch/unknown-wt.jsonl"
+out="$(shim="$scratch/bin-git" run "$repo" --id bad "${break_m1[@]}" --test 'echo RAN; exit 1' --repo skills --ticket 3 --ledger "$uw")" || true
+check "a mutation whose worktree could not be created was not reported unknown" grep -q '^bad: unknown' <<<"$out"
+check "its covering command ran anyway" bash -c '! grep -q RAN <<<"$1"' _ "$out"
+check "its ledger row is not unknown" [ "$(row_field "$uw" bad outcome)" = unknown ]
+check "the failed-worktree run left worktrees registered" [ "$(trees)" -eq 2 ]
 
-# #1219: the checker's own environment hygiene. A ledger of its own, not the
-# corrupt one above, and each run must exit 0: a refused row (4) or a failed
-# cleanup (3) here would otherwise pass unseen.
-ledger_path="$scratch/hygiene.jsonl"
-hygiene_run() { # <name> <reviewed tree> <launcher>
-  ( cd "$2" && env -u PYTHONDONTWRITEBYTECODE HOME="$home" PATH="$scratch/bin:$PATH" bash "$3" ) >"$scratch/$1.out" 2>&1 ||
-    { echo "FAIL: the $1 run exited non-zero" >&2; cat "$scratch/$1.out" >&2; fail=1; }
+# --- pipes and signals: the covering command's own exit status is the outcome ---
+out="$(run "$repo" --id pp1 "${break_m1[@]}" --test 'false | tail -1; echo done-after-pipe; false | tail -1' --no-ledger)" || true
+check "a failing test piped through tail read as a pass (pipe status, not the test's)" grep -q '^pp1: red' <<<"$out"
+out="$(run "$repo" --id sp1 "${break_m1[@]}" --test 'echo x; kill -PIPE $$' --no-ledger)" || true
+check "a SIGPIPE status was not reported unknown" grep -q '^sp1: unknown' <<<"$out"
+
+# --- cleanup that reports rather than covers: a failed worktree removal exits non-zero ---
+mkdir -p "$scratch/bin-norm"
+cat >"$scratch/bin-norm/git" <<NORM
+#!/usr/bin/env bash
+prev=""
+for a in "\$@"; do
+  if [ "\$prev" = worktree ] && [ "\$a" = remove ]; then echo "fatal: shim refuses worktree remove" >&2; exit 128; fi
+  prev="\$a"
+done
+exec "$real_git" "\$@"
+NORM
+chmod +x "$scratch/bin-norm/git"; cp "$scratch/bin/ps" "$scratch/bin-norm/ps"
+rc=0; out="$(shim="$scratch/bin-norm" run "$repo" --id r1x "${break_m1[@]}" --test 'echo x; exit 1' --no-ledger)" || rc=$?
+check "a run whose worktree removal failed still exited 0" [ "$rc" -ne 0 ]
+check "a failed worktree removal was not reported" grep -q 'could not remove worktree' <<<"$out"
+kept="$(printf '%s\n' "$out" | sed -n 's/.*keeping \([^ ]*\) -.*/\1/p' | head -1)"
+if [ -z "$kept" ] || [ ! -d "$kept" ]; then
+  echo "FAIL: the failed-removal run did not keep its root directory for a by-hand cleanup" >&2; fail=1
+else
+  for w in "$kept"/worktrees/*/; do [ -d "$w" ] && git -C "$repo" worktree remove --force "${w%/}" 2>/dev/null; done
+  rm -rf "$kept"
+fi
+check "after the by-hand cleanup worktrees are still registered" [ "$(trees)" -eq 2 ]
+
+# The EXIT/INT/TERM trap, witnessed: only an interrupted run proves it is wired, and a covering
+# command still running after its worktree was force-removed holds the box.
+( cd "$repo" && exec env HOME="$home" PATH="$scratch/bin:$PATH" bash "$checker" --worktree "$repo" --id kill1 "${break_m1[@]}" \
+    --test "echo \$\$ >'$scratch/kill1.pid'; : >'$scratch/kill1.up'; sleep 8; : >'$scratch/kill1.late'" --no-ledger ) >/dev/null 2>&1 &
+killpid=$!
+for _ in $(seq 1 100); do [ -e "$scratch/kill1.up" ] && break; sleep 0.1; done
+check "the interrupted run never got its covering command started" [ -e "$scratch/kill1.up" ]
+kill -TERM "$killpid" 2>/dev/null || true
+wait "$killpid" 2>/dev/null || true
+check "an interrupted run left worktrees registered" [ "$(trees)" -eq 2 ]
+child="$(cat "$scratch/kill1.pid" 2>/dev/null || true)"
+if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then
+  echo "FAIL: the covering command was still running after the interrupted run returned" >&2
+  kill -KILL "$child" 2>/dev/null || true; fail=1
+fi
+check "an interrupted run's covering command ran to its end" [ ! -e "$scratch/kill1.late" ]
+
+# --- concurrency across calls: --slots and the box bound live in the script (#957, #1325) ---
+# Two calls started together. A two-phase barrier, not a timing window: only a sibling that
+# reaches the barrier too is a sibling still running, and neither passes unless both ran at once.
+pair() { # <name> <slots args...>: two concurrent calls, each noting whether it saw the other running
+  local name="$1"; shift
+  local id other
+  rm -f "$scratch/$name".*
+  for id in a b; do
+    other=b; [ "$id" = b ] && other=a
+    run "$repo" --id "$name$id" "${break_m1[@]}" --no-ledger "$@" --test "
+      : >'$scratch/$name.$id.up'
+      for _ in \$(seq 1 40); do [ -e '$scratch/$name.$other.up' ] && break; sleep 0.1; done
+      if [ -e '$scratch/$name.$other.up' ]; then : >'$scratch/$name.$id.barrier'
+        for _ in \$(seq 1 40); do [ -e '$scratch/$name.$other.barrier' ] && break; sleep 0.1; done
+        [ -e '$scratch/$name.$other.barrier' ] && : >'$scratch/$name.$id.overlap'
+      fi
+      echo \"MUTANT-$name$id\"; exit 1" >"$scratch/$name.$id.out" 2>&1 &
+  done
+  wait
 }
-# The checker's own #1219 environment hygiene. Each case gets its own fixture
-# repo, reviewed through a linked worktree as every review in this lane is.
-make_repo() { # <name> <setup commands, run in the new repo> -> the reviewed worktree's path
-  (
-    cd "$scratch" && git init -q -b main "$1" && cd "$1" &&
-    fixture_identity "$scratch/$1" "$scratch" && eval "$2" &&
-    git add -A && git commit -qm base &&
-    git worktree add -q --detach "$scratch/$1-reviewed" HEAD
-  ) >/dev/null 2>&1 || { echo "FAIL: could not build fixture repo $1" >&2; exit 1; }
-  printf '%s\n' "$scratch/$1-reviewed"
-}
-. "$here/../tests/fixture-identity.sh"
+pair idle
+check "two calls on an idle box did not run at the same time" \
+  bash -c '[ -e "$1/idle.a.overlap" ] && [ -e "$1/idle.b.overlap" ]' _ "$scratch"
+pair one --slots 1
+check "--slots 1 let two calls overlap" bash -c '[ ! -e "$1/one.a.overlap" ] && [ ! -e "$1/one.b.overlap" ]' _ "$scratch"
+check "--slots 1 lost a call instead of running it second" \
+  bash -c 'grep -q "MUTANT-onea" "$1/one.a.out" && grep -q "MUTANT-oneb" "$1/one.b.out"' _ "$scratch"
+mkdir -p "$scratch/bin-nops"; printf '#!/usr/bin/env bash\nexit 1\n' >"$scratch/bin-nops/ps"; chmod +x "$scratch/bin-nops/ps"
+shim="$scratch/bin-nops" pair nops
+check "an unreadable process table was read as an idle box: two calls overlapped" \
+  bash -c '[ ! -e "$1/nops.a.overlap" ] && [ ! -e "$1/nops.b.overlap" ]' _ "$scratch"
+mkdir -p "$scratch/bin-busy"; printf '#!/usr/bin/env bash\nfor _ in $(seq 1 30); do echo claude; done\n' >"$scratch/bin-busy/ps"; chmod +x "$scratch/bin-busy/ps"
+shim="$scratch/bin-busy" pair busy
+check "a full box refused or overlapped instead of running the calls one after another" \
+  bash -c '[ ! -e "$1/busy.a.overlap" ] && grep -q MUTANT-busya "$1/busy.a.out" && grep -q MUTANT-busyb "$1/busy.b.out"' _ "$scratch"
+
+# --- #1219 environment hygiene: each case gets its own fixture, reviewed through a linked worktree ---
 py_setup='printf "def f():\n    return 1\n" >mod.py
 printf "import mod\nassert mod.f() == 1, \"MUTANT-py: mod.f() no longer returns 1\"\n" >test_mod.py'
+pymut=(--file mod.py --old 'return 1' --new 'return 5')
 
-# A same-size mutation whose mtime matches the bytecode written by an earlier
-# suite run in the same witness reads that stale .pyc and passes. `touch -d`
-# pins the mtime, so the stale read is certain rather than a one-second race.
-# The caller's own PYTHONDONTWRITEBYTECODE is cleared: set, it would make this
-# case pass whether or not the checker sets it.
-target="$(make_repo pyrepo "$py_setup")" || exit 1
-substitute 'py1' 'cd "$2" && python3 test_mod.py && m=$(stat -c %Y mod.py) && sed -i "s/return 1/return 2/" mod.py && touch -d "@$m" mod.py && : >"$3" && python3 test_mod.py' "$target" >"$scratch/launcher-pyc.sh"
-hygiene_run pyc "$target" "$scratch/launcher-pyc.sh"
-if ! grep -q 'py1: red' "$scratch/pyc.out" || ! grep -q 'py1|.*MUTANT-py' "$scratch/pyc.out"; then
-  echo "FAIL: a same-size, same-mtime Python mutation did not report red with its own assertion (stale bytecode?)" >&2
-  cat "$scratch/pyc.out" >&2; fail=1
-fi
-
-# A __pycache__ the witness already carries — tracked, here, and compiled
-# unchecked-hash, so Python never compares it with its source — must be
-# cleared before `mutate` runs, or every edit to mod.py is invisible.
-target="$(make_repo pycache "$py_setup"'
+# A same-size mutation whose mtime matches the bytecode written by an earlier suite run in the
+# same witness reads that stale .pyc and passes. `touch -d` pins the mtime.
+t="$(make_repo pyrepo "$py_setup")"
+out="$(run "$t" --id py1 "${pymut[@]}" --no-ledger --test 'python3 -c "import mod; assert mod.f() == 5" && m=$(stat -c %Y mod.py) && sed -i "s/return 5/return 6/" mod.py && touch -d "@$m" mod.py && python3 -c "import mod; assert mod.f() == 5, \"MUTANT-py: stale bytecode\""')" || true
+check "a same-size, same-mtime Python edit did not read red with its own assertion (stale bytecode?)" \
+  bash -c 'grep -q "^py1: red" <<<"$1" && grep -q "py1|.*MUTANT-py" <<<"$1"' _ "$out"
+# A __pycache__ the witness already carries — tracked, compiled unchecked-hash — must be cleared.
+t="$(make_repo pycache "$py_setup"'
 python3 -c "import py_compile as p; p.compile(\"mod.py\", invalidation_mode=p.PycInvalidationMode.UNCHECKED_HASH)"
-git add -f __pycache__')" || exit 1
-substitute 'pc1' 'cd "$2" && sed -i "s/return 1/return 22/" mod.py && : >"$3" && python3 test_mod.py' "$target" >"$scratch/launcher-pycache.sh"
-hygiene_run pycache "$target" "$scratch/launcher-pycache.sh"
-if ! grep -q 'pc1: red' "$scratch/pycache.out" || ! grep -q 'pc1|.*MUTANT-py' "$scratch/pycache.out"; then
-  echo "FAIL: a mutation under a tracked unchecked-hash __pycache__ did not report red with its own assertion" >&2
-  cat "$scratch/pycache.out" >&2; fail=1
-fi
+git add -f __pycache__')"
+out="$(run "$t" --id pc1 --file mod.py --old 'return 1' --new 'return 22' --no-ledger --test 'python3 test_mod.py')" || true
+check "a mutation under a tracked unchecked-hash __pycache__ did not read red with its own assertion" \
+  bash -c 'grep -q "^pc1: red" <<<"$1" && grep -q "pc1|.*MUTANT-py" <<<"$1"' _ "$out"
 
-# A fresh worktree carries no ignored directory, so a Node suite in the witness
-# fails on a missing module and reads red for the wrong reason. The checker
-# links the reviewed tree's node_modules in; this body goes red only when it
-# can see node_modules/marker, with a message of its own.
-target="$(make_repo noderepo 'printf "node_modules/\n" >.gitignore')" || exit 1
-mkdir -p "$target/node_modules" && : >"$target/node_modules/marker"
-substitute 'n1' ': >"$3"; if [ -e "$2/node_modules/marker" ]; then echo "MARKER-PRESENT: node_modules/marker is reachable"; exit 1; fi; echo "no node_modules/marker"; exit 0' "$target" >"$scratch/launcher-node.sh"
-hygiene_run node "$target" "$scratch/launcher-node.sh"
-if ! grep -q 'n1: red' "$scratch/node.out" || ! grep -q 'n1|.*MARKER-PRESENT' "$scratch/node.out"; then
-  echo "FAIL: the witness worktree did not see the reviewed tree's node_modules" >&2
-  cat "$scratch/node.out" >&2; fail=1
-fi
-# Removing the witness must remove the link, never what it points at.
-[ -e "$target/node_modules/marker" ] ||
-  { echo "FAIL: removing the witness deleted the reviewed tree's node_modules contents" >&2; fail=1; }
-
-# #1969: a review run from a worktree nested under the checkout (`.claude/worktrees/`) has no
-# `node_modules` at its own top level; the one the checkout holds is found by walking up from
-# the reviewed tree, and a reviewed tree outside the checkout finds it through the git common
-# dir's parent. The body goes red only when it can read node_modules/marker.
-node_body=': >"$3"; if [ -e "$2/node_modules/marker" ]; then echo "MARKER-PRESENT: reachable"; exit 1; fi; echo "no marker"; exit 0'
-target="$(make_repo nestedrepo 'printf "node_modules/\n" >.gitignore')" || exit 1
-# The reviewed tree sits under a directory that holds the node_modules, but the repo it is a
-# worktree of has none, so the git common dir's parent cannot supply it: only the walk-up can.
+# node_modules: a fresh worktree carries no ignored directory, so a Node suite would fail on a
+# missing module and read red for the wrong reason. The link goes red only when readable.
+node_test='if [ -e node_modules/marker ]; then echo "MARKER-PRESENT: reachable"; exit 1; fi; echo "no marker"; exit 0'
+t="$(make_repo noderepo "$py_setup"'
+printf "node_modules/\n" >.gitignore')"
+mkdir -p "$t/node_modules" && : >"$t/node_modules/marker"
+out="$(run "$t" --id n1 "${pymut[@]}" --no-ledger --test "$node_test")" || true
+check "the witness did not see the reviewed tree's node_modules" bash -c 'grep -q "^n1: red" <<<"$1" && grep -q "n1|.*MARKER-PRESENT" <<<"$1"' _ "$out"
+check "removing the witness deleted the reviewed tree's node_modules contents" [ -e "$t/node_modules/marker" ]
+# #1969: a reviewed tree under a directory holding node_modules finds it by walking up; one
+# outside the checkout finds the primary checkout's through the git common dir's parent.
+t="$(make_repo nestedrepo "$py_setup"'
+printf "node_modules/\n" >.gitignore')"
 mkdir -p "$scratch/outer/node_modules" "$scratch/outer/sub" && : >"$scratch/outer/node_modules/marker"
 git -C "$scratch/nestedrepo" worktree add -q --detach "$scratch/outer/sub/rev" HEAD
-substitute 'nn1' "$node_body" "$scratch/outer/sub/rev" >"$scratch/launcher-nested.sh"
-hygiene_run nested "$scratch/outer/sub/rev" "$scratch/launcher-nested.sh"
-if ! grep -q 'nn1: red' "$scratch/nested.out" || ! grep -q 'nn1|.*MARKER-PRESENT' "$scratch/nested.out"; then
-  echo "FAIL: a worktree under a directory holding node_modules did not get it by walking up" >&2
-  cat "$scratch/nested.out" >&2; fail=1
-fi
-# The common dir's parent: a reviewed tree outside the checkout, node_modules only in the checkout.
+out="$(run "$scratch/outer/sub/rev" --id nn1 "${pymut[@]}" --no-ledger --test "$node_test")" || true
+check "a worktree under a directory holding node_modules did not get it by walking up" grep -q 'nn1|.*MARKER-PRESENT' <<<"$out"
 mkdir -p "$scratch/nestedrepo/node_modules" && : >"$scratch/nestedrepo/node_modules/marker"
-substitute 'nc1' "$node_body" "$target" >"$scratch/launcher-common.sh"
-hygiene_run common "$target" "$scratch/launcher-common.sh"
-if ! grep -q 'nc1: red' "$scratch/common.out" || ! grep -q 'nc1|.*MARKER-PRESENT' "$scratch/common.out"; then
-  echo "FAIL: a worktree outside the checkout did not get the primary checkout's node_modules" >&2
-  cat "$scratch/common.out" >&2; fail=1
-fi
-# A tree that declares dependencies with no node_modules anywhere: a mutant whose output says
-# its module failed to load is `unknown`, never a `red` from the missing module; one that fails
-# for its own reason (a Python suite here) is still `red`.
-target="$(make_repo nonodes 'printf "{\"devDependencies\": {\"playwright\": \"1\"}}\n" >package.json')" || exit 1
-substitute 'nx1 nx2' 'case "$1" in nx1) : >"$3"; echo "Error [ERR_MODULE_NOT_FOUND]: Cannot find package playwright"; exit 1;; *) : >"$3"; echo "ASSERTION-FAILED: own message"; exit 1;; esac' "$target" >"$scratch/launcher-nonodes.sh"
-hygiene_run nonodes "$target" "$scratch/launcher-nonodes.sh"
-if ! grep -q 'nx1: unknown' "$scratch/nonodes.out" || grep -q 'nx1: red' "$scratch/nonodes.out" ||
-   ! grep -q 'nx2: red' "$scratch/nonodes.out"; then
-  echo "FAIL: a missing module was not unknown, or an unrelated failure in the same tree was not red" >&2
-  cat "$scratch/nonodes.out" >&2; fail=1
-fi
+out="$(run "$t" --id nc1 "${pymut[@]}" --no-ledger --test "$node_test")" || true
+check "a worktree outside the checkout did not get the primary checkout's node_modules" grep -q 'nc1|.*MARKER-PRESENT' <<<"$out"
+# Declared dependencies and no node_modules anywhere: a failure that says a module did not load
+# is unknown; one that fails for its own reason is still red.
+t="$(make_repo nonodes "$py_setup"'
+printf "{\"devDependencies\": {\"playwright\": \"1\"}}\n" >package.json')"
+out="$(run "$t" --id nx1 "${pymut[@]}" --no-ledger --test 'echo "Error [ERR_MODULE_NOT_FOUND]: Cannot find package playwright"; exit 1')" || true
+check "a missing module was not unknown" bash -c 'grep -q "^nx1: unknown" <<<"$1" && ! grep -q "^nx1: red" <<<"$1"' _ "$out"
+out="$(run "$t" --id nx2 "${pymut[@]}" --no-ledger --test 'echo "ASSERTION-FAILED: own message"; exit 1')" || true
+check "an unrelated failure in the same tree was not red" grep -q '^nx2: red' <<<"$out"
+# No node_modules anywhere and no dependencies declared: no link is invented.
+t="$(make_repo plainrepo "$py_setup")"
+out="$(run "$t" --id nl1 "${pymut[@]}" --no-ledger --test 'if [ -L node_modules ]; then echo UNEXPECTED-LINK; exit 1; fi; exit 0')" || true
+check "a reviewed tree without node_modules still got a link in its witness" grep -q '^nl1: HOLLOW' <<<"$out"
+# A Rust suite in the witness builds into the witness's own target dir (#1696).
+out="$(run "$t" --id cg1 "${pymut[@]}" --no-ledger --test 'echo "CARGO-TARGET: ${CARGO_TARGET_DIR:-unset}"; exit 1')" || true
+check "the witness did not get its own CARGO_TARGET_DIR" grep -Eq 'CARGO-TARGET: .*/worktrees/cg1/target' <<<"$out"
 
-# #1969: a test command piped through `tail` yields the test's own exit status, not tail's.
-target="$(make_repo pipedrepo "$py_setup")" || exit 1
-substitute 'pp1' ': >"$3"; false | tail -1' "$target" >"$scratch/launcher-piped.sh"
-hygiene_run piped "$target" "$scratch/launcher-piped.sh"
-grep -q 'pp1: red' "$scratch/piped.out" ||
-  { echo "FAIL: a failing test piped through tail read as a pass (pipe status, not the test's)" >&2; cat "$scratch/piped.out" >&2; fail=1; }
-
-# A pipe reader that closes early can SIGPIPE the test: status 141 reads unknown, not red.
-substitute 'sp1' ': >"$3"; kill -PIPE $$' "$target" >"$scratch/launcher-sigpipe.sh"
-hygiene_run sigpipe "$target" "$scratch/launcher-sigpipe.sh"
-grep -q 'sp1: unknown' "$scratch/sigpipe.out" ||
-  { echo "FAIL: a SIGPIPE status was not reported unknown" >&2; cat "$scratch/sigpipe.out" >&2; fail=1; }
-
-# #1969: `--worker` writes worker-mutation rows, so the worker's own mutations need no hand outcome.
-wledger="$scratch/worker-ledger.jsonl"
-printf 'mutate() { : >"$3"; exit 1; }\n' >"$scratch/mutate-def-worker.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$checker" --worktree "$repo" --mutate "$scratch/mutate-def-worker.sh" \
-    --repo skills --ticket 7 --ledger "$wledger" --worker -- wk1 ) >"$scratch/worker.out" 2>&1 ||
-  { echo "FAIL: the --worker run exited non-zero" >&2; cat "$scratch/worker.out" >&2; fail=1; }
-grep -q '"type": "worker-mutation"' "$wledger" 2>/dev/null ||
-  { echo "FAIL: --worker did not write a worker-mutation row" >&2; cat "$wledger" >&2 2>/dev/null; fail=1; }
-
-# A Rust suite in the witness must build into the witness's own target dir, never
-# the reviewed tree's (#1696).
-target="$(make_repo cargorepo "$py_setup")" || exit 1
-substitute 'cg1' ': >"$3"; echo "CARGO-TARGET: ${CARGO_TARGET_DIR:-unset}"; exit 1' "$target" >"$scratch/launcher-cargo.sh"
-hygiene_run cargo "$target" "$scratch/launcher-cargo.sh"
-if ! grep -Eq 'CARGO-TARGET: .*/worktrees/cg1/target' "$scratch/cargo.out"; then
-  echo "FAIL: the witness did not get its own CARGO_TARGET_DIR" >&2
-  cat "$scratch/cargo.out" >&2; fail=1
-fi
-
-# The link exists only when the reviewed tree has a node_modules: a dangling or
-# invented one would make every Python or Rust witness carry a stray entry. The
-# body goes red only if a link is there, so the run must report it HOLLOW.
-target="$(make_repo plainrepo "$py_setup")" || exit 1
-substitute 'nl1' ': >"$3"; if [ -L "$2/node_modules" ]; then echo "UNEXPECTED-LINK: node_modules was linked"; exit 1; fi; exit 0' "$target" >"$scratch/launcher-nolink.sh"
-hygiene_run nolink "$target" "$scratch/launcher-nolink.sh"
-grep -q 'nl1: HOLLOW' "$scratch/nolink.out" ||
-  { echo "FAIL: a reviewed tree without node_modules still got a link in its witness" >&2; cat "$scratch/nolink.out" >&2; fail=1; }
-unset target
-
-# A Python repo with a `uv.lock` gets its own `uv sync` in each witness (#1528,
-# Chris's ruling): never a symlink to the reviewed tree's `.venv`, whose editable
-# install would import the reviewed tree's code and test the wrong tree. A stub
-# `uv` stands in so no network or cache is touched; it records the directory it
-# ran in and the arguments, and leaves a `.venv` holding that record.
+# A Python repo with a `uv.lock` gets its own `uv sync` in each witness (#1528), never a link to
+# the reviewed tree's `.venv`. A stub `uv` records where it ran and leaves a `.venv` with that record.
 mkdir -p "$scratch/bin-uv"
 cat >"$scratch/bin-uv/uv" <<'UV'
 #!/usr/bin/env bash
@@ -730,54 +373,26 @@ chmod +x "$scratch/bin-uv/uv"
 uv_setup="$py_setup"'
 printf ".venv/\n" >.gitignore
 printf "version = 1\n" >uv.lock'
-target="$(make_repo uvrepo "$uv_setup")" || exit 1
-mkdir -p "$target/.venv" && printf '%s\n' "$target" >"$target/.venv/ran-in"
-# red only when the witness's .venv was synced in the witness itself, not
-# carried over from (or linked to) the reviewed tree.
-substitute 'uv1' ': >"$3"; if [ -L "$2/.venv" ]; then echo "SYMLINKED-VENV: .venv points at the reviewed tree"; exit 1; fi; if [ "$(cat "$2/.venv/ran-in" 2>/dev/null)" = "$2" ]; then echo "SYNCED-HERE: uv ran in the witness; ARGS: $(cat "$2/.venv/args"); ENV: $(cat "$2/.venv/env")"; exit 1; fi; echo "no synced .venv"; exit 0' "$target" >"$scratch/launcher-uv.sh"
-# The caller's UV_PROJECT_ENVIRONMENT must not reach the sync: set, it would put
-# every witness into one shared environment.
-UV_PROJECT_ENVIRONMENT=/nonexistent/shared-venv PATH="$scratch/bin-uv:$PATH" hygiene_run uv "$target" "$scratch/launcher-uv.sh"
-if ! grep -q 'uv1: red' "$scratch/uv.out" || ! grep -q 'uv1|.*SYNCED-HERE' "$scratch/uv.out"; then
-  echo "FAIL: a repo with a uv.lock did not get a uv sync run inside its witness" >&2
-  cat "$scratch/uv.out" >&2; fail=1
-fi
-grep -q 'uv1|.*ARGS: sync --frozen --quiet; ENV: unset' "$scratch/uv.out" ||
-  { echo "FAIL: the sync did not run with --frozen and without UV_PROJECT_ENVIRONMENT" >&2; cat "$scratch/uv.out" >&2; fail=1; }
-[ "$(cat "$target/.venv/ran-in")" = "$target" ] ||
-  { echo "FAIL: the witness's sync wrote into the reviewed tree's .venv" >&2; fail=1; }
+t="$(make_repo uvrepo "$uv_setup")"
+mkdir -p "$t/.venv" && printf '%s\n' "$t" >"$t/.venv/ran-in"
+out="$(UV_PROJECT_ENVIRONMENT=/nonexistent/shared-venv PATH="$scratch/bin-uv:$PATH" run "$t" --id uv1 "${pymut[@]}" --no-ledger \
+  --test 'if [ -L .venv ]; then echo "SYMLINKED-VENV"; exit 1; fi; if [ "$(cat .venv/ran-in 2>/dev/null)" = "$PWD" ]; then echo "SYNCED-HERE: ARGS: $(cat .venv/args); ENV: $(cat .venv/env)"; exit 1; fi; echo "no synced .venv"; exit 0')" || true
+check "a repo with a uv.lock did not get a uv sync run inside its witness" grep -q 'uv1|.*SYNCED-HERE' <<<"$out"
+check "the sync did not run with --frozen and without UV_PROJECT_ENVIRONMENT" grep -q 'ARGS: sync --frozen --quiet; ENV: unset' <<<"$out"
+check "the witness's sync wrote into the reviewed tree's .venv" [ "$(cat "$t/.venv/ran-in")" = "$t" ]
+t="$(make_repo nouvrepo "$py_setup")"
+out="$(PATH="$scratch/bin-uv:$PATH" run "$t" --id uv2 "${pymut[@]}" --no-ledger --test 'if [ -e .venv ] || [ -L .venv ]; then echo UNEXPECTED-VENV; exit 1; fi; exit 0')" || true
+check "a repo without a uv.lock got a .venv in its witness" grep -q '^uv2: HOLLOW' <<<"$out"
+check "a repo without a uv.lock was not told its .venv is left unset" grep -q 'no uv.lock at HEAD.*\.venv.*unset' <<<"$out"
+t="$(make_repo uvuntracked "$py_setup")"; printf 'version = 1\n' >"$t/uv.lock"
+out="$(PATH="$scratch/bin-uv:$PATH" run "$t" --id uv4 "${pymut[@]}" --no-ledger --test 'exit 0')" || true
+check "an uncommitted uv.lock was neither synced nor reported" grep -q 'no uv.lock at HEAD' <<<"$out"
+t="$(make_repo uvfail "$uv_setup")"
+out="$(STUB_UV_FAIL=1 PATH="$scratch/bin-uv:$PATH" run "$t" --id uv3 "${pymut[@]}" --no-ledger --test 'echo RAN; exit 1')" || true
+check "a failed uv sync was not reported unknown" grep -q '^uv3: unknown' <<<"$out"
 
-# No uv.lock: `.venv` stays unset in the witness, and the run says so.
-target="$(make_repo nouvrepo "$py_setup")" || exit 1
-substitute 'uv2' ': >"$3"; if [ -e "$2/.venv" ] || [ -L "$2/.venv" ]; then echo "UNEXPECTED-VENV: .venv exists"; exit 1; fi; exit 0' "$target" >"$scratch/launcher-nouv.sh"
-PATH="$scratch/bin-uv:$PATH" hygiene_run nouv "$target" "$scratch/launcher-nouv.sh"
-grep -q 'uv2: HOLLOW' "$scratch/nouv.out" ||
-  { echo "FAIL: a repo without a uv.lock got a .venv in its witness" >&2; cat "$scratch/nouv.out" >&2; fail=1; }
-grep -q 'no uv.lock at HEAD.*\.venv.*unset' "$scratch/nouv.out" ||
-  { echo "FAIL: a repo without a uv.lock was not told its .venv is left unset" >&2; cat "$scratch/nouv.out" >&2; fail=1; }
-
-# The notice reads HEAD, as the witnesses do: a uv.lock only in the reviewed
-# tree's working copy is not synced, so the run must say so, not stay silent.
-target="$(make_repo uvuntracked "$py_setup")" || exit 1
-printf 'version = 1\n' >"$target/uv.lock"
-substitute 'uv4' ': >"$3"; exit 0' "$target" >"$scratch/launcher-uvun.sh"
-PATH="$scratch/bin-uv:$PATH" hygiene_run uvun "$target" "$scratch/launcher-uvun.sh"
-grep -q 'no uv.lock at HEAD' "$scratch/uvun.out" ||
-  { echo "FAIL: an uncommitted uv.lock was neither synced nor reported" >&2; cat "$scratch/uvun.out" >&2; fail=1; }
-
-# A sync that fails leaves the mutation unreached: unknown, never a pass.
-target="$(make_repo uvfail "$uv_setup")" || exit 1
-substitute 'uv3' ': >"$3"; exit 1' "$target" >"$scratch/launcher-uvfail.sh"
-STUB_UV_FAIL=1 PATH="$scratch/bin-uv:$PATH" hygiene_run uvfail "$target" "$scratch/launcher-uvfail.sh"
-grep -q 'uv3: unknown' "$scratch/uvfail.out" ||
-  { echo "FAIL: a failed uv sync was not reported unknown" >&2; cat "$scratch/uvfail.out" >&2; fail=1; }
-unset target
-
-# A killed run is the case the exit sweep misses (#1547, Chris's ruling): each run
-# first prunes any `witness.*` directory in this repo's cache home older than 7
-# days, deregistering its linked worktrees with `git worktree remove`, not `rm`.
-# A younger one (maybe a live run) and a non-witness entry stay.
-prune_home="$home/.cache/agent-reviews/skills"
+# --- #1547: a killed run is the case the exit sweep misses; each run prunes old witness.* dirs ---
+prune_home="$cache"
 mkdir -p "$prune_home/witness.OLD001/worktrees" "$prune_home/witness.MID001/worktrees" \
   "$prune_home/witness.NEW001/worktrees" "$prune_home/witness.GONE01/worktrees/orphan" "$prune_home/keep.OLD001"
 git -C "$repo" worktree add --detach -q "$prune_home/witness.OLD001/worktrees/stale" HEAD
@@ -786,23 +401,16 @@ git -C "$repo" worktree add --detach -q "$prune_home/witness.NEW001/worktrees/li
 touch -d '8 days ago' "$prune_home/witness.OLD001" "$prune_home/keep.OLD001" "$prune_home/witness.GONE01"
 touch -d '180 hours ago' "$prune_home/witness.MID001"
 touch -d '6 days ago' "$prune_home/witness.NEW001"
-substitute 'pr1' ': >"$3"; exit 1' >"$scratch/launcher-prune.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-prune.sh" ) >"$scratch/prune.out" 2>&1 || true
+out="$(run "$repo" --id pr1 "${break_m1[@]}" --test 'exit 1' "${LA[@]}")" || true
 for d in OLD001 MID001 GONE01; do
-  [ ! -e "$prune_home/witness.$d" ] ||
-    { echo "FAIL: witness.$d (older than 7 days; GONE01 holds a directory git does not list) was not pruned" >&2; cat "$scratch/prune.out" >&2; fail=1; }
+  check "witness.$d (older than 7 days; GONE01 holds a directory git does not list) was not pruned" [ ! -e "$prune_home/witness.$d" ]
 done
-git -C "$repo" worktree list --porcelain | grep -q 'witness\.\(OLD001\|MID001\)' &&
-  { echo "FAIL: a pruned witness's worktree is still registered" >&2; fail=1; }
-[ -d "$prune_home/witness.NEW001" ] ||
-  { echo "FAIL: a witness.* directory under 7 days old was pruned" >&2; fail=1; }
-[ -d "$prune_home/keep.OLD001" ] ||
-  { echo "FAIL: the prune removed an entry that is not a witness.* directory" >&2; fail=1; }
+check "a pruned witness's worktree is still registered" bash -c '! git -C "$1" worktree list --porcelain | grep -q "witness\.\(OLD001\|MID001\)"' _ "$repo"
+check "a witness.* directory under 7 days old was pruned" [ -d "$prune_home/witness.NEW001" ]
+check "the prune removed an entry that is not a witness.* directory" [ -d "$prune_home/keep.OLD001" ]
 git -C "$repo" worktree remove --force "$prune_home/witness.NEW001/worktrees/live" 2>/dev/null
 rm -rf "$prune_home/witness.NEW001" "$prune_home/keep.OLD001"
-
-# A prune that cannot remove a worktree keeps its directory, says so, and still
-# runs the review: a git shim refuses `worktree remove` on the stale root.
+# A prune that cannot remove a worktree keeps its directory, says so, and still runs the review.
 mkdir -p "$prune_home/witness.STUCK1/worktrees"
 git -C "$repo" worktree add --detach -q "$prune_home/witness.STUCK1/worktrees/stuck" HEAD
 touch -d '8 days ago' "$prune_home/witness.STUCK1"
@@ -812,73 +420,85 @@ cat >"$scratch/bin-gitfail/git" <<GITSHIM
 case "\$*" in *"worktree remove"*witness.STUCK1*) echo "git: refused (stub)" >&2; exit 1;; esac
 exec "$real_git" "\$@"
 GITSHIM
-chmod +x "$scratch/bin-gitfail/git"
-substitute 'pr2' ': >"$3"; exit 1' >"$scratch/launcher-stuck.sh"
-( cd "$repo" && HOME="$home" PATH="$scratch/bin-gitfail:$scratch/bin:$PATH" bash "$scratch/launcher-stuck.sh" ) >"$scratch/stuck.out" 2>&1 || true
-[ -d "$prune_home/witness.STUCK1" ] ||
-  { echo "FAIL: a prune whose worktree removal failed deleted the directory anyway" >&2; fail=1; }
-grep -q 'could not prune .*witness.STUCK1' "$scratch/stuck.out" ||
-  { echo "FAIL: a failed prune was not reported" >&2; cat "$scratch/stuck.out" >&2; fail=1; }
-grep -q 'pr2: red' "$scratch/stuck.out" ||
-  { echo "FAIL: a failed prune stopped the review" >&2; cat "$scratch/stuck.out" >&2; fail=1; }
+chmod +x "$scratch/bin-gitfail/git"; cp "$scratch/bin/ps" "$scratch/bin-gitfail/ps"
+out="$(shim="$scratch/bin-gitfail" run "$repo" --id pr2 "${break_m1[@]}" --test 'echo x; exit 1' "${LA[@]}")" || true
+check "a prune whose worktree removal failed deleted the directory anyway" [ -d "$prune_home/witness.STUCK1" ]
+check "a failed prune was not reported" grep -q 'could not prune .*witness.STUCK1' <<<"$out"
+check "a failed prune stopped the review" grep -q '^pr2: red' <<<"$out"
 git -C "$repo" worktree remove --force "$prune_home/witness.STUCK1/worktrees/stuck" 2>/dev/null
 rm -rf "$prune_home/witness.STUCK1"
 
-# The two argument guards are refused by name before any worktree exists.
-mf="$scratch/mutate-def-guards.sh"; printf 'mutate() { :; }\n' >"$mf"
-refuses() { # <why> <expected message> <checker args...>
-  local why="$1" msg="$2"; shift 2
-  local rc=0
-  bash "$checker" --worktree "$repo" --mutate "$mf" "$@" >"$scratch/guard.out" 2>&1 || rc=$?
-  [ "$rc" -eq 2 ] && grep -qe "$msg" "$scratch/guard.out" ||
-    { echo "FAIL: $why was not refused with exit 2 and '$msg'" >&2; cat "$scratch/guard.out" >&2; fail=1; }
-}
-refuses 'a --call-site id outside the mutation ids' 'not among the mutation ids' --no-ledger --call-site zz -- a1
-refuses '--no-ledger with ledger arguments' '--no-ledger with ledger arguments' --no-ledger --repo skills -- a1
-
-# #1854: a mutant that hangs ends at its limit, reads `red (timeout)` in the report and
-# its ledger row, and leaves no child process behind. The fake mutant has a covering
-# suite that spawns a grandchild sleeper, so only a process-group kill clears it.
-ledger_path="$scratch/timeout.jsonl"
-substitute 'h1 h2 h3' 'case "$1" in h2) : >"$3"; echo "MUTANT-$1: fast red"; exit 1;; h3) : >"$3"; echo "MUTANT-$1: own 124"; exit 124;; esac; : >"$3"; echo "MUTANT-$1: hanging"; sh -c "echo \$\$ >\"'"$scratch"'/\$0.gpid\"; exec sleep 30" "$1" & wait' >"$scratch/launcher-timeout.sh"
-sed -i 's| -- h1 h2 h3| --timeout 2 -- h1 h2 h3|' "$scratch/launcher-timeout.sh"
+# --- #1854: a mutant that hangs ends at its limit, reads `red (timeout)`, and leaves no child ---
+tl="$scratch/timeout.jsonl"
+hang="echo 'MUTANT-h1: hanging'; sh -c 'echo \$\$ >$scratch/h1.gpid; exec sleep 30' & wait"
 t_start=$(date +%s)
-( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-timeout.sh" ) >"$scratch/timeout.out" 2>&1 ||
-  { echo "FAIL: the timeout run exited non-zero" >&2; cat "$scratch/timeout.out" >&2; fail=1; }
-t_secs=$(( $(date +%s) - t_start ))
-[ "$t_secs" -lt 15 ] || { echo "FAIL: a 2 s limit let the hanging mutant run $t_secs s" >&2; fail=1; }
-grep -q 'h1: red (timeout)' "$scratch/timeout.out" ||
-  { echo "FAIL: the hanging mutant was not reported 'red (timeout)'" >&2; cat "$scratch/timeout.out" >&2; fail=1; }
-grep -q 'h2: red (timeout)' "$scratch/timeout.out" &&
-  { echo "FAIL: a mutant that failed fast was reported as a timeout" >&2; fail=1; }
-# C1: a suite's own exit 124 well under the limit is its own red, never a timeout.
-grep -q 'h3: red (timeout)' "$scratch/timeout.out" &&
-  { echo "FAIL: a mutant exiting 124 under the limit was labelled a timeout" >&2; fail=1; }
-grep -q 'h3: red' "$scratch/timeout.out" ||
-  { echo "FAIL: the mutant exiting 124 was not reported red" >&2; cat "$scratch/timeout.out" >&2; fail=1; }
-[ "$(row_field h3 outcome)" = "red" ] ||
-  { echo "FAIL: h3's ledger row is not a plain red" >&2; fail=1; }
-[ "$(row_field h1 outcome timeout)" = "red True" ] ||
-  { echo "FAIL: the hanging mutant's ledger row is '$(row_field h1 outcome timeout)', wanted 'red True'" >&2; fail=1; }
-gp="$(cat "$scratch/h1.gpid" 2>/dev/null)"
+out="$(run "$repo" --id h1 "${break_m1[@]}" --test "$hang" --timeout 2 --repo skills --ticket 4 --ledger "$tl")" ||
+  { echo "FAIL: the timeout run exited non-zero" >&2; echo "$out" >&2; fail=1; }
+check "a 2 s limit let the hanging mutant run $(( $(date +%s) - t_start )) s" [ $(( $(date +%s) - t_start )) -lt 15 ]
+check "the hanging mutant was not reported 'red (timeout)'" grep -q '^h1: red (timeout)' <<<"$out"
+check "the hanging mutant's ledger row is '$(row_field "$tl" h1 outcome timeout)', wanted 'red True'" [ "$(row_field "$tl" h1 outcome timeout)" = "red True" ]
+gp="$(cat "$scratch/h1.gpid" 2>/dev/null || true)"
 if [ -z "$gp" ]; then echo "FAIL: the hanging mutant's grandchild never started" >&2; fail=1
-elif kill -0 "$gp" 2>/dev/null; then
-  echo "FAIL: the hanging mutant's grandchild $gp outlived the run" >&2; kill -KILL "$gp" 2>/dev/null || true; fail=1
-fi
-# A limit is a positive integer; and a baseline sets it at 3x with a 60 s floor.
-refuses 'a non-numeric --timeout' '--timeout needs a positive integer' --no-ledger --timeout x -- a1
-refuses 'a non-numeric --baseline-seconds' '--baseline-seconds needs a positive integer' --no-ledger --baseline-seconds x -- a1
-printf 'mutate() { : >"$3"; exit 1; }\n' >"$scratch/mutate-def-limit.sh"
-limit_of() { # <args...> -> the limit line the run prints
-  bash "$checker" --worktree "$repo" --mutate "$scratch/mutate-def-limit.sh" --no-ledger "$@" -- lim1 2>&1 | sed -n 's/^witness check: per-mutant limit \([0-9]*\) s.*/\1/p'
-}
-[ "$(limit_of)" = 240 ] || { echo "FAIL: no flags did not give the 240 s default: '$(limit_of)'" >&2; fail=1; }
-default_out="$(bash "$checker" --worktree "$repo" --mutate "$scratch/mutate-def-limit.sh" --no-ledger -- lim1 2>&1)"
-case "$default_out" in *'no --baseline-seconds given'*) ;; *) false ;; esac ||
-  { echo "FAIL: the default limit's notice does not say no baseline was given" >&2; fail=1; }
-refuses '--timeout together with --baseline-seconds' 'not both' --no-ledger --timeout 5 --baseline-seconds 5 -- a1
-[ "$(limit_of --baseline-seconds 10)" = 60 ] || { echo "FAIL: baseline 10 s did not give the 60 s floor: '$(limit_of --baseline-seconds 10)'" >&2; fail=1; }
-[ "$(limit_of --baseline-seconds 100)" = 300 ] || { echo "FAIL: baseline 100 s did not give 300 s: '$(limit_of --baseline-seconds 100)'" >&2; fail=1; }
+elif kill -0 "$gp" 2>/dev/null; then echo "FAIL: the hanging mutant's grandchild $gp outlived the run" >&2; kill -KILL "$gp" 2>/dev/null || true; fail=1; fi
+# C1: a suite's own exit 124 well under the limit is its own red, never a timeout.
+out="$(run "$repo" --id h3 "${break_m1[@]}" --test 'echo "MUTANT-h3: own 124"; exit 124' --timeout 30 --repo skills --ticket 4 --ledger "$tl")" || true
+check "a mutant exiting 124 under the limit was labelled a timeout" bash -c '! grep -q "red (timeout)" <<<"$1" && grep -q "^h3: red" <<<"$1"' _ "$out"
+check "h3's ledger row is not a plain red" [ "$(row_field "$tl" h3 outcome)" = red ]
+# A baseline sets the limit at 3x with a 60 s floor; with neither flag it is 240 s, and says so.
+limit_of() { run "$repo" --id lim1 "${break_m1[@]}" --test 'exit 1' --no-ledger "$@" | sed -n 's/^witness check: per-mutant limit \([0-9]*\) s.*/\1/p'; }
+check "no flags did not give the 240 s default: '$(limit_of)'" [ "$(limit_of)" = 240 ]
+check "the default limit's notice does not say no baseline was given" \
+  bash -c 'grep -q "no --baseline-seconds given" <<<"$1"' _ "$(run "$repo" --id lim2 "${break_m1[@]}" --test 'exit 1' --no-ledger)"
+check "baseline 10 s did not give the 60 s floor" [ "$(limit_of --baseline-seconds 10)" = 60 ]
+check "baseline 100 s did not give 300 s" [ "$(limit_of --baseline-seconds 100)" = 300 ]
+
+# --- --with-working-tree: the witness is the tree as it stands (a fan-out sub-worker cannot commit) ---
+wt_repo="$(make_repo wtrepo 'printf "committed\n" >a.txt; printf "keep\n" >gone.txt; printf "x\n" >.gitignore')"
+printf 'edited\n' >"$wt_repo/a.txt"; rm "$wt_repo/gone.txt"; printf 'brand new\n' >"$wt_repo/fresh.txt"
+mkdir -p "$wt_repo/.scratch" && printf 'junk\n' >"$wt_repo/.scratch/j.txt"
+out="$(run "$wt_repo" --with-working-tree --id wt1 --file a.txt --old edited --new MUTATED --no-ledger \
+  --test 'cat a.txt fresh.txt; ls gone.txt .scratch 2>&1; exit 1')" || true
+got="$(printf '%s\n' "$out" | sed -n 's/^  wt1| //p' | paste -sd'|')"
+case "$got" in 'MUTATED|brand new|'*) ;; *) echo "FAIL: the witness is not the working tree (edit and untracked file expected); got: $got" >&2; fail=1 ;; esac
+case "$got" in *'No such file'*'No such file'*) ;; *) echo "FAIL: a deleted file or .scratch/ reached the witness; got: $got" >&2; fail=1 ;; esac
+# Without the flag the same --old is not at HEAD, and is refused by its count.
+rc=0; out="$(run "$wt_repo" --id wt2 --file a.txt --old edited --new MUTATED --no-ledger --test 'exit 1')" || rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'occurs 0 times' <<<"$out"; } || { echo "FAIL: HEAD-only mode saw the uncommitted edit (exit $rc)" >&2; fail=1; }
+# An untracked file can be the mutated file.
+out="$(run "$wt_repo" --with-working-tree --id wt3 --file fresh.txt --old 'brand new' --new NEWER --no-ledger --test 'cat fresh.txt; exit 1')" || true
+check "an untracked file was not mutable under --with-working-tree" grep -q 'wt3| NEWER' <<<"$out"
+
+# --- C3: a checkout that differs from HEAD's blob (eol=crlf): the witness's own exactly-once check ---
+crlf_repo="$(make_repo crlfrepo 'printf "* text=auto\n*.crlf text eol=crlf\n" >.gitattributes; printf "one\ntwo\n" >c.crlf')"
+out="$(run "$crlf_repo" --id crlf1 --file c.crlf --old $'one\ntwo' --new X --no-ledger --test 'echo RAN; exit 1')" || true
+check "a --old that matches HEAD's blob but not the witness's checkout was not reported unknown" \
+  bash -c 'grep -q "^crlf1: unknown" <<<"$1" && ! grep -q "RAN" <<<"$1"' _ "$out"
+
+# --- C1: a flock that fails for a reason other than contention must not wait forever ---
+mkdir -p "$scratch/bin-noflock"; cp "$scratch/bin/ps" "$scratch/bin-noflock/ps"
+printf '#!/usr/bin/env bash\nexit 127\n' >"$scratch/bin-noflock/flock"; chmod +x "$scratch/bin-noflock/flock"
+rc=0; out="$(shim="$scratch/bin-noflock" timeout 20 bash -c "$(declare -f run); checker='$checker' home='$home' repo='$repo' shim='$scratch/bin-noflock' scratch='$scratch'; run \"\$repo\" --id fl1 --file m1.py --old 'assert 1 == 1' --new 'assert 1 == 2' --test 'exit 1' --no-ledger")" || rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'flock failed' <<<"$out"; } || { echo "FAIL: a failing flock did not exit 1 naming it (exit $rc): $out" >&2; fail=1; }
+
+# --- #1708: no doc shows the sourced `--mutate <file>` form, or a hand-rolled runner ---
+# The skill, the briefs, the agent file and the scripts are the docs a reviewer or worker reads.
+# Dated records under docs/research/ describe history and stay.
+doc_files=( "$repo_root/multi-axis-code-review/SKILL.md" "$repo_root"/multi-axis-code-review/briefs/*.md
+  "$repo_root/multi-axis-code-review/render-brief.py" "$repo_root/multi-axis-code-review/witness-check.sh"
+  "$repo_root/implement/SKILL.md" "$repo_root"/implement/briefs/*.md "$repo_root/implement/fanout-brief.py"
+  "$repo_root/flow/claude/agents/diff-reviewer.md"
+  "$repo_root/mutation-audit/witness.sh" "$repo_root"/tests/review_cache_e2e_golden/*.md )
+left="$(grep -nE -e '--mutate <|--mutate "|--mutate \$|defines? `mutate`|defining `mutate`|write one file, outside the checkout|a file outside the checkout defining|worktree add --detach [^ ]*mutation' "${doc_files[@]}" 2>/dev/null | cut -c1-200 || true)"
+check "a doc still shows the sourced --mutate file form:
+$left" [ -z "$left" ]
+for f in "$repo_root/multi-axis-code-review/SKILL.md" "$repo_root/flow/claude/agents/diff-reviewer.md" \
+         "$repo_root/multi-axis-code-review/briefs/correctness.md" "$repo_root/implement/SKILL.md" \
+         "$repo_root/implement/briefs/fanout-worker.md"; do
+  check "$f does not show the flag form" grep -q -e '--old' "$f"
+done
+# The ban is stated once, in the skill that owns the script; the other docs show the flag form.
+check "multi-axis-code-review/SKILL.md does not say no other runner may be used" \
+  grep -qi 'no other runner may be used' "$repo_root/multi-axis-code-review/SKILL.md"
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/witness-check.test.sh"
