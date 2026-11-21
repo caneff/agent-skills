@@ -232,11 +232,10 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
     `<default>` with its own review wave, so `one_slice` makes a section
     for that slice's body with no spec-level review.
 
-    `keep_spec_open` is the spec's own Miss ruling (a spec whose body says a
-    miss relabels it `backlog` and keeps it open): the section then forbids
-    `Closes #<spec>` where it would demand one, and still demands the
-    slices' own lines. Nothing in the run file records that ruling, so the
-    controller who read it in the spec passes the flag.
+    `keep_spec_open`: the spec stays open once it lands, so the section
+    forbids `Closes #<spec>` where it would demand one and still demands the
+    slices' own lines. The run file records no such ruling; the controller
+    passes the flag (`implement-spec/SKILL.md` § The closing check).
     """
     if surfaces is None:
         # Not defaulted to none: the failure this check exists to stop
@@ -256,13 +255,10 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
                 f"&& git merge --no-edit origin/{default} && git push origin "
                 f"{branch}")
 
-    # The Miss ruling keeps the spec open: the closing line is forbidden,
-    # not demanded, since a `Closes #<spec>` would close what the ruling
-    # parks as `backlog`.
-    keep_open = (f"The spec's own Miss ruling keeps it open: no "
+    keep_open = (f"The spec stays open after it lands, so there is no "
                  f"`Closes #{spec}` line in the PR body or any commit.")
     if one_slice:
-        closing = (keep_open + " Its slice's own `Closes` line stays."
+        closing = (keep_open + " The slice's own `Closes` line stays."
                    if keep_spec_open else
                    f"Add a bare `Closes #{spec}` line to the PR body and to "
                    "the last commit: the spec closes when this slice merges.")
@@ -271,13 +267,13 @@ def body(root, spec, surfaces=None, seam=None, blind_to=None, *, default,
                  "one end-to-end test at this repo's seam, and its own review "
                  f"wave is the spec's review. {closing}", ""]
     else:
-        closing = (f"only. {keep_open}" if keep_spec_open
-                   else f"and a bare `Closes #{spec}`.")
+        closing = (f"{keep_open}" if keep_spec_open
+                   else f"It also carries a bare `Closes #{spec}`.")
         lines = ["## Closing check", "",
                  f"The closing check of spec #{spec}, run on its integration "
                  f"PR: base `{default}`, head `{branch}`, opened once every "
                  f"slice has landed on `{branch}`. Its body carries a bare "
-                 f"`Closes #<slice>` line for every slice of the spec "
+                 f"`Closes #<slice>` line for every slice of the spec. "
                  f"{closing}", ""]
     lines += ["### The seam", "",
               f"- **Seam**: {seam}",
@@ -364,9 +360,8 @@ def main(argv):
     surfaces.add_argument("--no-surface", action="store_true",
                           help="the seam reaches every surface this spec touches")
     parser.add_argument("--keep-spec-open", action="store_true",
-                        help="the spec's own Miss ruling keeps it open: the "
-                             "section forbids `Closes #<spec>` instead of "
-                             "demanding it")
+                        help="the spec stays open after it lands: forbid "
+                             "`Closes #<spec>` instead of demanding it")
     parser.add_argument("--seam", help="the seam, where the repo declares none")
     parser.add_argument("--blind-to", help="what that seam cannot see")
     args = parser.parse_args(argv[1:])
