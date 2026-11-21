@@ -185,6 +185,8 @@ def _path_value(node, rel, env):
         return node.value if isinstance(node.value, str) else None
     if isinstance(node, ast.Name):
         return rel if node.id == "__file__" else env.get(node.id)
+    if isinstance(node, ast.Attribute) and ast.unparse(node) in ("os.pardir", "os.path.pardir"):
+        return ".."
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         left, right = val(node.left), val(node.right)
         return None if left is None or right is None \
@@ -197,7 +199,9 @@ def _path_value(node, rel, env):
             and isinstance(node.slice, ast.Constant)
             and isinstance(node.slice.value, int) and node.slice.value >= 0):
         inner = val(node.value.value)
-        for _ in range(node.slice.value + 1 if inner is not None else 0):
+        if inner is None:
+            return None
+        for _ in range(node.slice.value + 1):
             inner = posixpath.dirname(inner)
         return inner
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -244,9 +248,11 @@ def path_bases(rel, text):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and ast.unparse(node.func) in ("sys.path.insert", "sys.path.append")):
             continue
-        arg = (node.args[1] if node.func.attr == "insert" and len(node.args) == 2
-               else node.args[0] if node.func.attr == "append" and len(node.args) == 1
-               else None)
+        arg = None
+        if node.func.attr == "insert" and len(node.args) == 2:
+            arg = node.args[1]
+        elif node.func.attr == "append" and len(node.args) == 1:
+            arg = node.args[0]
         base = None if arg is None else _path_value(arg, rel, env)
         if base is not None:
             base = posixpath.normpath(base)
@@ -417,10 +423,6 @@ def include_edges(root, decl, limit=SCAN_LIMIT):
     for rel in files:
         if python and not rel.endswith(".py"):
             continue
-        if python and "fixtures" in rel.split("/")[:-1]:
-            # A fixture's files may be broken on purpose, and nothing real
-            # imports through them (#1981).
-            continue
         text = read_text(os.path.join(root, rel), limit)
         if text is None:
             if python:
@@ -429,7 +431,14 @@ def include_edges(root, decl, limit=SCAN_LIMIT):
                 raise ClosureError(f"cannot read imports of {rel}: not text")
             continue
         if python:
-            references = python_references(rel, text)
+            try:
+                references = python_references(rel, text)
+            except ClosureError:
+                # A fixture may be broken on purpose (#1981); every other
+                # file that does not parse fails the resolve by name.
+                if "fixtures" in rel.split("/")[:-1]:
+                    continue
+                raise
             inserted = path_bases(rel, text)
         else:
             references = [m.group(1).strip()

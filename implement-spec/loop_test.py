@@ -2171,3 +2171,48 @@ def test_a_live_closure_under_the_cap_holds_as_before(tmp):
     assert "dispatch  #500" not in got.stdout, got.stdout
     assert "closure cap" not in got.stdout, got.stdout
     assert "held" in got.stdout and "shared.py" in got.stdout, got.stdout
+
+
+def test_a_candidate_closure_over_the_cap_holds_only_its_own_files(tmp):
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [500], "files": ["mine.py"],
+                    "closure": ["mine.py", "shared.py", *wide_closure()]}], fh)
+    with open(live, "w") as fh:
+        json.dump([{"tickets": [351], "workspace": "/w/351", "agent": "sm-351",
+                    "files": ["shared.py"], "job": NO_JOB}], fh)
+    got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                  "--free", "2", "--processes", "4", "--committed-gb", "4")
+    assert got.returncode == 0, got
+    assert "dispatch  #500" in got.stdout and "closure cap" in got.stdout, got.stdout
+
+
+def test_a_closure_of_non_source_files_is_not_capped():
+    html = {"tickets": [7], "files": ["a.html"], "closure": ["a.html", "b.html"]}
+    kept, notes = loop.cap_closures([html], total=0)
+    assert kept == [html] and notes == [], (kept, notes)
+
+
+def test_source_total_is_none_for_a_directory_git_cannot_list(tmp):
+    assert loop.source_total(os.path.join(tmp, "missing")) is None
+
+
+def test_dispatch_says_so_when_the_source_files_cannot_be_counted(tmp, monkeypatch, capsys):
+    import argparse
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [20], "closure": ["b.js"]}], fh)
+    with open(live, "w") as fh:
+        json.dump([], fh)
+    cache = os.path.join(tmp, "cache")
+    os.mkdir(cache)
+    monkeypatch.setenv("SPEC_RUN_CACHE_DIR", cache)
+    monkeypatch.setattr(loop, "source_total", lambda repo: None)
+    args = argparse.Namespace(
+        candidates=cand, in_flight=live, run=fixture_run(cache, live), free=1,
+        no_workspace_diff=True, processes=4, committed_gb=4.0)
+    assert loop.cmd_dispatch(args) == 0
+    out = capsys.readouterr().out
+    assert "closure cap: not applied" in out and "dispatch  #20" in out, out

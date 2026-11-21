@@ -895,3 +895,28 @@ def test_an_unparsable_file_elsewhere_still_fails_the_resolve(py_closure):
     with pytest.raises(C.ClosureError) as exc:
         py_closure({"codec.py": "x\n", "tools/broken.py": "def f(:\n"})
     assert "tools/broken.py" in str(exc.value), exc.value
+
+
+def test_an_os_pardir_insert_is_read_as_the_parent(py_closure):
+    files = {"common/helper.py": "X = 1\n",
+             "implement/tool.py": ("import os, sys\nsys.path.insert(0, os.path.join("
+                                   "os.path.dirname(__file__), os.pardir, \"common\"))\n"
+                                   "import helper\n")}
+    assert py_closure(files, "common/helper.py", agents=AGENT_SKILLS) \
+        == {"common/helper.py", "implement/tool.py"}
+
+
+def test_a_parents_index_insert_is_read(py_closure):
+    files = {"common/helper.py": "X = 1\n",
+             "a/b/tool.py": ("import sys\nfrom pathlib import Path\n"
+                             "sys.path.insert(0, str(Path(__file__).resolve()"
+                             ".parents[2] / \"common\"))\nimport helper\n")}
+    assert py_closure(files, "common/helper.py", agents=AGENT_SKILLS) \
+        == {"common/helper.py", "a/b/tool.py"}
+
+
+def test_a_parsable_fixture_keeps_its_edges(py_closure):
+    files = {"tests/fixtures/x/sample.py": "X = 1\n",
+             "tests/fixtures/x/test_sample.py": "import sample\n"}
+    assert py_closure(files, "tests/fixtures/x/sample.py", agents=AGENT_SKILLS) \
+        == {"tests/fixtures/x/sample.py", "tests/fixtures/x/test_sample.py"}

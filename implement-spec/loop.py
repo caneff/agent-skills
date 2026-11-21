@@ -116,10 +116,13 @@ def cap_closures(clumps, total):
     out, notes = [], []
     for clump in clumps:
         wide = clump.get("closure")
-        if not isinstance(wide, list) or len(wide) * CLOSURE_CAP <= total:
+        # Source files against source files: the total counts only those.
+        covered = (sum(f.endswith(SOURCE_SUFFIXES) for f in wide)
+                   if isinstance(wide, list) else 0)
+        if covered * CLOSURE_CAP <= total:
             out.append(clump)
             continue
-        label = f"#{key_of(clump)}: closure of {len(wide)} files exceeds 1/{CLOSURE_CAP} of {total} source files"
+        label = f"#{key_of(clump)}: closure of {covered} source files exceeds 1/{CLOSURE_CAP} of {total} source files"
         if not clump.get("files"):
             out.append(clump)
             notes.append(f"closure cap not applied to {label}, and it names no files of its own")
