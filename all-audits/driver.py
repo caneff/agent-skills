@@ -343,7 +343,7 @@ def diagram_check_note(report_path):
             if "vt-mermaid" not in f.read():
                 return ""
         result = pagelib.check_mermaid(report_path)
-    except (RuntimeError, OSError) as e:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:  # SubprocessError: a hung renderer's TimeoutExpired
         return f"diagram check could not run: {e}"
     if not result["failed"]:
         return ""

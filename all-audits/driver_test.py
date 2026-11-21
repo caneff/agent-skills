@@ -831,6 +831,21 @@ def test_a_diagram_check_that_cannot_run_is_could_not_run_never_a_pass(tmp_path,
     assert "diagram check could not run" in text and "shot-scraper is not installed" in text
 
 
+def test_a_hung_renderer_is_could_not_run_and_the_report_is_still_collected(tmp_path, monkeypatch):
+    def hang(path):
+        raise subprocess.TimeoutExpired("shot-scraper", 80)
+    monkeypatch.setattr(driver.pagelib, "check_mermaid", hang)
+    assert "diagram check could not run" in _collect_one_report(tmp_path, MERMAID_REPORT)
+
+
+def test_the_could_not_run_reason_is_html_escaped_in_the_index(tmp_path, monkeypatch):
+    def boom(path):
+        raise RuntimeError("shot-scraper failed (1): <script>x</script>")
+    monkeypatch.setattr(driver.pagelib, "check_mermaid", boom)
+    text = _collect_one_report(tmp_path, MERMAID_REPORT)
+    assert "&lt;script&gt;x&lt;/script&gt;" in text and "<script>x</script>" not in text
+
+
 def test_index_only_rebuild_spawns_nothing_and_needs_no_run_branch(tmp_path):
     """`index --out DIR` calls the collect step over an existing
     collection. Nothing is spawned — the PATH here holds no `claude` and no
