@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
-from run_fixtures import drop_repo_field, linked_worktree  # noqa: E402
+from run_fixtures import SHA_A, SHA_B, commit_in, drop_repo_field, linked_worktree  # noqa: E402
 import counts as counts_mod  # noqa: E402
 
 # A real git checkout to record as a run's target when the case is not about it.
@@ -58,7 +58,7 @@ def landed_run(root):
     def make(run_id, repo):
         runfile.start(run_id, slots=1, root=root, repo=repo)
         runfile.clump(run_id, [901], "/w/a", "agent-a", root=root)
-        runfile.land(run_id, 901, "abc1234", root=root)
+        runfile.land(run_id, 901, SHA_A if repo == REPO else commit_in(repo), root=root)
     return make
 
 
@@ -82,8 +82,8 @@ def test_counts_sums_fixed_and_moved_across_landed_clumps(root, reviews):
     runfile.start("run-c", slots=2, root=root, repo=REPO)
     runfile.clump("run-c", [901], "/w/a", "agent-a", root=root)
     runfile.clump("run-c", [905], "/w/b", "agent-b", root=root)
-    runfile.land("run-c", 901, "abc1234", root=root)
-    runfile.land("run-c", 905, "def5678", root=root)
+    runfile.land("run-c", 901, SHA_A, root=root)
+    runfile.land("run-c", 905, SHA_B, root=root)
     write_sidecar(reviews, 901, [
         {"id": "S1", "outcome": "fixed", "sha": "aaa"},
         {"id": "S2", "outcome": "fixed", "sha": "bbb"},
@@ -100,7 +100,7 @@ def test_counts_sums_fixed_and_moved_across_landed_clumps(root, reviews):
 def test_counts_ignores_an_unlanded_clumps_sidecar(root, reviews):
     runfile.start("run-d", slots=2, root=root, repo=REPO)
     runfile.clump("run-d", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-d", 901, "abc1234", root=root)
+    runfile.land("run-d", 901, SHA_A, root=root)
     runfile.clump("run-d", [905], "/w/b", "agent-b", root=root)
     write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
     # 905 is not landed and has no sidecar file at all — its absence must
@@ -113,7 +113,7 @@ def test_counts_ignores_an_unlanded_clumps_sidecar(root, reviews):
 def test_a_pre_1401_sidecar_still_counts_filed_as_moved_and_names_the_leftovers_nothing_sweeps(root, reviews):
     runfile.start("run-l", slots=1, root=root, repo=REPO)
     runfile.clump("run-l", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-l", 901, "abc1234", root=root)
+    runfile.land("run-l", 901, SHA_A, root=root)
     write_sidecar(reviews, 901, [
         {"id": "S1", "outcome": "fixed", "sha": "a"},
         {"id": "S2", "outcome": "filed", "ticket": 5},
@@ -129,7 +129,7 @@ def test_a_pre_1401_sidecar_still_counts_filed_as_moved_and_names_the_leftovers_
 def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero(root, reviews):
     runfile.start("run-e", slots=1, root=root, repo=REPO)
     runfile.clump("run-e", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-e", 901, "abc1234", root=root)
+    runfile.land("run-e", 901, SHA_A, root=root)
     run = runfile.load("run-e", root=root)
     with pytest.raises(runfile.RunFileError, match="901"):
         counts_mod.counts(run, reviews)
@@ -143,7 +143,7 @@ def test_counts_names_a_closed_clump_as_skipped_rather_than_refusing_it(root, re
     runfile.clump("run-g", [901], "/w/a", "agent-a", root=root)
     runfile.clump("run-g", [1236], "/w/b", "agent-b", root=root)
     runfile.clump("run-g", [1262], "/w/c", "agent-c", root=root)
-    runfile.land("run-g", 901, "abc1234", root=root)
+    runfile.land("run-g", 901, SHA_A, root=root)
     runfile.close("run-g", 1236, "duplicate of #1202", root=root)
     runfile.close("run-g", 1262, "nested spec run", root=root)
     write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
@@ -160,8 +160,8 @@ def test_spec_counts_read_the_specs_one_sidecar_and_need_none_per_slice(root, re
     runfile.start("run-s", slots=2, root=root, repo=REPO)
     runfile.clump("run-s", [901], "/w/a", "agent-a", root=root)
     runfile.clump("run-s", [902], "/w/b", "agent-b", root=root)
-    runfile.land("run-s", 901, "abc1234", root=root)
-    runfile.land("run-s", 902, "def5678", root=root)
+    runfile.land("run-s", 901, SHA_A, root=root)
+    runfile.land("run-s", 902, SHA_B, root=root)
     write_sidecar(reviews, 500, [
         {"id": "S1", "outcome": "fixed", "sha": "a"},
         {"id": "C1", "outcome": "moved", "ticket": 5},
@@ -175,7 +175,7 @@ def test_spec_counts_read_the_specs_one_sidecar_and_need_none_per_slice(root, re
 def test_spec_counts_still_refuse_when_the_specs_own_sidecar_is_missing(root, reviews):
     runfile.start("run-t", slots=1, root=root, repo=REPO)
     runfile.clump("run-t", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-t", 901, "abc1234", root=root)
+    runfile.land("run-t", 901, SHA_A, root=root)
     # A slice's own sidecar must not stand in for the spec's.
     write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
     got = cli(root, "run-t", "--reviews-dir", reviews, "--spec", "500")
@@ -186,7 +186,7 @@ def test_spec_counts_still_refuse_when_the_specs_own_sidecar_is_missing(root, re
 def test_spec_counts_do_not_double_count_a_slices_stray_sidecar(root, reviews):
     runfile.start("run-u", slots=1, root=root, repo=REPO)
     runfile.clump("run-u", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-u", 901, "abc1234", root=root)
+    runfile.land("run-u", 901, SHA_A, root=root)
     write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
     write_sidecar(reviews, 500, [])
     got = cli(root, "run-u", "--reviews-dir", reviews, "--spec", "500")
@@ -220,7 +220,7 @@ def test_cli_counts_accepts_the_primary_checkout_of_a_run_started_in_a_worktree_
     linked = linked_worktree(target, "linked")
     runfile.start("run-x", slots=1, root=root, repo=linked)
     runfile.clump("run-x", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-x", 901, "abc1234", root=root)
+    runfile.land("run-x", 901, commit_in(linked), root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "sha": "a",
@@ -243,7 +243,7 @@ def test_cli_counts_keys_the_cache_on_the_common_git_dir_not_the_checkout_name_1
                    check=True)
     runfile.start("run-x", slots=1, root=root, repo=work)
     runfile.clump("run-x", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-x", 901, "abc1234", root=root)
+    runfile.land("run-x", 901, commit_in(work), root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "gitdirs")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "sha": "a",
@@ -261,7 +261,7 @@ def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd(root, home,
     other = git_repo(home, "other-repo")
     runfile.start("run-x", slots=1, root=root, repo=target)
     runfile.clump("run-x", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-x", 901, "abc1234", root=root)
+    runfile.land("run-x", 901, commit_in(target), root=root)
     for name, outcome in (("target-repo", "moved"), ("other-repo", "fixed")):
         d = os.path.join(home, ".cache", "agent-reviews", name)
         os.makedirs(d)
@@ -347,7 +347,7 @@ def test_cli_counts_ignores_a_git_dir_in_the_environment(root, home, git_repo):
     other = git_repo(home, "other-repo")
     runfile.start("run-g", slots=1, root=root, repo=target)
     runfile.clump("run-g", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-g", 901, "abc1234", root=root)
+    runfile.land("run-g", 901, commit_in(target), root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "ticket": 5}])
@@ -373,7 +373,7 @@ def test_cli_counts_reads_the_folded_cache_directory_for_a_repo_named_agent_skil
     subprocess.run(["git", "init", "-q", "--separate-git-dir", gitdir, work], check=True)
     runfile.start("run-x", slots=1, root=root, repo=work)
     runfile.clump("run-x", [901], "/w/a", "agent-a", root=root)
-    runfile.land("run-x", 901, "abc1234", root=root)
+    runfile.land("run-x", 901, commit_in(work), root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "skills")
     os.makedirs(d)
     write_sidecar(d, 901, [{"id": "S1", "outcome": "moved", "sha": "a", "ticket": 5}])

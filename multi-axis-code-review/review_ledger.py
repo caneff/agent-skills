@@ -1848,13 +1848,15 @@ def _old_ranges(repo_dir: Path, fix: str) -> dict[str, list[tuple[int, int]]]:
     names = _git(repo_dir, "diff", "--name-only", "-z", "--no-renames", f"{fix}^", fix)
     out: dict[str, list[tuple[int, int]]] = {}
     for path in filter(None, names.split("\0")):
-        parent_lines = len(_git(repo_dir, "show", f"{fix}^:{path}").splitlines()) if _exists(
-            repo_dir, f"{fix}^", path) else 0
         patch = _git(repo_dir, "diff", "-U0", "--no-renames", f"{fix}^", fix, "--", path)
-        for line in patch.splitlines():
-            m = _HUNK_RE.match(line)
-            if not m or not parent_lines:
-                continue
+        hunks = [m for line in patch.splitlines() if (m := _HUNK_RE.match(line))]
+        # A binary file's patch has no hunk, so its bytes are never read as text (#1979).
+        if not hunks or not _exists(repo_dir, f"{fix}^", path):
+            continue
+        parent_lines = len(_git(repo_dir, "show", f"{fix}^:{path}").splitlines())
+        if not parent_lines:
+            continue
+        for m in hunks:
             first, count = int(m.group(1)), int(m.group(2) if m.group(2) is not None else 1)
             span = (first, first + count - 1) if count else (max(min(first, parent_lines), 1),
                                                              min(first + 1, parent_lines))

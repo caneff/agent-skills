@@ -33,7 +33,9 @@ def scrubbed_env():
 
 def _run(cmd, ok, cwd, timeout):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, env=scrubbed_env(), timeout=timeout)
+        # errors="replace": non-UTF-8 output still counts lines (#1979).
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                           cwd=cwd, env=scrubbed_env(), timeout=timeout)
     except subprocess.TimeoutExpired:
         raise CmdError(f"{' '.join(cmd)}: timed out after {timeout}s") from None
     except OSError as e:

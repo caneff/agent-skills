@@ -9,6 +9,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../
 import fixture_identity  # noqa: E402
 
 
+def _commit_shas():
+    """Two distinct commits of this repo: `land` refuses a sha that is no
+    commit there (#1979). A one-commit clone has only one, and says so."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    top = runfile.checkout_top(here)
+    out = subprocess.run(["git", "-C", top, "rev-list", "--max-count=2", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.split()
+    if len(out) < 2:
+        raise RuntimeError(f"{top} has one commit; these suites need two")
+    return out[0], out[1]
+
+
+SHA_A, SHA_B = _commit_shas()
+
+
 def reopen_permissions(root):
     """Give every entry under `root` (and `root` itself) owner access again, so
     pytest can remove a tree a test took permissions away from."""
@@ -56,3 +71,15 @@ def linked_worktree(primary, name):
     subprocess.run(["git", "-C", primary, "worktree", "add", "-q", "--detach",
                     path], check=True)
     return os.path.realpath(path)
+
+
+def commit_in(repo):
+    """An empty commit in the fixture checkout `repo`, and its sha: a `land`
+    target (#1979). Refused on the checkout the suites run from."""
+    here = runfile.checkout_top(os.path.dirname(os.path.abspath(__file__)))
+    if runfile.checkout_top(repo) == here:
+        raise ValueError(f"commit_in would commit into the real checkout {here}")
+    subprocess.run(["git", "-C", repo, "commit", "-q", "--allow-empty", "-m", "x"],
+                   check=True, env={**os.environ, **fixture_identity.env()})
+    return subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True,
+                          text=True, check=True).stdout.strip()
