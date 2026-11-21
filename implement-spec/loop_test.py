@@ -2123,3 +2123,51 @@ def test_a_leaked_git_dir_does_not_repoint_the_loops_git(tmp, monkeypatch):
     monkeypatch.setenv("GIT_DIR", os.path.join(other, ".git"))
     assert want != "elsewhere"
     assert loop.git(["branch", "--show-current"], cwd=work).strip() == want
+
+
+# The closure cap (#1981): a closure past a quarter of the repo's tracked
+# source files holds only the candidate's own files.
+def wide_closure(n=5000):
+    return [f"wide/f{i}.py" for i in range(n)]
+
+
+def test_cap_closures_drops_a_closure_over_a_quarter_and_says_so():
+    big = {"tickets": [7], "files": ["a.py"], "closure": ["a.py", "b.py", "c.py"]}
+    kept, notes = loop.cap_closures([big], total=8)
+    assert "closure" not in kept[0] and kept[0]["files"] == ["a.py"], kept
+    assert len(notes) == 1 and "#7" in notes[0] and "cap" in notes[0], notes
+
+
+def test_cap_closures_keeps_a_closure_at_a_quarter_exactly():
+    small = {"tickets": [7], "files": ["a.py"], "closure": ["a.py", "b.py"]}
+    kept, notes = loop.cap_closures([small], total=8)
+    assert kept == [small] and notes == [], (kept, notes)
+
+
+def cap_dispatch(tmp, live_closure):
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [500], "files": ["shared.py"],
+                    "closure": ["shared.py"]}], fh)
+    with open(live, "w") as fh:
+        json.dump([{"tickets": [351], "workspace": "/w/351", "agent": "sm-351",
+                    "files": ["own.py"], "closure": live_closure,
+                    "job": NO_JOB}], fh)
+    return loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                   "--free", "2", "--processes", "4", "--committed-gb", "4")
+
+
+def test_a_live_closure_over_the_cap_holds_only_its_own_files(tmp):
+    got = cap_dispatch(tmp, ["own.py", "shared.py", *wide_closure()])
+    assert got.returncode == 0, got
+    assert "dispatch  #500" in got.stdout, got.stdout
+    assert "closure cap" in got.stdout and "#351" in got.stdout, got.stdout
+
+
+def test_a_live_closure_under_the_cap_holds_as_before(tmp):
+    got = cap_dispatch(tmp, ["own.py", "shared.py"])
+    assert got.returncode == 0, got
+    assert "dispatch  #500" not in got.stdout, got.stdout
+    assert "closure cap" not in got.stdout, got.stdout
+    assert "held" in got.stdout and "shared.py" in got.stdout, got.stdout

@@ -171,6 +171,90 @@ def python_references(rel, text):
     return out
 
 
+def _path_value(node, rel, env):
+    """A `sys.path` argument's directory as a repo-relative posix string, or
+    `None` when this reader cannot say. Reads the forms this repo's scripts
+    use: string constants, `__file__`, names bound once at module level,
+    `os.path.dirname/abspath/realpath/normpath/join`, `str`, `Path`,
+    `.resolve()`, `.parent`, `.parents[n]` and the `/` operator. Anything
+    else is unresolved, and an unresolved insert adds no edge."""
+    def val(n):
+        return _path_value(n, rel, env)
+
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.Name):
+        return rel if node.id == "__file__" else env.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left, right = val(node.left), val(node.right)
+        return None if left is None or right is None \
+            else posixpath.normpath(posixpath.join(left, right))
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        inner = val(node.value)
+        return None if inner is None else posixpath.dirname(inner)
+    if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "parents"
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, int) and node.slice.value >= 0):
+        inner = val(node.value.value)
+        for _ in range(node.slice.value + 1 if inner is not None else 0):
+            inner = posixpath.dirname(inner)
+        return inner
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "resolve" and not node.args):
+        return val(node.func.value)
+    if isinstance(node, ast.Call) and not node.keywords:
+        func = ast.unparse(node.func)
+        args = [val(a) for a in node.args]
+        if None in args or (not args and func != "os.path.join"):
+            return None
+        if func in ("os.path.abspath", "os.path.realpath", "os.path.normpath",
+                    "str", "Path", "pathlib.Path") and len(args) == 1:
+            return posixpath.normpath(args[0])
+        if func == "os.path.dirname" and len(args) == 1:
+            return posixpath.dirname(args[0])
+        if func == "os.path.join" and args:
+            return posixpath.normpath(posixpath.join(*args))
+    return None
+
+
+def path_bases(rel, text):
+    """The repo-relative directories a Python file puts on `sys.path` with
+    `sys.path.insert(i, X)` or `sys.path.append(X)`: a module the file
+    imports may live in any of them (#1981). Names bound once at module level
+    (`HERE = ...`) are followed. An insert this reader cannot evaluate, or
+    one that points outside the repo, adds nothing. Every insert in the file
+    counts, wherever it sits, as the over-matching direction is the safe one.
+    A file that does not parse is `imported_modules`' refusal, not this one's."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError):
+        return []
+    env = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            value = _path_value(node.value, rel, env)
+            if value is not None:
+                env[node.targets[0].id] = value
+    bases = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and ast.unparse(node.func) in ("sys.path.insert", "sys.path.append")):
+            continue
+        arg = (node.args[1] if node.func.attr == "insert" and len(node.args) == 2
+               else node.args[0] if node.func.attr == "append" and len(node.args) == 1
+               else None)
+        base = None if arg is None else _path_value(arg, rel, env)
+        if base is not None:
+            base = posixpath.normpath(base)
+            if base != ".." and not base.startswith("../") and not base.startswith("/"):
+                bases.append("" if base == "." else base)
+    return list(dict.fromkeys(bases))
+
+
 def directive_pattern(directive):
     """The repo's include line as a regex with the path captured. The
     declaration is a template — `#include <path>`, `{% include "<path>" %}` —
@@ -333,6 +417,10 @@ def include_edges(root, decl, limit=SCAN_LIMIT):
     for rel in files:
         if python and not rel.endswith(".py"):
             continue
+        if python and "fixtures" in rel.split("/")[:-1]:
+            # A fixture's files may be broken on purpose, and nothing real
+            # imports through them (#1981).
+            continue
         text = read_text(os.path.join(root, rel), limit)
         if text is None:
             if python:
@@ -342,16 +430,22 @@ def include_edges(root, decl, limit=SCAN_LIMIT):
             continue
         if python:
             references = python_references(rel, text)
+            inserted = path_bases(rel, text)
         else:
             references = [m.group(1).strip()
                           for line in scanned_lines(rel, text)
                           for m in pattern.finditer(line)]
         for reference in references:
-            target = resolve_reference(rel, reference, decl.relative_to)
-            # A Python name with no tracked file is stdlib or third-party.
-            if python and target not in tracked:
-                continue
-            edges.setdefault(target, set()).add(rel)
+            targets = [resolve_reference(rel, reference, decl.relative_to)]
+            if python:
+                # Also the directories this file puts on `sys.path` (#1981).
+                targets += [posixpath.normpath(posixpath.join(b, reference))
+                            for b in inserted]
+            for target in targets:
+                # A Python name with no tracked file is stdlib or third-party.
+                if python and target not in tracked:
+                    continue
+                edges.setdefault(target, set()).add(rel)
     return edges
 
 

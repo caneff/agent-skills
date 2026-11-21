@@ -123,6 +123,16 @@ in one directory can still collide in the merge tail, as #1342 saw. That
 conflict is the worker's to resolve on rebase; the idle slots were the larger
 cost.
 
+**The closure cap** (#1981). A closure that covers more than a quarter of the
+repo's tracked source files stops holding on all of them: `loop.py dispatch`
+reads such a clump's own `files` instead and prints one `closure cap applied`
+line naming it. twitch-rules-scroller's one-hop closure covered most of a flat
+tree, so the hold kept nearly every other slice back and a run went near-serial
+for about two hours. The cost: a capped clump no longer holds the importers of
+its files, so a collision the closure would have named surfaces in the merge
+tail instead. Candidates and live clumps are both capped. When git cannot count
+the source files, the line says the cap was not applied.
+
 Both consequences are stated in the skill because neither is visible from the
 frontier's own definition:
 

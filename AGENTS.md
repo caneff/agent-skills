@@ -10,7 +10,11 @@ Six canonical roles, all mapped to their default label strings (`needs-triage`, 
 
 ### Include closure
 
-None — no file in this repo is generated from another. Add a `**Directive**:` and a `**Generator**:` line here the day that stops being true. The grammar, and what a run does with it: `implement-spec/references/closure.md`.
+- **Directive**: `python imports`
+- **Paths**: relative to the including file
+- **Generator**: none — nothing here is generated; the closure is the importers a change reaches.
+
+Grammar, and the `sys.path` inserts it reads: `implement-spec/references/closure.md`.
 
 ### Skill frontmatter
 

@@ -26,9 +26,11 @@ import shutil
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 
 import agents  # noqa: E402
+import closure as closure_mod  # noqa: E402
 import runfile  # noqa: E402
 import shellcmd  # noqa: E402
 
@@ -86,6 +88,45 @@ def seat(run, default=origin_default):
             f"on {branch}, not this checkout's default branch ({default}) — "
             "a controller runs from the default branch.")
     return branch
+
+
+# What counts as a tracked source file for the closure cap (#1981); the same
+# kinds `tests/suite-edges.py` scans.
+SOURCE_SUFFIXES = (".py", ".sh", ".rs", ".js", ".mjs", ".cjs", ".ts", ".tsx")
+CLOSURE_CAP = 4  # a closure may cover at most 1/CLOSURE_CAP of the source files
+
+
+def source_total(repo):
+    """How many tracked source files `repo` holds, or `None` when git cannot
+    list them (`closure.repo_files`'s refusal)."""
+    try:
+        return sum(f.endswith(SOURCE_SUFFIXES)
+                   for f in closure_mod.repo_files(repo))
+    except closure_mod.ClosureError:
+        return None
+
+
+def cap_closures(clumps, total):
+    """`(clumps, notes)`: a clump whose `closure` covers more than a quarter
+    of `total` source files holds only its own `files`, and one note per such
+    clump says the cap applied (#1981). A flat repo's closure can cover most
+    of the tree, and holding on it ran a whole spec near-serial. A clump with
+    no `files` keeps its closure and says so: there is nothing narrower to
+    hold on. The clumps passed in are not mutated."""
+    out, notes = [], []
+    for clump in clumps:
+        wide = clump.get("closure")
+        if not isinstance(wide, list) or len(wide) * CLOSURE_CAP <= total:
+            out.append(clump)
+            continue
+        label = f"#{key_of(clump)}: closure of {len(wide)} files exceeds 1/{CLOSURE_CAP} of {total} source files"
+        if not clump.get("files"):
+            out.append(clump)
+            notes.append(f"closure cap not applied to {label}, and it names no files of its own")
+            continue
+        out.append({k: v for k, v in clump.items() if k != "closure"})
+        notes.append(f"closure cap applied to {label}; held on its own files only")
+    return out, notes
 
 
 def owned(clump):
@@ -723,6 +764,15 @@ def cmd_dispatch(args):
     root = runfile.env_root()
     run = load_run(args.run, root)
     repo = run_target(run)
+    total = source_total(repo)
+    if total is None:
+        print("closure cap: not applied — could not count the tracked source "
+              f"files of {repo}")
+    else:
+        candidates, notes = cap_closures(candidates, total)
+        in_flight, live_notes = cap_closures(in_flight, total)
+        for note in notes + live_notes:
+            print(note)
     in_flight = with_run_jobs(in_flight, run)
     candidates, skipped = without_settled(candidates, run)
     for lowest in skipped:
