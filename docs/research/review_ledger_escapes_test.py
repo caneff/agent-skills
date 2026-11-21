@@ -208,12 +208,17 @@ class TestEscape:
         got = repo.escapes()
         assert [(e["ticket"], e["files"]) for e in got["escapes"]] == [(11, ["a.py"])]
 
-    def test_a_crash_in_the_history_read_exits_non_zero_with_the_reason(self, repo, monkeypatch):
-        repo.land({"a.py": "a1\nFIXED\na3\na4\na5\na6\n"}, "fix: crash in a.py", 4)
+    def test_a_non_utf8_text_file_in_a_fix_commit_does_not_stop_the_table(self, repo):
+        # #1979 P1/C1: a Latin-1 file has hunks, so only the decode keeps the table.
+        (repo.repo / "l.txt").write_bytes(b"caf\xe9\nl2\nl3\n")
+        repo.git(repo.repo, "add", "l.txt")
+        repo.git(repo.repo, "commit", "-q", "-m", "l: add (#37)", "-m", "Closes #16", when=T0 + 3 * DAY)
+        repo.skip(16, "spec", "ablation")
+        (repo.repo / "l.txt").write_bytes(b"caf\xe9\nFIXED\nl3\n")
+        repo.git(repo.repo, "add", "l.txt")
+        repo.git(repo.repo, "commit", "-q", "-m", "fix: l", when=T0 + 4 * DAY)
         repo.publish()
-        r = repo.run("escapes", "--repo-dir", repo.repo / "missing-dir", "--ledger", repo.ledger)
-        assert r.returncode != 0
-        assert "review_ledger escapes:" in r.stderr, r.stderr
+        assert [(e["ticket"], e["files"]) for e in repo.escapes()["escapes"]] == [(16, ["l.txt"])]
 
     def test_a_landing_is_found_by_the_ticket_in_its_subject_when_the_body_has_no_closes(self, repo):
         repo.land({"e.py": "e1\ne2\ne3\n"}, "e: add the thing (#15) (#35)", 3)

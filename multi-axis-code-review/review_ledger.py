@@ -1854,9 +1854,9 @@ def _old_ranges(repo_dir: Path, fix: str) -> dict[str, list[tuple[int, int]]]:
         if not hunks or not _exists(repo_dir, f"{fix}^", path):
             continue
         parent_lines = len(_git(repo_dir, "show", f"{fix}^:{path}").splitlines())
+        if not parent_lines:
+            continue
         for m in hunks:
-            if not parent_lines:
-                continue
             first, count = int(m.group(1)), int(m.group(2) if m.group(2) is not None else 1)
             span = (first, first + count - 1) if count else (max(min(first, parent_lines), 1),
                                                              min(first + 1, parent_lines))

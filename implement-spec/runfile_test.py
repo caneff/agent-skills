@@ -9,6 +9,7 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -317,7 +318,8 @@ def test_a_landing_sha_is_hex(cache, bad):
 
 
 def test_a_landing_sha_that_is_no_commit_in_the_target_repo_is_refused(cache):
-    # #1979: a well-formed 40-hex sha no object answers to was recorded, then blocked its own correction.
+    # #1979: a well-formed sha no object answers to was recorded, then
+    # blocked its own correction.
     runfile.start("run-1", slots=2, root=cache, repo=REPO)
     runfile.clump("run-1", [901], "/w/a", "agent-a", root=cache)
     typo = "7c4a36c" + "0" * 33
@@ -327,6 +329,18 @@ def test_a_landing_sha_that_is_no_commit_in_the_target_repo_is_refused(cache):
     assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] is None
     runfile.land("run-1", 901, SHA_A, root=cache)  # the correction is accepted
     assert runfile.load("run-1", root=cache)["clumps"][0]["landed"] == SHA_A
+
+
+def test_a_target_repo_git_cannot_read_is_not_reported_as_a_bad_sha(cache, git_checkout):
+    # #1979 S1/C3: a moved or deleted checkout must not read as a typo'd sha.
+    target = git_checkout("gone")
+    runfile.start("run-1", slots=2, root=cache, repo=target)
+    runfile.clump("run-1", [901], "/w/a", "agent-a", root=cache)
+    shutil.rmtree(target)
+    with pytest.raises(runfile.RunFileError) as exc:
+        runfile.land("run-1", 901, SHA_A, root=cache)
+    assert "cannot check" in str(exc.value), exc.value
+    assert "is not a commit" not in str(exc.value), exc.value
 
 
 def test_a_landing_sha_that_names_a_tree_not_a_commit_is_refused(cache):
