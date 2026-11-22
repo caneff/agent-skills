@@ -447,6 +447,22 @@ def test_a_repo_whose_owner_is_on_the_owned_list_runs(sb):
     assert os.path.exists(sb.jobs_log), "the seam ran"
 
 
+def test_an_unreadable_owned_list_is_refused_as_inconclusive(sb):
+    """A lost `common/owned-owners.txt` refuses even the login's own repo (#2005)."""
+    wrapper = os.path.join(sb.tmp, "no-list-backstop.py")
+    write(wrapper, "import runpy, sys\n"
+                   f"sys.path.insert(0, {os.path.join(HERE, os.pardir, 'common')!r})\n"
+                   "import owners\n"
+                   f"owners.OWNERS_FILE = {os.path.join(sb.tmp, 'missing-list')!r}\n"
+                   f"sys.argv[0] = {BACKSTOP!r}\n"
+                   f"runpy.run_path({BACKSTOP!r}, run_name='__main__')\n")
+    out = sb.run("green", script=wrapper)
+    assert out.returncode == 2, out.stderr
+    assert not os.path.exists(sb.jobs_log), "no seam runs when ownership cannot be read"
+    (note,) = sb.notes()
+    assert "inconclusive" in note and "ownership could not be read" in note and "missing-list" in note, note
+
+
 def test_an_origin_that_is_not_on_github_is_refused_before_anything_runs(sb):
     """A remote with no `github.com/<owner>/<name>` in it names no repo to file in or to own."""
     elsewhere = os.path.join(sb.tmp, "elsewhere", "repo.git")

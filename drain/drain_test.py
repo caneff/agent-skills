@@ -1108,6 +1108,21 @@ def test_the_login_owns_its_repo_whatever_the_case_of_the_origin(sb):
     assert r.returncode == 0, (r.stdout, r.stderr)
 
 
+def test_refuses_any_repo_when_the_owned_list_cannot_be_read(sb):
+    """A lost `common/owned-owners.txt` refuses even the login's own repo (#2005)."""
+    sb.write_state({1: {}})
+    missing = os.path.join(sb.tmp, "missing-list")
+    code = ("import runpy, sys\n"
+            f"sys.path.insert(0, {os.path.join(HERE, os.pardir, 'common')!r})\n"
+            f"import owners; owners.OWNERS_FILE = {missing!r}\n"
+            f"sys.argv = [{DRAIN!r}, '--repo', {sb.repo!r}, '--once']\n"
+            f"runpy.run_path({DRAIN!r}, run_name='__main__')\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=sb.drain_env())
+    assert r.returncode == 1, (r.stdout, r.stderr)
+    assert sb.dispatch_runs() == []
+    assert "owned-owners list" in r.stderr and "missing-list" in r.stderr and "Traceback" not in r.stderr, r.stderr
+
+
 def test_each_merge_runs_the_per_change_command_and_no_run_follows_the_last_bundle(sb):
     sb.write_state({1: {}, 2: {}})
     sb.set_seam('echo run >> "$SEAM_LOG"')

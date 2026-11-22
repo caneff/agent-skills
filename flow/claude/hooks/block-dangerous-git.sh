@@ -23,9 +23,9 @@
 #     #1526) is gated on the same OWNERSHIP (#790): allowed when this
 #     checkout's base (a fork's parent, except the standalone fork of
 #     WORKFLOW.md § Gate 1, #1716) and every repo the line names are the
-#     user's, blocked everywhere else. Only the command is matched, not the phrase: quoted
-#     text (a grep pattern, a commit message) is data unless a shell runs
-#     it. The `ready-for-human` exception —
+#     user's, blocked everywhere else. Only the command is matched, not the
+#     phrase: quoted text (a grep pattern, a commit message) is data unless a
+#     shell runs it. The `ready-for-human` exception —
 #     the user merges that ticket's PR — is enforced by `/implement`'s prose,
 #     not here: a squash merge on the user's own repo is undone with a revert,
 #     so a prose miss there costs a revert, not a merge nobody can take back.
@@ -382,20 +382,21 @@ gh_failed() {
 owners_file="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../../common/owned-owners.txt"
 # Is owner $1 the user's: 0 when it is the login (GH_LOGIN, read first) or on
 # the list, 1 when on neither, 2 with OWNERSHIP_ERR set when the list cannot
-# be read. The login needs no list, so a lost list costs only the listed
-# owners, and never grants one.
+# be read, the login's own repos included (#2005: an unreadable list means
+# not owned). A line is read as common/owners.py reads it: `#` starts a
+# comment, and surrounding whitespace, a CRLF's CR included, is dropped.
 owner_is_owned() {
-  local line
-  [ -n "$1" ] || return 1
-  ieq "$1" "$GH_LOGIN" && return 0
+  local line listed=1
   [ -f "$owners_file" ] && [ -r "$owners_file" ] \
     || { OWNERSHIP_ERR="the owned-owners list $owners_file cannot be read"; return 2; }
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line%%#*}
-    line=$(printf '%s' "$line" | tr -d '[:space:]')
-    [ -n "$line" ] && ieq "$line" "$1" && return 0
+    line=$(printf '%s' "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [ -n "$line" ] && ieq "$line" "$1" && listed=0
   done < "$owners_file"
-  return 1
+  [ -n "$1" ] || return 1
+  ieq "$1" "$GH_LOGIN" && return 0
+  return $listed
 }
 # The gh login into GH_LOGIN; 2, with OWNERSHIP_ERR set, when gh cannot say.
 gh_login() {
@@ -420,9 +421,9 @@ gh_repo() {
   [ -z "$errf" ] || rm -f "$errf"
   [ -n "$GH_ANSWER" ] || { OWNERSHIP_ERR="gh: empty answer"; return 2; }
 }
-# Is the repo at URL $1 the user's (owner_is_owned), judged as itself: a fork is its own
-# owner's, not its parent's. A URL off github — a local path, a private host —
-# is the user's own experiment, with no outward gate.
+# Is the repo at URL $1 the user's (owner_is_owned), judged as itself: a
+# fork is its own owner's, not its parent's. A URL off github — a local path,
+# a private host — is the user's own experiment, with no outward gate.
 url_is_owned() {
   local slug
   slug=$(github_slug "$1") || return 0
@@ -434,8 +435,8 @@ url_is_owned() {
   cache_owned "$slug"
   return 0
 }
-# Is the PR base the repo at URL $1 resolves to the user's (owner_is_owned): its parent when
-# it is a fork, else itself. The URL is named to gh explicitly (a bare `gh
+# Is the PR base the repo at URL $1 resolves to the user's (owner_is_owned):
+# its parent when it is a fork, else itself. The URL is named to gh explicitly (a bare `gh
 # repo view` would resolve to an `upstream` remote instead). base/<key of $1>
 # is written only once that base is verified owned, so its presence is the
 # verdict.
@@ -509,7 +510,7 @@ named_owners() {
 }
 # Every owner in the list $1 is the user's (owner_is_owned); 2, naming them,
 # when the login or the owned-owners list cannot be read.
-owners_are_login() {
+owners_are_owned() {
   local owner
   OWNERSHIP_REPO="the repo the command names (owner $(printf '%s' "$1" | paste -sd, -))"
   gh_login || return 2
@@ -521,18 +522,18 @@ owners_are_login() {
 # acts on, never instead of it, so a name on another command or inside a
 # quoted subject can only block. Read from the whole command, heredoc bodies
 # included when a shell is handed the text.
-command_owners_are_login() {
+command_owners_are_owned() {
   local owners text=$SCAN
   command_views
   [ "$cmd_handed" = 1 ] && text=$COMMAND
   owners=$(named_owners "$text")
-  [ -z "$owners" ] || owners_are_login "$owners"
+  [ -z "$owners" ] || owners_are_owned "$owners"
 }
 # Returns as base_is_owned does: 0 owned, 1 not owned, 2 gh could not answer.
 merge_is_owned() {
   origin_base_is_owned || return
   # The checkout is already verified; what is left unread is the named repo.
-  command_owners_are_login
+  command_owners_are_owned
 }
 # Every repo gh could take as a PR's default base: each github remote as
 # itself and, when it is a fork, its parent, plus a repo `gh repo set-default`
@@ -549,12 +550,12 @@ default_bases_are_owned() {
            git config --get-regexp '^remote\..*\.gh-resolved$' | awk '$2 ~ /\// { print "https://github.com/" $2 }')
 }
 # The base of a `gh pr create`: every repo the command names must be the
-# login's, and unless each create the shell runs names its repo itself,
+# user's (owner_is_owned), and unless each create the shell runs names its repo itself,
 # unquoted, gh's default base must be too. 3, PR_WHY saying why, when the
 # default base is read from a checkout a `cd` moved away from.
 pr_create_is_owned() {
   local segment segments
-  command_owners_are_login || return
+  command_owners_are_owned || return
   command_views
   segments=$(split_segments "$CMD_BARE" | grep -E "$create_re")
   if [ -n "$segments" ]; then

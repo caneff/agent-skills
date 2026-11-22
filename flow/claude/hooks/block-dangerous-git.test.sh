@@ -870,24 +870,37 @@ run "gh pr merge naming an unlisted org blocked" 2 "gh pr merge 12 --repo chinst
 rm -rf "$XDG_CACHE_HOME"
 export STUB_OWNER=chinstrap46
 run "unlisted org's repo: push blocked" 2 "git push origin main" "gh pr create"
-# A list the guard cannot read fails closed, said as a lookup failure; the
-# login's own repos need no list.
+# A list the guard cannot read fails closed, said as a lookup failure, for
+# every owner, the login's own included (#2005).
 mkdir -p "$tmp/nolist/flow/claude/hooks"
 cp "$hook" "$here/command-scan-lib.sh" "$tmp/nolist/flow/claude/hooks/"
-nolist_run() { # <owner> <command>
+copy_run() { # <tree> <owner> <command>
   rm -rf "$XDG_CACHE_HOME"
-  printf '%s' "$2" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
-    | (cd "$repo" && STUB_LOGIN=caneff STUB_OWNER=$1 PATH="$stubdir:$PATH" bash "$tmp/nolist/flow/claude/hooks/block-dangerous-git.sh") 2>&1
+  printf '%s' "$3" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+    | (cd "$repo" && STUB_LOGIN=caneff STUB_OWNER=$2 PATH="$stubdir:$PATH" \
+         bash "$1/flow/claude/hooks/block-dangerous-git.sh") 2>&1
 }
-out=$(nolist_run chinstrap45 "git push origin main"); rc=$?
-if [ "$rc" = 2 ] && [[ "$out" == *"could not verify ownership"* && "$out" == *"owned-owners"* ]]; then
-  echo "PASS: unreadable owned-owners list blocks a listed org's push"
-else
-  echo "FAIL: unreadable owned-owners list — want exit 2 naming the list, got $rc: $out"; fails=1
-fi
-out=$(nolist_run caneff "git push origin main"); rc=$?
-if [ "$rc" = 0 ]; then echo "PASS: the login's own repo needs no list"
-else echo "FAIL: login's repo with no list — want exit 0, got $rc: $out"; fails=1; fi
+for owner in chinstrap45 caneff; do
+  out=$(copy_run "$tmp/nolist" "$owner" "git push origin main"); rc=$?
+  if [ "$rc" = 2 ] && [[ "$out" == *"could not verify ownership"* && "$out" == *"owned-owners"* ]]; then
+    echo "PASS: unreadable owned-owners list blocks $owner's push"
+  else
+    echo "FAIL: unreadable list, $owner — want exit 2 naming the list, got $rc: $out"; fails=1
+  fi
+done
+# The hook reads a line as common/owners_test.py holds common/owners.py to:
+# a comment, padding and a CRLF's CR are no part of the owner.
+mkdir -p "$tmp/padded/flow/claude/hooks" "$tmp/padded/common"
+cp "$hook" "$here/command-scan-lib.sh" "$tmp/padded/flow/claude/hooks/"
+printf '# owners\r\n\r\n  Org-A  # an org\r\n\tOrg-B\r\n' > "$tmp/padded/common/owned-owners.txt"
+for owner in org-a ORG-B; do
+  out=$(copy_run "$tmp/padded" "$owner" "git push origin main"); rc=$?
+  if [ "$rc" = 0 ]; then echo "PASS: padded CRLF list entry $owner is owned"
+  else echo "FAIL: padded CRLF list entry $owner — want exit 0, got $rc: $out"; fails=1; fi
+done
+out=$(copy_run "$tmp/padded" "org-c" "git push origin main"); rc=$?
+if [ "$rc" = 2 ]; then echo "PASS: an owner off the padded list is not owned"
+else echo "FAIL: org-c off the list — want exit 2, got $rc: $out"; fails=1; fi
 rm -rf "$XDG_CACHE_HOME"
 export STUB_LOGIN=caneff STUB_OWNER=caneff
 
