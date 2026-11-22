@@ -265,8 +265,10 @@ def test_the_ownership_check_passes_the_owner_and_refuses_anyone_else():
         pr_settle.require_own_repo("o/r", tracker=tracker.MemoryTracker(viewer="me"))
 
 
-def test_the_ownership_check_passes_an_owner_on_the_owned_list():
+def test_the_ownership_check_passes_an_owner_on_the_owned_list_and_no_other_org():
     pr_settle.require_own_repo("ChinStrap45/r", tracker=tracker.MemoryTracker(viewer="caneff"))
+    with pytest.raises(pr_settle.SettleError, match="nor on the owned-owners list"):
+        pr_settle.require_own_repo("chinstrap46/r", tracker=tracker.MemoryTracker(viewer="caneff"))
 
 
 def test_the_ownership_check_refuses_when_the_owned_list_cannot_be_read(monkeypatch, tmp_path):
