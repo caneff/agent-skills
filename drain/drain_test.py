@@ -1591,7 +1591,7 @@ def test_a_spec_with_one_unblocked_slice_beside_a_blocked_one_is_anchored(sb):
     assert [c["argv"] for c in sb.dispatch_runs()] == [["--repo", sb.repo, "--controller", "drain", "--spec", "1"]]
 
 
-HUMAN_SLICE = {"parent": 1, "labels": ["ready-for-agent", "ready-for-human"]}
+HUMAN_SLICE = {"parent": 1, "labels": ["ready-for-human"]}  # no ready-for-agent: the shape to-tickets gives it
 
 
 def test_a_spec_with_a_ready_for_human_slice_is_passed_over_not_anchored_and_the_drain_goes_on(sb):
@@ -1606,8 +1606,24 @@ def test_a_spec_with_a_ready_for_human_slice_is_passed_over_not_anchored_and_the
 def test_a_spec_names_every_ready_for_human_slice(sb):
     sb.write_state({1: SPEC, 2: {**HUMAN_SLICE}, 3: {**HUMAN_SLICE}})
     r = sb.drain()
-    assert "passed over: #1 slice #2, #3 is ready-for-human" in r.stdout.splitlines()
+    assert "passed over: #1 slices #2, #3 are ready-for-human" in r.stdout.splitlines()
     assert sb.dispatch_runs() == []
+
+
+def test_a_blocked_ready_for_human_slice_still_holds_its_spec_and_the_spec_is_not_waiting(sb):
+    sb.write_state({1: SPEC, 2: {"parent": 1}, 3: {**HUMAN_SLICE, "body": "## Blocked by\n\n- #2\n"}})
+    r = sb.drain()
+    assert "passed over: #1 slice #3 is ready-for-human" in r.stdout.splitlines()
+    assert "waiting:" not in r.stdout
+    assert sb.dispatch_runs() == []
+
+
+def test_a_ready_for_human_slice_that_cannot_be_read_stops_the_drain_not_anchors_the_spec(d):
+    import tracker
+    ctx = _barren_ctx([mem_issue(1, ["spec"]), mem_issue(2, ["ready-for-human"], parent=1)],
+                      broken={"parent_link:2": "boom"})
+    with pytest.raises(d.DrainError, match="ready-for-human slices: .*boom"):
+        d.human_held_specs(ctx, {1})
 
 
 def test_anchor_naming_a_spec_with_a_ready_for_human_slice_is_refused(sb):
