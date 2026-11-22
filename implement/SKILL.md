@@ -397,7 +397,7 @@ round follows steps 2–3 below keyed on the spec number:
    `disputed: unreachable — <why>`, the why naming how that environment rules
    the failure out; a bare "unlikely" is not one.
 
-   On a repo whose `origin` owner isn't your `gh` login, `/file-ticket` hands
+   On a repo that is not Chris's (`flow/claude/WORKFLOW.md` § Gate 1), `/file-ticket` hands
    the command back instead of filing, so a `moved` finding has no ticket
    number there: the disposition is `disputed: needs its own design — filing
    command handed to the controller`, with the command in your "PR up" message
@@ -1049,8 +1049,9 @@ closed.
    modified" refusal (#1526), and exits non-zero naming the last state on any
    limit. `--head` is required: the match binds the merge to the
    head the seam ran on (step 2's `headRefOid`), and GitHub refuses it
-   atomically if the head moved since. It refuses a repo whose owner is not
-   the `gh` login, as the ownership hook does for a bare `gh pr merge`. The
+   atomically if the head moved since. It refuses a repo whose owner is
+   neither the `gh` login nor on `common/owned-owners.txt`, as the ownership
+   hook does for a bare `gh pr merge`. The
    `ready-for-human` merge line, in the `--chris-merges` report block of
    § The PR, is a bare `gh pr merge` with the same flag, which Chris runs.
 

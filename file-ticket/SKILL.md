@@ -73,8 +73,9 @@ guess and do not create an issue until the target is confirmed.
 ## Create it
 
 Pass `--repo <owner>/<repo>` on every `gh` call. Read the owner/repo pair
-from the `origin` remote (`git remote -v`) — if `origin`'s owner isn't your
-`gh` login, hand the command back instead of filing it yourself.
+from the `origin` remote (`git remote -v`) — if `origin`'s owner is neither
+your `gh` login nor on `common/owned-owners.txt` (`flow/claude/WORKFLOW.md` § Gate 1), hand
+the command back instead of filing it yourself.
 
 Build the body through a heredoc so evidence text (backticks, `$(...)`,
 `$N`) isn't shell-expanded:

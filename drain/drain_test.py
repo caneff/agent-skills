@@ -1093,6 +1093,21 @@ def test_refuses_a_repo_the_user_does_not_own(sb):
     assert "someone-else" in r.stderr
 
 
+def test_runs_on_a_repo_whose_owner_is_on_the_owned_list(sb):
+    """`chinstrap45` is not the login `me`, but it is on `common/owned-owners.txt` (#2005)."""
+    sb.set_origin("ChinStrap45/repo")
+    r = sb.drain("--once")
+    assert "not owned" not in r.stderr, r.stderr
+    assert r.returncode == 0 and "queue empty" in r.stdout, (r.stdout, r.stderr)
+
+
+def test_the_login_owns_its_repo_whatever_the_case_of_the_origin(sb):
+    sb.set_origin("ME/repo")
+    r = sb.drain("--once")
+    assert "not owned" not in r.stderr, r.stderr
+    assert r.returncode == 0, (r.stdout, r.stderr)
+
+
 def test_each_merge_runs_the_per_change_command_and_no_run_follows_the_last_bundle(sb):
     sb.write_state({1: {}, 2: {}})
     sb.set_seam('echo run >> "$SEAM_LOG"')

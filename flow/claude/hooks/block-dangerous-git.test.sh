@@ -856,4 +856,39 @@ else
   echo "FAIL: missing scan lib — want exit 2 naming the lib, got $rc: $out"; fails=1
 fi
 
+# The owned-owners list (common/owned-owners.txt, #2005): an owner on it is
+# owned though it is not the login, compared case-insensitively; an owner on
+# neither is not. Pushes, PR bases and named repos all read the same list.
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER=ChinStrap45
+run "listed org's repo: push to default branch allowed" 0 "git push origin main"
+rm -rf "$XDG_CACHE_HOME"
+run "listed org's repo: gh pr merge allowed" 0 "gh pr merge 12 --squash"
+export STUB_OWNER=caneff
+run "gh pr merge naming a listed org's repo allowed" 0 "gh pr merge 12 --repo chinstrap45/sudokupad-scripts --squash"
+run "gh pr merge naming an unlisted org blocked" 2 "gh pr merge 12 --repo chinstrap46/sudokupad-scripts --squash" "BLOCKED"
+rm -rf "$XDG_CACHE_HOME"
+export STUB_OWNER=chinstrap46
+run "unlisted org's repo: push blocked" 2 "git push origin main" "gh pr create"
+# A list the guard cannot read fails closed, said as a lookup failure; the
+# login's own repos need no list.
+mkdir -p "$tmp/nolist/flow/claude/hooks"
+cp "$hook" "$here/command-scan-lib.sh" "$tmp/nolist/flow/claude/hooks/"
+nolist_run() { # <owner> <command>
+  rm -rf "$XDG_CACHE_HOME"
+  printf '%s' "$2" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+    | (cd "$repo" && STUB_LOGIN=caneff STUB_OWNER=$1 PATH="$stubdir:$PATH" bash "$tmp/nolist/flow/claude/hooks/block-dangerous-git.sh") 2>&1
+}
+out=$(nolist_run chinstrap45 "git push origin main"); rc=$?
+if [ "$rc" = 2 ] && [[ "$out" == *"could not verify ownership"* && "$out" == *"owned-owners"* ]]; then
+  echo "PASS: unreadable owned-owners list blocks a listed org's push"
+else
+  echo "FAIL: unreadable owned-owners list — want exit 2 naming the list, got $rc: $out"; fails=1
+fi
+out=$(nolist_run caneff "git push origin main"); rc=$?
+if [ "$rc" = 0 ]; then echo "PASS: the login's own repo needs no list"
+else echo "FAIL: login's repo with no list — want exit 0, got $rc: $out"; fails=1; fi
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

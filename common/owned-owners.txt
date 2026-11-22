@@ -1,0 +1,8 @@
+# GitHub owners whose repos are Chris's own, one per line, compared
+# case-insensitively. Every ownership check reads this list: the git hook
+# (flow/claude/hooks/block-dangerous-git.sh), pr_settle.py, drain.py and
+# backstop.py (through common/owners.py). A repo is owned when its owner is
+# the gh login or is named here. The list is explicit by Chris's ruling of
+# 2026-11-22 (#2005): an org membership grants nothing until it is added here.
+caneff
+chinstrap45

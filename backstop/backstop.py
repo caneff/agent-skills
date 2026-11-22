@@ -110,6 +110,7 @@ try:
     import shellcmd  # noqa: E402
     from scratch_run import one_line  # noqa: E402
     import tracker as issue_tracker  # noqa: E402  (#1786)
+    import owners  # noqa: E402  (#2005)
     from closing_ticket import declaration  # noqa: E402
     from selector_check import command_of, failing_suites  # noqa: E402
     _IMPORT_ERROR = None
@@ -521,9 +522,13 @@ def backstop(args):
         login = asked(issue_tracker.GhTracker(repo).viewer_login)
     except BackstopError as exc:
         return report_inconclusive(repo, f"the `gh` login could not be read: {one_line(exc, 200)}", args.notify)
-    if repo.split("/")[0] != login:
-        return report_inconclusive(repo, f"{repo} is not owned by {login}; the backstop files tickets only on the "
-                                         "caller's own repos", args.notify)
+    try:
+        owned = owners.is_owned(repo.split("/")[0], login)
+    except owners.OwnersError as exc:
+        return report_inconclusive(repo, f"ownership could not be read: {one_line(exc, 200)}", args.notify)
+    if not owned:
+        return report_inconclusive(repo, f"{repo} is not owned by {login} nor on the owned-owners list; the backstop "
+                                         "files tickets only on the caller's own repos", args.notify)
     try:
         default = shellcmd.default_branch(root)
     except shellcmd.CmdError as exc:

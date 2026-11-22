@@ -5,6 +5,12 @@ invariants; this file holds their exceptions and mechanics.
 
 ## Gate 1 — whose repo
 
+A repo is mine when its owner is my `gh` login or an owner named in
+`common/owned-owners.txt` (`caneff` and the `chinstrap45` org, Chris,
+2026-11-22, #2005). The list is explicit: an org I join or administer counts
+only once it is added there. The hook, `pr_settle.py`, `drain.py` and
+`backstop.py` all read it, compared case-insensitively.
+
 A push is judged by the repo it is sent to, so a fork I own is mine (Chris,
 2026-11-09: a fork I publish from, such as `caneff/penpa-edit`); a PR by its
 base repo; a merge by origin's base, a fork's parent. A **standalone fork** is

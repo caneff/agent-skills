@@ -19,6 +19,7 @@ import pr_settle  # noqa: E402
 
 sys.path.insert(0, os.path.join(HERE, "..", "common"))
 import tracker  # noqa: E402
+import owners  # noqa: E402
 
 SHA = "a" * 40
 
@@ -262,6 +263,16 @@ def test_the_ownership_check_passes_the_owner_and_refuses_anyone_else():
     pr_settle.require_own_repo("Me/r", tracker=tracker.MemoryTracker(viewer="me"))
     with pytest.raises(pr_settle.SettleError, match="not the gh login"):
         pr_settle.require_own_repo("o/r", tracker=tracker.MemoryTracker(viewer="me"))
+
+
+def test_the_ownership_check_passes_an_owner_on_the_owned_list():
+    pr_settle.require_own_repo("ChinStrap45/r", tracker=tracker.MemoryTracker(viewer="caneff"))
+
+
+def test_the_ownership_check_refuses_when_the_owned_list_cannot_be_read(monkeypatch, tmp_path):
+    monkeypatch.setattr(owners, "OWNERS_FILE", str(tmp_path / "missing"))
+    with pytest.raises(pr_settle.SettleError, match="owned-owners list .* cannot be read"):
+        pr_settle.require_own_repo("chinstrap45/r", tracker=tracker.MemoryTracker(viewer="caneff"))
 
 
 def test_the_ownership_check_refuses_when_the_login_cannot_be_read():
