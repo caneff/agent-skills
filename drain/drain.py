@@ -35,7 +35,11 @@ command's own slot default) and no chooser, since the spec's slices are its
 bundle. A spec with no unblocked slice on the frontier (none at all, or every one blocked, a
 blocker in another repo included) never anchors: it is a `passed over:` line naming its blocked
 slices and their blockers, since its run would open with nothing to build and end idle with no
-PR (#1974). When nothing else is startable, a `waiting:` line names each spec whose
+PR (#1974). So does a spec with any open slice labelled `ready-for-human` on the frontier
+(`--anchor` on it included): that slice's PR needs Chris's merge and `drain` has no controller
+session to hand it to, so the run would idle and be handed to Chris as a failed build. It is a
+`passed over: #<spec> slice #<n> is ready-for-human` line (#2006); waiting on Chris's merge
+would hold the serial queue on a person. When nothing else is startable, a `waiting:` line names each spec whose
 slices are ready but which `drain` cannot start. The spec
 run is the worker: pane `<repo-short>-spec-<n>`, workspace and branch
 `spec-<n>`, and it drives its slices itself (`implement-spec/SKILL.md`). Its
@@ -321,7 +325,9 @@ def read_queue(ctx):
     queue = [(t["number"], t["title"], kind) for kind, bucket in ((TICKET, "unblocked"), (SPEC, "spec"))
              for t in buckets[bucket]]
     queue = sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
-    barren = barren_specs(ctx, issues, buckets, {n for n, _, k in queue if k == SPEC})
+    specs = {n for n, _, k in queue if k == SPEC}
+    barren = barren_specs(ctx, issues, buckets, specs)
+    barren.update(human_held_specs(issues, buckets, specs - set(barren)))
     queue = [t for t in queue if t[0] not in barren]
     waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
     stranded = [(t["number"], t["why"]) for t in buckets["stranded"]]
@@ -360,6 +366,18 @@ def barren_specs(ctx, issues, buckets, specs):
         else:
             why[spec] = "spec with no dispatchable slice (it has no ready slice)"
     return why
+
+
+def human_held_specs(issues, buckets, specs):
+    """`{spec: why}` for each of `specs` (clear spec parents) with an open `ready-for-human`
+    slice on the frontier. Its slice PR needs Chris's merge, and `drain` has no controller
+    session to hand that to, so the spec run would idle past its one resume and be handed to
+    Chris as a failed build (#2006). Read from the listing and the `slice` bucket alone."""
+    held = collections.defaultdict(list)
+    for t in buckets["slice"]:
+        if t["spec"] in specs and HUMAN in labels_of(issues[t["number"]]):
+            held[t["spec"]].append(t["number"])
+    return {spec: f"slice {', '.join(f'#{n}' for n in sorted(ns))} is {HUMAN}" for spec, ns in held.items()}
 
 
 def native_blockers(ctx, issue):
