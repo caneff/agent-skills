@@ -1336,7 +1336,7 @@ def drain(ctx, limit, limit_name):
         if prog.want:  # refuse before any work, and not only when the loop gets there
             queue, waiting, _, candidates, passed = survey(ctx)
             prog.seen = (queue, waiting, passed)
-            if not any(t[0] == prog.want for t in candidates) and dict(passed).get(prog.want, "").startswith("spec with no"):
+            if not any(t[0] == prog.want for t in candidates) and dict(passed).get(prog.want, "").startswith(("spec with no", "slice #")):
                 raise DrainError(f"--anchor #{prog.want} is passed over: {dict(passed)[prog.want]}")
             put_first(candidates, prog.want)
         while prog.done < limit:
