@@ -336,14 +336,18 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             return set(), f" (landing lookup failed: {exc})"
 
     def native_open(issue, landed):
-        """The open native blockers not landed, or `None` when the list could
-        not be read, or came back empty against a summary that counted an open
-        blocker: an unknown blocker is not a met one."""
+        """`(open native blockers not landed, why)`. The list is `None` when
+        the blockers could not be read, or came back empty against a summary
+        that counted an open one: an unknown blocker is not a met one. `why`
+        then names which of the two happened (#1976), else it is empty."""
         try:
             listed = native_blockers_of(issue)
-        except tracker_mod.TrackerError:
-            return None
-        return [n for n in listed if n not in landed] if listed else None
+        except tracker_mod.TrackerError as exc:
+            return None, f" (the native blocker list could not be read: {exc})"
+        if not listed:
+            return None, (" (the summary counts an open blocker but the "
+                          "blocker list listed none)")
+        return [n for n in listed if n not in landed], ""
 
     def rank(issue, entry):
         """`(bucket, stated)` from this ticket's blocking state alone.
@@ -356,11 +360,12 @@ def classify(issues, state_of, parent_of, landed_of=None, native_blockers_of=Non
             entry["why"] = "native dependencies"
             if native and native_blockers_of is not None:
                 landed, failed = landed_numbers(issue)
-                if native_open(issue, landed) == []:
+                open_native, unread = native_open(issue, landed)
+                if open_native == []:
                     entry["why"] += ", all landed on the integration branch"
                     native = False
                 else:
-                    entry["why"] += failed
+                    entry["why"] += failed + unread
             return ("blocked" if native else "unblocked"), True
         section = blocked_by_section(issue.get("body"))
         if section is None:
