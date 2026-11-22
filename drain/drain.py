@@ -108,7 +108,8 @@ State lives in GitHub, git and herdr, nowhere else. An open, in-progress
 ticket carrying drain's own `drain anchor:` comment is resumed (a worker
 started by `implement-dispatch` outside drain has none, so it is never taken)
 and its worker or open PR is waited on and checked rather than rebuilt. Only
-repos whose origin owner is the `gh` login.
+repos whose origin owner is the `gh` login or on the owned-owners list
+(`common/owners.py`, #2005).
 """
 import argparse
 import collections
@@ -131,6 +132,7 @@ import frontier  # noqa: E402
 import pr_settle  # noqa: E402
 import scratch_run  # noqa: E402
 import shellcmd  # noqa: E402
+import owners  # noqa: E402  (#2005)
 import tracker  # noqa: E402
 from scratch_run import one_line  # noqa: E402
 from selector_check import UNDECLARED  # noqa: E402
@@ -1421,8 +1423,13 @@ def main(argv):
         repo = origin_slug(root)
         issues = tracker.GhTracker(repo)
         login = asked(issues.viewer_login)
-        if repo.split("/")[0] != login:
-            raise DrainError(f"{repo} is not owned by {login}; drain only runs on the caller's own repos")
+        try:
+            owned = owners.is_owned(repo.split("/")[0], login)
+        except owners.OwnersError as exc:
+            raise DrainError(f"{repo}: {exc}; drain only runs on the caller's own repos") from exc
+        if not owned:
+            raise DrainError(f"{repo} is not owned by {login} nor on the owned-owners list; "
+                             "drain only runs on the caller's own repos")
         default = shellcmd.default_branch(root)
         log_dir = os.environ.get("DRAIN_LOG_DIR") or os.path.expanduser("~/.cache/drain")
         os.makedirs(log_dir, exist_ok=True)

@@ -1,0 +1,4 @@
+# GitHub owners whose repos are Chris's own, one per line; `#` starts a
+# comment. The rule and its readers: flow/claude/WORKFLOW.md § Gate 1.
+caneff
+chinstrap45

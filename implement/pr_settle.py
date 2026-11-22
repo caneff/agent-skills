@@ -8,9 +8,10 @@ Prints one line, `draft=<bool> state=<mergeStateStatus> head=<sha>` (the last
 view read, on a failure too; none when no view was read), and exits 0 only on a PR that is not a draft, reads CLEAN and
 (with `--head`) still has that head; with `--merge` it has then been merged.
 Exit 1 is a limit or a refusal, named on stderr with the last state read; exit
-2 is a usage error. `--merge` refuses a repo whose owner is not the `gh` login
-(`require_own_repo`) and a PR named by anything but its number. The ownership
-rule's one owner is the hook (`block-dangerous-git.sh`, which reads this
+2 is a usage error. `--merge` refuses a repo that is not the user's
+(`require_own_repo`: the `gh` login or an owner on `common/owners.py`'s
+list) and a PR named by anything but its number. The ownership rule's one
+owner is the hook (`block-dangerous-git.sh`, which reads this
 command line for `pr_settle.py ... --merge` as it does for `gh pr merge`);
 this check is the same rule inside the process, for a caller the hook does not
 see, drain's own subprocess included.
@@ -37,6 +38,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 import tracker as issue_tracker  # noqa: E402  (#1786)
+import owners  # noqa: E402  (#2005)
 
 UNKNOWN_SECONDS = 60
 CHECKS_SECONDS = 15 * 60
@@ -176,16 +178,21 @@ def require_own_repo(repo, tracker=None):
     """`--merge` runs `gh pr merge` inside this process, where the ownership
     hook (`flow/claude/hooks/block-dangerous-git.sh`, which reads a command
     line for the words `gh pr merge`) cannot see it. So the same rule is kept
-    here, failing closed: a repo whose owner is not the `gh` login, or a login
-    `gh` cannot give, is not merged."""
+    here, failing closed: a repo whose owner is neither the `gh` login nor on
+    the owned-owners list (`common/owners.py`), a login `gh` cannot give, or a
+    list that cannot be read, is not merged."""
     try:
         login = (tracker or issue_tracker.GhTracker(repo)).viewer_login()
     except issue_tracker.TrackerError as exc:
         raise SettleError(f"refusing to merge: could not read the gh login ({exc})") from exc
     owner = repo.split("/")[0] if repo.count("/") == 1 else ""
-    if owner.lower() != login.lower():
-        raise SettleError(f"refusing to merge {repo}: owner {owner or '?'} is not the gh login {login}; "
-                          "that merge is the owner's to run")
+    try:
+        owned = owners.is_owned(owner, login)
+    except owners.OwnersError as exc:
+        raise SettleError(f"refusing to merge {repo}: {exc}") from exc
+    if not owned:
+        raise SettleError(f"refusing to merge {repo}: owner {owner or '?'} is not the gh login {login} "
+                          "nor on the owned-owners list; that merge is the owner's to run")
 
 
 def main(argv):
