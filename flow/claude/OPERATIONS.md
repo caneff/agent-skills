@@ -255,17 +255,16 @@ defines them.
   a question for him. The `Stop` hook `worker-stop-alert.sh` is registered:
   Chris retired it on 2026-10-04 because typing into the controller's pane
   landed in his own input, and re-registered it on 2026-11-17. Its alert is
-  a peer message written to the controller's inbox socket (#1946): the
-  `peerToken` from the controller's `~/.claude/sessions/<pid>.<hex>.key`,
-  then the message, as two JSON lines. Nothing is typed into a pane. A
-  missing record, key or socket is logged `not-sent` with its cause in
-  `~/.claude/worker-stop-alerts.log`, with no fallback to typing. Claude
-  Code does not document this protocol
-  (`docs/research/2026-11-21-peer-socket-auth-1946.md`), so a version bump
-  shows as `not-sent` lines. The send-time sibling delivers the same way. Its
-  false repeats are #1945. Its
-  send-time sibling `worker-send-alert.sh` (`PostToolUse` on `SendMessage`,
-  #1540) is registered; its header states when it fires.
+  a peer message on the controller's inbox socket (#1946), never typed into
+  a pane; `worker_alert_send_peer` in `hooks/worker-alert-lib.sh` holds the
+  protocol. A missing record, key or socket is logged `not-sent` with its
+  cause in `~/.claude/worker-stop-alerts.log`, with no fallback to typing.
+  `sent` means the frame was written: the receiver replies with nothing, so
+  a changed frame format or a rotated token also logs `sent`. Claude Code
+  does not document the protocol
+  (`docs/research/2026-11-21-peer-socket-auth-1946.md`). The false repeats
+  are #1945. The send-time sibling `worker-send-alert.sh` (`PostToolUse` on
+  `SendMessage`, #1540) is registered; its header states when it fires.
 - Dirty-stop guard (#1907): the registered `Stop` hook `worker-dirty-stop.sh`
   holds a worker's stop while its worktree has uncommitted files; its header
   states the contract.

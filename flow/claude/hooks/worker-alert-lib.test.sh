@@ -44,10 +44,10 @@ fail() { echo "FAIL: $1"; fails=1; }
 deliver() {
   rm -rf "$tmp/inbox/frames"/[0-9]* "$log" "$tmp/prompt.called"
   (
-    export HOME="$home" PATH="$tmp/bin:$PATH"
+    export HOME="$home" PATH="${extra_path:+$extra_path:}$tmp/bin:$PATH"
     source "$here/worker-alert-lib.sh"
     worker_alert_resolve_controller skills-b6
-    worker_alert_deliver "$log" "k1" skills-b6 "$1" $((SECONDS + 10))
+    worker_alert_deliver "$log" "k1" skills-b6 "$1" ${deadline_s:-$((SECONDS + 10))}
     echo $? > "$tmp/rc"; printf '%s' "$prompt_status" > "$tmp/status"; printf '%s' "$prompt_msg" > "$tmp/msg"
   )
   rc=$(cat "$tmp/rc"); status=$(cat "$tmp/status"); msg=$(cat "$tmp/msg")
@@ -100,10 +100,44 @@ keyfile "{\"peerToken\":\"$token\"}"
 record "$tmp/absent.sock"
 deliver "x"; not_sent "a socket path that does not exist" "does not exist"
 
-python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.close()' "$tmp/dead.sock"
+wa_dead_socket "$tmp/dead.sock"
 record "$tmp/dead.sock"
 deliver "x"; not_sent "a socket nobody listens on" "$tmp/dead.sock"
 record "$sock"
+
+# C1: a send killed by a signal prints nothing; the log still names a cause
+# and does not blame a missing record.
+mkdir -p "$tmp/pybin"; printf '#!/bin/sh\nkill -9 $$\n' > "$tmp/pybin/python3"; chmod +x "$tmp/pybin/python3"
+extra_path="$tmp/pybin" deliver "x"
+sleep 0.3
+if [ "$rc" = 1 ] && grep -qF 'failed with exit 137 and no output' "$log" && ! grep -q 'no live session record' "$log"; then
+  pass "a send killed with no output is not-sent naming the exit status, not a missing record"
+else fail "silent kill — rc $rc log: $(cat "$log" 2>/dev/null)"; fi
+
+# C2: a key for another process start (a reused pid) is not used; a good key
+# beside it is.
+other_hex=$(printf 'b%.0s' $(seq 64))
+keyfile "{\"peerToken\":\"stale\",\"procStart\":\"1\"}"
+deliver "x"; not_sent "only a stale key (another procStart)" "another process start"
+printf '{"peerToken":"%s","procStart":"%s"}\n' "$token" "$start" > "$sessions/$$.$other_hex.key"
+deliver "x"
+if wa_wait_frame "$tmp/inbox" && [ "$status" = sent ] \
+   && [ "$(sed -n 1p "$(wa_newest "$tmp/inbox")" | jq -r .token)" = "$token" ]; then
+  pass "a stale key beside a good one: the good token is sent"
+else fail "stale and good key — status $status log $(cat "$log" 2>/dev/null)"; fi
+rm -f "$sessions/$$.$other_hex.key"; keyfile "{\"peerToken\":\"$token\"}"
+
+# The deadline: a second target is not tried when its 5 s no longer fits.
+sleep 60 & twin=$!
+twin_start=$(stat=$(cat /proc/$twin/stat); set -- ${stat##*) }; echo "${20}")
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","messagingSocketPath":"%s"}\n' "$twin" "$twin_start" "$tmp/absent2.sock" > "$sessions/zz-twin.json"
+wa_key "$sessions" "$twin"
+record "$tmp/absent.sock"
+deadline_s=$((SECONDS - 1)) deliver "x"
+kill "$twin" 2>/dev/null; rm -f "$sessions/zz-twin.json" "$sessions/$twin".*.key; record "$sock"
+if [ "$rc" = 1 ] && grep -qF 'out of time before trying the next socket' "$log" && ! grep -qF 'absent2.sock' "$log"; then
+  pass "twin records: the second socket is not tried once the deadline leaves no room"
+else fail "deadline — rc $rc log: $(cat "$log" 2>/dev/null)"; fi
 
 # 4. No herdr prompt call anywhere under flow/claude/hooks (the ticket's rg check).
 pat='herdr agent'' prompt'   # split so this file does not match itself

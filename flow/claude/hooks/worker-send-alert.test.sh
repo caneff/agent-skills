@@ -45,7 +45,7 @@ drain="$tmp/drain.jsonl"; human "${brief//skills-b6/drain}" > "$drain"
 fails=0
 # run <name> <transcript> <event-json> [env...] -> sets $got (a new frame
 # reached the controller's inbox), $text (its alert) and $count (frames)
-sent_lines() { local c; c=$(grep -c $'\tsent\t' "$log" 2>/dev/null); echo "${c:-0}"; }
+sent_lines() { wa_sent_lines "$log"; }
 run() {
   local name=$1 t=$2 event=$3 out rc before; shift 3
   rm -f "$inbox"/frames/[0-9]* "$tmp/prompt.called"; before=$(sent_lines)
@@ -98,8 +98,8 @@ expect_none "a tool other than SendMessage does not alert"
 
 reset_log
 run "drain controller" "$drain" "$(send_event tu-7 drain "$failed")"
-# Not just no alert: the guard exits before any log line, where the no-pane
-# fallback would also send nothing and log "not-sent".
+# Not just no alert: the guard exits before any log line, where a failed
+# delivery would also send nothing and log "not-sent".
 if [ -z "$got" ] && [ ! -s "$log" ]; then pass "the controller named drain is no session: no alert and no log line"; else fail "drain — log: $(cat "$log" 2>/dev/null)"; fi
 
 reset_log

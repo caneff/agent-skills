@@ -44,6 +44,15 @@ wa_wait_frame() { local i; for i in $(seq 60); do [ "$(wa_frames "$1")" -ge 1 ] 
 # wa_text <dir> -> the alert text of the newest frame (its second line).
 wa_text() { local f; f=$(wa_newest "$1"); [ -n "$f" ] && sed -n 2p "$f" | jq -r '.message.content' 2>/dev/null; }
 
+# wa_sent_lines <log> -> how many `sent` lines the alert log holds.
+wa_sent_lines() { local c; c=$(grep -c $'\tsent\t' "$1" 2>/dev/null); echo "${c:-0}"; }
+# wa_dead_socket <path> -> a socket file nobody listens on.
+wa_dead_socket() { python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.close()' "$1"; }
+# wa_record <sessions dir> <pid> <procStart> <sock> -> the controller's live
+# session record for that pid, named skills-b6.
+wa_record() {
+  printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"%s"}\n' "$2" "$3" "$4" > "$1/$2.json"
+}
 # wa_key <sessions dir> <pid> [json] -> publishes <pid>.<64 hex>.key.
 wa_key() {
   local hex; hex=$(printf 'a%.0s' $(seq 64))

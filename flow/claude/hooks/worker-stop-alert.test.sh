@@ -13,7 +13,7 @@ tmp=$(mktemp -d)
 . "$here/worker-alert-testlib.sh"
 trap 'kill_inboxes; rm -rf "$tmp"' EXIT
 
-# herdr stub: `agent list` names the controller's pane by its session id,
+# herdr stub: `agent list` names the controller's agent by its session id,
 # `agent get` names the worker's agent, `agent prompt` records that it was
 # called (the hook must never call it).
 stubdir="$tmp/bin"
@@ -39,7 +39,7 @@ ctl_start=$(proc_start $$)
 wa_start_inbox "$tmp/inbox" ctl
 inbox="$tmp/inbox"
 wa_key "$home/.claude/sessions" "$$"
-ctl_record() { printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"%s"}\n' "$$" "$ctl_start" "$wa_sock" > "$home/.claude/sessions/$$.json"; }
+ctl_record() { wa_record "$home/.claude/sessions" "$$" "$ctl_start" "$wa_sock"; }
 ctl_record
 agents_ok='{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}},{"pane_id":"w0:p1","agent_session":{"value":"dead-session"}}]}}'
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
@@ -137,7 +137,7 @@ agents_live() { local a='{"pane_id":"w9:p1","agent_session":{"value":"ctl-sessio
 
 fails=0
 # sent_lines -> how many `sent` lines the log holds now.
-sent_lines() { local c; c=$(grep -c $'\tsent\t' "$log" 2>/dev/null); echo "${c:-0}"; }
+sent_lines() { wa_sent_lines "$log"; }
 # collect <sent lines before> -> sets $got (yes when a new frame reached the
 # controller's inbox) and $text (its alert); a `sent` log line is waited on
 # until its frame lands, since the fake inbox writes it a moment later.
@@ -174,10 +174,10 @@ expect_none() {
   if [ -z "$got" ]; then echo "PASS: $name"; else echo "FAIL: $name — want no prompt"; echo "  got: $got text: $text log: $(cat "$log" 2>/dev/null)"; fails=1; fi
 }
 # expect_reported <name> : a genuine `reported` verdict, stronger than
-# expect_none — no prompt AND no `not-sent` log line. A `silent` verdict
-# whose pane lookup happens to fail also leaves no prompt, so expect_none
-# alone cannot tell a real report from a report the matching missed and the
-# missing pane then hid.
+# expect_none — nothing sent AND no `not-sent` log line. A `silent` verdict
+# whose delivery fails also sends nothing, so expect_none alone cannot tell a
+# real report from a report the matching missed and the failed delivery then
+# hid.
 expect_reported() {
   local name=$1
   if [ -z "$got" ] && ! grep -q 'not-sent' "$log" 2>/dev/null; then
@@ -194,9 +194,11 @@ reset_log
 t="$tmp/no-report.jsonl"
 { human "$brief"; assistant_text "done, report in my pane"; } > "$t"
 run "no report" "$t"
-expect_alert "worker that never reported alerts the controller's pane"
+expect_alert "worker that never reported alerts the controller"
 # Read the recorded file itself: `$(...)` would strip a trailing newline.
-if [ "$(wc -l < "$(wa_newest "$inbox")")" = 2 ] && [[ "$text" != *$'\n'* ]] && [[ "$text" != '! '* ]]; then
+# Read from the frame itself: `$(...)` would strip a trailing newline.
+if [ "$(wc -l < "$(wa_newest "$inbox")")" = 2 ] \
+   && sed -n 2p "$(wa_newest "$inbox")" | jq -e '.message.content | (contains("\n") or startswith("! ")) | not' >/dev/null; then
   echo "PASS: alert is one line with no \`! \` command"
 else
   echo "FAIL: alert text is not one plain line: $text"; fails=1
@@ -660,7 +662,7 @@ expect_alert "a half-written last line and a non-string recipient still alert"
 # The brief carries the controller's herdr agent name, which a compliant
 # worker resolves to a live session name before sending: the two differ, so
 # matching the brief's literal directly would miss a delivered report and,
-# when an alert is owed, find no session for the pane lookup. Resolve
+# when an alert is owed, find no session to deliver to. Resolve
 # through `herdr agent list` (agent name -> agent_session id) and the live
 # registry (session id -> current name) first.
 reset_log
@@ -685,7 +687,7 @@ reset_log
 t="$tmp/herdr-name-silent.jsonl"
 { human "$herdr_brief"; assistant_text "done, no report"; } > "$t"
 run "herdr-name controller, no report" "$t"
-expect_alert "a herdr-name controller with no report still resolves the pane and alerts"
+expect_alert "a herdr-name controller with no report still resolves the controller and alerts"
 # Restore the registry and agent list the tests below expect.
 ctl_record
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
@@ -704,11 +706,10 @@ run "controller record with no sessionId, report to its socket" "$t"
 expect_reported "a live record with a name and a socket but no sessionId still resolves the socket, not a field shifted by the missing one"
 ctl_record
 
-# A herdr-resolved session whose live record has no `.name` and no socket
-# either: nothing to match a report against, but the pane lookup needs only
-# the session id, which `resolve_session` returns directly (no fallback
-# needed) — a genuinely silent stop still alerts instead of ending in "no
-# herdr pane for controller".
+# A herdr-resolved session whose live record has no `.name`: nothing to match
+# a report against, but the socket still resolves from the session id, so a
+# genuinely silent stop still alerts instead of ending in "no live session
+# record".
 reset_log
 printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nopanel","messagingSocketPath":"%s"}\n' "$$" "$ctl_start" "$wa_sock" > "$home/.claude/sessions/$$.json"
 printf '%s\n' '{"result":{"agents":[{"name":"hctl-nopanel","pane_id":"w9:p1","agent_session":{"value":"sess-nopanel"}}]}}' > "$tmp/agent-list.json"
@@ -716,7 +717,7 @@ nopanel_brief='<command-message>implement</command-message>\n<command-name>/impl
 t="$tmp/nopanel-silent.jsonl"
 { human "$nopanel_brief"; assistant_text "done, no report"; } > "$t"
 run "herdr-resolved session id, live record has no name" "$t"
-expect_alert "the pane is found via the herdr-resolved session id alone, even though the record has nothing to match a report against"
+expect_alert "the socket is found via the herdr-resolved session id alone, even though the record has nothing to match a report against"
 ctl_record
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
@@ -825,12 +826,12 @@ fail_case "no key file" "no key file"
 wa_key "$home/.claude/sessions" "$$"; rm -f "$tmp/key.bak"
 
 reset_log
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"%s"}\n' "$$" "$ctl_start" "$tmp/absent.sock" > "$home/.claude/sessions/$$.json"
+wa_record "$home/.claude/sessions" "$$" "$ctl_start" "$tmp/absent.sock"
 run "socket path missing" "$t"
 fail_case "a socket path that does not exist" "does not exist"
-python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.close()' "$tmp/dead.sock"
+wa_dead_socket "$tmp/dead.sock"
 reset_log
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"%s"}\n' "$$" "$ctl_start" "$tmp/dead.sock" > "$home/.claude/sessions/$$.json"
+wa_record "$home/.claude/sessions" "$$" "$ctl_start" "$tmp/dead.sock"
 run "socket nobody listens on" "$t"
 fail_case "a socket nobody listens on" "$tmp/dead.sock"
 ctl_record

@@ -35,10 +35,9 @@
 # no session (drain watches the pane itself): the hook logs one line per
 # session saying so and attempts no delivery.
 # Otherwise send one line to the controller's inbox socket as a peer message
-# (#1946), never typed into its pane, where it landed inside whatever draft
-# Chris was writing. The hook writes the frame itself, so the auto-mode
-# classifier never sees it (a report sent through it was once denied there).
-# One alert per stop: every
+# (#1946; `worker_alert_send_peer` holds the protocol), never typed into its
+# pane, where it landed inside Chris's draft. The hook writes the frame
+# itself, so the auto-mode classifier never sees it. One alert per stop: every
 # attempt is logged to ~/.claude/worker-stop-alerts.log keyed by session
 # and the transcript's last entry (plus the turn's id), and a logged stop
 # never alerts again.
@@ -104,7 +103,7 @@ controller="$(worker_alert_current_controller "$transcript" "$controller")"
 
 # `drain` is no session: drain's briefs name it on purpose and drain watches
 # the pane itself (its idle grace and wall clock, `drain/drain.py`), so there
-# is nobody to alert and no pane to look up (#1945). Logged once per session,
+# is nobody to alert and no socket to look up (#1945). Logged once per session,
 # so the log says why and does not fill with a `not-sent` per stop.
 if [ "$controller" = drain ]; then
   dkey="$session"$'\t'"drain"
@@ -302,11 +301,11 @@ if [ -n "$dispatched" ]; then
   [ -n "$live" ] && grep -qxFf <(printf '%s\n' "$dispatched") <<<"$live" && exit 0
 fi
 
-# Every herdr call below ends by a 10 s deadline, measured from here — not
-# 12 s, because the controller resolution above already spent up to its own
-# 2 s budget, and the dispatched-worker check up to another 2 s, on the same
-# 15 s hook timeout; this deadline has to leave room for both whether or not
-# the stop turned out silent.
+# The delivery below ends by a 10 s deadline, measured from here — not 12 s,
+# because the controller resolution above already spent up to its own 2 s
+# budget, and the dispatched-worker check up to another 2 s, on the same 15 s
+# hook timeout; this deadline has to leave room for both whether or not the
+# stop turned out silent.
 deadline=$((SECONDS + 10))
 
 worker_agent="$(worker_alert_worker_agent_name)"

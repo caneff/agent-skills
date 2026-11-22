@@ -15,9 +15,10 @@
 # peer message replaces it. The send is to the controller when
 # `worker_alert_is_controller_target` says so. A response whose `success` is
 # not true is a failed send: one line goes to the controller's inbox socket
-# as a peer message (#1946; never typed into its pane), written by the hook
-# itself, so the auto-mode classifier never sees it. A controller named `drain` is no session, so no alert. One alert per
-# send: every attempt is logged to ~/.claude/worker-send-alerts.log keyed by
+# as a peer message (#1946; `worker_alert_send_peer` holds the protocol),
+# written by the hook itself, so the auto-mode classifier never sees it. A
+# controller named `drain` is no session, so no alert. One alert per send:
+# every attempt is logged to ~/.claude/worker-send-alerts.log keyed by
 # `tool_use_id` (an event without one is keyed by its own content), and a
 # logged send never alerts again. An event with no `tool_response` is logged,
 # never read as delivered or as failed. Always exit 0 — a hook failure must
