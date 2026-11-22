@@ -41,8 +41,7 @@ merge and `drain` has no controller session to hand it to, so the run would idle
 to Chris as a failed build. It is a `passed over: #<spec> slice #<n> is ready-for-human` line
 (`slices #<n>, #<m> are ready-for-human` for several; #2006). Waiting on Chris's merge would hold
 the serial queue on a person. When nothing else is startable, a `waiting:` line names each spec
-whose
-slices are ready but which `drain` cannot start. The spec
+whose slices are ready but which `drain` cannot start. The spec
 run is the worker: pane `<repo-short>-spec-<n>`, workspace and branch
 `spec-<n>`, and it drives its slices itself (`implement-spec/SKILL.md`). Its
 stop is the integration PR up and the pane idle, and the wait differs in three
