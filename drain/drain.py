@@ -35,8 +35,13 @@ command's own slot default) and no chooser, since the spec's slices are its
 bundle. A spec with no unblocked slice on the frontier (none at all, or every one blocked, a
 blocker in another repo included) never anchors: it is a `passed over:` line naming its blocked
 slices and their blockers, since its run would open with nothing to build and end idle with no
-PR (#1974). When nothing else is startable, a `waiting:` line names each spec whose
-slices are ready but which `drain` cannot start. The spec
+PR (#1974). So does a spec with any open slice labelled `ready-for-human`, blocked or not and
+with or without `ready-for-agent` (`--anchor` on it included): that slice's PR needs Chris's
+merge and `drain` has no controller session to hand it to, so the run would idle and be handed
+to Chris as a failed build. It is a `passed over: #<spec> slice #<n> is ready-for-human` line
+(`slices #<n>, #<m> are ready-for-human` for several; #2006). Waiting on Chris's merge would hold
+the serial queue on a person. When nothing else is startable, a `waiting:` line names each spec
+whose slices are ready but which `drain` cannot start. The spec
 run is the worker: pane `<repo-short>-spec-<n>`, workspace and branch
 `spec-<n>`, and it drives its slices itself (`implement-spec/SKILL.md`). Its
 stop is the integration PR up and the pane idle, and the wait differs in three
@@ -138,6 +143,8 @@ from scratch_run import one_line  # noqa: E402
 from selector_check import UNDECLARED  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
+# What opens the reason `barren_specs` / `human_held_specs` give a spec read_queue passed over.
+HELD_SPEC_REASONS = ("spec with no dispatchable slice", "slice #", "slices #")
 ANCHOR_NOTE, BUNDLE_NOTE, HANDED_NOTE = "drain anchor:", "drain bundle:", "drain could not land"
 CHOOSER_NOTE = "drain chooser:"  # never `BUNDLE_NOTE`: its digits would read as tickets
 # The count a `drain bundle:` note ends with, which is not a ticket.
@@ -323,9 +330,11 @@ def read_queue(ctx):
     queue = [(t["number"], t["title"], kind) for kind, bucket in ((TICKET, "unblocked"), (SPEC, "spec"))
              for t in buckets[bucket]]
     queue = sorted((t for t in queue if HUMAN not in labels_of(issues[t[0]])), key=lambda t: t[0])
-    barren = barren_specs(ctx, issues, buckets, {n for n, _, k in queue if k == SPEC})
+    specs = {n for n, _, k in queue if k == SPEC}
+    barren = human_held_specs(ctx, specs)
+    barren.update(barren_specs(ctx, issues, buckets, specs - set(barren)))
     queue = [t for t in queue if t[0] not in barren]
-    waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue}
+    waiting = {t["spec"] for t in buckets["slice"]} - {t[0] for t in queue} - set(barren)
     stranded = [(t["number"], t["why"]) for t in buckets["stranded"]]
     return queue, sorted(waiting), stranded, sorted(passed_over(issues, buckets) + list(barren.items()))
 
@@ -362,6 +371,29 @@ def barren_specs(ctx, issues, buckets, specs):
         else:
             why[spec] = "spec with no dispatchable slice (it has no ready slice)"
     return why
+
+
+def human_held_specs(ctx, specs):
+    """`{spec: why}` for each of `specs` (clear spec parents) with an open `ready-for-human`
+    slice. Its slice PR needs Chris's merge, and `drain` has no controller session to hand that
+    to, so the spec run would idle past its one resume and be handed to Chris as a failed build
+    (#2006). Read from the `ready-for-human` listing, not the frontier: a human slice usually
+    lacks `ready-for-agent`, and a blocked one waits in a frontier bucket the run unblocks
+    mid-run. A read that fails stops the drain, since a spec not known to be clear of a human
+    slice must not anchor."""
+    if not specs:
+        return {}
+    held = collections.defaultdict(list)
+    try:
+        for issue in ctx.tracker.issues(HUMAN):
+            parent = None if issue.get("pull_request") else frontier.fetch_parent(ctx.tracker, issue)
+            if parent and parent["number"] in specs:
+                held[parent["number"]].append(issue["number"])
+    except tracker.TrackerError as exc:
+        raise DrainError(f"{HUMAN} slices: {exc}") from exc
+    return {spec: (f"slice #{ns[0]} is {HUMAN}" if len(ns) == 1 else
+                   f"slices {', '.join(f'#{n}' for n in ns)} are {HUMAN}")
+            for spec, ns in ((spec, sorted(ns)) for spec, ns in held.items())}
 
 
 def native_blockers(ctx, issue):
@@ -1320,7 +1352,7 @@ def drain(ctx, limit, limit_name):
         if prog.want:  # refuse before any work, and not only when the loop gets there
             queue, waiting, _, candidates, passed = survey(ctx)
             prog.seen = (queue, waiting, passed)
-            if not any(t[0] == prog.want for t in candidates) and dict(passed).get(prog.want, "").startswith("spec with no"):
+            if not any(t[0] == prog.want for t in candidates) and dict(passed).get(prog.want, "").startswith(HELD_SPEC_REASONS):
                 raise DrainError(f"--anchor #{prog.want} is passed over: {dict(passed)[prog.want]}")
             put_first(candidates, prog.want)
         while prog.done < limit:
