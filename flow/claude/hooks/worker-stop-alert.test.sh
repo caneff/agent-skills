@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # Contract test for worker-stop-alert.sh: a synthetic Stop event on stdin, a
 # synthetic transcript, a scratch HOME holding the sessions registry, and a
-# stubbed `herdr` on PATH -> exactly one `herdr agent prompt` to the
-# controller's pane, or none. Runs offline; no real session is touched.
+# stubbed `herdr` on PATH and a fake controller inbox socket -> exactly one
+# peer-message frame on that socket (#1946), or none, and never a `herdr agent
+# prompt`. Runs offline; no real session is touched.
 # Run: bash flow/claude/hooks/worker-stop-alert.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 hook="$here/worker-stop-alert.sh"
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+. "$here/worker-alert-testlib.sh"
+trap 'kill_inboxes; rm -rf "$tmp"' EXIT
 
-# herdr stub: `agent list` names the controller's pane by its session id,
-# `agent get` names the worker's agent, `agent prompt` records its target and
-# its alert text in separate files.
+# herdr stub: `agent list` names the controller's agent by its session id,
+# `agent get` names the worker's agent, `agent prompt` records that it was
+# called (the hook must never call it).
 stubdir="$tmp/bin"
 mkdir -p "$stubdir"
 cat > "$stubdir/herdr" <<STUB
@@ -21,15 +23,7 @@ cat > "$stubdir/herdr" <<STUB
 case "\$1 \$2" in
   "agent list") cat "$tmp/agent-list.json" ;;
   "agent get") printf '{"result":{"agent":{"name":"skills-820","pane_id":"%s"}}}\n' "\$3" ;;
-  "agent prompt")
-    [ -n "\${HERDR_PROMPT_HANG:-}" ] && exec sleep 30
-    # HERDR_PROMPT_BLOCKED=<k>: the first k prompts are refused as blocked.
-    tries=\$(( \$(cat "$tmp/prompt.tries" 2>/dev/null || echo 0) + 1 )); echo "\$tries" > "$tmp/prompt.tries"
-    if [ "\$tries" -le "\${HERDR_PROMPT_BLOCKED:-0}" ]; then
-      echo '{"error":{"code":"agent_blocked","message":"agent is blocked"},"id":"cli:agent:prompt"}'; exit 1
-    fi
-    printf '%s' "\$3" > "$tmp/prompt.pane"; printf '%s' "\$4" > "$tmp/prompt.text"
-    exit "\${HERDR_PROMPT_RC:-0}" ;;
+  "agent prompt") echo "\$*" >> "$tmp/prompt.called" ;;
 esac
 STUB
 chmod +x "$stubdir/herdr"
@@ -42,7 +36,11 @@ proc_start() { # <pid> -> its /proc starttime, field 22 (the 20th after `(comm) 
   local stat; stat=$(cat "/proc/$1/stat") && (set -- ${stat##*) }; echo "${20}")
 }
 ctl_start=$(proc_start $$)
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+wa_start_inbox "$tmp/inbox" ctl
+inbox="$tmp/inbox"
+wa_key "$home/.claude/sessions" "$$"
+ctl_record() { wa_record "$home/.claude/sessions" "$$" "$ctl_start" "$wa_sock"; }
+ctl_record
 agents_ok='{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}},{"pane_id":"w0:p1","agent_session":{"value":"dead-session"}}]}}'
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 log="$home/.claude/worker-stop-alerts.log"
@@ -138,16 +136,25 @@ agents_live() { local a='{"pane_id":"w9:p1","agent_session":{"value":"ctl-sessio
   printf '{"result":{"agents":[%s]}}\n' "$a" > "$tmp/agent-list.json"; }
 
 fails=0
-# run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
-# (the recorded prompt's target and alert, empty if no prompt was sent)
+# sent_lines -> how many `sent` lines the log holds now.
+sent_lines() { wa_sent_lines "$log"; }
+# collect <sent lines before> -> sets $got (yes when a new frame reached the
+# controller's inbox) and $text (its alert); a `sent` log line is waited on
+# until its frame lands, since the fake inbox writes it a moment later.
+collect() {
+  got="" text=""
+  if [ "$(sent_lines)" -gt "$1" ] && wa_wait_frame "$inbox"; then got=yes; text=$(wa_text "$inbox"); fi
+}
+# run <name> <transcript-file> [stop_hook_active] -> sets $got and $text
+# (whether a frame reached the controller's inbox, and its alert text)
 run() {
-  local name=$1 transcript=$2 active=${3:-false} out rc
-  rm -f "$tmp/prompt.pane" "$tmp/prompt.text"
+  local name=$1 transcript=$2 active=${3:-false} out rc before
+  rm -f "$inbox"/frames/[0-9]* "$tmp/prompt.called"; before=$(sent_lines)
   out=$(jq -n --arg t "$transcript" --argjson a "$active" '{hook_event_name:"Stop",session_id:"w",transcript_path:$t,stop_hook_active:$a}' \
         | HOME="$home" HERDR_PANE_ID="w2W:p1" PATH="$stubdir:$PATH" bash "$hook" 2>&1)
   rc=$?
-  pane=$(cat "$tmp/prompt.pane" 2>/dev/null || true)
-  text=$(cat "$tmp/prompt.text" 2>/dev/null || true)
+  collect "$before"
+  if [ -e "$tmp/prompt.called" ]; then echo "FAIL: $name — the herdr prompt call was called: $(cat "$tmp/prompt.called")"; fails=1; fi
   if [ "$rc" != 0 ]; then
     echo "FAIL: $name — want exit 0, got $rc"; echo "  out: $out"; fails=1
   fi
@@ -155,29 +162,29 @@ run() {
 # expect_alert <name> [ticket]
 expect_alert() {
   local name=$1 n=${2:-820}
-  if [ "$pane" = "w9:p1" ] && printf '%s' "$text" | grep -q "worker #$n stopped without reporting" \
+  if [ "$got" = yes ] && printf '%s' "$text" | grep -q "worker #$n stopped without reporting" \
      && printf '%s' "$text" | grep -q 'skills-820'; then
     echo "PASS: $name"
   else
-    echo "FAIL: $name — want an alert for #$n to w9:p1"; echo "  pane: $pane text: $text"; fails=1
+    echo "FAIL: $name — want an alert for #$n on the controller socket"; echo "  got: $got text: $text log: $(cat "$log" 2>/dev/null)"; fails=1
   fi
 }
 expect_none() {
   local name=$1
-  if [ -z "$pane" ]; then echo "PASS: $name"; else echo "FAIL: $name — want no prompt"; echo "  pane: $pane text: $text"; fails=1; fi
+  if [ -z "$got" ]; then echo "PASS: $name"; else echo "FAIL: $name — want no prompt"; echo "  got: $got text: $text log: $(cat "$log" 2>/dev/null)"; fails=1; fi
 }
 # expect_reported <name> : a genuine `reported` verdict, stronger than
-# expect_none — no prompt AND no `not-sent` log line. A `silent` verdict
-# whose pane lookup happens to fail also leaves no prompt, so expect_none
-# alone cannot tell a real report from a report the matching missed and the
-# missing pane then hid.
+# expect_none — nothing sent AND no `not-sent` log line. A `silent` verdict
+# whose delivery fails also sends nothing, so expect_none alone cannot tell a
+# real report from a report the matching missed and the failed delivery then
+# hid.
 expect_reported() {
   local name=$1
-  if [ -z "$pane" ] && ! grep -q 'not-sent' "$log" 2>/dev/null; then
+  if [ -z "$got" ] && ! grep -q 'not-sent' "$log" 2>/dev/null; then
     echo "PASS: $name"
   else
     echo "FAIL: $name — want a genuine reported verdict (no prompt, no not-sent log line)"
-    echo "  pane: $pane log: $(cat "$log" 2>/dev/null)"; fails=1
+    echo "  got: $got log: $(cat "$log" 2>/dev/null)"; fails=1
   fi
 }
 reset_log() { rm -f "$log"; }
@@ -187,9 +194,11 @@ reset_log
 t="$tmp/no-report.jsonl"
 { human "$brief"; assistant_text "done, report in my pane"; } > "$t"
 run "no report" "$t"
-expect_alert "worker that never reported alerts the controller's pane"
+expect_alert "worker that never reported alerts the controller"
 # Read the recorded file itself: `$(...)` would strip a trailing newline.
-if [ "$(wc -l < "$tmp/prompt.text")" = 0 ] && ! grep -q '^! ' "$tmp/prompt.text"; then
+# Read from the frame itself: `$(...)` would strip a trailing newline.
+if [ "$(wc -l < "$(wa_newest "$inbox")")" = 2 ] \
+   && sed -n 2p "$(wa_newest "$inbox")" | jq -e '.message.content | (contains("\n") or startswith("! ")) | not' >/dev/null; then
   echo "PASS: alert is one line with no \`! \` command"
 else
   echo "FAIL: alert text is not one plain line: $text"; fails=1
@@ -248,9 +257,9 @@ run "name with ref" "$t"
 expect_none "a SendMessage to 'controller [ref]' counts as reported"
 
 reset_log
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"/run/ctl.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"%s"}\n' "$$" "$ctl_start" "$wa_sock" > "$home/.claude/sessions/$$.json"
 t="$tmp/uds.jsonl"
-{ human "$brief"; peer "ruling"; send u1 "uds:/run/ctl.sock"; ok u1; } > "$t"
+{ human "$brief"; peer "ruling"; send u1 "uds:$wa_sock"; ok u1; } > "$t"
 run "uds reply" "$t"
 expect_none "a reply to the controller's uds: address counts as reported"
 
@@ -282,7 +291,7 @@ expect_alert "a third-party peer message does not hide a worker that never repor
 reset_log
 t="$tmp/controller-by-socket.jsonl"
 { human "$brief"; send s1 "skills-b6"; ok s1;
-  peer_from "uds:/run/ctl.sock" "renamed-ctl" "fix this"; work; assistant_text "fixed"; } > "$t"
+  peer_from "uds:$wa_sock" "renamed-ctl" "fix this"; work; assistant_text "fixed"; } > "$t"
 run "controller peer matched by socket" "$t"
 expect_alert "a peer message from the controller's socket starts a turn even under another name"
 
@@ -653,11 +662,11 @@ expect_alert "a half-written last line and a non-string recipient still alert"
 # The brief carries the controller's herdr agent name, which a compliant
 # worker resolves to a live session name before sending: the two differ, so
 # matching the brief's literal directly would miss a delivered report and,
-# when an alert is owed, find no session for the pane lookup. Resolve
+# when an alert is owed, find no session to deliver to. Resolve
 # through `herdr agent list` (agent name -> agent_session id) and the live
 # registry (session id -> current name) first.
 reset_log
-printf '{"pid":%s,"procStart":"%s","sessionId":"sess-hctl99","name":"skills-c7"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-hctl99","name":"skills-c7","messagingSocketPath":"%s"}\n' "$$" "$ctl_start" "$wa_sock" > "$home/.claude/sessions/$$.json"
 printf '%s\n' '{"result":{"agents":[{"name":"hctl-99","pane_id":"w9:p1","agent_session":{"value":"sess-hctl99"}}]}}' > "$tmp/agent-list.json"
 herdr_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-99\"</command-args>'
 t="$tmp/herdr-name-reported.jsonl"
@@ -678,9 +687,9 @@ reset_log
 t="$tmp/herdr-name-silent.jsonl"
 { human "$herdr_brief"; assistant_text "done, no report"; } > "$t"
 run "herdr-name controller, no report" "$t"
-expect_alert "a herdr-name controller with no report still resolves the pane and alerts"
+expect_alert "a herdr-name controller with no report still resolves the controller and alerts"
 # Restore the registry and agent list the tests below expect.
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+ctl_record
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
 # `resolve_session`'s fields are joined on `\x1f`, not a tab, precisely so a
@@ -695,22 +704,21 @@ t="$tmp/nosid-reported.jsonl"
 { human "$nosid_brief"; send s1 "uds:/run/nosid.sock"; ok s1; assistant_text "PR up sent"; } > "$t"
 run "controller record with no sessionId, report to its socket" "$t"
 expect_reported "a live record with a name and a socket but no sessionId still resolves the socket, not a field shifted by the missing one"
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+ctl_record
 
-# A herdr-resolved session whose live record has no `.name` and no socket
-# either: nothing to match a report against, but the pane lookup needs only
-# the session id, which `resolve_session` returns directly (no fallback
-# needed) — a genuinely silent stop still alerts instead of ending in "no
-# herdr pane for controller".
+# A herdr-resolved session whose live record has no `.name`: nothing to match
+# a report against, but the socket still resolves from the session id, so a
+# genuinely silent stop still alerts instead of ending in "no live session
+# record".
 reset_log
-printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nopanel"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nopanel","messagingSocketPath":"%s"}\n' "$$" "$ctl_start" "$wa_sock" > "$home/.claude/sessions/$$.json"
 printf '%s\n' '{"result":{"agents":[{"name":"hctl-nopanel","pane_id":"w9:p1","agent_session":{"value":"sess-nopanel"}}]}}' > "$tmp/agent-list.json"
 nopanel_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-nopanel\"</command-args>'
 t="$tmp/nopanel-silent.jsonl"
 { human "$nopanel_brief"; assistant_text "done, no report"; } > "$t"
 run "herdr-resolved session id, live record has no name" "$t"
-expect_alert "the pane is found via the herdr-resolved session id alone, even though the record has nothing to match a report against"
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+expect_alert "the socket is found via the herdr-resolved session id alone, even though the record has nothing to match a report against"
+ctl_record
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
 # The same nameless session, but WITH a socket: a nameless live session
@@ -727,7 +735,7 @@ t="$tmp/nosockname-reported.jsonl"
 { human "$nosockname_brief"; send s1 "uds:/run/nosockname.sock"; ok s1; assistant_text "PR up sent"; } > "$t"
 run "nameless herdr-resolved session, report to its socket" "$t"
 expect_reported "a report addressed to a nameless controller's socket counts as reported"
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+ctl_record
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
 # Two live records share the controller's sessionId (the race flow/lane's
@@ -764,7 +772,7 @@ t="$tmp/race-name-nameless-socket.jsonl"
 run "session-name brief, twin records, report to the nameless socket" "$t"
 expect_reported "a name-resolved controller's nameless twin socket counts as reported"
 kill "$race_pid" 2>/dev/null; rm -f "$home/.claude/sessions/zz-race.json"
-printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+ctl_record
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
 reset_log
@@ -795,46 +803,38 @@ run "reused pid" "$t"
 expect_alert "a same-name record with a reused pid does not hide the real controller"
 rm -f "$home/.claude/sessions/0.json"
 
-# Failure paths log and exit 0.
+# Failure paths log `not-sent` with the cause, send nothing, and exit 0 (#1946).
+# fail_case <name> <cause substring> : the run just made delivered nothing and
+# the log names the cause.
+fail_case() {
+  if [ -z "$got" ] && grep -qP $'\tnot-sent\t' "$log" 2>/dev/null && grep -qF -- "$2" "$log"; then
+    echo "PASS: $1 is logged not-sent naming '$2', nothing sent, exit 0"
+  else
+    echo "FAIL: $1 — got: $got log: $(cat "$log" 2>/dev/null)"; fails=1
+  fi
+}
 reset_log
-HERDR_PROMPT_RC=1 run "prompt rejected" "$t"
-if grep -q 'not-sent' "$log" 2>/dev/null; then
-  echo "PASS: a rejected herdr prompt is logged as not-sent, exit 0"
-else
-  echo "FAIL: a rejected prompt left no not-sent log line"; fails=1
-fi
-
-# A blocked controller: retry with backoff inside the hook's budget.
-reset_log; rm -f "$tmp/prompt.tries"
-HERDR_PROMPT_BLOCKED=2 run "blocked, then free" "$t"
-expect_alert "a prompt refused as blocked is retried until the controller accepts it"
-reset_log; rm -f "$tmp/prompt.tries"
-start=$SECONDS
-HERDR_PROMPT_BLOCKED=99 run "blocked throughout" "$t"
-if [ -z "$pane" ] && [ "$(cat "$tmp/prompt.tries")" -ge 2 ] && [ $((SECONDS - start)) -lt 15 ] \
-   && grep -q $'not-sent\tcontroller blocked:' "$log" 2>/dev/null; then
-  echo "PASS: a controller blocked throughout is retried, then logged as not-sent: blocked, within 15 s"
-else
-  echo "FAIL: blocked controller — tries $(cat "$tmp/prompt.tries"), $((SECONDS - start)) s, log: $(cat "$log" 2>/dev/null)"; fails=1
-fi
-rm -f "$tmp/prompt.tries"
+mv "$home/.claude/sessions/$$.json" "$tmp/record.bak"
+run "no session record" "$t"
+fail_case "no session record" "no live session record"
+mv "$tmp/record.bak" "$home/.claude/sessions/$$.json"
 
 reset_log
-HERDR_PROMPT_HANG=1 run "prompt hangs" "$t"
-if grep -q 'not-sent' "$log" 2>/dev/null; then
-  echo "PASS: a hung herdr prompt times out and is logged as not-sent"
-else
-  echo "FAIL: a hung prompt left no not-sent log line"; fails=1
-fi
+mv "$home/.claude/sessions/$$".*.key "$tmp/key.bak"
+run "no key file" "$t"
+fail_case "no key file" "no key file"
+wa_key "$home/.claude/sessions" "$$"; rm -f "$tmp/key.bak"
 
 reset_log
-printf '{"result":{"agents":[]}}\n' > "$tmp/agent-list.json"
-run "no controller pane" "$t"
-if [ -z "$pane" ] && grep -q 'not-sent.*no herdr pane' "$log" 2>/dev/null; then
-  echo "PASS: a missing controller pane is logged as not-sent, no prompt, exit 0"
-else
-  echo "FAIL: missing controller pane not logged"; echo "  pane: $pane"; fails=1
-fi
+wa_record "$home/.claude/sessions" "$$" "$ctl_start" "$tmp/absent.sock"
+run "socket path missing" "$t"
+fail_case "a socket path that does not exist" "does not exist"
+wa_dead_socket "$tmp/dead.sock"
+reset_log
+wa_record "$home/.claude/sessions" "$$" "$ctl_start" "$tmp/dead.sock"
+run "socket nobody listens on" "$t"
+fail_case "a socket nobody listens on" "$tmp/dead.sock"
+ctl_record
 
 # A deployment missing the sibling lib (install.sh once linked the hook but
 # not worker-alert-lib.sh) must fail loud, not join the "not a worker
@@ -887,11 +887,10 @@ fi
 reset_log
 printf '{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}}]}}\n' > "$tmp/agent-list.json"
 linked="$tmp/linked"; mkdir -p "$linked"; ln -s "$hook" "$linked/$(basename "$hook")"
-rm -f "$tmp/prompt.pane" "$tmp/prompt.text"
+rm -f "$inbox"/frames/[0-9]*; before=$(sent_lines)
 out=$(jq -n --arg t "$t" '{hook_event_name:"Stop",session_id:"w",transcript_path:$t,stop_hook_active:false}' \
       | HOME="$home" HERDR_PANE_ID="w2W:p1" PATH="$stubdir:$PATH" bash "$linked/$(basename "$hook")" 2>&1)
-pane=$(cat "$tmp/prompt.pane" 2>/dev/null || true)
-text=$(cat "$tmp/prompt.text" 2>/dev/null || true)
+collect "$before"
 expect_alert "a hook symlinked alone into another directory finds its lib beside the target and alerts"
 
 # #1945: a spec run waiting on the workers it dispatched is not stopped.
@@ -918,7 +917,7 @@ expect_alert "the same transcript with every worker gone and no report alerts"
 reset_log
 printf 'not json\n' > "$tmp/agent-list.json"
 run "agent list unreadable" "$t"
-if grep -q $'\tnot-sent\t' "$log"; then echo "PASS: an unreadable herdr list does not hold a stop as a wait (the alert was attempted)"
+if grep -qE $'\t(not-sent|sent)\t' "$log"; then echo "PASS: an unreadable herdr list does not hold a stop as a wait (the alert was attempted)"
 else echo "FAIL: an unreadable herdr list held the stop as a wait — log: $(cat "$log" 2>/dev/null)"; fails=1; fi
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
@@ -961,11 +960,11 @@ else echo "FAIL: want one sent line for the turn: $(cat "$log")"; fails=1; fi
 
 # A delivery that failed does not use up the turn's alert.
 reset_log
-printf '{"result":{"agents":[]}}\n' > "$tmp/agent-list.json"
 t="$tmp/failed-delivery.jsonl"
 { human "$brief"; work; assistant_text "stop one"; } > "$t"
+mv "$home/.claude/sessions/$$".*.key "$tmp/key.bak"
 run "unsent stop 1" "$t"
-printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+wa_key "$home/.claude/sessions" "$$"; rm -f "$tmp/key.bak"
 assistant_text "stop two" >> "$t"
 run "unsent stop 2" "$t"
 expect_alert "a stop after a not-sent alert in the same turn is tried again"
@@ -980,7 +979,7 @@ expect_none "a worker under controller drain sends no delivery attempt"
 assistant_text "second stop" >> "$t"
 run "drain stop 2" "$t"
 expect_none "a second stop under drain still sends nothing"
-if [ "$(wc -l < "$log")" = 1 ] && grep -q 'drain watches the pane' "$log" && ! grep -q 'no herdr pane' "$log"; then
+if [ "$(wc -l < "$log")" = 1 ] && grep -q 'drain watches the pane' "$log" && ! grep -q 'not-sent' "$log"; then
   echo "PASS: drain leaves one log line saying drain watches the pane"
 else
   echo "FAIL: drain log line — $(cat "$log" 2>/dev/null)"; fails=1

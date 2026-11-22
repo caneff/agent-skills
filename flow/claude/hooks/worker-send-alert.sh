@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PostToolUse hook on SendMessage: tell the controller's pane at once when a
+# PostToolUse hook on SendMessage: tell the controller at once when a
 # worker's send to its controller failed. A worker whose sends all fail (a
 # Claude Code upgrade moved the socket directory) says nothing until it stops.
 # The Stop hook worker-stop-alert.sh is that stop-time alert (its entry is
@@ -14,10 +14,11 @@
 # carrying `--controller "<name>"`; a later `Your controller is now <name>`
 # peer message replaces it. The send is to the controller when
 # `worker_alert_is_controller_target` says so. A response whose `success` is
-# not true is a failed send: one line goes into the controller's herdr pane
-# with `herdr agent prompt`, a hook command the auto-mode classifier never
-# sees. A controller named `drain` is no session, so no alert. One alert per
-# send: every attempt is logged to ~/.claude/worker-send-alerts.log keyed by
+# not true is a failed send: one line goes to the controller's inbox socket
+# as a peer message (#1946; `worker_alert_send_peer` holds the protocol),
+# written by the hook itself, so the auto-mode classifier never sees it. A
+# controller named `drain` is no session, so no alert. One alert per send:
+# every attempt is logged to ~/.claude/worker-send-alerts.log keyed by
 # `tool_use_id` (an event without one is keyed by its own content), and a
 # logged send never alerts again. An event with no `tool_response` is logged,
 # never read as delivered or as failed. Always exit 0 — a hook failure must
@@ -35,8 +36,8 @@ lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
 source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
   lib_missing "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller"
 for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
-          worker_alert_worker_agent_name worker_alert_controller_pane \
-          worker_alert_resolve_controller worker_alert_prompt_pane \
+          worker_alert_worker_agent_name \
+          worker_alert_resolve_controller worker_alert_send_peer \
           worker_alert_current_controller worker_alert_is_controller_target \
           worker_alert_deliver; do
   declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"

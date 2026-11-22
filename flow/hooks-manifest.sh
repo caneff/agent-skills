@@ -21,4 +21,4 @@ UNREGISTERED_BY_DESIGN=(worker-stop-alert.sh)
 # settings.json entry exists for them. Named, not matched by a `*-lib.sh`
 # glob: a new hook with a library-sounding name must not skip the check.
 # install-check.sh fails when a name here no longer exists.
-SOURCED_LIBS=(command-scan-lib.sh worker-alert-lib.sh teach-lib.sh teach-testlib.sh)
+SOURCED_LIBS=(command-scan-lib.sh worker-alert-lib.sh worker-alert-testlib.sh teach-lib.sh teach-testlib.sh)
