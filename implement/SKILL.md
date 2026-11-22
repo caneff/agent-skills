@@ -398,10 +398,10 @@ round follows steps 2–3 below keyed on the spec number:
    the failure out; a bare "unlikely" is not one.
 
    On a repo that is not Chris's (`flow/claude/WORKFLOW.md` § Gate 1),
-   `/file-ticket` hands the command back instead of filing, so a `moved` finding has no ticket
-   number there: the disposition is `disputed: needs its own design — filing
-   command handed to the controller`, with the command in your "PR up" message
-   (§ Someone else's repo).
+   `/file-ticket` hands the command back instead of filing, so a `moved`
+   finding has no ticket number there: the disposition is `disputed: needs
+   its own design — filing command handed to the controller`, with the
+   command in your "PR up" message (§ Someone else's repo).
 
 3. **Write the dispositions, then run the seam.** You write
    `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl` (`<repo>` as in

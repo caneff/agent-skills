@@ -436,10 +436,10 @@ url_is_owned() {
   return 0
 }
 # Is the PR base the repo at URL $1 resolves to the user's (owner_is_owned):
-# its parent when it is a fork, else itself. The URL is named to gh explicitly (a bare `gh
-# repo view` would resolve to an `upstream` remote instead). base/<key of $1>
-# is written only once that base is verified owned, so its presence is the
-# verdict.
+# its parent when it is a fork, else itself. The URL is named to gh
+# explicitly (a bare `gh repo view` would resolve to an `upstream` remote
+# instead). base/<key of $1> is written only once that base is verified
+# owned, so its presence is the verdict.
 base_is_owned() {
   local slug map
   slug=$(github_slug "$1") || return 0
@@ -550,8 +550,8 @@ default_bases_are_owned() {
            git config --get-regexp '^remote\..*\.gh-resolved$' | awk '$2 ~ /\// { print "https://github.com/" $2 }')
 }
 # The base of a `gh pr create`: every repo the command names must be the
-# user's (owner_is_owned), and unless each create the shell runs names its repo itself,
-# unquoted, gh's default base must be too. 3, PR_WHY saying why, when the
+# user's (owner_is_owned), and unless each create the shell runs names its
+# repo itself, unquoted, gh's default base must be too. 3, PR_WHY saying why, when the
 # default base is read from a checkout a `cd` moved away from.
 pr_create_is_owned() {
   local segment segments
