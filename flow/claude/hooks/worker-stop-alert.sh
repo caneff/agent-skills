@@ -34,9 +34,11 @@
 # alert is sent per turn, whatever the stops in it. And controller `drain` is
 # no session (drain watches the pane itself): the hook logs one line per
 # session saying so and attempts no delivery.
-# Otherwise submit one line into the controller's herdr pane with `herdr agent
-# prompt` — a hook command, so the auto-mode classifier never sees it (a
-# report sent that way was once denied there). One alert per stop: every
+# Otherwise send one line to the controller's inbox socket as a peer message
+# (#1946), never typed into its pane, where it landed inside whatever draft
+# Chris was writing. The hook writes the frame itself, so the auto-mode
+# classifier never sees it (a report sent through it was once denied there).
+# One alert per stop: every
 # attempt is logged to ~/.claude/worker-stop-alerts.log keyed by session
 # and the transcript's last entry (plus the turn's id), and a logged stop
 # never alerts again.
@@ -70,8 +72,8 @@ source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
 # since worker_alert_logline can be exactly the missing symbol. Checked here
 # with `lib_missing`, which needs none of them.
 for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
-          worker_alert_worker_agent_name worker_alert_controller_pane \
-          worker_alert_resolve_controller worker_alert_prompt_pane \
+          worker_alert_worker_agent_name \
+          worker_alert_resolve_controller worker_alert_send_peer \
           worker_alert_current_controller worker_alert_deliver; do
   declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
 done
@@ -130,8 +132,9 @@ IFS=$'\t' read -r verdict stop turn < <(entries | jq -r --arg c "$controller" \
   # same names and sockets a report is matched against. A peer message
   # carrying neither is attributable to no one, so it starts no turn.
   def from_controller: (.origin.from | IN($socks[])) or (.origin.name | IN($c, $names[]));
-  # A sub-worker'"'"'s own stop alert is typed into this pane as a human prompt;
-  # it is that worker'"'"'s report to us, not a turn we owe the controller.
+  # A sub-worker'"'"'s own stop alert (once typed into this pane as a human
+  # prompt, now a peer message) is that worker'"'"'s report to us, not a turn we
+  # owe the controller.
   def msg_text: .message.content
       | if type == "string" then . else ([.[]? | .text? // empty] | join("")) end;
   def worker_alert: msg_text | startswith("[worker-stop-alert]");
