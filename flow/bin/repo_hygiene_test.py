@@ -297,6 +297,18 @@ def test_ignored_folder_holding_a_worktree_is_listed_without_a_delete_line(world
     assert ".claude" in body and "no delete proposed" in body and "rm -r" not in body
 
 
+def test_ignored_folder_holding_a_nested_git_checkout_gets_no_delete_line(world):
+    (world.repo / ".gitignore").write_text("clones/\n")
+    git(world.repo, "add", ".gitignore")
+    git(world.repo, "commit", "-q", "-m", "ignore")
+    inner = world.repo / "clones" / "other"
+    inner.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(inner)], check=True)
+    (inner / "blob").write_bytes(b"x" * 2_000_000)
+    body = section(world.run("--min-ignored-mb", "1").stdout, "ignored folders")
+    assert "clones" in body and "no delete proposed" in body and "rm -r" not in body
+
+
 def test_ignored_folder_with_a_non_ascii_name_is_measured_not_a_failure(world):
     (world.repo / ".gitignore").write_text("caché/\n")
     git(world.repo, "add", ".gitignore")
