@@ -211,6 +211,8 @@ list is accepted is not known.
 - Nested `<span>`s with inline `position: absolute`, `border` and `background` styles survive inside a link
   and render (000W76's CSS-drawn Twitch glyph, read back and screenshotted logged out, 2026-11-23). Discord
   previews show every `og:image` (Chris pasted 000W1E: two images).
+- A `style` attribute holding `clip-path: path('...')` is removed whole, leaving a bare `<span>` (000W76,
+  2026-11-23). Which part sets it off (`clip-path`, the parentheses or the quotes) is not known.
 - After "Create", the author opens `Raetsel/zeigen.php?id=…` and clicks
   "Aktivieren" in the right-hand box. A puzzle can be deactivated and edited
   later.
