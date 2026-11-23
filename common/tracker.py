@@ -8,6 +8,7 @@ never an empty answer, since an empty queue and an unreadable one are different 
 GitHub REST objects."""
 import datetime
 import json
+import re
 from urllib.parse import quote
 
 import shellcmd
@@ -263,13 +264,18 @@ class GhTracker:
         try:
             entries = self._json(["api", self._path("contents/.github/workflows")])
         except TrackerError as exc:
-            if "404" in str(exc) or "Not Found" in str(exc):
-                return []
-            raise
+            # gh's own status ends the message; the command before it names the repo, whose name may hold "404".
+            if not re.search(r"\(HTTP 404\)\s*$", str(exc)):
+                raise
+            self._json(["api", f"repos/{quote(self.repo, safe='/')}"])  # a 404 for the whole repo raises here
+            return []
         if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
             raise TrackerError("the workflow directory listing was not a list of files")
+        files = [e for e in entries if e.get("type") == "file" and str(e.get("name", "")).endswith((".yml", ".yaml"))]
+        if not all(isinstance(e.get("path"), str) for e in files):
+            raise TrackerError("a workflow directory entry named no path")
         return [self._run(["api", "-H", "Accept: application/vnd.github.raw", self._path(f"contents/{quote(e['path'])}")])
-                for e in entries if e.get("type") == "file" and str(e.get("name", "")).endswith((".yml", ".yaml"))]
+                for e in files]
 
     def viewer_login(self):
         """The login `gh` is authenticated as."""
@@ -296,8 +302,8 @@ class MemoryTracker:
     `runs` is the workflow-run list and `logs` maps a run id to its failed log.
     `comments`, `merges` and the issues `create_issue` adds record what was written; a comment is
     also appended to its issue's own `comments`, as `issue_view` reads it back. An issue may carry
-    `events` (its timeline). `identity` is the `(owner, name)` every checkout answers, `workflows` the text of each workflow
-    file, and `labels_defined` the repo's label names."""
+    `events` (its timeline). `identity` is the `(owner, name)` every checkout answers, `workflows` the text of
+    each workflow file, and `labels_defined` the repo's label names."""
 
     def __init__(self, issues=(), prs=(), viewer="me", merged=None, broken=None, repo="owner/repo",
                  pr_views=None, pr_comments=None, runs=(), logs=None, identity=None, labels_defined=(), workflows=()):

@@ -47,22 +47,9 @@ class Clock:
         self.sleeps += 1
 
 
-def settle_seq(views, poll=5):
-    """Settle against `views` in order, the last one repeating."""
-    clock, reads = Clock(), []
-
-    def read():
-        reads.append(1)
-        return views[min(len(reads), len(views)) - 1]
-    try:
-        out = pr_settle.settle(read, sleep=clock.sleep, now=clock.now, poll=poll)
-    except pr_settle.SettleError as exc:
-        return exc, clock, reads
-    return out, clock, reads
-
-
-def settle_ci(views, ci, poll=5):
-    """`settle_seq` with a `ci()` answer for "this repo runs workflows on pull_request"."""
+def settle_seq(views, poll=5, ci=lambda: False):
+    """Settle against `views` in order, the last one repeating; `ci()` says whether the repo runs
+    workflows on pull_request (none, unless a test says so)."""
     clock, reads = Clock(), []
 
     def read():
@@ -76,33 +63,71 @@ def settle_ci(views, ci, poll=5):
 
 
 def test_clean_with_no_check_yet_waits_in_a_repo_with_a_pull_request_workflow():
-    out, clock, reads = settle_ci([view("CLEAN"), view("CLEAN", checks=[run_check()])], lambda: True)
+    out, clock, reads = settle_seq([view("CLEAN"), view("CLEAN", checks=[run_check()])], ci=lambda: True)
     assert out["statusCheckRollup"] and len(reads) == 2 and clock.sleeps == 1
 
 
 def test_clean_with_no_check_ever_registering_fails_naming_it():
-    exc, clock, _ = settle_ci([view("CLEAN")], lambda: True)
+    exc, clock, _ = settle_seq([view("CLEAN")], ci=lambda: True)
     assert isinstance(exc, pr_settle.SettleError)
     assert "no check registered" in str(exc) and SHA in str(exc)
     assert 60 <= clock.t < 75
 
 
 def test_clean_with_no_check_is_accepted_at_once_when_no_workflow_runs_on_pull_request():
-    out, clock, reads = settle_ci([view("CLEAN")], lambda: False)
+    out, clock, reads = settle_seq([view("CLEAN")], ci=lambda: False)
     assert out["mergeStateStatus"] == "CLEAN" and len(reads) == 1 and clock.sleeps == 0
 
 
 def test_a_failed_workflow_lookup_waits_and_never_accepts():
     t = tracker.MemoryTracker(broken={"workflow_texts": "gh: rate limited"})
-    exc, _, reads = settle_ci([view("CLEAN")], lambda: pr_settle.runs_on_pull_request(t))
+    exc, _, reads = settle_seq([view("CLEAN")], ci=lambda: pr_settle.runs_on_pull_request(t))
     assert isinstance(exc, pr_settle.SettleError) and "no check registered" in str(exc)
     assert len(reads) > 1
 
 
-def test_clean_with_a_running_check_in_a_ci_repo_is_not_re_asked_about_workflows():
+def test_clean_with_every_check_passed_does_not_ask_about_workflows():
     asked = []
-    out, _, _ = settle_ci([view("CLEAN", checks=[run_check()])], lambda: asked.append(1) or True)
+    out, _, _ = settle_seq([view("CLEAN", checks=[run_check()])], ci=lambda: asked.append(1) or True)
     assert out["mergeStateStatus"] == "CLEAN" and not asked
+
+
+def test_clean_with_a_running_check_waits_for_it_in_a_pull_request_repo():
+    running = run_check(status="IN_PROGRESS", conclusion=None)
+    out, clock, reads = settle_seq([view("CLEAN", checks=[running]), view("CLEAN", checks=[run_check()])],
+                                   ci=lambda: True)
+    assert out["statusCheckRollup"][0]["status"] == "COMPLETED" and len(reads) == 2 and clock.sleeps == 1
+
+
+def test_clean_with_a_running_check_is_accepted_when_no_workflow_runs_on_pull_request():
+    running = run_check(status="IN_PROGRESS", conclusion=None)
+    out, _, reads = settle_seq([view("CLEAN", checks=[running])], ci=lambda: False)
+    assert out["mergeStateStatus"] == "CLEAN" and len(reads) == 1
+
+
+def test_clean_with_a_check_running_past_the_limit_fails_naming_it():
+    running = run_check(status="IN_PROGRESS", conclusion=None, name="gate")
+    exc, clock, _ = settle_seq([view("CLEAN", checks=[running])], ci=lambda: True)
+    assert isinstance(exc, pr_settle.SettleError) and "gate" in str(exc) and "not CLEAN" not in str(exc)
+    assert clock.t >= pr_settle.CHECKS_SECONDS
+
+
+def test_merge_waits_for_a_check_to_register_in_a_pull_request_repo():
+    exc, calls, reads = merge_with([(0, "")], views=[view("CLEAN"), view("CLEAN", checks=[run_check()])],
+                                   ci=lambda: True)
+    assert exc is None and calls == [SHA] and len(reads) == 2
+
+
+def test_merge_refuses_when_no_check_ever_registers_in_a_pull_request_repo():
+    exc, calls, _ = merge_with([(0, "")], views=[view("CLEAN")], ci=lambda: True)
+    assert isinstance(exc, pr_settle.SettleError) and "no check registered" in str(exc) and not calls
+
+
+def test_settle_and_merge_require_the_ci_answer():
+    with pytest.raises(TypeError):
+        pr_settle.settle(lambda: view())
+    with pytest.raises(TypeError):
+        pr_settle.merge(lambda: view(), lambda head: (0, ""), SHA)
 
 
 WF_PR = "name: ci\non:\n  pull_request:\n    branches: [main]\njobs: {}\n"
@@ -111,7 +136,11 @@ WF_PUSH = "name: ci\non:\n  push:\n    branches: [main]\n# pull_request is not a
 
 @pytest.mark.parametrize("texts,expected", [
     ([WF_PR], True), (["on: pull_request\n"], True), (["on: [push, pull_request]\n"], True),
-    (["on:\n  pull_request_target:\n"], True), ([WF_PUSH], False), ([], False)])
+    (["on:\n  pull_request_target:\n"], True), ([WF_PUSH], False), ([], False),
+    (['"on":\n  pull_request:\n'], True),
+    (["on:\n  push:  # not pull_request\njobs:\n  a:\n    if: github.event_name == 'pull_request'\n"], False),
+    (["on: push\njobs:\n  a:\n    if: github.event_name == 'pull_request'\n"], False),
+    (["name: x\njobs: {}\n"], False), ([WF_PUSH, WF_PR], True)])
 def test_runs_on_pull_request_reads_the_workflow_triggers(texts, expected):
     t = tracker.MemoryTracker(workflows=texts)
     assert pr_settle.runs_on_pull_request(t) is expected
@@ -217,7 +246,7 @@ def test_an_unrecognised_status_context_state_is_a_failure():
 def test_settle_refuses_a_head_other_than_the_one_named():
     clock = Clock()
     with pytest.raises(pr_settle.SettleError, match="head moved"):
-        pr_settle.settle(lambda: view("CLEAN", head="b" * 40), head=SHA, sleep=clock.sleep, now=clock.now)
+        pr_settle.settle(lambda: view("CLEAN", head="b" * 40), head=SHA, sleep=clock.sleep, now=clock.now, ci=lambda: False)
 
 
 def test_a_draft_fails_at_once():
@@ -242,7 +271,7 @@ def test_the_error_carries_the_last_view():
     assert exc.view["mergeStateStatus"] == "UNKNOWN" and exc.view["headRefOid"] == SHA
 
 
-def merge_with(outcomes, views=None):
+def merge_with(outcomes, views=None, ci=lambda: False):
     """`merge` where the n-th `gh pr merge` returns `outcomes[n]` as (code, text)."""
     clock, calls = Clock(), []
     seq = list(views or [view("CLEAN")])
@@ -256,7 +285,7 @@ def merge_with(outcomes, views=None):
         calls.append(head)
         return outcomes[min(len(calls), len(outcomes)) - 1]
     try:
-        pr_settle.merge(read, gh_merge, SHA, sleep=clock.sleep, now=clock.now, poll=5)
+        pr_settle.merge(read, gh_merge, SHA, sleep=clock.sleep, now=clock.now, poll=5, ci=ci)
     except pr_settle.SettleError as exc:
         return exc, calls, reads
     return None, calls, reads
@@ -356,6 +385,8 @@ elif a[:1] == ["api"] and a[-1].endswith("contents/.github/workflows"):
     if st.get("workflows") is None:
         sys.stderr.write("gh: Not Found (HTTP 404)\n"); sys.exit(1)
     print(json.dumps([{"type": "file", "name": "ci.yml", "path": ".github/workflows/ci.yml"}]))
+elif a[:1] == ["api"] and a[-1].startswith("repos/") and a[-1].count("/") == 2:
+    print(json.dumps({"full_name": a[-1][6:]}))
 elif a[:1] == ["api"] and a[-1].endswith("contents/.github/workflows/ci.yml"):
     print(st["workflows"])
 elif a[:2] == ["pr", "view"]:
@@ -468,3 +499,10 @@ def test_cli_waits_for_a_check_to_register_in_a_pull_request_repo(cli):
     r, st = cli([view("CLEAN"), view("CLEAN", checks=[run_check()])], workflows=WF_PR)
     assert r.returncode == 0, r.stderr
     assert st["n"] == 2
+
+
+def test_cli_merge_waits_for_a_check_to_register_in_a_pull_request_repo(cli):
+    r, st = cli([view("CLEAN"), view("CLEAN", checks=[run_check()])], ((0, ""),), "--merge", "--head", SHA,
+                workflows=WF_PR)
+    assert r.returncode == 0, r.stderr
+    assert st["n"] >= 2 and len(st["merge_calls"]) == 1

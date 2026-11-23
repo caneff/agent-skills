@@ -1004,7 +1004,8 @@ def verify_pr(ctx, branch, anchor, kind):
     limits), then its closures and the seam."""
     try:
         view = pr_settle.settle(pr_settle.gh_reader(branch, ctx.repo, "number,url,closingIssuesReferences,body",
-                                                    tracker=ctx.tracker))
+                                                    tracker=ctx.tracker),
+                                ci=lambda: pr_settle.runs_on_pull_request(ctx.tracker))
     except pr_settle.SettleError as exc:
         url = (exc.view or {}).get("url")
         raise DrainError(f"{url} {exc}" if url else str(exc)) from exc
@@ -1324,7 +1325,8 @@ def work(ctx, anchor, others, resumed, started, kind):
             view["before"] = main_sha(ctx)  # `{before}` of the deploy (#1726), read as the seam's check last left it
             try:
                 pr_settle.merge(pr_settle.gh_reader(view["number"], ctx.repo, tracker=ctx.tracker),
-                                pr_settle.gh_merger(view["number"], ctx.repo, tracker=ctx.tracker), view["headRefOid"])
+                                pr_settle.gh_merger(view["number"], ctx.repo, tracker=ctx.tracker), view["headRefOid"],
+                                ci=lambda: pr_settle.runs_on_pull_request(ctx.tracker))
             except pr_settle.SettleError as exc:
                 raise DrainError(f"{view['url']} {exc}") from exc
         except DrainError as exc:
