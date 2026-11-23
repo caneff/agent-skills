@@ -2401,7 +2401,8 @@ def test_drains_cap_is_the_one_tests_all_sh_gives_a_linked_worktree():
 
 
 def test_an_unresolved_ticket_is_named_before_the_first_bundle_starts(sb):
-    sb.write_state({1: {"body": "no blocker section here"}, 2: {}})
+    sb.write_state({1: {"body": "no blocker section here"}, 2: {},
+                    3: {"labels": ["ready-for-agent", "in-progress"]}})
     r = sb.drain()
     assert r.returncode == 0, r.stderr
     lines = r.stdout.splitlines()
@@ -2416,4 +2417,23 @@ def test_an_unresolved_ticket_is_named_before_the_first_bundle_starts(sb):
 def test_a_run_with_no_unresolved_ticket_prints_no_preflight_line(sb):
     sb.write_state({1: {}})
     r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    assert "bundle started:" in r.stdout
     assert "unresolved at start" not in r.stdout
+
+
+def test_the_preflight_is_said_before_a_resumed_bundle(sb):
+    sb.write_state({1: {"labels": ["in-progress"]}, 2: {"body": "no blocker section here"}, 3: {}},
+                   comments=[["1", "drain anchor: implement-1"]])
+    sb.git(sb.repo, "worktree", "add", "-q", "--no-track", "-b", "implement-1", sb.worktree(1), "origin/main")
+    r = sb.drain("--once", env={"HERDR_GONE": "1"})
+    lines = r.stdout.splitlines()
+    pre = next(i for i, x in enumerate(lines) if x.startswith("unresolved at start: #2"))
+    assert pre < next(i for i, x in enumerate(lines) if x.startswith("bundle started:"))
+
+
+def test_the_preflight_is_said_when_anchor_is_refused(sb):
+    sb.write_state({1: SPEC, 2: {"parent": 1, "body": "## Blocked by\n\n- #9\n"}, 3: {"body": "none"}, 9: {"labels": []}})
+    r = sb.drain("--anchor", "1")
+    assert "--anchor #1 is passed over" in (r.stdout + r.stderr)
+    assert "unresolved at start: #3 ticket 3" in r.stdout

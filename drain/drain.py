@@ -92,9 +92,10 @@ Progress is one flushed line per event on stdout, which `job-run` copies into
 the run's progress file as it happens: `bundle started: #<n> <title>; ...
 pane <repo-short>-<anchor>` when a bundle's worker exists, `bundle ended: #<n>
 ... merged <pr> <sha>` or `... handed to Chris: <reason>` or `... stopped:
-<reason>` when it ends, then the summary. Before the first bundle, one `unresolved at start: #<n>
-<title>  <why>` per ready ticket with no readable `Blocked by`, worded as its `passed over:` line; the
-run goes on without it. A ticket the worker closed with no
+<reason>` when it ends, then the summary. Before the first bundle, one
+`unresolved at start: #<n> <title>  <why>` per ready ticket with no
+readable `Blocked by`, worded as its `passed over:` line; the run goes on
+without it. A ticket the worker closed with no
 PR is recorded as what closed it, from its `closed` event: `(landed on main,
 no PR)` with that commit's sha, or with the sha of the main commit whose
 message says `Closes #<n>` when a hand closed it after the trailer did not
@@ -1284,6 +1285,20 @@ def say_unresolved(ctx, prog, passed):
             say(f"unresolved at start: #{n} {title_of(ctx, n)}  {why}")
 
 
+def preflight_for_resume(ctx, prog):
+    """A resumed bundle starts before any queue read, so the preflight reads the queue
+    itself first. A failed read is said, never taken for an empty list."""
+    if prog.preflight:
+        return
+    try:
+        passed = read_frontier(ctx, retry=False)[3]
+    except DrainError as exc:
+        prog.preflight = True
+        say(f"unresolved at start: not read ({one_line(exc, 150)})")
+        return
+    say_unresolved(ctx, prog, passed)
+
+
 def say_waiting(waiting):
     for spec in waiting:
         say(f"waiting: ready slices of spec #{spec}, which drain cannot start (it is not "
@@ -1312,6 +1327,7 @@ def next_anchor(ctx, prog):
     while True:
         taken = resumable(ctx, prog.ended)
         if taken is not None:
+            preflight_for_resume(ctx, prog)
             anchor, kind = taken
             return anchor, kind, True, []
         queue, waiting, stranded, candidates, passed = survey(ctx)

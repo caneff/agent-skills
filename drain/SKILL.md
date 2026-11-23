@@ -78,7 +78,9 @@ Read the progress file
 - the bundle in flight: the last `bundle started:` line with no
   `bundle ended:` after it, its tickets with titles, its pane, and that pane's
   herdr state;
-- each bundle already ended in this drain, with its `bundle ended:` outcome.
+- each bundle already ended in this drain, with its `bundle ended:` outcome;
+- the `unresolved at start:` lines, as printed: the ready tickets this drain
+  passed over because their `Blocked by` was unreadable.
 
 A drain that is not alive has no batch to list: say so, quoting
 `job-run --status`.
@@ -104,8 +106,9 @@ then the summary:
 - **stopped**: the reason, when drain printed one.
 - **ended**: the closing `ended: <cause>` line, as printed (its causes are
   in the `drain/drain.py` docstring), then each `passed over:` ticket with
-  its reason. The `unresolved at start:` lines of the run's start are not
-  repeated here; the `passed over:` lines carry the same reasons. It is not a stop: an empty queue exits 0.
+  its reason. The `unresolved at start:` lines are not repeated here: the
+  `passed over:` lines carry the same reasons. It is not a stop: an empty
+  queue exits 0.
 - **Live layer**: when the target repo declares a live layer above its merge
   seam in its `AGENTS.md` § End-to-end seam, a command run once per drain on
   Chris's go (`./e2e.sh` in twitch-rules-scroller, #1392), end the report with the ask
