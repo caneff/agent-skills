@@ -711,7 +711,8 @@ const LANE_WRAPPER_MARK: &str = "lane commit-identity guard wrapper";
 /// arguments and stdin git gave the slot through `hook-impl`, the entry point
 /// pre-commit's own installed script uses, because `pre-commit run` takes
 /// neither pre-push's remote arguments nor its ref list. A missing `pre-commit`
-/// fails the hook, naming the tool, and so does a checkout with no config (no
+/// fails the hook, naming the tool (`hook-impl` as pre-commit 4.7.0 has it, the
+/// version this was checked against), and so does a checkout with no config (no
 /// `--skip-on-missing-config`): a hook that did not run never passes.
 fn pre_commit_runner(slot: &str) -> String {
     format!(
@@ -725,12 +726,10 @@ fn pre_commit_runner(slot: &str) -> String {
 /// moved to `<slot>.legacy`, is what `pre-commit install` leaves, and running
 /// on top of it loops (`bug: pre-commit's script is installed in migration
 /// mode`) without the guard ever running.
-fn pre_commit_takeover(dir: &str, slot: &str, foreign_name: &str) -> Option<String> {
+fn pre_commit_takeover(dir: &str, slot: &str) -> Option<String> {
     let has = |name: &str, mark: &str| std::fs::read(Path::new(dir).join(name)).is_ok_and(|b| String::from_utf8_lossy(&b).contains(mark));
     let found = if has(slot, PRE_COMMIT_SCRIPT_MARK) {
         slot.to_string()
-    } else if has(foreign_name, PRE_COMMIT_SCRIPT_MARK) {
-        foreign_name.to_string()
     } else if has(&format!("{slot}.legacy"), LANE_WRAPPER_MARK) {
         format!("{slot}.legacy")
     } else {
@@ -741,17 +740,28 @@ fn pre_commit_takeover(dir: &str, slot: &str, foreign_name: &str) -> Option<Stri
     ))
 }
 
-/// Puts the pre-commit runner where the guard wrapper calls its foreign hook.
-/// Refuses when that name already holds a different hook (the slot's own
-/// current hook counts, since the install would displace it there): one
-/// foreign name cannot hold both, and only a human can say which survives.
-fn install_pre_commit_runner(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, buffer_stdin: bool) -> Result<(), String> {
+/// True for a wrapper an earlier build of the lane installed: its text opens
+/// with the lane's own two lines, which a user's hook has no reason to carry.
+/// Such a file is the lane's to replace; any other hook is not.
+fn is_stale_lane_wrapper(bytes: &[u8]) -> bool {
+    bytes.starts_with(format!("#!/bin/sh\n# {LANE_WRAPPER_MARK}").as_bytes())
+}
+
+/// Refuses, before anything is written, when the runner's name or the slot
+/// holds a hook the lane may not replace (#1641). Allowed in the foreign
+/// name: the runner itself, pre-commit's own generated script (what
+/// `pre-commit install` left there, which the runner supersedes and
+/// `pre-commit install` regenerates), and a stale lane wrapper. Allowed in the
+/// slot: the current wrapper and a stale one. Anything else is a user's hook,
+/// and one foreign name cannot hold both it and the runner.
+fn check_pre_commit_runner(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, buffer_stdin: bool) -> Result<(), String> {
     let runner = pre_commit_runner(slot);
     let wrapper = hook_wrapper(guard_name, foreign_name, buffer_stdin);
-    let foreign_path = Path::new(dir).join(foreign_name);
-    for (p, allowed) in [(foreign_path.clone(), &runner), (Path::new(dir).join(slot), &wrapper)] {
+    let replaceable = |b: &[u8]| is_stale_lane_wrapper(b);
+    for (name, ours, may_be_pre_commits) in [(foreign_name, runner.as_bytes(), true), (slot, wrapper.as_bytes(), false)] {
+        let p = Path::new(dir).join(name);
         match std::fs::read(&p) {
-            Ok(b) if b == allowed.as_bytes() => {}
+            Ok(b) if b == ours || replaceable(&b) || (may_be_pre_commits && String::from_utf8_lossy(&b).contains(PRE_COMMIT_SCRIPT_MARK)) => {}
             Ok(_) => {
                 return Err(format!(
                     "{} already holds a hook of its own, so the repo's {PRE_COMMIT_CONFIG} cannot run from {slot}; resolve by hand (move it into the repo's pre-commit config, or remove it) before dispatching again",
@@ -762,7 +772,39 @@ fn install_pre_commit_runner(dir: &str, slot: &str, foreign_name: &str, guard_na
             Err(e) => return Err(format!("cannot read {}: {e}", p.display())),
         }
     }
-    write_executable(&foreign_path, &runner)
+    Ok(())
+}
+
+/// Writes the runner over whatever `check_pre_commit_runner` allowed in the
+/// foreign name, and replaces a stale lane wrapper in the slot with the
+/// current one, so `install_hook_slot` does not displace it onto the runner.
+fn install_pre_commit_runner(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, buffer_stdin: bool) -> Result<(), String> {
+    write_executable(&Path::new(dir).join(foreign_name), &pre_commit_runner(slot))?;
+    let slot_path = Path::new(dir).join(slot);
+    if std::fs::read(&slot_path).is_ok_and(|b| is_stale_lane_wrapper(&b)) {
+        write_executable(&slot_path, &hook_wrapper(guard_name, foreign_name, buffer_stdin))?;
+    }
+    Ok(())
+}
+
+/// A repo that dropped its config no longer gets its runner's failure on every
+/// commit: the runner this lane wrote is removed, a hook of anyone else's kept.
+fn remove_stale_pre_commit_runner(dir: &str, slot: &str, foreign_name: &str) {
+    let p = Path::new(dir).join(foreign_name);
+    if std::fs::read(&p).is_ok_and(|b| b == pre_commit_runner(slot).as_bytes()) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// Whether the repo has a pre-commit config: in the primary checkout, or on
+/// `origin/main` / `origin/master`, which a worktree is cut from. The checkout
+/// alone misses a primary left on an older branch, and then no runner is
+/// installed and the repo's hooks never run.
+fn has_pre_commit_config(primary: &str) -> bool {
+    Path::new(primary).join(PRE_COMMIT_CONFIG).is_file()
+        || ["origin/main", "origin/master"].iter().any(|r| {
+            quiet_ok_bounded("git", &["-C", primary, "cat-file", "-e", &format!("{r}:{PRE_COMMIT_CONFIG}")], git_query_timeout()).unwrap_or(false)
+        })
 }
 
 /// Installs both halves of the commit-identity guard: pre-commit and
@@ -789,17 +831,22 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
         ("pre-commit", PRE_COMMIT_FOREIGN, GUARD_NAME, IDENTITY_GUARD, false),
         ("pre-push", PRE_PUSH_FOREIGN, PUSH_GUARD_NAME, PUSH_GUARD, true),
     ];
-    let with_config = Path::new(primary).join(PRE_COMMIT_CONFIG).is_file();
+    let with_config = has_pre_commit_config(primary);
     if with_config {
-        for (slot, foreign_name, ..) in slots {
-            if let Some(refusal) = pre_commit_takeover(&dir, slot, foreign_name) {
+        // Every slot is checked before any is written, so a refusal on pre-push
+        // does not leave pre-commit half installed.
+        for (slot, foreign_name, guard_name, _, buffer_stdin) in slots {
+            if let Some(refusal) = pre_commit_takeover(&dir, slot) {
                 return Err(refusal);
             }
+            check_pre_commit_runner(&dir, slot, foreign_name, guard_name, buffer_stdin)?;
         }
     }
     for (slot, foreign_name, guard_name, guard_content, buffer_stdin) in slots {
         if with_config {
             install_pre_commit_runner(&dir, slot, foreign_name, guard_name, buffer_stdin)?;
+        } else {
+            remove_stale_pre_commit_runner(&dir, slot, foreign_name);
         }
         install_hook_slot(&dir, slot, foreign_name, guard_name, guard_content, buffer_stdin)?;
     }

@@ -3229,7 +3229,8 @@ fn a_repo_with_a_pre_commit_config_runs_its_hooks_from_the_foreign_slot_and_the_
     assert!(push.status.success(), "{}", out_text(&push));
     let log = std::fs::read_to_string(&log).unwrap();
     assert!(log.contains("--hook-type=pre-commit"), "{log}");
-    assert!(log.contains("--hook-type=pre-push") && log.contains("refs/heads/good"), "pre-push did not get the ref list: {log}");
+    assert!(log.contains("--hook-type=pre-push -- origin"), "pre-push did not get git's remote argument: {log}");
+    assert!(log.contains("refs/heads/good"), "pre-push did not get the ref list: {log}");
     std::fs::write(&code, "1").unwrap();
     let blocked_push = git_in(&wt, &path, &["push", "origin", "HEAD:refs/heads/good2"]);
     assert!(!blocked_push.status.success(), "a failing pre-push hook did not block the push: {}", out_text(&blocked_push));
@@ -3288,6 +3289,96 @@ fn guard_wrappers_moved_to_legacy_by_pre_commit_install_are_refused_with_the_fix
     std::fs::write(dir.join("pre-commit"), "#!/bin/sh\nexit 0\n").unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
     assert!(refused(&out, &f.calls(), &repo, "395", "pre-commit uninstall"), "{}", out_text(&out));
+}
+
+const STALE_LANE_WRAPPER: &str = "#!/bin/sh\n# lane commit-identity guard wrapper (#934, an earlier build)\nexec \"$(dirname \"$0\")/commit-identity-guard\"\n";
+
+/// What `pre-commit install` leaves behind in a repo the lane dispatched before
+/// #1641: its generated script at `<slot>.foreign`. `pre-commit uninstall`
+/// cannot clear it, so the install supersedes it instead of refusing.
+#[test]
+fn pre_commits_script_left_at_the_foreign_name_is_replaced_by_the_runner() {
+    let f = Fixture::new();
+    let repo = dispatch_with_config(&f);
+    let foreign = hooks_dir(&repo).join("pre-commit.foreign");
+    std::fs::write(&foreign, PRE_COMMIT_OWN_SCRIPT).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(std::fs::read_to_string(&foreign).unwrap().contains("hook-impl"), "the foreign name still holds pre-commit's script");
+}
+
+/// A repo dispatched by an earlier build has its older lane wrapper in the
+/// slot or at the foreign name; it is the lane's own, never "a hook of its own".
+#[test]
+fn an_earlier_lane_wrapper_in_the_slot_or_foreign_name_does_not_block_the_runner() {
+    let f = Fixture::new();
+    let repo = dispatch_with_config(&f);
+    let dir = hooks_dir(&repo);
+    std::fs::write(dir.join("pre-commit.foreign"), STALE_LANE_WRAPPER).unwrap();
+    std::fs::write(dir.join("pre-commit"), STALE_LANE_WRAPPER).unwrap();
+    std::fs::write(dir.join("pre-push"), STALE_LANE_WRAPPER).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    for slot in ["pre-commit", "pre-push"] {
+        assert!(std::fs::read_to_string(dir.join(format!("{slot}.foreign"))).unwrap().contains("hook-impl"), "{slot}.foreign is not the runner");
+    }
+    let (path, _, _) = stub_pre_commit(&f);
+    let wt = repo.join(".claude/worktrees/implement-395");
+    std::fs::write(wt.join("g"), "x\n").unwrap();
+    git_in(&wt, &path, &["add", "g"]);
+    let bad = git_in(&wt, &path, &["-c", "user.email=real@gmail.com", "commit", "-qm", "x"]);
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("commit-identity guard"), "{}", out_text(&bad));
+}
+
+#[test]
+fn a_users_own_hook_in_a_slot_of_a_repo_with_a_config_is_refused_and_nothing_is_half_installed() {
+    let f = Fixture::new();
+    let repo = dispatch_with_config(&f);
+    let dir = hooks_dir(&repo);
+    let mine = "#!/bin/sh\nexit 0\n";
+    std::fs::write(dir.join("pre-push"), mine).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "395", "pre-push"), "{}", out_text(&out));
+    assert!(out_text(&out).contains("already holds a hook of its own"), "{}", out_text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("pre-push")).unwrap(), mine, "the user's hook was touched");
+    assert!(!dir.join("pre-commit.foreign").exists(), "pre-commit was installed before pre-push refused");
+}
+
+#[test]
+fn a_second_dispatch_into_a_repo_with_a_config_is_unchanged_and_a_dropped_config_removes_the_runner() {
+    let f = Fixture::new();
+    let repo = dispatch_with_config(&f);
+    let first = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(first.status.success(), "{}", out_text(&first));
+    let dir = hooks_dir(&repo);
+    let before = (std::fs::read(dir.join("pre-commit")).unwrap(), std::fs::read(dir.join("pre-commit.foreign")).unwrap());
+    let second = f.dispatch(&["--repo", repo.to_str().unwrap(), "396"], &default_scenario());
+    assert!(second.status.success(), "a repeat dispatch refused: {}", out_text(&second));
+    assert_eq!(before, (std::fs::read(dir.join("pre-commit")).unwrap(), std::fs::read(dir.join("pre-commit.foreign")).unwrap()));
+    std::fs::remove_file(repo.join(".pre-commit-config.yaml")).unwrap();
+    let third = f.dispatch(&["--repo", repo.to_str().unwrap(), "397"], &default_scenario());
+    assert!(third.status.success(), "{}", out_text(&third));
+    assert!(!dir.join("pre-commit.foreign").exists() && !dir.join("pre-push.foreign").exists(), "the runner outlived the config");
+}
+
+/// The primary checkout sits on an older branch without the config, while the
+/// base a worktree is cut from has it: the runner is still installed.
+#[test]
+fn a_config_only_on_origin_main_still_gets_the_runner() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let git = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&repo).args(args).status().unwrap().success(), "{args:?}");
+    git(&["reset", "-q", "--hard", "origin/main"]);
+    std::fs::write(repo.join(".pre-commit-config.yaml"), PRE_COMMIT_CONFIG).unwrap();
+    git(&["add", ".pre-commit-config.yaml"]);
+    git(&["commit", "-qm", "config"]);
+    git(&["push", "-q", "origin", "main"]);
+    git(&["reset", "-q", "--hard", "HEAD~1"]);
+    assert!(!repo.join(".pre-commit-config.yaml").exists());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(hooks_dir(&repo).join("pre-commit.foreign").exists(), "no runner for a config that is on origin/main");
 }
 
 #[test]
