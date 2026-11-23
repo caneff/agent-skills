@@ -19,7 +19,9 @@ throwaway worktree. Either way the night is one of three outcomes:
                    A suite whose PASS line says it ran over its CPU budget
                    (`tests/all.sh` measures it and does not fail on it) is
                    printed and notified as such; the night stays green. A red
-                   night prints them too, without a second notice
+                   night prints them too, without a second notice. The same
+                   holds for the always-on word count `tests/all.sh` prints
+                   (`always-on: total <n> words, over its budget of <b>`, #2016)
     red            the seam exited non-zero and named its failing suites with
                    `FAIL <suite>` lines
     inconclusive   anything else: the repo's origin, its owner or its
@@ -295,6 +297,25 @@ def over_budget(log):
         return []
 
 
+# `tests/all.sh` prints the always-on word count on every run (#2016); an
+# overrun is read from that line.
+_ALWAYS_ON = re.compile(r"^always-on: total (\d+) words(?:, incomplete: [^,]*)?, over its budget of (\d+)$")
+
+
+def always_on_overrun(log):
+    """`(words, budget)` when the seam's always-on line in `log` says the count
+    is over its budget, else None. An unreadable log or a missing line names
+    none: the count is a report, never a reason to hold a night back."""
+    try:
+        with open(log, errors="replace") as f:
+            for m in map(_ALWAYS_ON.match, f.read().splitlines()):
+                if m:
+                    return m.groups()
+    except OSError:
+        pass
+    return None
+
+
 def local_night(ctx, tip, jobs):
     try:
         cmd = seam_command(ctx.root, tip)
@@ -544,6 +565,9 @@ def backstop(args):
     over = [] if args.workflow or result.outcome not in (GREEN, RED) else over_budget(seam_log(ctx))
     for suite, cpu, budget in over:
         print(f"backstop: over CPU budget: {suite}: {cpu}s cpu over its {budget}s budget")
+    words = None if args.workflow or result.outcome not in (GREEN, RED) else always_on_overrun(seam_log(ctx))
+    if words:
+        print(f"backstop: always-on over budget: {words[0]} words against {words[1]}")
     if result.outcome == GREEN:
         with open(last_green_path(ctx), "w") as f:
             f.write(result.sha + "\n")
@@ -551,7 +575,13 @@ def backstop(args):
         if over:
             title = f"backstop: {repo} green, {len(over)} {'suite' if len(over) == 1 else 'suites'} over " \
                     f"{'its' if len(over) == 1 else 'their'} CPU budget"
+            if words:
+                title += f", always-on {words[0]} words over its {words[1]} budget"
             if not notify(args.notify, title, "; ".join(f"{s}: {c}s against {b}s" for s, c, b in over)):
+                return UNSENT
+        elif words:
+            if not notify(args.notify, f"backstop: {repo} green, always-on {words[0]} words over its {words[1]} budget",
+                          f"the always-on text is {words[0]} words against a budget of {words[1]}"):
                 return UNSENT
         return GREEN
     if result.outcome == RED:

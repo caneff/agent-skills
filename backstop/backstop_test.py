@@ -72,6 +72,7 @@ case "$FAKE_SEAM" in
   green) echo "PASS a/a_test.py"; echo "PASS b/b.test.sh"; echo "2 suites passed" ;;
   overbudget) echo "PASS a/a_test.py (30.1s cpu, over its 25s budget)"; echo "PASS b/b.test.sh (1.0s cpu)"
     echo "PASS c/c_test.py (120.4s cpu, over its 100s budget)"; echo "3 suites passed" ;;
+  alwayson) echo "always-on: total 1109 words, over its budget of 1100"; echo "PASS a/a_test.py (1.0s cpu)"; echo "1 suites passed" ;;
   red) echo "PASS a/a_test.py"; echo "FAIL b/b.test.sh"; echo "boom"; exit 1 ;;
   red2) echo "FAIL a/a_test.py"; echo "FAIL b/b.test.sh"; exit 1 ;;
   garbled) echo "Segmentation fault"; exit 1 ;;
@@ -207,6 +208,19 @@ def test_green_night_reports_every_suite_over_its_cpu_budget(sb):
     [note] = sb.notes()
     assert note.startswith("backstop: me/repo green, 2 suites over their CPU budget|")
     assert "a/a_test.py" in note and "c/c_test.py" in note
+    assert sb.tickets() == []
+
+
+def test_green_night_reports_an_always_on_word_overrun(sb):
+    """The always-on count is a reported number (#2016): the night names an
+    overrun and notifies, and stays green."""
+    tip = sb.git(sb.repo, "rev-parse", "HEAD")
+    out = sb.run("alwayson")
+    assert out.returncode == 0, out.stderr
+    assert sb.last_green() == tip
+    assert "backstop: always-on over budget: 1109 words against 1100" in out.stdout, out.stdout
+    [note] = sb.notes()
+    assert note.startswith("backstop: me/repo green, always-on 1109 words over its 1100 budget|"), note
     assert sb.tickets() == []
 
 

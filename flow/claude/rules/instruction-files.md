@@ -15,9 +15,11 @@ irreversible mistake. Anything else gets one action-worded pointer line
 hook already enforces is one line naming the guard. Each rule is stated once,
 in the place that loads it.
 
-The global `CLAUDE.md` plus its `@`-imports is held under 1,100 words by
-`tests/check-always-on.py` in the agent-skills repo, which also fails a
-pointer line whose path does not exist (#1413).
+The global `CLAUDE.md` plus its `@`-imports has a 1,100-word budget that
+`tests/all.sh` prints on every run and the nightly backstop reports when it is
+passed (#2016); the count includes files outside this repo, so it never fails
+the seam. `tests/check-always-on.py` does fail a pointer line whose path does
+not exist (#1413) or that names no action.
 
 This file loads when a session reads or edits a matching file under its cwd
 (`docs/research/2026-10-04-user-path-rules-probe.md`).
