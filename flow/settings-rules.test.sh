@@ -2,7 +2,7 @@
 # Run: bash flow/settings-rules.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-settings="$here/claude/settings.json"
+settings="${SETTINGS_RULES_SETTINGS:-$here/claude/settings.json}"
 fails=0
 has() { # has <list: allow|ask> <rule>
   if jq -e --arg l "$1" --arg r "$2" '.permissions[$l] | index($r)' "$settings" >/dev/null 2>&1
@@ -76,54 +76,81 @@ if jq -e '[.hooks.SessionStart[].hooks[].command] | any(test("install-check\\.sh
 then echo "PASS: SessionStart runs install-check.sh --quiet"
 else echo "FAIL: no SessionStart hook runs install-check.sh --quiet"; fails=1; fi
 
-# Every hook script the docs depend on is wired: each flow/claude/hooks/*.sh
-# that is not a library (*lib.sh, which covers *-lib.sh and *-testlib.sh) or a
-# test (*.test.sh) is named by some `command` under settings.json's `hooks`
-# key. Matched on the file name, so a repo path and a ~/.claude/hooks/ link
-# both count. A script run some other way goes in the allowlist, one line of
+# Every hook script is wired: each flow/claude/hooks/*.sh that is not a
+# library (*lib.sh, which covers *-lib.sh and *-testlib.sh) or a test
+# (*.test.sh) is named by some `command` under settings.json's `hooks` key.
+# Matched on the file name, so a repo path and a ~/.claude/hooks/ link both
+# count. A script run some other way goes in the allowlist, one line of
 # reason each (none today). On 2026-10-04 the whole Stop entry vanished and
 # every suite stayed green.
 hook_allowlist=()   # entries: "<script>.sh  # why it is not in settings.json"
 unwired_hooks() { # unwired_hooks <settings.json> <hooks dir>: prints each unwired script
-  local cmds f name
+  local cmds f name seen=0
   cmds=$(jq -c '[.hooks // {} | .[] | .[] | .hooks[]? | .command // empty]' "$1" 2>&1) \
     || { echo "unreadable settings: $cmds"; return; }
   for f in "$2"/*.sh; do
+    [ -e "$f" ] || { echo "no hook scripts found in $2"; return; }
     name=$(basename "$f")
     case "$name" in *lib.sh|*.test.sh) continue ;; esac
+    seen=1
     [[ " ${hook_allowlist[*]%%#*} " == *" $name "* ]] && continue
-    jq -e --arg n "$name" 'any(.[]; test("(^|[/ \u0027\"])" + ($n | gsub("\\."; "\\.")) + "($|[^A-Za-z0-9_.-])"))' \
+    jq -e --arg n "$name" 'any(.[]; test("(^|[^A-Za-z0-9_.-])" + ($n | gsub("\\."; "\\.")) + "($|[^A-Za-z0-9_.-])"))' \
       <<<"$cmds" >/dev/null 2>&1 || echo "$name"
   done
+  [ "$seen" = 1 ] || echo "no hook scripts found in $2"
+}
+check_hooks_wired() { # check_hooks_wired <settings.json> <hooks dir>
+  local unwired
+  unwired=$(unwired_hooks "$1" "$2")
+  if [ -z "$unwired" ]
+  then echo "PASS: every hook script in claude/hooks is wired in settings.json"
+  else echo "FAIL: hook script(s) not wired in settings.json hooks: $(tr '\n' ' ' <<<"$unwired")"; fails=1; fi
 }
 hooks_dir="$here/claude/hooks"
-unwired=$(unwired_hooks "$settings" "$hooks_dir")
-if [ -z "$unwired" ]
-then echo "PASS: every hook script in claude/hooks is wired in settings.json"
-else echo "FAIL: hook script(s) not wired in settings.json hooks: $(echo $unwired)"; fails=1; fi
+check_hooks_wired "$settings" "$hooks_dir"
 
-# Witnesses, on copies: the check goes red on its own message for a dropped
-# entry or a new unwired script, and counts both wiring forms.
+# Witnesses, on copies. A nested run of this file (SETTINGS_RULES_NESTED set,
+# so it skips these) on a doctored settings.json proves the check above is
+# called and goes red on its own message.
+if [ -z "${SETTINGS_RULES_NESTED:-}" ]; then
 scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT
+nested() { SETTINGS_RULES_NESTED=1 SETTINGS_RULES_SETTINGS="$1" bash "${BASH_SOURCE[0]}" 2>&1; }
 jq 'del(.hooks.Stop)' "$settings" >"$scratch/nostop.json"
-out=$(unwired_hooks "$scratch/nostop.json" "$hooks_dir")
-if [[ "$out" == *worker-stop-alert.sh* && "$out" == *worker-dirty-stop.sh* ]]
-then echo "PASS: deleting the Stop entry names worker-stop-alert.sh as unwired"
-else echo "FAIL: deleting Stop did not name worker-stop-alert.sh (got: $out)"; fails=1; fi
-mkdir "$scratch/hooks"; touch "$scratch/hooks/new-hook.sh" "$scratch/hooks/x-lib.sh" "$scratch/hooks/x.test.sh" "$scratch/hooks/p.sh"
+out=$(nested "$scratch/nostop.json")
+if [[ "$out" == *"FAIL: hook script(s) not wired"*worker-stop-alert.sh* ]]
+then echo "PASS: deleting the Stop entry fails the suite naming worker-stop-alert.sh"
+else echo "FAIL: deleting the Stop entry did not fail naming worker-stop-alert.sh"; fails=1; fi
+if [[ "$out" == *"FAIL: hook script(s) not wired"*worker-dirty-stop.sh* ]]
+then echo "PASS: deleting the Stop entry names worker-dirty-stop.sh too"
+else echo "FAIL: deleting the Stop entry did not name worker-dirty-stop.sh"; fails=1; fi
+echo '{ not json' >"$scratch/bad.json"
+out=$(unwired_hooks "$scratch/bad.json" "$hooks_dir")
+if [[ "$out" == "unreadable settings:"* ]]
+then echo "PASS: an unreadable settings.json is reported, not read as wired"
+else echo "FAIL: unreadable settings.json was not reported (got: $out)"; fails=1; fi
+mkdir "$scratch/empty"
+out=$(unwired_hooks "$settings" "$scratch/empty")
+if [[ "$out" == "no hook scripts found in"* ]] && [[ "$(unwired_hooks "$settings" "$scratch/nodir")" == "no hook scripts found in"* ]]
+then echo "PASS: an empty or missing hooks dir is reported, not read as wired"
+else echo "FAIL: empty/missing hooks dir was not reported (got: $out)"; fails=1; fi
+mkdir "$scratch/hooks"; touch "$scratch/hooks/new-hook.sh" "$scratch/hooks/x-lib.sh" "$scratch/hooks/x.test.sh" "$scratch/hooks/p.sh" \
+  "$scratch/hooks/stop-alert.sh" "$scratch/hooks/q.sh" "$scratch/hooks/r.sh"
 cat >"$scratch/s.json" <<'JSON'
-{"hooks":{"A":[{"hooks":[{"type":"command","command":"bash /r/flow/claude/hooks/p.sh"}]}]}}
+{"hooks":{"A":[{"hooks":[{"type":"command","command":"bash /r/flow/claude/hooks/p.sh"},
+ {"type":"command","command":"/r/worker-stop-alert.sh"},{"type":"command","command":"/r/q.sh2"},
+ {"type":"command","command":"/r/r.sh.bak"}]}]}}
 JSON
-out=$(unwired_hooks "$scratch/s.json" "$scratch/hooks")
-if [ "$out" = "new-hook.sh" ]
-then echo "PASS: a new unwired .sh is named; libs, tests and a wired script are not"
-else echo "FAIL: expected only new-hook.sh unwired (got: $out)"; fails=1; fi
+out=$(unwired_hooks "$scratch/s.json" "$scratch/hooks" | tr '\n' ' ')
+if [ "$out" = "new-hook.sh q.sh r.sh stop-alert.sh " ]
+then echo "PASS: unwired .sh named; libs, tests, a wired script not; names match exactly at both ends"
+else echo "FAIL: expected new-hook.sh q.sh r.sh stop-alert.sh unwired (got: $out)"; fails=1; fi
 cat >"$scratch/s.json" <<'JSON'
 {"hooks":{"A":[{"hooks":[{"type":"command","command":"/home/u/.claude/hooks/new-hook.sh"},{"type":"command","command":"bash /r/flow/claude/hooks/p.sh"}]}]}}
 JSON
-out=$(unwired_hooks "$scratch/s.json" "$scratch/hooks")
-if [ -z "$out" ]
+out=$(unwired_hooks "$scratch/s.json" "$scratch/hooks" | tr '\n' ' ')
+if [ "$out" = "q.sh r.sh stop-alert.sh " ]
 then echo "PASS: a repo-path hook and a ~/.claude/hooks link both count as wired"
 else echo "FAIL: both wiring forms should count (got: $out)"; fails=1; fi
+fi
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
