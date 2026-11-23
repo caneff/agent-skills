@@ -8,7 +8,8 @@
 # failure and prints that suite's output; a narrowed run (`--changed`) starts
 # every selected suite, prints the output of each one that fails, closes with
 # `failed suites: <labels>` and exits non-zero if any did (#1984), so an
-# inherited red on `main` no longer hides the suites a change touched. A suite is failed on its exit status *or* on a failure
+# inherited red on `main` no longer hides the suites a change touched. A
+# suite is failed on its exit status *or* on a failure
 # signature at the start of a line in its output, because exit status alone
 # read a suite that reported findings and exited 0 as green (#954; the
 # signature set and its reason are below).
@@ -396,8 +397,9 @@ fi
 # green suite just went red is not reading this comment.
 failure_signature='^(FAIL|Traceback|ERROR)'
 
-# Both loop branches end a run the same way: the label, an optional note, the
-# suite's whole output, exit 1.
+# A failure reports the same way in every branch: the label, an optional note,
+# the suite's whole output. `report_failure` ends the run with exit 1; a suite
+# failure in a narrowed run uses `print_failure` alone and the run goes on.
 print_failure() { # <label> <output> [<note>...]: the failure's report, no exit
   local label=$1 output=$2 note
   shift 2
@@ -414,6 +416,8 @@ print_failure() { # <label> <output> [<note>...]: the failure's report, no exit
 report_failure() { # <label> <output> [<note>...]: the run's last word
   print_wall
   print_failure "$@"
+  # A narrowed run that ends here still names the suites that failed before it.
+  [ -z "${failed_labels:-}" ] || echo "failed suites: $failed_labels $1"
   exit 1
 }
 
@@ -467,9 +471,11 @@ identity_before=$(identity_snapshot)
 
 # Concurrency (#1415): the suites run `jobs` at a time, each writing its output
 # and exit status under "$tmp"; this shell reports them in discovery order, so
-# the transcript reads the same as a serial run. A failure stops new suites
-# from starting, lets those in flight finish (an orphaned suite would keep
-# writing into a directory this script is about to remove) and exits 1. The
+# the transcript reads the same as a serial run. In the full seam a failure
+# stops new suites from starting, lets those in flight finish (an orphaned
+# suite would keep writing into a directory this script is about to remove)
+# and exits 1; a narrowed run starts every suite and exits 1 at the end
+# (#1984), but an identity leak still ends it at once. The
 # identity check runs after each suite against the baseline above: suites
 # overlap, so one that finishes after a leak is flagged along with the leaker,
 # and the failure says so rather than naming a suite that may be innocent.

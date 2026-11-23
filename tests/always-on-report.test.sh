@@ -33,4 +33,11 @@ echo x >>"$shadow/repo/a/x.txt"; git -C "$shadow/repo" add -A; git -C "$shadow/r
 out=$(cd "$shadow/repo" && TESTS_RUN_DIR=off bash tests/all.sh --changed "$base" 2>&1); rc=$?
 check "a narrowed run prints it too, and passes" "$([ "$rc" = 0 ] && grep -qxF "always-on: total $words words, over its budget of $budget" <<<"$out"; echo $?)"
 
+# The count line must never carry a FAIL line, even with a dead pointer in the file (the
+# nightly backstop reads a column-0 FAIL as a failed suite): the seam stays green.
+printf 'Before you land: read `~/.agents/skills/flow/claude/NOPE.md`.\n' >>"$shadow/repo/flow/claude/CLAUDE.md"
+git -C "$shadow/repo" commit -qam pointer
+out=$(cd "$shadow/repo" && TESTS_RUN_DIR=off bash tests/all.sh 2>&1); rc=$?
+check "a dead pointer in the file leaves the run green with no FAIL line" "$([ "$rc" = 0 ] && ! grep -q '^FAIL' <<<"$out" && ! grep -q 'not counted' <<<"$out"; echo $?)"
+
 exit "$fail"

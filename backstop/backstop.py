@@ -299,7 +299,7 @@ def over_budget(log):
 
 # `tests/all.sh` prints the always-on word count on every run (#2016); an
 # overrun is read from that line.
-_ALWAYS_ON = re.compile(r"^always-on: total (\d+) words(?:, incomplete: [^,]*)?, over its budget of (\d+)$")
+_ALWAYS_ON = re.compile(r"^always-on: total (\d+) words(?:, incomplete: .*)?, over its budget of (\d+)$")
 
 
 def always_on_overrun(log):
@@ -314,6 +314,16 @@ def always_on_overrun(log):
     except OSError:
         pass
     return None
+
+
+def always_on_uncounted(log):
+    """Whether the seam's log says `tests/all.sh` could not take the always-on
+    count: a count that was never taken is not one under budget."""
+    try:
+        with open(log, errors="replace") as f:
+            return any(l.startswith("always-on: not counted") for l in f.read().splitlines())
+    except OSError:
+        return False
 
 
 def local_night(ctx, tip, jobs):
@@ -566,8 +576,11 @@ def backstop(args):
     for suite, cpu, budget in over:
         print(f"backstop: over CPU budget: {suite}: {cpu}s cpu over its {budget}s budget")
     words = None if args.workflow or result.outcome not in (GREEN, RED) else always_on_overrun(seam_log(ctx))
+    always = f"always-on {words[0]} words over its {words[1]} budget" if words else ""
     if words:
         print(f"backstop: always-on over budget: {words[0]} words against {words[1]}")
+    elif not args.workflow and result.outcome in (GREEN, RED) and always_on_uncounted(seam_log(ctx)):
+        print("backstop: always-on word count was not taken (the checker failed to run)")
     if result.outcome == GREEN:
         with open(last_green_path(ctx), "w") as f:
             f.write(result.sha + "\n")
@@ -576,11 +589,11 @@ def backstop(args):
             title = f"backstop: {repo} green, {len(over)} {'suite' if len(over) == 1 else 'suites'} over " \
                     f"{'its' if len(over) == 1 else 'their'} CPU budget"
             if words:
-                title += f", always-on {words[0]} words over its {words[1]} budget"
+                title += f", {always}"
             if not notify(args.notify, title, "; ".join(f"{s}: {c}s against {b}s" for s, c, b in over)):
                 return UNSENT
         elif words:
-            if not notify(args.notify, f"backstop: {repo} green, always-on {words[0]} words over its {words[1]} budget",
+            if not notify(args.notify, f"backstop: {repo} green, {always}",
                           f"the always-on text is {words[0]} words against a budget of {words[1]}"):
                 return UNSENT
         return GREEN

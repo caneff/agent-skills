@@ -72,6 +72,8 @@ case "$FAKE_SEAM" in
   green) echo "PASS a/a_test.py"; echo "PASS b/b.test.sh"; echo "2 suites passed" ;;
   overbudget) echo "PASS a/a_test.py (30.1s cpu, over its 25s budget)"; echo "PASS b/b.test.sh (1.0s cpu)"
     echo "PASS c/c_test.py (120.4s cpu, over its 100s budget)"; echo "3 suites passed" ;;
+  uncounted) echo "always-on: not counted (the checker failed to run)"; echo "PASS a/a_test.py (1.0s cpu)"; echo "1 suites passed" ;;
+  alwayson_comma) echo "always-on: total 1203 words, incomplete: import not found: ~/n/R.md,, over its budget of 1100"; echo "1 suites passed" ;;
   alwayson) echo "always-on: total 1109 words, over its budget of 1100"; echo "PASS a/a_test.py (1.0s cpu)"; echo "1 suites passed" ;;
   red) echo "PASS a/a_test.py"; echo "FAIL b/b.test.sh"; echo "boom"; exit 1 ;;
   red2) echo "FAIL a/a_test.py"; echo "FAIL b/b.test.sh"; exit 1 ;;
@@ -222,6 +224,18 @@ def test_green_night_reports_an_always_on_word_overrun(sb):
     [note] = sb.notes()
     assert note.startswith("backstop: me/repo green, always-on 1109 words over its 1100 budget|"), note
     assert sb.tickets() == []
+
+
+def test_green_night_names_an_always_on_count_that_was_not_taken(sb):
+    out = sb.run("uncounted")
+    assert out.returncode == 0, out.stderr
+    assert "backstop: always-on word count was not taken" in out.stdout, out.stdout
+    assert "over budget" not in out.stdout and sb.notes() == []
+
+
+def test_always_on_overrun_is_read_past_a_comma_in_the_incomplete_reason(sb):
+    out = sb.run("alwayson_comma")
+    assert "backstop: always-on over budget: 1203 words against 1100" in out.stdout, out.stdout
 
 
 def test_red_night_prints_the_overruns_of_the_suites_that_ran(sb):
