@@ -1,6 +1,6 @@
 ---
 name: create-lmd-page
-description: Post a Logic Masters Deutschland puzzle from a SudokuPad link: render the image, create the inactive puzzle through the driver, hand back the puzzle page link, and archive it once Chris activates it.
+description: "Post a Logic Masters Deutschland puzzle from a SudokuPad link: render the image, create the inactive puzzle through the driver, hand back the puzzle page link, and archive it once Chris activates it."
 disable-model-invocation: true
 ---
 

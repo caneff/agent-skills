@@ -37,6 +37,12 @@ defines them.
   outside every temp root, and `pre-commit` also compares the author and
   committer *name* to `user.name`. Suites take their identity from one helper
   per language; `tests/fixture-identity-sites.test.sh` fails any other writer.
+  A repo with a `.pre-commit-config.yaml` gets `pre-commit hook-impl` as that
+  foreign hook in both slots, so its framework hooks run beside the guard;
+  `pre-commit` itself never owns `.git/hooks` (#1641). No `pre-commit` on
+  `PATH` fails the hook naming the tool. `pre-commit install` in such a repo
+  makes dispatch refuse, naming the fix: `pre-commit uninstall -t pre-commit
+  -t pre-push`, then dispatch again.
 - **The agent-model guard.** A bare Agent call inherits the session's model,
   so explore/lookup passes `sonnet` and review/diagnosis `opus`. The guard is
   the `agent-model` mod (`flow/mods/agent-model/`): it rewrites a bare or non-`sonnet`/`haiku` Explore

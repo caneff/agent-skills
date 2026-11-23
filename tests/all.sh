@@ -4,8 +4,12 @@
 # runs as `uv run --locked pytest <file>` (the tools pinned by pyproject.toml
 # and uv.lock), each `Cargo.toml` runs `cargo test`, and each mod folder under
 # `flow/mods/` runs `claude plugin test <folder>`. One
-# line per suite; exits non-zero on the first failure (and prints that
-# suite's output). A suite is failed on its exit status *or* on a failure
+# line per suite. A bare run (the full seam) exits non-zero on the first
+# failure and prints that suite's output; a narrowed run (`--changed`) starts
+# every selected suite, prints the output of each one that fails, closes with
+# `failed suites: <labels>` and exits non-zero if any did (#1984), so an
+# inherited red on `main` no longer hides the suites a change touched. A
+# suite is failed on its exit status *or* on a failure
 # signature at the start of a line in its output, because exit status alone
 # read a suite that reported findings and exited 0 as green (#954; the
 # signature set and its reason are below).
@@ -268,6 +272,13 @@ selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; begin_record; ex
 selected_count=$(printf '%s\n' "$selection" | grep -c .)
 begin_record
 [ -s "$tmp/scope" ] && cat "$tmp/scope"
+# The always-on word count is a number to read, never a gate (#2016): it counts
+# files outside this repo, so an overrun can arrive with no commit here. The
+# nightly backstop reports an overrun from this line. A checkout without the
+# checker (a fixture repo) prints nothing.
+if [ -f "$root/tests/check-always-on.py" ]; then
+  python3 "$root/tests/check-always-on.py" --root "$root" --summary 2>&1 || echo "always-on: not counted (the checker failed to run)"
+fi
 # A missing cargo must fail the gate, not silently skip every Cargo suite.
 if printf '%s\n' "$selection" | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
   echo "tests/all.sh: cargo is not on PATH, and a tracked Cargo.toml needs it" >&2
@@ -386,14 +397,14 @@ fi
 # green suite just went red is not reading this comment.
 failure_signature='^(FAIL|Traceback|ERROR)'
 
-# Both loop branches end a run the same way: the label, an optional note, the
-# suite's whole output, exit 1.
-report_failure() { # <label> <output> [<note>...]
+# A failure reports the same way in every branch: the label, an optional note,
+# the suite's whole output. `report_failure` ends the run with exit 1; a suite
+# failure in a narrowed run uses `print_failure` alone and the run goes on.
+print_failure() { # <label> <output> [<note>...]: the failure's report, no exit
   local label=$1 output=$2 note
   shift 2
   outcome=fail
   record_result "$label" fail
-  print_wall
   echo "FAIL $label"
   # Skip empty notes: a caller passing a conditional note it decided not to
   # produce would otherwise print a blank line into the failure report.
@@ -401,6 +412,12 @@ report_failure() { # <label> <output> [<note>...]
     [ -n "$note" ] && printf '%s\n' "$note"
   done
   printf '%s\n' "$output"
+}
+report_failure() { # <label> <output> [<note>...]: the run's last word
+  print_wall
+  print_failure "$@"
+  # A narrowed run that ends here still names the suites that failed before it.
+  [ -z "${failed_labels:-}" ] || echo "failed suites: $failed_labels $1"
   exit 1
 }
 
@@ -454,9 +471,11 @@ identity_before=$(identity_snapshot)
 
 # Concurrency (#1415): the suites run `jobs` at a time, each writing its output
 # and exit status under "$tmp"; this shell reports them in discovery order, so
-# the transcript reads the same as a serial run. A failure stops new suites
-# from starting, lets those in flight finish (an orphaned suite would keep
-# writing into a directory this script is about to remove) and exits 1. The
+# the transcript reads the same as a serial run. In the full seam a failure
+# stops new suites from starting, lets those in flight finish (an orphaned
+# suite would keep writing into a directory this script is about to remove)
+# and exits 1; a narrowed run starts every suite and exits 1 at the end
+# (#1984), but an identity leak still ends it at once. The
 # identity check runs after each suite against the baseline above: suites
 # overlap, so one that finishes after a leak is flagged along with the leaker,
 # and the failure says so rather than naming a suite that may be innocent.
@@ -543,7 +562,8 @@ run_suite() { # <index> <command>
   [ "$after" = "$identity_before" ] || printf '%s' "$after" >"$tmp/$1.ident"
   # A failed suite stops new ones from starting at once, not when the reporter
   # reaches it in discovery order.
-  [ "$status" -eq 0 ] || touch "$tmp/stop"
+  # A narrowed run keeps starting suites (#1984).
+  [ "$status" -eq 0 ] || [ -n "$changed_base" ] || touch "$tmp/stop"
   echo "$status" >"$tmp/$1.rc.tmp" && mv "$tmp/$1.rc.tmp" "$tmp/$1.rc"
 }
 
@@ -571,7 +591,16 @@ outcome=incomplete
 dispatch &
 dispatcher=$!
 
-count=0 idx=0
+count=0 idx=0 failed_labels=""
+# A suite failure in a narrowed run is reported and the loop goes on; any other
+# failure (identity leak, a vanished runner) still ends the run.
+suite_failed() { # <label> <output> [<note>...]
+  if [ -n "$changed_base" ]; then
+    print_failure "$@"; failed_labels="$failed_labels${failed_labels:+ }$1"
+  else
+    stop_and_wait; report_failure "$@"
+  fi
+}
 while IFS=$'\t' read -r label cmd; do
   until [ -e "$tmp/$idx.rc" ]; do
     # A dispatcher that is gone with no result for this suite never ran it:
@@ -597,11 +626,11 @@ while IFS=$'\t' read -r label cmd; do
   fi
   if [ "$suite_status" -eq 0 ]; then
     if hit=$(printf '%s\n' "$out" | grep -m1 -E "$failure_signature"); then
-      stop_and_wait
-      report_failure "$label" "$out" \
+      suite_failed "$label" "$out" \
         "tests/all.sh: exited 0, but its output carries a failure line:" \
         "  $hit" \
         "$(logging_remedy "$hit")"
+      idx=$((idx + 1)); continue
     fi
     cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label"); over=""
     if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then over=", over its ${budget}s budget"; fi
@@ -609,16 +638,20 @@ while IFS=$'\t' read -r label cmd; do
     record_result "$label" pass
     count=$((count + 1))
   else
-    stop_and_wait
     # The exit status is the one fact a silent failure leaves (#1524), so it
     # is always named, and an empty output says so.
-    report_failure "$label" "$out" \
+    suite_failed "$label" "$out" \
       "$(status_note "$suite_status")" \
       "$([ -z "$out" ] && echo "tests/all.sh: the suite printed no output")"
   fi
   idx=$((idx + 1))
 done <"$tmp/ordered"
 wait "$dispatcher"
+if [ -n "$failed_labels" ]; then
+  print_wall
+  echo "failed suites: $failed_labels"
+  exit 1
+fi
 outcome=pass
 print_wall
 

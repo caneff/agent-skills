@@ -347,3 +347,57 @@ def test_memory_comments_are_stamped_in_posting_order():
         t.comment(1, body)
     stamps = [c["createdAt"] for c in t.issue_view(1, "comments")["comments"]]
     assert stamps == sorted(stamps) and len(set(stamps)) == 3
+
+
+def test_memory_tracker_answers_workflow_texts_and_can_break():
+    assert tracker.MemoryTracker(workflows=["on: push"]).workflow_texts() == ["on: push"]
+    with pytest.raises(tracker.TrackerError, match="boom"):
+        tracker.MemoryTracker(broken={"workflow_texts": "boom"}).workflow_texts()
+
+
+def test_gh_adapter_reads_workflow_files_and_treats_only_a_404_as_none(monkeypatch):
+    seen = []
+
+    def run(args, cwd=None):
+        seen.append(args)
+        if args[-1].endswith("contents/.github/workflows"):
+            return json.dumps([{"type": "file", "name": "ci.yml", "path": ".github/workflows/ci.yml"},
+                               {"type": "file", "name": "README.md", "path": ".github/workflows/README.md"},
+                               {"type": "dir", "name": "x.yml", "path": ".github/workflows/x.yml"}])
+        return "on: pull_request\n"
+    assert tracker.GhTracker("o/r", run=run).workflow_texts() == ["on: pull_request\n"]
+
+    def missing(args, cwd=None):
+        if args[-1].endswith("contents/.github/workflows"):
+            raise tracker.TrackerError("gh api x: gh: Not Found (HTTP 404)")
+        return json.dumps({"full_name": "o/r"})
+    assert tracker.GhTracker("o/r", run=missing).workflow_texts() == []
+
+    def denied(args, cwd=None):
+        raise tracker.TrackerError("gh: rate limited (HTTP 403)")
+    with pytest.raises(tracker.TrackerError, match="403"):
+        tracker.GhTracker("o/r", run=denied).workflow_texts()
+
+
+@pytest.mark.parametrize("repo", ["o/svc404", "team404/r"])
+def test_gh_adapter_does_not_read_a_404_from_the_repo_name(repo):
+    def denied(args, cwd=None):
+        if args[-1].endswith("contents/.github/workflows"):
+            raise tracker.TrackerError(f"gh api repos/{repo}/contents/.github/workflows: gh: rate limited (HTTP 403)")
+        return json.dumps({"full_name": repo})  # the repo itself answers: only the status can tell this is no 404
+    with pytest.raises(tracker.TrackerError, match="403"):
+        tracker.GhTracker(repo, run=denied).workflow_texts()
+
+
+def test_gh_adapter_raises_when_the_whole_repo_is_a_404():
+    def run(args, cwd=None):
+        raise tracker.TrackerError(f"gh {' '.join(args)}: gh: Not Found (HTTP 404)")
+    with pytest.raises(tracker.TrackerError, match="404"):
+        tracker.GhTracker("o/private", run=run).workflow_texts()
+
+
+def test_gh_adapter_raises_on_a_workflow_entry_with_no_path():
+    def run(args, cwd=None):
+        return json.dumps([{"type": "file", "name": "ci.yml"}])
+    with pytest.raises(tracker.TrackerError, match="no path"):
+        tracker.GhTracker("o/r", run=run).workflow_texts()
