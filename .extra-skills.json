@@ -2,12 +2,12 @@
   "prompt-master": {
     "repo": "nidhinjs/prompt-master",
     "path": "",
-    "treeSha": "e6f8879b688c827fb0ed7e1fc43dc5f0977a8b80"
+    "treeSha": "915547c40acd21b20b9bf8fdd86c75fe86c890a2"
   },
   "humanizer": {
     "repo": "blader/humanizer",
     "path": "",
-    "treeSha": "8ed37b6d1d98a0bbdb599d0399a4a2185eb8fa03"
+    "treeSha": "8ffea9602d08c9138d280bba5a23e77159353f27"
   },
   "read-the-damn-docs": {
     "repo": "BuilderIO/skills",
