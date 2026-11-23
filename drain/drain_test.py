@@ -572,6 +572,7 @@ def test_a_failed_hand_off_still_prints_the_bundle_ended_line_for_the_stopped_bu
     ctx = type("Ctx", (), {"log_dir": "/logs", "repo": "o/r", "root": "/nowhere", "default": "main",
                            "bundle_max": 8, "want": None})()
     mod.survey = lambda ctx, retry=True: ([], [], [], [], [])
+    mod.read_frontier = lambda ctx, retry=True: ([], [], [], [])
     mod.resumable = lambda ctx, ended: (1, mod.TICKET) if not ended else None
     mod.work = lambda ctx, anchor, others, resumed, started, kind: (started.append(1), (None, "red seam"))[1]
     result = mod.drain(ctx, 5, "--max 5")
@@ -2398,3 +2399,42 @@ def test_drains_cap_is_the_one_tests_all_sh_gives_a_linked_worktree():
     mod = _drain_mod()
     with open(os.path.join(HERE, "..", "tests", "all.sh")) as f:
         assert f"\nlinked_cap={mod.SEAM_JOBS}\n" in f.read()
+
+
+def test_an_unresolved_ticket_is_named_before_the_first_bundle_starts(sb):
+    sb.write_state({1: {"body": "no blocker section here"}, 2: {},
+                    3: {"labels": ["ready-for-agent", "in-progress"]}})
+    r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    pre = [x for x in lines if x.startswith("unresolved at start:")]
+    reason = next(x for x in lines if x.startswith("passed over: #1 ")).split("passed over: #1 ", 1)[1]
+    assert pre == [f"unresolved at start: #1 ticket 1  {reason}"], r.stdout
+    assert reason.startswith("blocker state unresolved:")
+    assert lines.index(pre[0]) < next(i for i, x in enumerate(lines) if x.startswith("bundle started:"))
+    assert len(sb.dispatch_runs()) == 1
+
+
+def test_a_run_with_no_unresolved_ticket_prints_no_preflight_line(sb):
+    sb.write_state({1: {}})
+    r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    assert "bundle started:" in r.stdout
+    assert "unresolved at start" not in r.stdout
+
+
+def test_the_preflight_is_said_before_a_resumed_bundle(sb):
+    sb.write_state({1: {"labels": ["in-progress"]}, 2: {"body": "no blocker section here"}, 3: {}},
+                   comments=[["1", "drain anchor: implement-1"]])
+    sb.git(sb.repo, "worktree", "add", "-q", "--no-track", "-b", "implement-1", sb.worktree(1), "origin/main")
+    r = sb.drain("--once", env={"HERDR_GONE": "1"})
+    lines = r.stdout.splitlines()
+    pre = next(i for i, x in enumerate(lines) if x.startswith("unresolved at start: #2"))
+    assert pre < next(i for i, x in enumerate(lines) if x.startswith("bundle started:"))
+
+
+def test_the_preflight_is_said_when_anchor_is_refused(sb):
+    sb.write_state({1: SPEC, 2: {"parent": 1, "body": "## Blocked by\n\n- #9\n"}, 3: {"body": "none"}, 9: {"labels": []}})
+    r = sb.drain("--anchor", "1")
+    assert "--anchor #1 is passed over" in (r.stdout + r.stderr)
+    assert "unresolved at start: #3 ticket 3" in r.stdout
