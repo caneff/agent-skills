@@ -382,7 +382,9 @@ def test_gh_adapter_reads_workflow_files_and_treats_only_a_404_as_none(monkeypat
 @pytest.mark.parametrize("repo", ["o/svc404", "team404/r"])
 def test_gh_adapter_does_not_read_a_404_from_the_repo_name(repo):
     def denied(args, cwd=None):
-        raise tracker.TrackerError(f"gh api repos/{repo}/contents/.github/workflows: gh: rate limited (HTTP 403)")
+        if args[-1].endswith("contents/.github/workflows"):
+            raise tracker.TrackerError(f"gh api repos/{repo}/contents/.github/workflows: gh: rate limited (HTTP 403)")
+        return json.dumps({"full_name": repo})  # the repo itself answers: only the status can tell this is no 404
     with pytest.raises(tracker.TrackerError, match="403"):
         tracker.GhTracker(repo, run=denied).workflow_texts()
 
