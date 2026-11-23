@@ -43,7 +43,7 @@ part of the closing check or of the seam-rerun skip's gate text:
 from the primary checkout after each merge it makes, `{before}` being the
 default branch's sha just before the merge (read from main after the merge,
 first backtick span, same reader); and `- **Owed marker**: `Still owed, by
-eye:``, any number of backticked line starts, which with the default `owed:`
+eye:``, any number of backticked line starts leading the value (prose after them is ignored), which with the default `owed:`
 pick the deploy's output lines carried into `drain`'s end report (matched at the start of a line, case ignored; as with every key, a second line of the same key replaces the first, so list several markers on one line). A repo with no
 `Deploy` line runs no deploy. A `Deploy` line that names no command, or a section
 that cannot be read, is a refusal and stops the drain, never "no deploy".

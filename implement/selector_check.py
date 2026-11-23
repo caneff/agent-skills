@@ -190,7 +190,9 @@ def deploy_in(text):
     command = command_of(found["deploy"])
     if not command:
         return None, "the `Deploy` line names no command"
-    declared = re.findall(r"`([^`]+)`", found.get("owed marker", ""))
+    # the leading run of backticked spans only: later prose may quote other words
+    lead = re.match(r"(?:\s*,?\s*`[^`]+`)+", found.get("owed marker", ""))
+    declared = re.findall(r"`([^`]+)`", lead.group(0)) if lead else []
     return Deploy(command, tuple(m.strip() for m in declared if m.strip()) + (DEFAULT_OWED,)), None
 
 

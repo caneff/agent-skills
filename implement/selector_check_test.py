@@ -548,3 +548,9 @@ def test_deploy_and_owed_marker_lines_are_not_gate_text():
     plain = selector_check.gate_text(selector_check.seam_section(SEAM_HEAD))
     with_deploy = SEAM_HEAD + "- **Deploy**: `node deploy.mjs --run {before}`\n- **Owed marker**: `owed run:`\n"
     assert selector_check.gate_text(selector_check.seam_section(with_deploy)) == plain
+
+
+def test_owed_markers_are_the_leading_backticked_spans_not_words_quoted_in_the_prose_after_them():
+    text = SEAM_HEAD + "- **Owed marker**: `A:`, `B:` — lines `deploy.mjs` prints, carried by `drain`\n"
+    deploy, _ = selector_check.deploy_in(text + "- **Deploy**: `make deploy`\n")
+    assert deploy.markers == ("A:", "B:", "owed:")
