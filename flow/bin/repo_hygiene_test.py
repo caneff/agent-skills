@@ -19,9 +19,10 @@ import fixture_identity  # noqa: E402
 SCRIPT = Path(__file__).with_name("repo-hygiene")
 
 STUB_GH = """#!/usr/bin/env bash
-# Answers `gh <noun> list` from $HYG_FIX/<noun>.json; $HYG_FIX/fail-<noun> makes it fail.
+# Answers `gh <noun> list` from $HYG_FIX/<noun>.json; $HYG_FIX/fail-<noun> makes it fail
+# with a valid-looking empty list on stdout, so only its exit status says it failed.
 noun="$1"
-[ -e "$HYG_FIX/fail-$noun" ] && { echo "gh: HTTP 401" >&2; exit 1; }
+[ -e "$HYG_FIX/fail-$noun" ] && { echo "gh: HTTP 401" >&2; echo "[]"; exit 1; }
 cat "$HYG_FIX/$noun.json"
 """
 
