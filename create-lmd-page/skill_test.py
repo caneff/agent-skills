@@ -248,7 +248,8 @@ def test_template_ends_with_a_quiet_twitch_signoff_below_the_rules():
     assert "text-decoration: none" in style and "font-weight: normal" in style
     assert "color: #889" in style, "sign-off text must stay the muted grey, not Play Now's #557"
     assert re.search(r"font-size: 0\.8em", m.group(1).split("<a", 1)[0]), "sign-off must be smaller than Play Now"
-    assert 'fill="#9146FF"' in inner and inner.rstrip().endswith("Watch me solve live")
+    # LMD strips <svg> from a saved page (000W76), so the glyph is an uploaded LMD image, never inline SVG.
+    assert "<svg" not in inner and "<img:0016EY " in inner and inner.rstrip().endswith("Watch me solve live")
     assert "twitch.tv" not in re.sub(r"<[^>]*>", "", inner), "the URL must not be visible"
 
 

@@ -199,6 +199,9 @@ list is accepted is not known.
 
 ## Other facts from the help page
 
+- LMD strips `<svg>` (with its contents) from a saved page's HTML; the text around it stays. Seen on
+  000W76, 2026-11-23, read back logged in. An `<img:ID>` inside a link survives and renders as `<img src="/Dateien/bild.php?...">`
+  with its extra attributes kept.
 - After "Create", the author opens `Raetsel/zeigen.php?id=…` and clicks
   "Aktivieren" in the right-hand box. A puzzle can be deactivated and edited
   later.
