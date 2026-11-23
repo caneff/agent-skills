@@ -572,6 +572,7 @@ def test_a_failed_hand_off_still_prints_the_bundle_ended_line_for_the_stopped_bu
     ctx = type("Ctx", (), {"log_dir": "/logs", "repo": "o/r", "root": "/nowhere", "default": "main",
                            "bundle_max": 8, "want": None})()
     mod.survey = lambda ctx, retry=True: ([], [], [], [], [])
+    mod.read_frontier = lambda ctx, retry=True: ([], [], [], [])
     mod.resumable = lambda ctx, ended: (1, mod.TICKET) if not ended else None
     mod.work = lambda ctx, anchor, others, resumed, started, kind: (started.append(1), (None, "red seam"))[1]
     result = mod.drain(ctx, 5, "--max 5")
