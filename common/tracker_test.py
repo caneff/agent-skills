@@ -347,3 +347,31 @@ def test_memory_comments_are_stamped_in_posting_order():
         t.comment(1, body)
     stamps = [c["createdAt"] for c in t.issue_view(1, "comments")["comments"]]
     assert stamps == sorted(stamps) and len(set(stamps)) == 3
+
+
+def test_memory_tracker_answers_workflow_texts_and_can_break():
+    assert tracker.MemoryTracker(workflows=["on: push"]).workflow_texts() == ["on: push"]
+    with pytest.raises(tracker.TrackerError, match="boom"):
+        tracker.MemoryTracker(broken={"workflow_texts": "boom"}).workflow_texts()
+
+
+def test_gh_adapter_reads_workflow_files_and_treats_only_a_404_as_none(monkeypatch):
+    seen = []
+
+    def run(args, cwd=None):
+        seen.append(args)
+        if args[-1].endswith("contents/.github/workflows"):
+            return json.dumps([{"type": "file", "name": "ci.yml", "path": ".github/workflows/ci.yml"},
+                               {"type": "file", "name": "README.md", "path": ".github/workflows/README.md"},
+                               {"type": "dir", "name": "x.yml", "path": ".github/workflows/x.yml"}])
+        return "on: pull_request\n"
+    assert tracker.GhTracker("o/r", run=run).workflow_texts() == ["on: pull_request\n"]
+
+    def missing(args, cwd=None):
+        raise tracker.TrackerError("gh: Not Found (HTTP 404)")
+    assert tracker.GhTracker("o/r", run=missing).workflow_texts() == []
+
+    def denied(args, cwd=None):
+        raise tracker.TrackerError("gh: rate limited (HTTP 403)")
+    with pytest.raises(tracker.TrackerError, match="403"):
+        tracker.GhTracker("o/r", run=denied).workflow_texts()

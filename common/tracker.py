@@ -256,6 +256,21 @@ class GhTracker:
             raise TrackerError("gh search prs answered with something other than a list")
         return rows
 
+    def workflow_texts(self):
+        """The text of every workflow file in `.github/workflows` on the repo's default branch; `[]`
+        only when the directory does not exist (a 404). Any other failure raises: an unreadable
+        directory is not a repo with no workflows."""
+        try:
+            entries = self._json(["api", self._path("contents/.github/workflows")])
+        except TrackerError as exc:
+            if "404" in str(exc) or "Not Found" in str(exc):
+                return []
+            raise
+        if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+            raise TrackerError("the workflow directory listing was not a list of files")
+        return [self._run(["api", "-H", "Accept: application/vnd.github.raw", self._path(f"contents/{quote(e['path'])}")])
+                for e in entries if e.get("type") == "file" and str(e.get("name", "")).endswith((".yml", ".yaml"))]
+
     def viewer_login(self):
         """The login `gh` is authenticated as."""
         login = self._run(["api", "user", "--jq", ".login"]).strip()
@@ -281,11 +296,11 @@ class MemoryTracker:
     `runs` is the workflow-run list and `logs` maps a run id to its failed log.
     `comments`, `merges` and the issues `create_issue` adds record what was written; a comment is
     also appended to its issue's own `comments`, as `issue_view` reads it back. An issue may carry
-    `events` (its timeline). `identity` is the `(owner, name)` every checkout answers, and
-    `labels_defined` the repo's label names."""
+    `events` (its timeline). `identity` is the `(owner, name)` every checkout answers, `workflows` the text of each workflow
+    file, and `labels_defined` the repo's label names."""
 
     def __init__(self, issues=(), prs=(), viewer="me", merged=None, broken=None, repo="owner/repo",
-                 pr_views=None, pr_comments=None, runs=(), logs=None, identity=None, labels_defined=()):
+                 pr_views=None, pr_comments=None, runs=(), logs=None, identity=None, labels_defined=(), workflows=()):
         self.repo = repo
         self._issues = {i["number"]: i for i in issues}
         self._prs = list(prs)
@@ -297,6 +312,7 @@ class MemoryTracker:
         self._runs = list(runs)
         self._logs = logs or {}
         self._identity = identity
+        self._workflows = list(workflows)
         self._labels_defined = set(labels_defined)
         self.comments = []
         self.merges = []
@@ -425,6 +441,10 @@ class MemoryTracker:
         if self._identity is None:
             raise TrackerError(f"{checkout}: no repo identity")
         return self._identity
+
+    def workflow_texts(self):
+        self._check("workflow_texts")
+        return list(self._workflows)
 
     def label_names(self):
         self._check("label_names")

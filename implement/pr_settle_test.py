@@ -61,6 +61,67 @@ def settle_seq(views, poll=5):
     return out, clock, reads
 
 
+def settle_ci(views, ci, poll=5):
+    """`settle_seq` with a `ci()` answer for "this repo runs workflows on pull_request"."""
+    clock, reads = Clock(), []
+
+    def read():
+        reads.append(1)
+        return views[min(len(reads), len(views)) - 1]
+    try:
+        out = pr_settle.settle(read, sleep=clock.sleep, now=clock.now, poll=poll, ci=ci)
+    except pr_settle.SettleError as exc:
+        return exc, clock, reads
+    return out, clock, reads
+
+
+def test_clean_with_no_check_yet_waits_in_a_repo_with_a_pull_request_workflow():
+    out, clock, reads = settle_ci([view("CLEAN"), view("CLEAN", checks=[run_check()])], lambda: True)
+    assert out["statusCheckRollup"] and len(reads) == 2 and clock.sleeps == 1
+
+
+def test_clean_with_no_check_ever_registering_fails_naming_it():
+    exc, clock, _ = settle_ci([view("CLEAN")], lambda: True)
+    assert isinstance(exc, pr_settle.SettleError)
+    assert "no check registered" in str(exc) and SHA in str(exc)
+    assert 60 <= clock.t < 75
+
+
+def test_clean_with_no_check_is_accepted_at_once_when_no_workflow_runs_on_pull_request():
+    out, clock, reads = settle_ci([view("CLEAN")], lambda: False)
+    assert out["mergeStateStatus"] == "CLEAN" and len(reads) == 1 and clock.sleeps == 0
+
+
+def test_a_failed_workflow_lookup_waits_and_never_accepts():
+    t = tracker.MemoryTracker(broken={"workflow_texts": "gh: rate limited"})
+    exc, _, reads = settle_ci([view("CLEAN")], lambda: pr_settle.runs_on_pull_request(t))
+    assert isinstance(exc, pr_settle.SettleError) and "no check registered" in str(exc)
+    assert len(reads) > 1
+
+
+def test_clean_with_a_running_check_in_a_ci_repo_is_not_re_asked_about_workflows():
+    asked = []
+    out, _, _ = settle_ci([view("CLEAN", checks=[run_check()])], lambda: asked.append(1) or True)
+    assert out["mergeStateStatus"] == "CLEAN" and not asked
+
+
+WF_PR = "name: ci\non:\n  pull_request:\n    branches: [main]\njobs: {}\n"
+WF_PUSH = "name: ci\non:\n  push:\n    branches: [main]\n# pull_request is not a trigger here\njobs: {}\n"
+
+
+@pytest.mark.parametrize("texts,expected", [
+    ([WF_PR], True), (["on: pull_request\n"], True), (["on: [push, pull_request]\n"], True),
+    (["on:\n  pull_request_target:\n"], True), ([WF_PUSH], False), ([], False)])
+def test_runs_on_pull_request_reads_the_workflow_triggers(texts, expected):
+    t = tracker.MemoryTracker(workflows=texts)
+    assert pr_settle.runs_on_pull_request(t) is expected
+
+
+def test_runs_on_pull_request_is_true_when_the_lookup_fails():
+    t = tracker.MemoryTracker(broken={"workflow_texts": "boom"})
+    assert pr_settle.runs_on_pull_request(t) is True
+
+
 def test_clean_returns_at_once():
     out, clock, reads = settle_seq([view("CLEAN")])
     assert out["headRefOid"] == SHA
@@ -291,6 +352,12 @@ if a[:2] == ["api", "user"]:
     if st.get("login") is None:
         sys.stderr.write("gh: not logged in\n"); sys.exit(1)
     print(st["login"])
+elif a[:1] == ["api"] and a[-1].endswith("contents/.github/workflows"):
+    if st.get("workflows") is None:
+        sys.stderr.write("gh: Not Found (HTTP 404)\n"); sys.exit(1)
+    print(json.dumps([{"type": "file", "name": "ci.yml", "path": ".github/workflows/ci.yml"}]))
+elif a[:1] == ["api"] and a[-1].endswith("contents/.github/workflows/ci.yml"):
+    print(st["workflows"])
 elif a[:2] == ["pr", "view"]:
     reads = st["views"]
     v = reads[min(st["n"], len(reads) - 1)]
@@ -317,8 +384,9 @@ def cli(tmp_path):
     gh.chmod(0o755)
     state = tmp_path / "state.json"
 
-    def call(views, merge=((0, ""),), *args, login="o", pr="7", repo="o/r"):
-        state.write_text(json.dumps({"n": 0, "views": views, "merge": merge, "login": login}))
+    def call(views, merge=((0, ""),), *args, login="o", pr="7", repo="o/r", workflows=None):
+        state.write_text(json.dumps({"n": 0, "views": views, "merge": merge, "login": login,
+                                     "workflows": workflows}))
         env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", FAKE_STATE=str(state), PR_SETTLE_POLL="0")
         r = subprocess.run([sys.executable, os.path.join(HERE, "pr_settle.py"), pr, "--repo", repo, *args],
                            capture_output=True, text=True, env=env)
@@ -384,3 +452,19 @@ def test_cli_merge_refuses_when_the_login_cannot_be_read(cli):
     r, st = cli([view("CLEAN")], ((0, ""),), "--head", SHA, "--merge", login=None)
     assert r.returncode == 1 and "merge_calls" not in st
     assert "could not read the gh login" in r.stderr
+
+
+def test_cli_accepts_clean_with_no_check_when_the_repo_has_no_workflows(cli):
+    r, _ = cli([view("CLEAN")])
+    assert r.returncode == 0, r.stderr
+
+
+def test_cli_accepts_clean_with_no_check_when_the_workflows_do_not_run_on_pull_request(cli):
+    r, _ = cli([view("CLEAN")], workflows=WF_PUSH)
+    assert r.returncode == 0, r.stderr
+
+
+def test_cli_waits_for_a_check_to_register_in_a_pull_request_repo(cli):
+    r, st = cli([view("CLEAN"), view("CLEAN", checks=[run_check()])], workflows=WF_PR)
+    assert r.returncode == 0, r.stderr
+    assert st["n"] == 2

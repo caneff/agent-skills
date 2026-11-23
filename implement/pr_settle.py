@@ -19,6 +19,11 @@ see, drain's own subprocess included.
 What it waits for:
 - `UNKNOWN` (GitHub still computing), or a non-CLEAN state with no check
   registered yet: re-read for up to 60 s.
+- `CLEAN` with no check registered, in a repo with a workflow that runs on
+  `pull_request` (#1985): CI has not started on the head yet, so it is not
+  settled. Re-read for the same 60 s; if no check registers, it fails saying
+  so, never passes. A repo with no such workflow accepts it at once. A
+  workflow lookup that fails counts as "has CI" (`runs_on_pull_request`).
 - `UNSTABLE` or `BLOCKED` with a check still running: until the checks finish,
   capped at 15 minutes. CI on these repos is GitHub Actions, not local:
   in the 2026-10-08 drain run that handed #755 and #757 over on UNSTABLE, the
@@ -33,6 +38,7 @@ those, even with a check running.
 """
 import argparse
 import os
+import re
 import sys
 import time
 
@@ -85,15 +91,39 @@ def classify(rollup):
     return pending, failed
 
 
+PULL_REQUEST_TRIGGER = re.compile(r"(?<![\w-])pull_request(?:_target)?(?![\w-])")
+
+
+def runs_on_pull_request(tracker):
+    """Whether any workflow of `tracker`'s repo is triggered by `pull_request` (or
+    `pull_request_target`). Fails closed: a lookup that cannot answer is True, since an
+    unreadable answer must never read as "no CI". Comment lines are ignored; a mention in
+    any other text counts, which only makes a settle wait for a check that never comes."""
+    try:
+        texts = tracker.workflow_texts()
+    except issue_tracker.TrackerError:
+        return True
+    for text in texts:
+        code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+        if PULL_REQUEST_TRIGGER.search(code):
+            return True
+    return False
+
+
 def line(view):
     return f"draft={str(bool(view['isDraft'])).lower()} state={view['mergeStateStatus']} head={view['headRefOid']}"
 
 
-def settle(read, head=None, sleep=time.sleep, now=time.monotonic, poll=POLL_SECONDS):
+def settle(read, head=None, sleep=time.sleep, now=time.monotonic, poll=POLL_SECONDS, ci=None):
     """Re-read `read()` (a `gh pr view` as a dict) until the PR is CLEAN and
     return that view, or raise `SettleError` on a limit or a refusal. With
-    `head`, a PR whose head is another sha is refused too."""
+    `head`, a PR whose head is another sha is refused too. `ci()` says whether
+    the repo runs workflows on `pull_request`: when it does, a CLEAN read with
+    no check registered is waited on like UNKNOWN (#1985). It is asked only
+    then, once. None means the caller did not ask for that check (a test's
+    seam); `main` always passes it."""
     start = quiet_since = now()
+    has_ci = None
     while True:
         view = read()
         missing = [k for k in FIELDS.split(",") if k not in view]
@@ -110,7 +140,17 @@ def settle(read, head=None, sleep=time.sleep, now=time.monotonic, poll=POLL_SECO
         if head and view["headRefOid"] != head:
             raise SettleError(f"head moved from {head} to {view['headRefOid']}", view)
         if state == "CLEAN":
-            return view
+            if view["statusCheckRollup"] or ci is None:
+                return view
+            if has_ci is None:
+                has_ci = ci()
+            if not has_ci:
+                return view
+            if now() - quiet_since >= UNKNOWN_SECONDS:
+                raise SettleError(f"is CLEAN but no check registered on head {view['headRefOid']} "
+                                  f"after {UNKNOWN_SECONDS} s; the repo runs workflows on pull_request", view)
+            sleep(poll)
+            continue
         if state not in WAITED:
             raise SettleError(f"is {state}, not CLEAN", view)
         t = now()
@@ -127,13 +167,13 @@ def settle(read, head=None, sleep=time.sleep, now=time.monotonic, poll=POLL_SECO
         sleep(poll)
 
 
-def merge(read, gh_merge, head, sleep=time.sleep, now=time.monotonic, poll=POLL_SECONDS):
+def merge(read, gh_merge, head, sleep=time.sleep, now=time.monotonic, poll=POLL_SECONDS, ci=None):
     """Settle, then `gh_merge(head)` -> `(exit code, output)`; a "Base branch
     was modified" refusal settles again and retries, up to `MERGE_RETRIES`
     times. The merge is bound to `head`: a PR whose head moved is refused."""
     refusal = ""
     for attempt in range(MERGE_RETRIES + 1):
-        view = settle(read, head=head, sleep=sleep, now=now, poll=poll)
+        view = settle(read, head=head, sleep=sleep, now=now, poll=poll, ci=ci)
         code, text = gh_merge(head)
         if code == 0:
             return view
@@ -207,6 +247,10 @@ def main(argv):
     if args.merge and not args.head:
         ap.error("--merge needs --head <sha>: the merge is bound to the head the seam ran on")
     read = gh_reader(args.pr, args.repo)
+    gh = issue_tracker.GhTracker(args.repo)
+
+    def ci():
+        return runs_on_pull_request(gh)
     last = {}
 
     def tracked():
@@ -216,9 +260,9 @@ def main(argv):
     try:
         if args.merge:
             require_own_repo(args.repo)
-            view = merge(tracked, gh_merger(args.pr, args.repo), args.head, poll=POLL_SECONDS)
+            view = merge(tracked, gh_merger(args.pr, args.repo), args.head, poll=POLL_SECONDS, ci=ci)
         else:
-            view = settle(tracked, head=args.head, poll=POLL_SECONDS)
+            view = settle(tracked, head=args.head, poll=POLL_SECONDS, ci=ci)
     except SettleError as exc:
         shown = exc.view or last
         if shown.get("mergeStateStatus"):
