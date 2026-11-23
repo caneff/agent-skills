@@ -374,6 +374,54 @@ fn the_report_names_path_branch_agent_and_the_cleanup_line() {
     assert!(text.contains(&format!("cd {} && merge-cleanup implement-395 --repo {}", repo.display(), repo.display())), "{text}");
 }
 
+// A lane worktree installs its own Node dependencies at creation (#1624).
+#[test]
+fn a_worktree_with_a_lockfile_gets_its_own_node_modules_1624() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let log = f.stub_npm();
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    f.push_lockfile(&repo, "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let scenario = with(&default_scenario(), &[("NPM_LOG", log.to_str().unwrap())]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(wt.join("node_modules").is_dir(), "no node_modules in the worktree: {}", out_text(&out));
+    let ran = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(ran.lines().count(), 1, "{ran}");
+    assert!(ran.starts_with("npm ci in ") && ran.trim_end().ends_with("/implement-395"), "npm ran outside the worktree: {ran}");
+}
+
+#[test]
+fn a_failed_node_install_fails_the_dispatch_and_names_the_rerun_command_1624() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let log = f.stub_npm();
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    f.push_lockfile(&repo, "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let scenario = with(&default_scenario(), &[("NPM_LOG", log.to_str().unwrap()), ("NPM_RED", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    let text = out_text(&out);
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("registry unreachable"), "npm's own tail is missing: {text}");
+    assert!(text.contains(&format!("re-run: cd {} && npm ci", wt.display())), "{text}");
+    assert!(text.contains("release the ticket:"), "the claim was not offered for release: {text}");
+    assert!(!f.calls().contains("worktree open"), "the worker was handed a worktree with no dependencies: {}", f.calls());
+}
+
+#[test]
+fn a_worktree_with_no_lockfile_attempts_no_install_1624() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let log = f.stub_npm();
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("NPM_LOG", log.to_str().unwrap())]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(!log.exists(), "npm ran in a repo with no lockfile: {}", std::fs::read_to_string(&log).unwrap_or_default());
+}
+
 const AGENT_395: &str = "sudokumaker-custom-constrain-395";
 
 /// A real, live child process — what a real Claude session's pid would be,

@@ -157,3 +157,45 @@ def test_run_group_kills_what_a_command_started_at_the_wall_clock(tmp_path):
             return
         time.sleep(0.1)
     pytest.fail("the command's grandchild survived the wall clock")
+
+
+# `install_node_deps` and its CLI: the one install the lane's worktree creation and the scratch
+# run share (#1624).
+@pytest.fixture
+def npm_stub(tmp_path, monkeypatch):
+    """The `npm` stub first on PATH, logging to `tmp_path/npm.log`."""
+    monkeypatch.setenv("NPM_LOG", str(tmp_path / "npm.log"))
+    monkeypatch.setenv("PATH", str(tmp_path / "bin") + os.pathsep + os.environ["PATH"])
+    write(str(tmp_path / "bin" / "npm"), NPM, 0o755)
+
+
+def test_install_node_deps_installs_where_a_lockfile_sits_and_says_so(npm_stub, tmp_path):
+    write(str(tmp_path / "wt" / "package-lock.json"), "{}\n")
+    assert scratch_run.install_node_deps(str(tmp_path / "wt"), 30) is True
+    assert os.path.isdir(tmp_path / "wt" / "node_modules")
+
+
+def test_install_node_deps_without_a_lockfile_runs_no_npm(npm_stub, tmp_path):
+    (tmp_path / "wt").mkdir()
+    assert scratch_run.install_node_deps(str(tmp_path / "wt"), 30) is False
+    assert not os.path.exists(tmp_path / "npm.log"), "npm was started in a tree with no lockfile"
+
+
+def test_the_install_cli_names_the_rerun_command_and_npms_tail_on_failure(npm_stub, tmp_path):
+    write(str(tmp_path / "wt" / "package-lock.json"), "{}\n")
+    write(str(tmp_path / "bin" / "npm"),
+          '#!/bin/sh\necho "npm $*" >> "$NPM_LOG"\nfor i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do echo "line $i"; done\necho boom >&2\nexit 1\n',
+          0o755)
+    r = subprocess.run([sys.executable, scratch_run.__file__, "install", str(tmp_path / "wt")],
+                       capture_output=True, text=True)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert f"cd {tmp_path / 'wt'} && npm ci" in r.stderr
+    assert "boom" in r.stderr and "line 25" in r.stderr and "line 1\n" not in r.stderr, r.stderr
+
+
+def test_the_install_cli_is_silent_and_green_with_no_lockfile(npm_stub, tmp_path):
+    (tmp_path / "wt").mkdir()
+    r = subprocess.run([sys.executable, scratch_run.__file__, "install", str(tmp_path / "wt")],
+                       capture_output=True, text=True)
+    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+    assert not os.path.exists(tmp_path / "npm.log")

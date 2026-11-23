@@ -440,6 +440,13 @@ fn git_mutation_timeout() -> std::time::Duration {
     env_ms_or("LANE_GIT_MUTATION_TIMEOUT_MS", 30_000)
 }
 
+/// OS-level bound for the Node install of a new worktree: `scratch_run.py
+/// install` bounds `npm ci` itself at 900 s, so this is the backstop for the
+/// script hanging. `LANE_NODE_INSTALL_TIMEOUT_MS` shortens it for tests.
+fn node_install_timeout() -> std::time::Duration {
+    env_ms_or("LANE_NODE_INSTALL_TIMEOUT_MS", 960_000)
+}
+
 /// OS-level bound for a `gh` read (`issue view`) — a GitHub API round trip,
 /// so looser than a local git query. `LANE_GH_QUERY_TIMEOUT_MS` shortens it
 /// for tests.
@@ -1710,6 +1717,17 @@ fn run() -> Result<(), ExitCode> {
         git_mutation_timeout(),
     );
     claim.step("git worktree add", wa, None)?;
+    // A lockfile at the worktree's root gets its own `node_modules` before
+    // anyone is handed the tree (#1624): a bare worktree fails `Cannot find
+    // package` or, worse, resolves the primary checkout's by walking up and
+    // misses what only this branch adds. The install is `scratch_run.py`'s,
+    // the one drain's scratch worktree uses, and a failure fails the
+    // dispatch with npm's tail and the re-run line, never a skip.
+    if wt.join("package-lock.json").is_file() {
+        let script = format!("{home}/.agents/skills/common/scratch_run.py");
+        let install = run_in_timeout(None, "python3", &[&script, "install", wt.to_str().unwrap_or("")], node_install_timeout());
+        claim.step("installing Node dependencies", install, Some("timed out"))?;
+    }
     // Where the branch started: merge-cleanup counts a branch as landed by
     // the ancestor test only when its tip has moved off this sha.
     let fork = claim.step("reading the fork point", run_timeout("git", &["-C", &primary, "rev-parse", "--verify", &format!("refs/heads/{branch}^{{commit}}")], git_query_timeout()), None)?;
