@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Always-on budget gate: the global CLAUDE.md plus every file it `@`-imports
 is the text every session loads, so its word count is a cost paid everywhere.
-Fails when that total passes BUDGET, when an import cannot be read (an unread
-import is not zero words), and when a pointer line names a path that does not
-exist or names no action.
+The total is a reported number, never a failure (#2016): it includes files
+outside this repo (the vault's Memory/RULES.md), so an overrun can arrive with
+no commit here. Fails when an import cannot be read (an unread import is not
+zero words), and when a pointer line names a path that does not exist or names
+no action: those are this repo's own text.
 
 A pointer line is any line naming a backticked absolute or `~/` path to a
 Markdown doc; it must read "Before you <action>: read `<path>`". Every
@@ -12,7 +14,12 @@ so those paths resolve into the checkout under test (--root): a doc a branch
 adds is found before it merges, and one a branch deletes is missed before it
 merges. Words are counted as `wc -w` counts them.
 
-Usage: check-always-on.py [--root <repo>] [<CLAUDE.md>]
+Usage: check-always-on.py [--root <repo>] [--summary] [<CLAUDE.md>]
+
+`--summary` prints the one `always-on: total <n> words...` line and always
+exits 0, for `tests/all.sh` to print on every run; it prints no `FAIL` line, so
+the nightly backstop never reads it as a failed suite. A count that could not
+read an import says `incomplete` on that line.
 """
 from __future__ import annotations
 
@@ -81,23 +88,24 @@ def main() -> int:
     here = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", type=Path, default=here)
+    ap.add_argument("--summary", action="store_true")
     ap.add_argument("claude_md", type=Path, nargs="?")
     args = ap.parse_args()
     claude_md = args.claude_md or args.root / "flow" / "claude" / "CLAUDE.md"
     rows, errors = [], []
     count(claude_md, "CLAUDE.md", args.root, 0, rows, errors)
-    check_pointers(claude_md, args.root, errors)
     total = sum(w for _, w in rows)
+    if args.summary:
+        print(f"always-on: total {total} words" + (f", incomplete: {errors[0]}" if errors else "")
+              + (f", over its budget of {BUDGET}" if total > BUDGET else ""))
+        return 0
+    check_pointers(claude_md, args.root, errors)
     for label, words in rows:
         print(f"  {words:5d}  {label}")
-    if total > BUDGET:
-        errors.append(f"over budget: total {total} words > {BUDGET}")
     for e in errors:
         print(f"FAIL {e}")
-    if not errors:
-        print(f"always-on: total {total} words, within budget {BUDGET}")
-    else:
-        print(f"always-on: total {total} words")
+    print(f"always-on: total {total} words, "
+          + (f"over its budget of {BUDGET}" if total > BUDGET else f"within budget {BUDGET}"))
     return 1 if errors else 0
 
 

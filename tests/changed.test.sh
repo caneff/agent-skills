@@ -255,6 +255,38 @@ rm -f "$shadow/later-ran"
 out=$(cd "$shadow/repo" && TESTS_JOBS=1 bash tests/all.sh 2>&1); rc=$?
 check "a failing suite stops the suites after it from starting" "$([ "$rc" = 1 ] && [ ! -e "$shadow/later-ran" ]; echo $?)"
 
+# Two failing suites (#1984). The full seam stops at the first; a narrowed run
+# (--changed) starts every selected suite and names every failure.
+two_failing() { # <extra all.sh args...>: a and b both fail, t passes; sets $out and $rc
+  fresh
+  printf '#!/usr/bin/env bash\necho a-output; exit 1\n' >"$shadow/repo/a/a.test.sh"
+  printf '#!/usr/bin/env bash\necho b-output; exit 1\n' >"$shadow/repo/b/b.test.sh"
+  git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm failing
+  base=$(git -C "$shadow/repo" rev-parse HEAD)
+  change a/x.txt; change b/y.txt
+  out=$(cd "$shadow/repo" && TESTS_JOBS=1 bash tests/all.sh "$@" 2>&1); rc=$?
+}
+two_failing
+check "the full seam with two failing suites stops after the first" "$([ "$rc" = 1 ] && has 'FAIL a/a.test.sh' && ! has 'FAIL b/b.test.sh' && ! grep -q b-output <<<"$out"; echo $?)"
+two_failing --changed "$base"
+check "a narrowed run with two failing suites exits non-zero" "$([ "$rc" = 1 ]; echo $?)"
+check "...runs both and prints each one's output" "$(grep -q a-output <<<"$out" && grep -q b-output <<<"$out"; echo $?)"
+check "...and closes by naming every failed suite" "$(grep -qx 'failed suites: a/a.test.sh b/b.test.sh' <<<"$out"; echo $?)"
+check "...with the passing suite still reported" "$(has_pass tests/t.test.sh; echo $?)"
+
+# A suite that exits 0 but prints a failure line is a failure too, and is not also counted as a pass.
+fresh
+printf '#!/usr/bin/env bash\necho "FAIL inner"; exit 0\n' >"$shadow/repo/a/a.test.sh"
+git -C "$shadow/repo" add -A; git -C "$shadow/repo" commit -qm sig; base=$(git -C "$shadow/repo" rev-parse HEAD)
+change a/x.txt; change b/y.txt
+out=$(cd "$shadow/repo" && TESTS_JOBS=1 bash tests/all.sh --changed "$base" 2>&1); rc=$?
+check "a narrowed run reports an exit-0 suite with a failure line, once, and still runs the rest" "$([ "$rc" = 1 ] && has 'FAIL a/a.test.sh' && ! has_pass a/a.test.sh && has_pass b/b.test.sh && has 'failed suites: a/a.test.sh'; echo $?)"
+
+fresh; change a/x.txt
+out=$(cd "$shadow/repo" && TESTS_JOBS=1 bash tests/all.sh --changed "$base" 2>&1); rc=$?
+check "a narrowed run where everything passes exits 0 with no failed-suites line" "$([ "$rc" = 0 ] && ! grep -q 'failed suites' <<<"$out"; echo $?)"
+check "...and keeps its narrowed verdict line" "$(grep -qE '^2 of 3 suites passed \(narrowed' <<<"$out"; echo $?)"
+
 fresh
 printf '#!/usr/bin/env bash\necho line-one; echo line-two; exit 1\n' >"$shadow/repo/a/a.test.sh"
 out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
