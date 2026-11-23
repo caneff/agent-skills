@@ -18,6 +18,7 @@ AUDITS = [
     {"name": "domain-drift", "gated": True, "short": False, "ground_truth": ["GLOSSARY.md", "docs/adr/"], "python_only": False},
     {"name": "type-tightness", "gated": True, "short": False, "ground_truth": [], "python_only": True},
     {"name": "crap-audit", "gated": False, "short": False, "ground_truth": [], "python_only": False},
+    {"name": "mechanism-audit", "gated": False, "short": False, "ground_truth": [], "python_only": False},
 ]
 
 AUDIT_NAMES = [a["name"] for a in AUDITS]

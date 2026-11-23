@@ -1,11 +1,11 @@
 ---
 name: all-audits
-description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time and land the sweep as one spec per area.
+description: Run every repo audit at once — fourteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time and land the sweep as one spec per area.
 disable-model-invocation: true
 argument-hint: "[path] | multi [paths…] | triage <issue>"
 ---
 
-Run the whole audit set over one repo in a single sweep. Thirteen audit skills fan
+Run the whole audit set over one repo in a single sweep. Fourteen audit skills fan
 out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep runs to completion on its own: past the index, it grills every report
@@ -24,7 +24,7 @@ opened.
 Whole-repo by default, and the branch-scope exception — see
 [`harness/AUDIT-RUN.md`](harness/AUDIT-RUN.md#scope).
 
-## The set — thirteen skills
+## The set — fourteen skills
 
 Each audits the whole repo. Most write a `findings.jsonl` + grouped-summary
 `report.html` pair (see `harness/findings-schema.md`); the three structural
@@ -45,6 +45,7 @@ instead, with no separate log file:
 - `domain-drift` — code vocabulary that drifts from the project's domain terms.
 - `type-tightness` — loose `Any`, unexplained `# type: ignore`, fake boundaries.
 - `crap-audit` — per-function CRAP score (complexity² × uncovered fraction³ + complexity), real risk hotspots.
+- `mechanism-audit` — stated rules with no mechanism behind them, and mechanisms nothing reaches.
 
 `skill-audit` is **not** in the set — it scans the global skills directory, not
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and

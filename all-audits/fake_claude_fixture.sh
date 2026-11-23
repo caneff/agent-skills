@@ -24,7 +24,7 @@
 # FAKE_CLAUDE_SNAPSHOT=<dir>: every start copies each multi-repo index under
 # $XDG_DATA_HOME/all-audits/multi/ to <dir>/start-<k>.html, k counting starts
 # from 1, so a test reads the page as it stood when that audit began.
-# domain-drift writes the same report and manifest as dead-code.
+# domain-drift and mechanism-audit write the same report and manifest as dead-code.
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
 # manifest as a named failure, never as a silent skip.
@@ -70,7 +70,7 @@ manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true
 echo "prompt=$prompt"
 
 case "$prompt" in
-  /dead-code\ *|/domain-drift\ *)
+  /dead-code\ *|/domain-drift\ *|/mechanism-audit\ *)
     dir="$(dirname "$manifest")/report"
     mkdir -p "$dir"
     [ -n "${FAKE_CLAUDE_MISSING_REPORT:-}" ] || echo '<html><body>dead-code report</body></html>' >"$dir/report.html"

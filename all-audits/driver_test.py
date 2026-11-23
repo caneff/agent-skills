@@ -2675,3 +2675,59 @@ def test_a_corrupt_mutation_log_is_not_counted_as_measured_on_the_main_index(tmp
 def test_git_state_of_a_non_repo_is_dirty_never_clean(tmp_path):
     """#1778: a `git status` that failed is no answer; it must force a run, not read as clean."""
     assert driver.git_state(str(tmp_path), None) == {"dirty": True, "changed_files": []}
+
+
+def _load_module(name, path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_mechanism_audit_is_in_the_default_sweep_and_not_the_short_one(tmp_path):
+    """A default sweep plans mechanism-audit ungated and unconditionally, on
+    a repo with no Python too; `--short` leaves it out (#1364)."""
+    from audits_data import AUDITS, SHORT_SET
+    entry = next(a for a in AUDITS if a["name"] == "mechanism-audit")
+    assert (entry["gated"], entry["short"], entry["python_only"]) == (False, False, False)
+    assert "mechanism-audit" not in SHORT_SET
+
+    repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", repo, "init", "-q"], check=True, env=env)
+    open(os.path.join(repo, "app.js"), "w").write("export const a = 1;\n")
+    subprocess.run(["git", "-C", repo, "add", "."], check=True, env=env)
+    plan = driver.plan_sweep(repo, list(driver.AUDIT_NAMES), force=False, base=cache_dir)
+    assert "dead-code" in plan.not_applicable, "setup: this repo has no Python"
+    assert "mechanism-audit" in plan.to_run
+    assert "mechanism-audit" not in plan.not_applicable
+
+
+def test_a_sweep_runs_mechanism_audit_over_the_seeded_fixture_and_its_findings_validate(tmp_path):
+    """The three seeded rules go through the real driver with the fake
+    `claude`: the audit starts, its log lands in the collection, and every
+    row parses under mechanism-audit's own validation."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    mech = os.path.join(here, "..", "mechanism-audit")
+    audit = _load_module("mechanism_audit_audit", os.path.join(mech, "audit.py"))
+    findings_log = audit.findings_log
+
+    tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
+    repo = os.path.join(tmp, "repo")
+    shutil.copytree(os.path.join(mech, "fixtures", "sample"), repo)
+    seeded = os.path.join(mech, "fixtures", "findings.jsonl")
+    starts = os.path.join(tmp, "starts.log")
+    r = _sweep_with_fake_claude(repo, cache_dir, bin_dir, "mechanism-audit",
+                                FAKE_CLAUDE_FINDINGS_FILE=seeded, FAKE_CLAUDE_STARTS=starts)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "[mechanism-audit] done" in r.stdout, r.stdout
+    assert open(starts).read().startswith("/mechanism-audit "), open(starts).read()
+
+    logs = [os.path.join(d, f) for d, _, fs in os.walk(os.path.join(repo, "out", "collection"))
+            for f in fs if f == "findings.jsonl"]
+    assert len(logs) == 1, logs
+    log = findings_log.read(logs[0])
+    assert log.corrupt == [] and len(log.rows) == 3
+    assert audit.validate(log.rows) == []
+    assert sorted(r["category"] for r in log.rows) == ["has-mechanism", "never-reached", "no-mechanism"]
