@@ -59,8 +59,10 @@ doc-vs-code contradiction is mine to rule on: report both sides.
   background-job guard wraps one you forget.
 - Before you launch a solver, hunt, count, search or any multi-core job:
   read `~/.agents/skills/flow/claude/MACHINE-LOAD.md`.
-- Before you name the cause of a symptom I report: read
-  `~/.agents/skills/flow/claude/SYMPTOMS.md`.
+- Before you name the cause of a symptom I report, or patch a failure again:
+  read `~/.agents/skills/flow/claude/SYMPTOMS.md`.
+- Before you act on a request once I say I am on usage credit or saving
+  quota: read `~/.agents/skills/flow/claude/QUOTA.md`.
 - Before you run or grade a drill or quiz: read
   `~/.agents/skills/flow/claude/DRILLS.md`.
 - Before you build a solver, tool or check, say none exists, or answer a
@@ -81,4 +83,3 @@ doc-vs-code contradiction is mine to rule on: report both sides.
 
 # Vault memory
 @/home/caneff/src/second-brain-v2/Memory/RULES.md
-@/home/caneff/src/second-brain-v2/Memory/SOUL.md

@@ -148,6 +148,7 @@ defines them.
 
 ## Control
 
+- **Follow-up parts.** A builder that gets follow-up parts for a round keeps a list of every part and confirms each one is in the code before it starts the round's full check or commits, because parts sent while a job was running get dropped and leave the check results stale. (Promoted from the weekly-retro inbox, Chris 2026-11-23.)
 - The dispatching session is the worker's **controller**: what passes
   between them is `implement/SKILL.md` § Control, and what the controller
   escalates to me is its entry in `~/.agents/skills/GLOSSARY.md`.

@@ -8,6 +8,8 @@ call;
 
 ## Showing me a file
 
+**On the laptop.** When Chris says they are on the laptop, hand over a URL the laptop can load (a server bound past localhost, or a published page), not a window opened on the desktop, because desktop Chrome and windows-mcp reach only the desktop and Chris never sees what they open. (Promoted from the weekly-retro inbox, Chris 2026-11-23.)
+
 Open it for me; never print a path and ask me to open it. Why: that hands me
 a step your own hands can do.
 
@@ -194,6 +196,7 @@ after 10 s.
 
 ## Judging visual work
 
+- **Drive it before handing it over.** Before handing Chris a UI build or prototype, drive it yourself at 1366x768 and click every control it adds, because a headless render without interaction lets dead clicks and laptop-size overlaps reach Chris to find. (Promoted from the weekly-retro inbox, Chris 2026-11-23.)
 - A visual pass or fix is judged from a picture, never from settings or a
   green log: open every screenshot, frame, or rendered grid a test produced.
   When I say a picture looks wrong, screenshot the exact window I named (the
