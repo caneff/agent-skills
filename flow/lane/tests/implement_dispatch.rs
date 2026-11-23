@@ -415,6 +415,9 @@ fn a_worktree_with_no_lockfile_attempts_no_install_1624() {
     let f = Fixture::new();
     f.reset_home(true);
     let log = f.stub_npm();
+    // No shared install script at all: only the lane's own lockfile check
+    // keeps a repo with none from reaching it (and failing here).
+    std::fs::remove_file(f.home().join(".agents/skills/common")).unwrap();
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let scenario = with(&default_scenario(), &[("NPM_LOG", log.to_str().unwrap())]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);

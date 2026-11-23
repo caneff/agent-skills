@@ -8,6 +8,7 @@ it in their own exception type at their edge. The directory belongs to no skill,
 this without importing drain (#1779)."""
 import contextlib
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -53,19 +54,18 @@ def run_group(cmd, cwd, timeout, out=None, preexec=None):
 
 
 def install_node_deps(directory, timeout, out=None):
-    """Run `npm ci` in `directory` when it holds a `package-lock.json`; return whether it did. The one
-    install the scratch run (#1445, #1502) and the lane's worktree creation (#1624) share. A failed or
-    unstartable install raises `ScratchError`; a directory with no lockfile is left alone, and says so
-    by returning False. With `out` (an open file) npm's output goes there."""
+    """Run `npm ci` in `directory` when it holds a `package-lock.json`. The one install the scratch
+    run (#1445, #1502) and the lane's worktree creation (#1624) share. A failed or unstartable
+    install raises `ScratchError`; a directory with no lockfile is left alone. With `out` (an open
+    file) npm's output goes there."""
     if not os.path.isfile(os.path.join(directory, "package-lock.json")):
-        return False
+        return
     try:
         code, _ = run_group(["npm", "ci"], directory, timeout, out=out)
     except OSError as exc:
         raise ScratchError(f"`npm ci` could not start: {exc}") from exc
     if code:
         raise ScratchError("`npm ci` failed")
-    return True
 
 
 def run_in_scratch_tree(root, rev, cmd, log, timeout, head=None):
@@ -101,22 +101,26 @@ def run_in_scratch_tree(root, rev, cmd, log, timeout, head=None):
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def _install_cli(directory, timeout=900, tail=20):
-    """`scratch_run.py install <dir>`: what the lane runs on a fresh worktree. Exit 0 and silent when
-    the install ran or there was no lockfile; exit 1 with npm's last `tail` lines and the command to
-    re-run when it did not, so a failed install is never read as a bare worktree."""
+def _install_cli(directory, timeout, tail=20):
+    """`scratch_run.py install <dir> <timeout-seconds>`: what the lane runs on a fresh worktree. Exit
+    0 and silent when the install ran or the tree has no lockfile; exit 1 with npm's last `tail`
+    lines and the command to re-run when it did not, so a failed install is never read as a bare
+    worktree. A directory that does not exist is a failure, never "no lockfile"."""
+    if not os.path.isdir(directory):
+        print(f"cannot install Node dependencies: {directory!r} is not a directory", file=sys.stderr)
+        return 1
     with tempfile.TemporaryFile(mode="w+") as out:
         try:
             install_node_deps(directory, timeout, out=out)
         except ScratchError as exc:
             out.seek(0)
             last = "".join(out.readlines()[-tail:])
-            print(f"{exc} in {directory}\n{last}re-run: cd {directory} && npm ci", file=sys.stderr)
+            print(f"{exc} in {directory}\n{last}re-run: cd {shlex.quote(directory)} && npm ci", file=sys.stderr)
             return 1
     return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] != "install":
-        sys.exit("usage: scratch_run.py install <dir>")
-    sys.exit(_install_cli(sys.argv[2]))
+    if len(sys.argv) != 4 or sys.argv[1] != "install" or not sys.argv[3].isdigit():
+        sys.exit("usage: scratch_run.py install <dir> <timeout-seconds>")
+    sys.exit(_install_cli(sys.argv[2], int(sys.argv[3])))
