@@ -77,6 +77,18 @@ declares a `Narrowed` line gets that run's listing as one `selector:` comment
 on the PR, posted before the command, as the lane's merge step does (#1593).
 A section that declares no command merges nothing. No full seam runs in
 drain: the nightly backstop (`backstop/`) is the only full run.
+After each merge, before the next bundle starts, a repo that declares a
+`- **Deploy**: `<command>`` line in that section (#1726; `{before}` is
+current main's sha just before the merge) has the primary checkout
+fast-forwarded and the command run there, read from main after the merge.
+`deploy <tickets>: `<command>` -> exit <n>` and the last 15 output lines
+(`deploy output: ...`) go to the progress file. A non-zero exit, a timeout, a
+checkout that cannot fast-forward or a declaration that cannot be read ends the
+drain with `stopped: deploy ...` naming the merged PR; merges already made stay
+merged. An output line starting with the repo's `- **Owed marker**: `<text>``
+(backticked, any number) or the default `owed:` is carried into the summary
+as `    deploy: <line>` under its merged ticket. A repo with no `Deploy` line runs
+nothing and prints nothing more.
 A bundle that fails is given one more try by prompting the same worker with
 the reason (waiting for it to start working before it looks again); a second
 failure closes the worker's pane, labels the anchor and every claimed ticket
@@ -139,6 +151,7 @@ for _dir in ("implement-spec", "implement", "common"):
 import frontier  # noqa: E402
 import pr_settle  # noqa: E402
 import scratch_run  # noqa: E402
+import selector_check  # noqa: E402
 import shellcmd  # noqa: E402
 import owners  # noqa: E402  (#2005)
 import tracker  # noqa: E402
@@ -1137,7 +1150,66 @@ def finish(ctx, anchor, branch, view, kind):
             relabel(ctx, n, READY)
     except DrainError as exc:
         notes.append("releasing unclosed tickets failed: " + one_line(exc, 150))
-    return [{"tickets": view["closes"], "via": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED}]
+    return [{"tickets": view["closes"], "via": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED,
+             "deploy": deploy_after_merge(ctx, view["before"])}]
+
+
+# How long a deploy may run, and how many of its last output lines the progress
+# file keeps.
+DEPLOY_SECONDS = 1800
+DEPLOY_TAIL = 15
+
+
+def deploy_after_merge(ctx, before):
+    """`None` when the repo declares no `Deploy` line (#1726); else a dict
+    `{command, status, tail, owed, failed, why}`: main fast-forwarded in the
+    primary checkout, then the command run there with `{before}` (main's sha
+    just before this merge) substituted. `owed` is every output line starting
+    with one of the repo's markers. A section that cannot be read, a checkout
+    that cannot fast-forward and a deploy that exits non-zero or times out are
+    all `failed` with the reason in `why`, never "no deploy" (class 1). Read
+    from main after the merge, as the seam's command is read from current
+    main."""
+    def failed(why, command="", status=None, tail=(), owed=()):
+        return {"command": command, "status": status, "tail": list(tail), "owed": list(owed), "failed": True,
+                "why": why}
+
+    try:
+        git(["fetch", "-q", "origin"], cwd=ctx.root)
+        deploy, why = selector_check.deploy_of(ctx.root, ctx.default)
+        if why:
+            return failed(f"the deploy declaration cannot be read: {why}")
+        if deploy is None:
+            return None
+        local = ctx.default.split("/", 1)[-1]  # `ctx.default` is `origin/<branch>`
+        if git(["branch", "--show-current"], cwd=ctx.root) != local:
+            return failed(f"the primary checkout is not on {local}, so it was not fast-forwarded", deploy.command)
+        git(["merge", "--ff-only", "-q", ctx.default], cwd=ctx.root)
+    except DrainError as exc:
+        return failed(f"could not fast-forward the primary checkout: {one_line(exc, 150)}")
+    command = deploy.command.replace("{before}", before)
+    try:
+        ran = subprocess.run(command, shell=True, cwd=ctx.root, capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL, timeout=DEPLOY_SECONDS, errors="replace")
+    except subprocess.TimeoutExpired:
+        return failed(f"timed out after {DEPLOY_SECONDS} s", command)
+    lines = (ran.stdout + ran.stderr).splitlines()
+    owed = [x.strip() for x in lines if x.strip().lower().startswith(tuple(m.lower() for m in deploy.markers))]
+    return {"command": command, "status": ran.returncode, "tail": lines[-DEPLOY_TAIL:], "owed": owed,
+            "failed": bool(ran.returncode), "why": f"exited {ran.returncode}" if ran.returncode else ""}
+
+
+def say_deploy(result):
+    """The deploy's command, exit status and output tail as progress lines,
+    and the stop reason when it failed, else `None`."""
+    deploy = result.get("deploy")
+    if not deploy:
+        return None
+    say(f"deploy {refs(result['tickets'])}: `{deploy['command']}` -> "
+        + ("not run" if deploy["status"] is None else f"exit {deploy['status']}") + f"  ({deploy['why']})" * bool(deploy["why"]))
+    for line in deploy["tail"]:
+        say(f"deploy output: {line}")
+    return f"deploy {deploy['why']} after merging {result['via']} ({refs(result['tickets'])})" if deploy["failed"] else None
 
 
 def resume(ctx, agent):
@@ -1229,6 +1301,8 @@ def work(ctx, anchor, others, resumed, started, kind):
                                resumed=resumed_agents) == "closed":
                 return finish_closed(ctx, branch, tickets), None
             view = verify_pr(ctx, branch, anchor, kind)
+            git(["fetch", "-q", "origin"], cwd=ctx.root)
+            view["before"] = git(["rev-parse", ctx.default], cwd=ctx.root)  # `{before}` of the deploy (#1726)
             try:
                 pr_settle.merge(pr_settle.gh_reader(view["number"], ctx.repo, tracker=ctx.tracker),
                                 pr_settle.gh_merger(view["number"], ctx.repo, tracker=ctx.tracker), view["headRefOid"])
@@ -1365,7 +1439,8 @@ def record_bundle(ctx, prog, anchor, kind, results, reason):
             (prog.merged if result["outcome"] == MERGED else prog.closed).append(result)
         prog.started.clear()
         prog.done, prog.failures = prog.done + sum(len(r["tickets"]) for r in results), 0
-        return None
+        # A failed deploy stops the run after the merges already made (#1726).
+        return next((stop for stop in map(say_deploy, results) if stop), None)
     bundle = hand_to_chris(ctx, anchor, reason, kind)
     say(f"bundle ended: {refs(bundle)}  handed to Chris: {reason}")
     prog.started.clear()
@@ -1447,8 +1522,10 @@ def summary(result):
     exit code."""
     lines = []
     if result.merged:
-        lines += ["merged:"] + [f"  {refs(m['tickets'])}  {m['via']}  {m['sha']}"
-                                 + (f"  ({m['note']})" if m["note"] else "") for m in result.merged]
+        for m in result.merged:
+            lines += (["merged:"] if m is result.merged[0] else []) + [
+                f"  {refs(m['tickets'])}  {m['via']}  {m['sha']}" + (f"  ({m['note']})" if m["note"] else "")]
+            lines += [f"    deploy: {x}" for x in (m.get("deploy") or {}).get("owed", [])]
     if result.closed:
         lines += ["closed, no PR:"] + [f"  {refs(m['tickets'])}  {m['via']}"
                                         + (f"  ({m['note']})" if m["note"] else "") for m in result.closed]

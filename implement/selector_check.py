@@ -38,6 +38,10 @@ by any merge since the last green full run is the nightly backstop's question
 posts again, and the last `selector:` comment of a PR is the run it landed on.
 Both subcommands exit 0 whatever they recorded, and a failed post is said on
 stdout, so no caller has a status to read as a reason to hold or allow a merge.
+`deploy_of` reads the optional `- **Deploy**: `<command>`` line and its
+`- **Owed marker**:` line (#1726) for `drain`'s post-merge step; neither is gate
+text, so editing them never forces a seam rerun.
+
 A repo with no `Narrowed` line runs its `Seam` and gets no listing run (`list`
 exits 3 and writes no state) and no comment.
 
@@ -165,6 +169,41 @@ def read_narrowed(root, rev=None, base=None):
     return None if text is None else narrowed_in(text, base)
 
 
+# What a deploy's output line starts with to be carried into drain's report
+# when the repo declares no `Owed marker` of its own; a declared one adds to it.
+DEFAULT_OWED = "owed:"
+
+# `command` is the declared deploy command, `markers` the line starts that name
+# what it leaves owed (the declared ones, then `DEFAULT_OWED`).
+Deploy = collections.namedtuple("Deploy", "command markers")
+
+
+def deploy_in(text):
+    """`(Deploy, None)` for an `AGENTS.md` whose § End-to-end seam declares a
+    `- **Deploy**: `<command>`` line (#1726), `(None, None)` when it
+    declares none, `(None, why)` when it cannot say: no section, or a line
+    that names no command. The last two are never "no deploy" (class 1). An
+    `- **Owed marker**:` line lists, in backticks, the output-line starts
+    that mark a look the deploy leaves owed."""
+    found = declaration(text)
+    if found is None:
+        return None, "AGENTS.md has no `## End-to-end seam` section"
+    if "deploy" not in found:
+        return None, None
+    command = command_of(found["deploy"])
+    if not command:
+        return None, "the `Deploy` line names no command"
+    declared = re.findall(r"`([^`]+)`", found.get("owed marker", ""))
+    return Deploy(command, tuple(m.strip() for m in declared if m.strip()) + (DEFAULT_OWED,)), None
+
+
+def deploy_of(root, rev=None):
+    """`deploy_in` for `root/AGENTS.md` (at `rev`); an unreadable file is
+    `(None, why)`, never "no deploy"."""
+    text, why = agents_text(root, rev)
+    return (None, why) if why else deploy_in(text)
+
+
 def record_listing(root, state_path, rev=None, base=None):
     """Run the listing and write the state file. Returns False when the repo
     declares no narrowed line: nothing is written. Any state an earlier run
@@ -253,7 +292,7 @@ def gate_text(section):
         pair = None if fenced else key_line(block)
         if pair and pair[0] in ("seam", "narrowed"):
             kept.append(f"{pair[0]}: {command_of(pair[1])}")
-        elif pair and pair[0] == "blind to":
+        elif pair and pair[0] in ("blind to", "deploy", "owed marker"):
             continue
         elif fenced or _RUN_WORD.search(block):
             kept.append(block)

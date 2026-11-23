@@ -2438,3 +2438,64 @@ def test_the_preflight_is_said_when_anchor_is_refused(sb):
     r = sb.drain("--anchor", "1")
     assert "--anchor #1 is passed over" in (r.stdout + r.stderr)
     assert "unresolved at start: #3 ticket 3" in r.stdout
+
+
+# --- the declared post-merge deploy (#1726) ---
+def set_deploy(sb, deploy_line, owed_line=""):
+    """Commit to main an `AGENTS.md` whose § End-to-end seam also carries the given
+    `Deploy` (and `Owed marker`) lines, beside the fixture's `Seam`."""
+    sb.set_seam("true")
+    text = read(os.path.join(sb.repo, "AGENTS.md")) + deploy_line + "\n" + owed_line
+    write(os.path.join(sb.repo, "AGENTS.md"), text)
+    sb.git(sb.repo, "add", ".")
+    sb.git(sb.repo, "commit", "-qm", "deploy")
+    sb.git(sb.repo, "push", "-q", "origin", "main")
+
+
+DEPLOY = '- **Deploy**: `echo "$PWD {before}" >> "$DEPLOY_LOG"; echo "building"; echo "owed: look at the rig"; echo "Still owed, by eye: the badge"`'
+
+
+def test_a_declared_deploy_runs_once_per_merge_from_the_primary_checkout_with_before_filled_in(sb):
+    sb.write_state({1: {}, 2: {}})
+    set_deploy(sb, DEPLOY)
+    before = sb.git(sb.repo, "rev-parse", "origin/main")
+    log = os.path.join(sb.tmp, "deploy.log")
+    r = sb.drain("--max", "2", env={"DEPLOY_LOG": log})
+    assert [m[0] for m in sb.state()["merged"]] == [[1], [2]], r.stdout
+    assert read(log).splitlines() == [f"{os.path.realpath(sb.repo)} {before}"] * 2
+    assert "deploy #1: `" in r.stdout and "-> exit 0" in r.stdout and "deploy output: building" in r.stdout
+
+
+def test_a_failing_deploy_stops_the_run_with_a_stopped_line_and_no_next_bundle_starts(sb):
+    sb.write_state({1: {}, 2: {}})
+    set_deploy(sb, "- **Deploy**: `echo deploying; exit 3`")
+    r = sb.drain("--max", "2")
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]  # the merge stays merged
+    assert [c["n"] for c in sb.dispatch_runs()] == ["1"]
+    assert "stopped: deploy exited 3 after merging https://example.test/pull/101 (#1)" in r.stdout
+    assert "ended: stopped" in r.stdout and "deploy output: deploying" in r.stdout
+
+
+def test_owed_lines_of_the_deploy_output_are_carried_under_their_ticket_by_declared_and_default_marker(sb):
+    sb.write_state({1: {}})
+    set_deploy(sb, DEPLOY, "- **Owed marker**: `Still owed, by eye:`\n")
+    r = sb.drain("--once", env={"DEPLOY_LOG": os.path.join(sb.tmp, "d.log")})
+    lines = r.stdout.splitlines()
+    at = next(i for i, x in enumerate(lines) if x.startswith("  #1  https://example.test/pull/101"))
+    assert lines[at + 1:at + 3] == ["    deploy: owed: look at the rig", "    deploy: Still owed, by eye: the badge"]
+
+
+def test_a_repo_with_no_deploy_line_runs_no_deploy_and_prints_no_deploy_line(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"DEPLOY_LOG": os.path.join(sb.tmp, "d.log")})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+    assert not os.path.exists(os.path.join(sb.tmp, "d.log"))
+    assert "deploy" not in r.stdout
+
+
+def test_a_deploy_line_that_names_no_command_stops_the_run_never_reads_as_no_deploy(sb):
+    sb.write_state({1: {}, 2: {}})
+    set_deploy(sb, "- **Deploy**: **")
+    r = sb.drain("--max", "2")
+    assert [c["n"] for c in sb.dispatch_runs()] == ["1"]
+    assert "stopped: deploy the deploy declaration cannot be read: the `Deploy` line names no command" in r.stdout

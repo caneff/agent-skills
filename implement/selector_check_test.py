@@ -505,3 +505,47 @@ def test_an_edit_to_prose_naming_a_backticked_file_reads_same(tmp_path):
     before = declared() + "\nThe helper list lives in `tests/helpers.txt`.\n"
     root = two_revs(tmp_path, before, before.replace("tests/helpers.txt", "tests/other.txt"))
     assert (seam_section_run(root).returncode, ) == (0, )
+
+
+# --- `deploy_of` (#1726): the optional post-merge deploy line drain reads ---
+sys.path.insert(0, HERE)
+import selector_check  # noqa: E402
+
+SEAM_HEAD = "## End-to-end seam\n\n- **Seam**: `npm test`\n- **Blind to**: x\n"
+
+
+def test_a_deploy_line_is_read_with_its_declared_and_default_owed_markers():
+    text = SEAM_HEAD + "- **Deploy**: `node deploy.mjs --since {before}`\n- **Owed marker**: `Still owed, by eye:`\n"
+    deploy, why = selector_check.deploy_in(text)
+    assert why is None
+    assert deploy.command == "node deploy.mjs --since {before}"
+    assert deploy.markers == ("Still owed, by eye:", "owed:")
+
+
+def test_no_deploy_line_is_no_deploy_and_no_reason():
+    assert selector_check.deploy_in(SEAM_HEAD) == (None, None)
+
+
+def test_a_deploy_line_in_a_fence_is_an_example_not_a_declaration():
+    text = SEAM_HEAD + "\n```\n- **Deploy**: `make deploy`\n```\n"
+    assert selector_check.deploy_in(text) == (None, None)
+
+
+@pytest.mark.parametrize("text, why", [
+    ("# Notes\n\nno section\n", "no `## End-to-end seam` section"),
+    (SEAM_HEAD + "- **Deploy**: **\n", "`Deploy` line names no command"),
+])
+def test_a_deploy_that_cannot_be_read_names_why_and_is_never_no_deploy(text, why):
+    deploy, found = selector_check.deploy_in(text)
+    assert deploy is None and why in found
+
+
+def test_an_unreadable_agents_file_is_a_reason(tmp_path):
+    deploy, why = selector_check.deploy_of(str(tmp_path))
+    assert deploy is None and "no AGENTS.md could be read" in why
+
+
+def test_deploy_and_owed_marker_lines_are_not_gate_text():
+    plain = selector_check.gate_text(selector_check.seam_section(SEAM_HEAD))
+    with_deploy = SEAM_HEAD + "- **Deploy**: `node deploy.mjs --run {before}`\n- **Owed marker**: `owed run:`\n"
+    assert selector_check.gate_text(selector_check.seam_section(with_deploy)) == plain
