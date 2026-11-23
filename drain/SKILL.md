@@ -100,6 +100,9 @@ the report with every bundle this drain worked, one per
 then the summary:
 
 - **merged**: each ticket set with its PR and squash sha.
+  A repo's post-merge deploy (`drain.py`'s docstring) leaves indented
+  `deploy: <line>` lines under its ticket set: what the deploy owes by eye. Carry
+  each one into the report under that ticket set, verbatim.
 - **closed, no PR**: each ticket set with how drain recorded it, as printed:
   `moot (closed, no PR)` is a ticket closed by hand, which landed nothing.
 - **handed to Chris**: each ticket set with the reason, as drain printed it.

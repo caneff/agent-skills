@@ -141,6 +141,12 @@ elif args[:2] == ["pr", "merge"]:
         save()
         sys.stderr.write("GraphQL: Base branch was modified. Review and try the merge again.\n"); sys.exit(1)
     pr["merged"] = True
+    other = os.environ.get("MOVE_MAIN_ON_MERGE")  # a second clone lands a commit on origin's main, as a real merge does
+    if other:
+        import subprocess
+        for cmd in (["pull", "-q", "--ff-only", "origin", "main"], ["commit", "-q", "--allow-empty", "-m", "merge " + args[2]],
+                    ["push", "-q", "origin", "HEAD:main"]):
+            subprocess.run(["git", "-C", other, *cmd], check=True)
     for n in pr["closes"]:
         state["issues"][str(n)]["state"] = "closed"
     state.setdefault("merged", []).append([pr["closes"], pr["head"]])
@@ -2438,3 +2444,93 @@ def test_the_preflight_is_said_when_anchor_is_refused(sb):
     r = sb.drain("--anchor", "1")
     assert "--anchor #1 is passed over" in (r.stdout + r.stderr)
     assert "unresolved at start: #3 ticket 3" in r.stdout
+
+
+# --- the declared post-merge deploy (#1726) ---
+def set_deploy(sb, deploy_line, owed_line=""):
+    """Commit to main an `AGENTS.md` whose § End-to-end seam also carries the given
+    `Deploy` (and `Owed marker`) lines, beside the fixture's `Seam`."""
+    sb.set_seam("true")
+    text = read(os.path.join(sb.repo, "AGENTS.md")) + deploy_line + "\n" + owed_line
+    write(os.path.join(sb.repo, "AGENTS.md"), text)
+    sb.git(sb.repo, "add", ".")
+    sb.git(sb.repo, "commit", "-qm", "deploy")
+    sb.git(sb.repo, "push", "-q", "origin", "main")
+
+
+DEPLOY = ('- **Deploy**: `echo "$PWD {before} $(git rev-parse HEAD)" >> "$DEPLOY_LOG"; echo "building"; '
+          'echo "owed: look at the rig"; echo "Still owed, by eye: the badge"`')
+
+
+def merging_main(sb):
+    """`MOVE_MAIN_ON_MERGE` for a clone of origin that lands a commit there at each merge."""
+    other = os.path.join(sb.tmp, "other")
+    sb.git(sb.tmp, "clone", "-q", sb.origin, other)
+    return {"MOVE_MAIN_ON_MERGE": other}
+
+
+def test_a_declared_deploy_runs_once_per_merge_from_the_primary_checkout_with_before_filled_in(sb):
+    sb.write_state({1: {}, 2: {}})
+    set_deploy(sb, DEPLOY)
+    start = sb.git(sb.repo, "rev-parse", "origin/main")
+    log = os.path.join(sb.tmp, "deploy.log")
+    r = sb.drain("--max", "2", env={"DEPLOY_LOG": log, **merging_main(sb)})
+    assert [m[0] for m in sb.state()["merged"]] == [[1], [2]], r.stdout
+    (path1, before1, head1), (path2, before2, head2) = (x.split() for x in read(log).splitlines())
+    assert path1 == path2 == os.path.realpath(sb.repo)
+    # each deploy gets main as it stood just before its own merge, and runs on the fast-forwarded checkout
+    assert before1 == start and head1 != before1 and before2 == head1 and head2 != before2
+    assert "deploy #1: `" in r.stdout and "-> exit 0" in r.stdout and "deploy output: building" in r.stdout
+
+
+def test_a_failing_deploy_stops_the_run_with_a_stopped_line_and_no_next_bundle_starts(sb):
+    sb.write_state({1: {}, 2: {}})
+    set_deploy(sb, "- **Deploy**: `echo deploying; exit 3`")
+    r = sb.drain("--max", "2")
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]  # the merge stays merged
+    assert [c["n"] for c in sb.dispatch_runs()] == ["1"]
+    assert "stopped: deploy exited 3 after merging https://example.test/pull/101 (#1)" in r.stdout
+    assert "ended: stopped" in r.stdout and "deploy output: deploying" in r.stdout
+
+
+def test_a_deploy_past_the_wall_clock_stops_the_run_and_says_it_timed_out_not_that_it_never_ran(sb):
+    sb.write_state({1: {}, 2: {}})
+    set_deploy(sb, "- **Deploy**: `sleep 30`")
+    r = sb.drain("--max", "2", env={"DRAIN_DEPLOY_SECONDS": "1"})
+    assert [c["n"] for c in sb.dispatch_runs()] == ["1"]
+    assert "no exit status  (timed out after 1 s" in r.stdout and "not run" not in r.stdout
+    assert "stopped: deploy timed out after 1 s" in r.stdout
+
+
+def test_a_primary_checkout_off_the_default_branch_is_not_deployed_from(sb):
+    sb.write_state({1: {}, 2: {}})
+    set_deploy(sb, DEPLOY)
+    sb.git(sb.repo, "checkout", "-q", "-b", "side")
+    r = sb.drain("--max", "2", env={"DEPLOY_LOG": os.path.join(sb.tmp, "d.log")})
+    assert not os.path.exists(os.path.join(sb.tmp, "d.log"))
+    assert "stopped: deploy the primary checkout is not on main, so it was not fast-forwarded" in r.stdout
+
+
+def test_owed_lines_of_the_deploy_output_are_carried_under_their_ticket_by_declared_and_default_marker(sb):
+    sb.write_state({1: {}})
+    set_deploy(sb, DEPLOY, "- **Owed marker**: `Still owed, by eye:`\n")
+    r = sb.drain("--once", env={"DEPLOY_LOG": os.path.join(sb.tmp, "d.log")})
+    lines = r.stdout.splitlines()
+    at = next(i for i, x in enumerate(lines) if x.startswith("  #1  https://example.test/pull/101"))
+    assert lines[at + 1:at + 3] == ["    deploy: owed: look at the rig", "    deploy: Still owed, by eye: the badge"]
+
+
+def test_a_repo_with_no_deploy_line_runs_no_deploy_and_prints_no_deploy_line(sb):
+    sb.write_state({1: {}})
+    r = sb.drain("--once", env={"DEPLOY_LOG": os.path.join(sb.tmp, "d.log")})
+    assert [m[0] for m in sb.state()["merged"]] == [[1]]
+    assert not os.path.exists(os.path.join(sb.tmp, "d.log"))
+    assert "deploy" not in r.stdout
+
+
+def test_a_deploy_line_that_names_no_command_stops_the_run_never_reads_as_no_deploy(sb):
+    sb.write_state({1: {}, 2: {}})
+    set_deploy(sb, "- **Deploy**: **")
+    r = sb.drain("--max", "2")
+    assert [c["n"] for c in sb.dispatch_runs()] == ["1"]
+    assert "stopped: deploy the deploy declaration cannot be read: the `Deploy` line names no command" in r.stdout

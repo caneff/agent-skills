@@ -77,6 +77,18 @@ declares a `Narrowed` line gets that run's listing as one `selector:` comment
 on the PR, posted before the command, as the lane's merge step does (#1593).
 A section that declares no command merges nothing. No full seam runs in
 drain: the nightly backstop (`backstop/`) is the only full run.
+After each merge, before the next bundle starts, a repo that declares a
+`- **Deploy**: `<command>`` line in that section (#1726; `{before}` is
+current main's sha just before the merge) has the primary checkout
+fast-forwarded and the command run there, read from main after the merge.
+`deploy <tickets>: `<command>` -> exit <n>` and the last 15 output lines
+(`deploy output: ...`) go to the progress file. A non-zero exit, a timeout, a
+checkout that cannot fast-forward or a declaration that cannot be read ends the
+drain with `stopped: deploy ...` naming the merged PR; merges already made stay
+merged. An output line starting with the repo's `- **Owed marker**: `<text>``
+(backticked, any number) or the default `owed:` is carried into the summary
+as `    deploy: <line>` under its merged ticket. A repo with no `Deploy` line runs
+nothing and prints nothing more.
 A bundle that fails is given one more try by prompting the same worker with
 the reason (waiting for it to start working before it looks again); a second
 failure closes the worker's pane, labels the anchor and every claimed ticket
@@ -139,6 +151,7 @@ for _dir in ("implement-spec", "implement", "common"):
 import frontier  # noqa: E402
 import pr_settle  # noqa: E402
 import scratch_run  # noqa: E402
+import selector_check  # noqa: E402
 import shellcmd  # noqa: E402
 import owners  # noqa: E402  (#2005)
 import tracker  # noqa: E402
@@ -1137,7 +1150,86 @@ def finish(ctx, anchor, branch, view, kind):
             relabel(ctx, n, READY)
     except DrainError as exc:
         notes.append("releasing unclosed tickets failed: " + one_line(exc, 150))
-    return [{"tickets": view["closes"], "via": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED}]
+    return [{"tickets": view["closes"], "via": view["url"], "sha": sha, "note": "; ".join(notes), "outcome": MERGED,
+             "deploy": deploy_after_merge(ctx, view["before"])}]
+
+
+# How long a deploy may run, and how many of its last output lines the progress
+# file keeps.
+DEPLOY_SECONDS = float(os.environ.get("DRAIN_DEPLOY_SECONDS", 1800))
+DEPLOY_TAIL = 15
+
+
+def main_sha(ctx):
+    """Current main's sha as last fetched, `None` when git cannot say; it only
+    matters to a repo that declares a deploy, so it never fails a bundle."""
+    try:
+        return git(["rev-parse", ctx.default], cwd=ctx.root)
+    except DrainError:
+        return None
+
+
+def deploy_after_merge(ctx, before):
+    """`None` when the repo declares no `Deploy` line (#1726); else a dict
+    `{command, status, tail, owed, why}`, `why` empty when the deploy exited 0:
+    main fast-forwarded in the primary checkout, then the command run there with
+    `{before}` (main's sha just before this merge) substituted. `owed` is every
+    output line starting with one of the repo's markers, case ignored. A
+    section that cannot be read, a checkout that cannot fast-forward, a
+    `before` that was unread and a deploy that exits non-zero or passes the
+    wall clock all have a `why`, never "no deploy" (class 1). The declaration
+    is read from main after the merge, as the seam's command is read from
+    current main; a failed fetch reads the last fetched main, and only a repo
+    that declares a deploy is stopped by it."""
+    def failed(why, command="", status=None):
+        return {"command": command, "status": status, "tail": [], "owed": [], "why": why}
+
+    fetched = None
+    try:
+        git(["fetch", "-q", "origin"], cwd=ctx.root)
+    except DrainError as exc:
+        fetched = f"git fetch failed: {one_line(exc, 150)}"
+    deploy, why = selector_check.deploy_of(ctx.root, ctx.default)
+    if why:
+        return failed(f"the deploy declaration cannot be read: {why}")
+    if deploy is None:
+        return None
+    if fetched:
+        return failed(f"{fetched}, so main was not fast-forwarded", deploy.command)
+    local = ctx.default.split("/", 1)[-1]  # `ctx.default` is `origin/<branch>`
+    try:
+        if git(["branch", "--show-current"], cwd=ctx.root) != local:
+            return failed(f"the primary checkout is not on {local}, so it was not fast-forwarded", deploy.command)
+        git(["merge", "--ff-only", "-q", ctx.default], cwd=ctx.root)
+    except DrainError as exc:
+        return failed(f"could not fast-forward the primary checkout: {one_line(exc, 150)}", deploy.command)
+    if before is None:
+        return failed("main's sha before the merge was unread, so `{before}` has no value", deploy.command)
+    command = deploy.command.replace("{before}", before)
+    try:
+        status, text = scratch_run.run_group(["sh", "-c", command], ctx.root, DEPLOY_SECONDS)
+    except scratch_run.ScratchError:
+        return failed(f"timed out after {DEPLOY_SECONDS:g} s (its process group was killed, its output dropped)", command)
+    except OSError as exc:
+        return failed(f"could not start: {one_line(exc, 100)}", command)
+    lines = text.splitlines()
+    markers = tuple(m.lower() for m in deploy.markers)
+    return {"command": command, "status": status, "tail": lines[-DEPLOY_TAIL:],
+            "owed": [x.strip() for x in lines if x.strip().lower().startswith(markers)],
+            "why": f"exited {status}" if status else ""}
+
+
+def say_deploy(result):
+    """The deploy's command, exit status and output tail as progress lines,
+    and the stop reason when it failed, else `None`."""
+    deploy = result.get("deploy")
+    if not deploy:
+        return None
+    outcome = "no exit status" if deploy["status"] is None else f"exit {deploy['status']}"
+    say(f"deploy {refs(result['tickets'])}: `{deploy['command']}` -> {outcome}" + (f"  ({deploy['why']})" if deploy["why"] else ""))
+    for line in deploy["tail"]:
+        say(f"deploy output: {line}")
+    return f"deploy {deploy['why']} after merging {result['via']} ({refs(result['tickets'])})" if deploy["why"] else None
 
 
 def resume(ctx, agent):
@@ -1229,6 +1321,7 @@ def work(ctx, anchor, others, resumed, started, kind):
                                resumed=resumed_agents) == "closed":
                 return finish_closed(ctx, branch, tickets), None
             view = verify_pr(ctx, branch, anchor, kind)
+            view["before"] = main_sha(ctx)  # `{before}` of the deploy (#1726), read as the seam's check last left it
             try:
                 pr_settle.merge(pr_settle.gh_reader(view["number"], ctx.repo, tracker=ctx.tracker),
                                 pr_settle.gh_merger(view["number"], ctx.repo, tracker=ctx.tracker), view["headRefOid"])
@@ -1365,7 +1458,9 @@ def record_bundle(ctx, prog, anchor, kind, results, reason):
             (prog.merged if result["outcome"] == MERGED else prog.closed).append(result)
         prog.started.clear()
         prog.done, prog.failures = prog.done + sum(len(r["tickets"]) for r in results), 0
-        return None
+        # A failed deploy stops the run after the merges already made (#1726).
+        stops = [say_deploy(result) for result in results]
+        return next((stop for stop in stops if stop), None)
     bundle = hand_to_chris(ctx, anchor, reason, kind)
     say(f"bundle ended: {refs(bundle)}  handed to Chris: {reason}")
     prog.started.clear()
@@ -1447,8 +1542,10 @@ def summary(result):
     exit code."""
     lines = []
     if result.merged:
-        lines += ["merged:"] + [f"  {refs(m['tickets'])}  {m['via']}  {m['sha']}"
-                                 + (f"  ({m['note']})" if m["note"] else "") for m in result.merged]
+        lines.append("merged:")
+        for m in result.merged:
+            lines.append(f"  {refs(m['tickets'])}  {m['via']}  {m['sha']}" + (f"  ({m['note']})" if m["note"] else ""))
+            lines += [f"    deploy: {x}" for x in (m.get("deploy") or {}).get("owed", [])]
     if result.closed:
         lines += ["closed, no PR:"] + [f"  {refs(m['tickets'])}  {m['via']}"
                                         + (f"  ({m['note']})" if m["note"] else "") for m in result.closed]
