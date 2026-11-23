@@ -227,14 +227,36 @@ def test_status_rows_classifies_every_state_and_sorts(tmp_path, monkeypatch, gh_
     gh_runner(_happy_responses(upstream_dirs))
     rows = upstream.status_rows("HEAD", lock, str(tmp_path / "none.json"))
     assert rows == [
+        ("DELETED locally (update keeps it deleted)", "missing"),
         ("EDITED+STALE (merge needed)", "both"),
         ("ORPHAN (removed upstream)", "orphan"),
         ("OUT OF DATE", "stale"),
         ("edited, on latest", "edited"),
-        ("edited, on latest", "missing"),
         ("non-github source (skip)", "nogh"),
         ("clean", "clean"),
     ]
+
+
+def test_status_rows_missing_folder_is_deleted_locally_not_edited(tmp_path, monkeypatch, gh_runner):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    local = _git_repo(str(repo), {"keep": "a"})
+    monkeypatch.chdir(repo)
+    url = "https://github.com/acme/repo"
+    lock = _lock(tmp_path, {
+        "keep": _entry(url, "keep", local["keep"]),
+        "gone": _entry(url, "gone", "oldhash"),
+        "gone-orphan": _entry(url, "gone-orphan", "oldhash"),
+    })
+    gh_runner(_happy_responses([
+        {"path": "keep", "type": "tree", "sha": local["keep"]},
+        {"path": "gone", "type": "tree", "sha": "newer"},
+    ]))
+    rows = upstream.status_rows("HEAD", lock, None)
+    assert ("DELETED locally (update keeps it deleted)", "gone") in rows
+    assert ("DELETED locally (update keeps it deleted)", "gone-orphan") in rows
+    assert ("clean", "keep") in rows
+    assert not any(st.startswith(("edited", "EDITED")) for st, _ in rows)
 
 
 def test_status_rows_unknown_when_gh_fails(tmp_path, monkeypatch, gh_runner):

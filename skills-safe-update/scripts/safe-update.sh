@@ -8,6 +8,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
+# where npx links each installed skill for Claude Code
+CLAUDE_SKILLS="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}"
 
 # commit_staged <message> — commit what is staged, with the checkout's own
 # identity (no `-c user.*` override: the commit-identity guard refuses one).
@@ -237,6 +239,27 @@ protect_skills(){
   fi
 }
 
+# keep_deleted <pre> <prelock-file>
+# A lock-tracked skill whose folder is absent from <pre> was deleted on purpose,
+# but `npx skills update` reinstalls it (and re-links CLAUDE_SKILLS/<name>) and
+# the extras sync re-extracts it. Remove whatever came back, so the deletion
+# stands: only a path <pre> lacks is touched, so none of your work can go. Sets
+# the global `kept_deleted` and prints one line per skill.
+keep_deleted(){
+  local pre=$1 prelock=$2 name hash
+  kept_deleted=()
+  [ -s "$prelock" ] || return 0
+  while IFS=$'\t' read -r name hash; do
+    case $name in ""|.|..|*/*) continue ;; esac
+    git cat-file -e "$pre:$name" 2>/dev/null && continue
+    [ -e "$name" ] || [ -L "$CLAUDE_SKILLS/$name" ] || { kept_deleted+=("$name"); continue; }
+    rm -rf -- "${SKILLS:?}/$name"
+    [ -L "$CLAUDE_SKILLS/$name" ] && rm -f -- "$CLAUDE_SKILLS/$name"
+    kept_deleted+=("$name")
+    echo "kept deleted: $name (you deleted it; the update's reinstall and link were removed)"
+  done < "$prelock"
+}
+
 main(){
 cd "$SKILLS"
 
@@ -284,6 +307,9 @@ if [ -f "$EXTRA" ]; then
   python3 "$SCRIPT_DIR/upstream.py" sync-extras --extras "$EXTRA"
 fi
 
+# a skill you deleted on purpose stays deleted (#2023)
+keep_deleted "$PRE" "$PRELOCK"
+
 # record upstream result: npx rewrote the live lock, so mirror the new one in
 snap_lock
 git add -A
@@ -312,6 +338,9 @@ for s in $changed; do
 done
 echo "Updated from upstream (${#updated[@]}):"
 for s in "${updated[@]:-}"; do [ -n "$s" ] && echo "  $s"; done
+if [ ${#kept_deleted[@]} -gt 0 ]; then
+  echo "Kept deleted (${#kept_deleted[@]}): ${kept_deleted[*]}"
+fi
 if [ ${#merged[@]} -gt 0 ]; then
   echo "Your edits merged with upstream (${#merged[@]}): ${merged[*]}"
 fi
@@ -344,6 +373,7 @@ echo "DIGEST_SKILLS_DIR=$SKILLS"
 echo "DIGEST_CHANGED=$(echo $changed | tr '\n' ' ')"
 echo "DIGEST_MERGED=${merged[*]:-}"
 echo "DIGEST_CONFLICTED=${conflicted[*]:-}"
+echo "DIGEST_DELETED=${kept_deleted[*]:-}"
 echo "DIGEST_KEPT=${nobase[*]:-}"
 echo
 echo "undo everything:  git -C $SKILLS reset --hard $PRE"

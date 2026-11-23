@@ -129,6 +129,9 @@ def upstream_dir(t, path):
     return True, t["tree"].get(path)
 
 
+DELETED_STATUS = "DELETED locally (update keeps it deleted)"
+
+
 def status_rows(base, lock_path, extras_path):
     """[(status, display-name), ...] sorted the way skills-status.sh prints them."""
     items = load_items(lock_path, extras_path)
@@ -137,7 +140,11 @@ def status_rows(base, lock_path, extras_path):
     for it in items:
         r = subprocess.run(["git", "rev-parse", f"{base}:{it['name']}"], capture_output=True, text=True)
         local = r.stdout.strip() if r.returncode == 0 else "MISSING"
-        if not it["owner"]:
+        if local == "MISSING":
+            # An absent folder is its own state, never "edited": the update
+            # would reinstall it, and safe-update.sh removes it again.
+            status = DELETED_STATUS
+        elif not it["owner"]:
             status = "non-github source (skip)"
         else:
             t = upstream_tree(it["owner"], it["repo"], cache)
