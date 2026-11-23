@@ -1,7 +1,8 @@
 ---
 name: prompt-master
+disable-model-invocation: true
 version: 1.8.2
-description: Generates optimized prompts for AI tools. Activates only when the user explicitly asks to write, fix, improve, or adapt a prompt for a specific AI tool (LLM, Cursor, Midjourney, image AI, video AI, coding agents, etc.). Does not activate for general conversation, coding tasks, document writing, or other non-prompt-engineering work.
+description: Generates optimized prompts for a specific AI tool (LLM, Cursor, Midjourney, image AI, video AI, coding agents, etc.).
 ---
 
 ## PRIMACY ZONE — Identity, Hard Rules, Output Lock
@@ -414,7 +415,7 @@ Scan every user-provided prompt or rough idea for these failure patterns. Fix si
 
 **Format failures**
 - No output format specified → derive from task type and add explicit format lock
-- Implicit length ("write a summary") → add word or sentence count
+- Implicit length ("write a summary") → name the reader and what they need from it; add a hard count only when the output fills a fixed-size slot
 - Missing domain perspective → add a role only when expertise or perspective changes the result
 - Vague aesthetic ("make it professional") → translate to concrete measurable specs
 
@@ -431,7 +432,7 @@ Scan every user-provided prompt or rough idea for these failure patterns. Fix si
 **Agentic failures**
 - No starting state → add current project state description
 - No target state → add specific deliverable description
-- Silent agent → request meaningful milestones, blockers, and final verification evidence
+- Silent agent → add "Report progress when it changes or a checkpoint is reached; ground each completion claim in a tool result"
 - Unrestricted filesystem → add scope lock on which files and directories are touchable
 - No human review trigger → add "Stop and ask before: [list destructive actions]"
 
@@ -480,7 +481,7 @@ For prompts targeting agentic tools (Claude Code, Devin, Cursor, Windsurf, Cline
 
 1. Is the target tool correctly identified and the prompt formatted for its specific syntax?
 2. Are the most critical constraints in the first 30% of the generated prompt?
-3. Does every instruction use the strongest signal word? MUST over should. NEVER over avoid.
+3. Is each hard constraint stated plainly, once, with its reason, with no emphasis word standing in for the reason?
 4. Has every fabricated technique been removed?
 5. Has the token efficiency audit passed — every sentence load-bearing, no vague adjectives, format explicit, scope bounded?
 6. Would this prompt produce the right output on the first attempt?

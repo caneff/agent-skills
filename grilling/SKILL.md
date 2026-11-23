@@ -5,21 +5,17 @@ description: Grill the user relentlessly about a plan, decision, or idea. Use wh
 
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
-Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round.
+Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled — the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask a few frontier questions per round, not the whole frontier at once: number each and give your recommended answer. Then wait for the user's answers before the next round.
 
-Format a round like so:
+Each question should be formatted like so:
 
 ```
 ❓ **Q1** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
 
 ➡️ <your recommended answer>
-
----
-
-❓ **Q2** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
-
-➡️ <your recommended answer>
 ```
+
+Write every question body in the session's active output style. Real technical terms are fine, but no coined compound jargon or invented mashups — a question the user has to decode fails the grill. Self-check the prose before sending each round.
 
 Word each question so "yes" accepts your recommended answer.
 

@@ -1,0 +1,449 @@
+#!/usr/bin/env python3
+"""The merge check: did the worker dispose of every review finding?
+
+    python3 implement/fix_check.py <ticket> [<branch, default implement-<ticket>>]
+
+Run from any checkout of the repo; the review cache is keyed on the shared
+.git's parent name, as `implement/SKILL.md` § Review writes it. The controller
+passes `origin/implement-<ticket>`, the head the PR merges. It verifies,
+mechanically, what the removed verification pass used to grade:
+
+- `dispositions-<n>.jsonl` exists (empty when every reviewer found nothing: a
+  missing file is not a clean review), every finding id in
+  `findings-{standards,spec,correctness}-<n>.jsonl` and in the Codex pass's
+  output has exactly one line in it, and every line names a finding. The file
+  is read by `runfile.read_dispositions`, the one reader of the format;
+- a `fixed` line's sha is a hex commit on the branch, past `origin`'s default
+  branch;
+- a `moved` line's ticket is open, and is not the ticket under review (the
+  merge would close it and lose the finding). A ticket this PR closes is
+  accepted (#1700): a slice filed mid-run is the finding's home, still open
+  until the merge;
+- a `disputed` line gives a reason;
+- a correctness finding's line carries `rating`, CONFIRMED or PLAUSIBLE
+  (#1230);
+- every review that ran left a sidecar beside its completion marker
+  `findings-<axis>-<n>.done`, written after the sidecar was complete: an empty
+  file is also what a reviewer that crashed leaves, and a truncated one is
+  not told from a whole one without it (defect class 1);
+- every file of the review is newer than the branch's first authored commit,
+  so a leftover of an earlier dispatch of the same ticket is not read as this
+  one.
+
+A slice of a spec run (#1459) runs no review wave: the spec is reviewed once
+on its integration branch. The check reads that from the base dispatch
+recorded, `git config branch.implement-<ticket>.base` naming `spec-<p>`, never
+from a missing dispositions file (defect class 1), and on such a branch it
+looks for no review file at all. `origin/spec-<p>` must exist: a key left from
+an ended spec, or set by hand, is refused rather than read as a slice. It is
+not required to be an ancestor of the branch, since another slice landing
+moves it past a slice already built. An open PR from `implement-<ticket>` must
+target `spec-<p>`, read from GitHub: a slice PR into the default branch would
+land there unreviewed. No open PR yet passes and says so, since the worker's
+gate runs before `gh pr create`. No key, or a key naming anything else, is an
+ordinary ticket.
+
+A spec's own review (#1461) is keyed on the spec number: `<ticket>` is the
+spec and the branch is `spec-<ticket>` (the controller passes
+`origin/spec-<ticket>`), so every `fixed` sha is a commit on the integration
+branch past the default branch, and a finding `moved` onto a slice the
+integration PR closes passes while the slice is open (#1700); onto the spec
+itself it is refused.
+
+A review that ran also has its ledger row (#1527): a sidecar with no
+`review_ledger.py append --type <axis>` row for this ticket and repo (a skip
+row does not count) is refused, since a wave that never appended leaves the
+ledger blind to it. The row must be this wave's (#1555): `append` records the
+sha256 of the sidecar it read as `sidecar_sha256`, and the check wants a row
+whose hash matches the sidecar on disk, so a row left by an earlier dispatch,
+or by a version of `append` before the field, is refused with the line to
+re-run. Each later round (#1576) is read the same way:
+`findings-<axis>-<n>-rK.jsonl` with its `-rK.done` marker and a row of
+`round: K` holding its hash, found by listing the cache. A `-rK` marker with
+no sidecar is refused, as is a sidecar with no marker. A skip row excuses
+round 1 only. A second wave of one round whose sidecar is byte-identical to
+the first's (an empty one both times) still matches: the hash cannot tell
+the two waves apart.
+A review the ledger records as skipped (`review_ledger.py append --type
+<axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
+record, or a `codex-gate` ledger row saying why it did not run (size gate,
+usage, kill switch). A Codex record that errored, or whose branch moved under
+it, is a refused pass and its findings are not required, said in the output.
+An output the parser cannot read is a refusal of this check, never an empty
+pass.
+
+Exit 0 and one line when every finding is disposed; 1 and one line per
+problem; 2 on usage or an environment that cannot answer (git, `gh`, an
+unreadable file).
+"""
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "multi-axis-code-review"))
+sys.path.insert(0, os.path.join(HERE, "..", "implement-spec"))
+import review_cache  # noqa: E402
+import review_ledger  # noqa: E402
+import runfile  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "common"))
+import shellcmd  # noqa: E402  (#1782)
+import tracker as issue_tracker  # noqa: E402  (#1786)
+
+AXES = ("standards", "spec", "correctness")
+RATINGS = ("CONFIRMED", "PLAUSIBLE")
+# The same shape flow/lane/src/bin/merge_cleanup.rs `recorded_spec_base` accepts;
+# a change to one is a change to both.
+SPEC_BASE = re.compile(r"spec-\d+\Z")
+SHA = re.compile(r"[0-9a-f]{7,40}\Z")
+
+
+class Unanswerable(Exception):
+    """The environment cannot answer (git, gh or the cache): exit 2, not a verdict."""
+
+
+def git(*args, ok=(0,)):
+    """git's stdout; None when it exits with a status in `ok` other than 0 (git's own "not there"
+    code for the call, `config --get`'s 1). Any exit outside `ok` is Unanswerable."""
+    try:
+        done = shellcmd.git(list(args), ok=ok)
+    except shellcmd.CmdError as e:
+        raise Unanswerable(f"`git {' '.join(args)}` failed: {e}") from None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def slice_base(n):
+    """`spec-<p>` when dispatch recorded ticket `n` as a slice of spec <p>, else None."""
+    base = git("config", "--get", f"branch.implement-{n}.base", ok=(0, 1))
+    return base if base and SPEC_BASE.match(base) else None
+
+
+def tracker():
+    """The issue module's adapter for this checkout's GitHub origin; a checkout whose origin is not
+    one cannot be asked, which is the environment's exit 2."""
+    try:
+        slug = shellcmd.origin_slug(".")
+    except shellcmd.CmdError as e:
+        raise Unanswerable(f"origin could not be read: {e}") from None
+    if slug is None:
+        raise Unanswerable("origin is not a github.com remote, so GitHub cannot be asked")
+    return issue_tracker.GhTracker(slug)
+
+
+def slice_prs(n):
+    """`(number, base)` of each open PR from `implement-<n>`, as GitHub
+    holds it: a slice runs no review, so a slice PR into anything but its
+    integration branch would land unreviewed. None open is the worker's gate
+    before `gh pr create`; the controller's merge has one."""
+    try:
+        prs = tracker().open_prs(f"implement-{n}")
+    except issue_tracker.TrackerError as e:
+        raise Unanswerable(f"`gh pr list --head implement-{n}` failed: {e}") from None
+    return [(str(pr["number"]), pr["baseRefName"]) for pr in prs]
+
+
+def reviews_dir():
+    """The review cache directory of this repo, chosen by `review_cache.cache_dir_for`, the one rule for it."""
+    try:
+        return str(review_cache.cache_dir_for(Path.cwd()))
+    except review_cache.CacheDirError as exc:
+        raise Unanswerable(str(exc))
+
+
+def read_lines(path):
+    """The non-blank lines of a file, or None when it is absent."""
+    try:
+        with open(path) as fh:
+            return [(n, line) for n, line in enumerate(fh.read().splitlines(), 1) if line.strip()]
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise Unanswerable(f"{path} is unreadable: {exc}")
+
+
+def json_object(line):
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def ledger_types(reviews, n):
+    """What the ledger holds for ticket `n` of this repo: `(ran, skipped)`. `ran` maps each review
+    `(type, round)` with a row that ran to the set of `sidecar_sha256` its rows carry (a row written
+    before the digest field carries none, so adds none; a row with no
+    `round` is round 1, one with a malformed `round` counts for none);
+    `skipped` is the types it records as not run, which excuses round 1
+    only. A skip row is no evidence a review ran."""
+    repo = review_cache.fold_repo(os.path.basename(reviews))
+    try:
+        rows = review_ledger.read_ledger(review_ledger.DEFAULT_LEDGER)
+    except FileNotFoundError:
+        return {}, set()
+    except ValueError as exc:
+        raise Unanswerable(str(exc))
+    mine = [r for r in rows if r.get("repo") == repo and n in (r.get("tickets") or [r.get("ticket")])]
+    skipped = {r["type"] for r in mine if r["status"]["fields"]["findings"]["status"] == "skipped"}
+    ran = {}
+    for r in mine:
+        rnd = r.get("round", 1)  # a row from before the field is round 1
+        if not isinstance(rnd, int) or isinstance(rnd, bool) or rnd < 1:
+            continue  # a malformed round vouches for no sidecar
+        # A skip row records round 1 not run (`append --skip-reason` is round 1 only): it
+        # discards round 1's ran rows, never a later round's.
+        if r["type"] not in skipped or rnd > 1:
+            digests = ran.setdefault((r["type"], rnd), set())
+            if isinstance(r.get("sidecar_sha256"), str):
+                digests.add(r["sidecar_sha256"])
+    return ran, skipped
+
+
+class Branch:
+    """The branch under review: its commits past the default branch, their
+    start time.
+
+    The start is the earliest author time, not committer time: a rebase after
+    the review wave rewrites every committer date to now, which would read each
+    sidecar as older than the branch (#1419). The cost: a redispatch that
+    reuses commits authored before its predecessor's sidecars cannot tell them
+    from its own; a reused commit's author time is the earlier dispatch's."""
+
+    def __init__(self, name):
+        self.name = name
+        try:
+            self.base = shellcmd.default_branch(".")
+        except shellcmd.CmdError as e:
+            raise Unanswerable(str(e)) from None
+        self.commits = set(git("rev-list", f"{self.base}..{name}").split())
+        stamps = [int(t) for t in git("log", f"{self.base}..{name}", "--format=%at").split()]
+        self.started = min(stamps) if stamps else None
+
+    def fresh(self, path):
+        """None when `path` was written after the branch began; else the problem."""
+        if self.started is None or os.path.getmtime(path) >= self.started:
+            return None
+        return (f"{os.path.basename(path)} is older than the first commit of {self.name} — a leftover of "
+                "an earlier dispatch of this ticket, not this review")
+
+
+def axis_rounds(reviews, n, axis):
+    """Each review round of `axis` present in the cache as `{round: [file stems]}`: round 1 always
+    (its absence is the check's to report), and every later round that left a sidecar or a marker,
+    read through `review_ledger.findings_name`, the one parser of the `-rK` names (#1576). A round
+    spelled two ways (`-r2` and `-round2`) lists both, so neither is left unread."""
+    rounds = {1: [f"findings-{axis}-{n}"]}
+    try:
+        names = os.listdir(reviews)
+    except OSError as exc:
+        raise Unanswerable(f"{reviews} is unreadable: {exc}")
+    for name in sorted(names):
+        stem, ext = os.path.splitext(name)
+        if ext not in (".jsonl", ".done"):
+            continue
+        parsed = review_ledger.findings_name(stem + ".jsonl")
+        if parsed and parsed[0] == axis and parsed[1] == str(n) and parsed[2] > 1:
+            stems = rounds.setdefault(parsed[2], [])
+            if stem not in stems:
+                stems.append(stem)
+    return dict(sorted(rounds.items()))
+
+
+def axis_findings(reviews, n, branch, rowed, skipped, problems):
+    ids = []
+    for axis in AXES:
+        for rnd, stems in axis_rounds(reviews, n, axis).items():
+            for stem in stems:
+                ids += round_findings(reviews, n, branch, axis, rnd, stem, rowed, skipped, problems)
+    return ids
+
+
+def round_findings(reviews, n, branch, axis, rnd, stem, rowed, skipped, problems):
+    """The finding ids of one round of one axis, its problems appended. Round 1 of a skipped axis
+    needs no sidecar; a later round is never excused by that skip row."""
+    name, marker = f"{stem}.jsonl", f"{stem}.done"
+    path = os.path.join(reviews, name)
+    lines = read_lines(path)
+    if lines is None and rnd == 1 and axis in skipped:
+        return []
+    if lines is None and rnd > 1:
+        if os.path.exists(os.path.join(reviews, marker)):
+            problems.append(f"{marker} has no sidecar {name} — round {rnd} of the {axis} review left a "
+                            "marker and no findings")
+        return []
+    if lines is None:
+        problems.append(f"{name} is missing — that reviewer never ran, and the ledger "
+                        "records no skip for it")
+        return []
+    append = (f"review_ledger.py append --repo {os.path.basename(reviews)} --ticket {n} "
+              f"--type {axis}" + (f" --round {rnd}" if rnd > 1 else ""))
+    digests = rowed.get((axis, rnd))
+    if digests is None:
+        problems.append(f"no ledger row for the {axis} review of #{n}{f' round {rnd}' if rnd > 1 else ''} "
+                        f"under repo {os.path.basename(reviews)}, though {name} exists — a skip row is "
+                        f"not one: {append}")
+    elif review_ledger.sidecar_digest(path) not in digests:
+        problems.append(f"the ledger carries no row for this wave's {name}: no {axis} row of #{n} holds "
+                        "its sha256 — the row is an earlier dispatch's or predates the field, or the "
+                        f"sidecar changed after its append; re-append: {append}")
+    if not os.path.exists(os.path.join(reviews, marker)):
+        problems.append(f"{name} has no completion marker {marker} — a reviewer that crashed or "
+                        "was cut off leaves an empty or truncated sidecar too")
+        return []
+    ids = []
+    for fresh in (branch.fresh(path), branch.fresh(os.path.join(reviews, marker))):
+        if fresh:
+            problems.append(fresh)
+    for num, line in lines:
+        obj = json_object(line)
+        if obj is None or not isinstance(obj.get("id"), str) or not obj["id"].strip():
+            problems.append(f"{name}:{num} is not a finding line with an id")
+        elif axis == "correctness" and "rating" not in obj:
+            problems.append(f"{name}:{num} has no rating, which a correctness finding carries in its "
+                            "sidecar (#1230)")
+        elif axis == "correctness" and obj["rating"] not in RATINGS:
+            problems.append(f"{name}:{num} rating {obj['rating']!r} is not CONFIRMED or PLAUSIBLE")
+        else:
+            ids.append(obj["id"])
+    return ids
+
+
+def codex_findings(reviews, n, branch, skipped, problems, notes):
+    record = os.path.join(reviews, f"codex-adversarial-{n}-gate.json")
+    out_name = f"codex-adversarial-{n}-gate.out"
+    if not os.path.exists(record):
+        if "codex-gate" not in skipped:
+            problems.append(f"{os.path.basename(record)} is missing and the ledger has no codex-gate "
+                            "row saying why the pass did not run (size gate, usage, kill switch)")
+        return []
+    try:
+        with open(record) as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError) as exc:
+        problems.append(f"{os.path.basename(record)} is unreadable: {exc}")
+        return []
+    if not isinstance(rec, dict) or rec.get("status") != 0:
+        notes.append(f"codex pass refused (status {rec.get('status') if isinstance(rec, dict) else '?'}), "
+                     "its findings are not required")
+        return []
+    if rec.get("launch_sha") != rec.get("completion_sha"):
+        notes.append("codex pass refused (the branch moved while it read), its findings are not required")
+        return []
+    try:
+        with open(os.path.join(reviews, out_name)) as fh:
+            found, why = review_ledger.parse_codex_out(fh.read())
+    except (OSError, UnicodeDecodeError) as exc:
+        problems.append(f"{out_name} is unreadable: {exc}")
+        return []
+    for fresh in (branch.fresh(record), branch.fresh(os.path.join(reviews, out_name))):
+        if fresh:
+            problems.append(fresh)
+    if found is None:
+        problems.append(f"{out_name} cannot be read as findings: {why}")
+        return []
+    return [f"codex-gate-{k}" for k in range(1, len(found) + 1)]
+
+
+def moved_state(ticket):
+    """`OPEN` or `CLOSED`, as GitHub holds ticket `ticket`; a ticket gh cannot read is Unanswerable."""
+    try:
+        return str(tracker().issue(ticket).get("state", "")).upper()
+    except issue_tracker.TrackerError as e:
+        raise Unanswerable(f"`gh issue view {ticket}` failed: {e}") from None
+
+
+def check_disposition(obj, n, branch):
+    """The problem with one disposition line, or None."""
+    fid, outcome = obj["id"], obj["outcome"]
+    if outcome == "disputed" and not str(obj.get("reason", "")).strip():
+        return f"{fid}: disputed without a reason"
+    if outcome == "fixed":
+        sha = str(obj.get("sha", ""))
+        resolved = None
+        if SHA.match(sha):
+            resolved = git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}", ok=(0, 1))
+        if resolved not in branch.commits:
+            return (f"{fid}: fixed sha {sha or '(none)'} is not a hex commit on {branch.name} past "
+                    f"{branch.base}")
+    if outcome == "moved":
+        ticket = obj.get("ticket")
+        if not isinstance(ticket, int) or isinstance(ticket, bool):
+            return f"{fid}: moved without a ticket number"
+        if ticket == n:
+            return f"{fid}: moved ticket #{ticket} is the ticket this review is of, so the merge would close it"
+        state = moved_state(ticket)
+        if state != "OPEN":
+            return f"{fid}: moved ticket #{ticket} is {state}, not OPEN"
+    return None
+
+
+def check(n, branch_name):
+    if (spec := slice_base(n)):
+        git("rev-parse", "--verify", f"{branch_name}^{{commit}}")
+        if git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{spec}", ok=(0, 1)) is None:
+            return [f"branch.implement-{n}.base names {spec}, but origin/{spec} does not exist — a key "
+                    "left from an ended spec or set by hand is no slice; fetch, or remove the key"], ""
+        summary = (f"{branch_name} is a slice of {spec}, no review wave: the spec is reviewed once on "
+                   f"{spec} (branch.implement-{n}.base)")
+        prs = slice_prs(n)
+        wrong = [f"PR #{number} from implement-{n} targets {base}, not {spec}: it would land there "
+                 f"unreviewed — gh pr edit {number} --base {spec}" for number, base in prs if base != spec]
+        if wrong:
+            return wrong, ""
+        if not prs:
+            return [], f"{summary}; no open PR from implement-{n} yet, its base is checked at the merge"
+        return [], f"{summary}; " + ", ".join(f"PR #{number} into {base}" for number, base in prs)
+    reviews = reviews_dir()
+    branch = Branch(branch_name)
+    rowed, skipped = ledger_types(reviews, n)
+    problems, notes = [], []
+    ids = axis_findings(reviews, n, branch, rowed, skipped, problems)
+    ids += codex_findings(reviews, n, branch, skipped, problems, notes)
+    for fid in sorted({i for i in ids if ids.count(i) > 1}):
+        problems.append(f"{fid} is raised twice across the findings sidecars")
+    sidecar = review_cache.dispositions_path(reviews, n)
+    lines = []
+    if not os.path.exists(sidecar):
+        problems.append(f"{os.path.basename(sidecar)} is missing — the worker writes it, "
+                        "empty when every reviewer found nothing")
+    else:
+        if (fresh := branch.fresh(sidecar)):
+            problems.append(fresh)
+        try:
+            lines = runfile.read_dispositions(sidecar)
+        except runfile.RunFileError as exc:
+            problems.append(str(exc))
+            return problems, ""
+    disposed = {obj["id"] for _, obj in lines}
+    for _, obj in lines:
+        if obj["id"] not in ids:
+            problems.append(f"{obj['id']} is no finding of this ticket's review")
+        elif (problem := check_disposition(obj, n, branch)):
+            problems.append(problem)
+    for fid in dict.fromkeys(ids):
+        if fid not in disposed:
+            problems.append(f"no disposition for {fid}")
+    return problems, f"{len(set(ids))} findings, each disposed once" + "".join(f"; {x}" for x in notes)
+
+
+def main(argv):
+    if not argv or not argv[0].isdigit() or len(argv) > 2:
+        print("usage: fix-check.sh <ticket number> [<branch, default implement-<ticket>>]", file=sys.stderr)
+        return 2
+    n = int(argv[0])
+    try:
+        problems, summary = check(n, argv[1] if len(argv) > 1 else f"implement-{n}")
+    except Unanswerable as exc:
+        print(f"fix check: {exc}", file=sys.stderr)
+        return 2
+    if problems:
+        print("\n".join(f"fix check: {p}" for p in problems))
+        return 1
+    print(f"fix check: {summary}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

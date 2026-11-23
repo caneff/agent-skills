@@ -194,16 +194,6 @@
       "updatedAt": "2026-11-23T15:22:42.736Z",
       "commit": "abeeaf95660ba9e8b7c753eb38f441ca707a8823"
     },
-    "git-guardrails-claude-code": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "skillPath": "skills/misc/git-guardrails-claude-code/SKILL.md",
-      "skillFolderHash": "ceed97af09633b300826d0ca0b1464c527ec9a35",
-      "installedAt": "2026-05-30T20:11:57.421Z",
-      "updatedAt": "2026-11-23T15:22:42.926Z",
-      "commit": "abeeaf95660ba9e8b7c753eb38f441ca707a8823"
-    },
     "setup-pre-commit": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -306,16 +296,6 @@
       "skillFolderHash": "2f8f36af48796faed5c687c75bb650071631a984",
       "installedAt": "2026-07-02T15:11:53.072Z",
       "updatedAt": "2026-11-23T15:22:43.929Z",
-      "commit": "abeeaf95660ba9e8b7c753eb38f441ca707a8823"
-    },
-    "code-review": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "skillPath": "skills/engineering/code-review/SKILL.md",
-      "skillFolderHash": "a8ef561571acbb611de8ff19ba6da75b197c63a8",
-      "installedAt": "2026-07-02T15:12:01.381Z",
-      "updatedAt": "2026-11-23T15:22:44.109Z",
       "commit": "abeeaf95660ba9e8b7c753eb38f441ca707a8823"
     },
     "wayfinder": {

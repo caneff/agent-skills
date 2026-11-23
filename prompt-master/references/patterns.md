@@ -35,8 +35,8 @@
 
 | # | Pattern | Bad Example | Fixed |
 |---|---------|------------|-------|
-| 14 | **Missing output format** | "explain this concept" | "3 bullet points, each under 20 words, with a one-sentence summary at top" |
-| 15 | **Implicit length** | "write a summary" | "Write a summary in exactly 3 sentences" |
+| 14 | **Missing output format** | "explain this concept" | "3 bullet points a newcomer can act on, with a one-sentence summary at top" |
+| 15 | **Implicit length** | "write a summary" | "Write a summary a busy executive can act on without reading the source" |
 | 16 | **Missing domain perspective** | Specialized task without domain context | Add an expert role only when it changes the result |
 | 17 | **Vague aesthetic adjectives** | "make it look professional" | "Monochrome palette, 16px base font, 24px line height, no decorative elements" |
 | 18 | **No negative prompts for image AI** | "a portrait of a woman" | Add: "no watermark, no blur, no extra fingers, no distortion, no text overlay" |
@@ -75,7 +75,7 @@
 |---|---------|------------|-------|
 | 31 | **No starting state** | "build me a REST API" | "Empty Node.js project, Express installed, `src/app.js` exists" |
 | 32 | **No target state** | "add authentication" | "`/src/middleware/auth.js` with JWT verify. `POST /login` and `POST /register` in `/src/routes/auth.js`" |
-| 33 | **Silent agent** | No progress output | "Report meaningful milestones, blockers, and final verification results" |
+| 33 | **Silent agent** | No progress output | "Report progress when it changes or a checkpoint is reached; ground each completion claim in a tool result" |
 | 34 | **Unlocked filesystem** | No file restrictions | "Only edit files inside `src/`. Do not touch `package.json`, `.env`, or any config file." |
 | 35 | **No human review trigger** | Agent decides everything autonomously | "Stop and ask before: deleting any file, adding any dependency, or changing the database schema" |
 | 36 | **Vague first turn for an agentic model** | "fix the auth bug" with no scope, files, or criteria | Use Template M for Claude or Template N for OpenAI tasks. Front-load the outcome, relevant context, file scope, constraints, action boundaries, and acceptance criteria. |

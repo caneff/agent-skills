@@ -92,7 +92,7 @@ Steps:
   3. Define acceptance criteria for each story
   4. List out-of-scope items explicitly
 End Goal: A PRD that an engineering team can begin sprint planning from immediately.
-Narrowing: No technical implementation details. No wireframes. Under 600 words total.
+Narrowing: No technical implementation details. No wireframes. Short enough for the team to read in one sitting before sprint planning.
 ```
 
 ---
@@ -245,7 +245,7 @@ Pause and ask for human review when:
 - The task requires changes outside the stated scope
 
 Checkpoints:
-After each major step, output: ✅ [what was completed]
+Report progress when it changes or a checkpoint is reached; ground each completion claim in a tool result.
 At the end, output a full summary of every file changed.
 ```
 
