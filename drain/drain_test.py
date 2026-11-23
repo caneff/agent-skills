@@ -2398,3 +2398,22 @@ def test_drains_cap_is_the_one_tests_all_sh_gives_a_linked_worktree():
     mod = _drain_mod()
     with open(os.path.join(HERE, "..", "tests", "all.sh")) as f:
         assert f"\nlinked_cap={mod.SEAM_JOBS}\n" in f.read()
+
+
+def test_an_unresolved_ticket_is_named_before_the_first_bundle_starts(sb):
+    sb.write_state({1: {"body": "no blocker section here"}, 2: {}})
+    r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    pre = [x for x in lines if x.startswith("unresolved at start:")]
+    reason = next(x for x in lines if x.startswith("passed over: #1 ")).split("passed over: #1 ", 1)[1]
+    assert pre == [f"unresolved at start: #1 ticket 1  {reason}"], r.stdout
+    assert reason.startswith("blocker state unresolved:")
+    assert lines.index(pre[0]) < next(i for i, x in enumerate(lines) if x.startswith("bundle started:"))
+    assert len(sb.dispatch_runs()) == 1
+
+
+def test_a_run_with_no_unresolved_ticket_prints_no_preflight_line(sb):
+    sb.write_state({1: {}})
+    r = sb.drain()
+    assert "unresolved at start" not in r.stdout

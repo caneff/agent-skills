@@ -92,7 +92,9 @@ Progress is one flushed line per event on stdout, which `job-run` copies into
 the run's progress file as it happens: `bundle started: #<n> <title>; ...
 pane <repo-short>-<anchor>` when a bundle's worker exists, `bundle ended: #<n>
 ... merged <pr> <sha>` or `... handed to Chris: <reason>` or `... stopped:
-<reason>` when it ends, then the summary. A ticket the worker closed with no
+<reason>` when it ends, then the summary. Before the first bundle, one `unresolved at start: #<n>
+<title>  <why>` per ready ticket with no readable `Blocked by`, worded as its `passed over:` line; the
+run goes on without it. A ticket the worker closed with no
 PR is recorded as what closed it, from its `closed` event: `(landed on main,
 no PR)` with that commit's sha, or with the sha of the main commit whose
 message says `Closes #<n>` when a hand closed it after the trailer did not
@@ -420,12 +422,15 @@ class Listed:
         return list(self._listing)
 
 
+UNRESOLVED = "blocker state unresolved:"  # opens `held_reason`'s wording for an `unresolved` entry
+
+
 def held_reason(bucket, entry, native=()):
     """Why a `blocked` or `unresolved` frontier entry is held, the one wording `passed_over`
     and `barren_specs` share. `native` is the open native blockers read for an entry whose
     own list is empty (a native dependency)."""
     if bucket == "unresolved":
-        return f"blocker state unresolved: {entry['why']}"
+        return f"{UNRESOLVED} {entry['why']}"
     named = entry["blockers"] or list(native)
     if named:
         return "blocked by " + ", ".join(f"#{n}" for n in named)
@@ -1268,6 +1273,17 @@ def survey(ctx, retry=True):
     return queue, waiting, stranded, candidates, passed + [(n, "workspace kept") for n in kept]
 
 
+def say_unresolved(ctx, prog, passed):
+    """Once per drain, before its first bundle: one `unresolved at start:` line per ready
+    ticket `passed` holds as unresolved, with the same reason its `passed over:` line gives."""
+    if prog.preflight:
+        return
+    prog.preflight = True
+    for n, why in passed:
+        if why.startswith(UNRESOLVED):
+            say(f"unresolved at start: #{n} {title_of(ctx, n)}  {why}")
+
+
 def say_waiting(waiting):
     for spec in waiting:
         say(f"waiting: ready slices of spec #{spec}, which drain cannot start (it is not "
@@ -1281,6 +1297,7 @@ class Progress:
     def __init__(self, want):
         self.merged, self.closed, self.handed = [], [], []
         self.failures, self.done, self.want = 0, 0, want
+        self.preflight = False  # the `unresolved at start:` lines are out
         self.started = []  # the tickets of a bundle whose start line is out and whose end line is not
         self.told = set()  # stranded slices already named this drain
         self.ended = set()  # the anchors this drain has taken up: added before `work()`, so none is taken twice
@@ -1299,6 +1316,7 @@ def next_anchor(ctx, prog):
             return anchor, kind, True, []
         queue, waiting, stranded, candidates, passed = survey(ctx)
         prog.seen = (queue, waiting, passed)
+        say_unresolved(ctx, prog, passed)
         for n, why in stranded:
             if n not in prog.told:  # every exit names them, once
                 prog.told.add(n)
@@ -1352,6 +1370,7 @@ def drain(ctx, limit, limit_name):
         if prog.want:  # refuse before any work, and not only when the loop gets there
             queue, waiting, _, candidates, passed = survey(ctx)
             prog.seen = (queue, waiting, passed)
+            say_unresolved(ctx, prog, passed)
             if not any(t[0] == prog.want for t in candidates) and dict(passed).get(prog.want, "").startswith(HELD_SPEC_REASONS):
                 raise DrainError(f"--anchor #{prog.want} is passed over: {dict(passed)[prog.want]}")
             put_first(candidates, prog.want)
