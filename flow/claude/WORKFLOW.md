@@ -153,16 +153,25 @@ Skills live in `~/.agents/skills` (symlinked into `~/.claude/skills`).
 
 ## Auto mode and harness work
 
-Work that changes the harness itself is never dispatched into auto mode
-workers. Harness work means `flow/claude/settings.json`, hooks, mods, plugins,
-plugin load paths, and sessions driving other sessions. Chris runs it in a
-session outside auto mode, where each risky step is one prompt he approves.
-Why: the classifier exists to stop exactly this work, and its rules for it
+Harness work means `flow/claude/settings.json`, hooks, mods, plugins, plugin
+load paths, and sessions driving other sessions. It goes to auto-mode workers
+like any code, in the code lane, with one exception: a ticket whose proof needs
+a live session or Chris's eye (a hook's effect on a running turn, a team
+session, a launch wrapper) stays `ready-for-human`. A worker can still build
+that ticket's script and tests, but the live check is Chris's. Work outside
+any repo, such as the user crontab, also stays Chris's.
+
+Why (ruled by Chris 2026-11-23, ADR 0009): the 2026-10-04 rule kept all
+harness work from workers because must-name `soft_deny` rules
 (`Self-Modification`, `Auto-Mode Bypass`, `Instruction Poisoning`,
-`Unauthorized Persistence`, and more) are must-name `soft_deny` rules that
-no `autoMode.allow` entry clears. An auto-mode worker on harness work parks
-at each denial and relays it, a round per step (#1389 adds the pre-dispatch
-check).
+`Unauthorized Persistence`) parked a worker at every step. None of those
+rules is in the live `soft_deny` list (`claude auto-mode config`,
+2026-11-23), and the 2026-10-09 blanket `autoMode.allow` entry
+("Self-modification of Chris's own agent setup") covers hooks, mods and
+settings in any worktree. If a worker on harness work is denied anyway,
+it parks and reports the denial as the paragraphs below say.
+The cost that remains is live wiring: `~/.claude/settings.json` links into
+`main`, so a merged hook entry is live at once (#1942). Revert is the undo.
 
 A denial report names the root-cause fix: the user-level settings or
 `autoMode` entry that produces the denial, never a per-worktree or one-off
