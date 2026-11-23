@@ -44,8 +44,8 @@ short. `flex-wrap` stacks both variants vertically on narrow screens.
   </div>
 
   <!-- Sign-off: discreet, last thing in the section (below the rules). A <div>, so LMD's 35em cap does not apply.
-       Glyph + text are one link. The glyph is Twitch's mark as LMD image 0016EY (a 64x64 #9146FF PNG shown at 12px):
-       LMD strips <svg> from a saved page, so an inline SVG glyph never shows (000W76, 2026-11-23). -->
-  <div style="margin-top: 18px; text-align: center; font-size: 0.8em;"><a href="https://www.twitch.tv/chinstrap45" style="color: #889; font-weight: normal; text-decoration: none;"><img:0016EY width="12" height="12" alt="" style="vertical-align: -0.15em; margin-right: 4px; display: inline;">Watch me solve live</a></div>
+       Text only, no glyph (000W76, 2026-11-23): LMD strips <svg>; an <img:ID> glyph becomes a second og:image, which
+       a Discord link preview can pick up; a raw <img src> inside the link is stripped with the link's text. -->
+  <div style="margin-top: 18px; text-align: center; font-size: 0.8em;"><a href="https://www.twitch.tv/chinstrap45" style="color: #889; font-weight: normal; text-decoration: none;">Watch me solve live</a></div>
 </section>
 ```
