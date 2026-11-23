@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""repo-hygiene -- list what the tracker and the checkout have left lying around (#2013).
+
+  repo-hygiene [--repo <checkout>] [--stale-days N] [--min-ignored-mb N]
+
+Runs on one repo (default: the current directory's) and prints six sections:
+
+  worktrees           linked worktrees with uncommitted work and no open PR
+  branches            local branches merged into origin/<default> or whose PR
+                      merged at this exact tip (a squash merge), and branches
+                      with no commit for --stale-days (default 30) and no open PR
+  scheduled runs      the latest scheduled workflow run of each workflow, when red
+  unlabelled tickets  open tickets with no label
+  bot tickets         open tickets a bot filed that have no comment and no assignee
+                      (the closest the tracker gets to "nobody has read it")
+  ignored folders     git-ignored paths in the checkout of at least
+                      --min-ignored-mb (default 50; 0 lists every one) MB.
+                      A path that holds a worktree or a nested .git is listed
+                      with its size but never with a delete line.
+
+It lists and never deletes. A deletion it would propose is printed as a
+`! <command>` line, with what it would remove, for Chris to run or not.
+Dependency advisories are not part of it (the `dependencies` audit, #2012).
+
+A check that cannot run prints `did not run: <why>` under its heading, never
+`none`, and the exit status is 3. Exit 0 means every check ran, findings or
+not; exit 2 is a usage error.
+"""
+
+import argparse
+import functools
+import json
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+NOT_RUN_EXIT = 3
+RED = {"failure", "timed_out", "startup_failure", "cancelled", "action_required"}
+
+
+class DidNotRun(Exception):
+    """A check that could not run; the message is the reason printed for it."""
+
+
+def run(cmd, cwd=None, quiet=False):
+    """stdout of cmd; `quiet` also fails on any stderr (git warns and exits 0 on what it skipped)."""
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise DidNotRun(f"`{cmd[0]}` is not installed or not on PATH")
+    if p.returncode != 0:
+        why = (p.stderr.strip() or p.stdout.strip() or f"exit {p.returncode}").splitlines()[0]
+        shown = cmd[3:] if cmd[:2] == ["git", "-C"] else cmd[1:]  # drop `git -C <path>`
+        raise DidNotRun(f"`{cmd[0]} {' '.join(shown[:2])}` failed: {why}")
+    if quiet and p.stderr.strip():
+        raise DidNotRun(f"`{cmd[0]}` warned, so its answer may be missing entries: {p.stderr.strip().splitlines()[0]}")
+    return p.stdout
+
+
+def git(repo, *args, quiet=False):
+    return run(["git", "-C", str(repo), *args], quiet=quiet)
+
+
+def github_slug(repo):
+    try:
+        url = git(repo, "config", "--get", "remote.origin.url").strip()
+    except DidNotRun as e:
+        raise DidNotRun(f"cannot read the origin remote: {e}")
+    m = re.match(r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+                 r"([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    if not m:
+        raise DidNotRun(f"origin ({url}) is not a GitHub remote: no GitHub remote to ask")
+    return m.group(1)
+
+
+LIMIT = 1000
+
+
+def need(slug):
+    """The GitHub slug, or the reason there is none, raised as that check's own."""
+    if isinstance(slug, DidNotRun):
+        raise slug
+    return slug
+
+
+def gh_list(slug, noun, fields, *extra):
+    out = run(["gh", noun, "list", "--repo", need(slug), "--limit", str(LIMIT), *extra, "--json", fields])
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError as e:
+        raise DidNotRun(f"`gh {noun} list` printed unreadable JSON: {e}")
+    if not isinstance(data, list):
+        raise DidNotRun(f"`gh {noun} list` printed {type(data).__name__}, not a list")
+    if len(data) >= LIMIT:  # a cut-off list read as the whole list is a false "none"
+        raise DidNotRun(f"`gh {noun} list` returned {LIMIT} rows, the most it asks for: the list may be cut off")
+    return data
+
+
+@functools.lru_cache(maxsize=None)
+def open_pr_heads(slug):
+    return {p["headRefName"] for p in gh_list(slug, "pr", "headRefName", "--state", "open")}
+
+
+@functools.lru_cache(maxsize=None)
+def merged_pr_tips(slug):
+    return {p["headRefOid"] for p in gh_list(slug, "pr", "headRefOid", "--state", "merged")}
+
+
+def default_branch(repo):
+    """The remote's default branch name, e.g. `main`."""
+    return git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip().removeprefix("origin/")
+
+
+def worktrees(repo):
+    """[(path, branch or None)] of the linked worktrees, primary excluded."""
+    entries, cur = [], {}
+    for line in git(repo, "worktree", "list", "--porcelain").splitlines() + [""]:
+        if line:
+            k, _, v = line.partition(" ")
+            cur[k] = v
+        elif cur:
+            entries.append(cur)
+            cur = {}
+    return [(e["worktree"], e.get("branch", "").removeprefix("refs/heads/") or None)
+            for e in entries[1:]]
+
+
+def check_worktrees(repo, slug, args):
+    heads = open_pr_heads(need(slug))
+    found = []
+    for path, branch in worktrees(repo):
+        if git(path, "status", "--porcelain").strip() and branch not in heads:
+            found.append(f"{path}  ({branch or 'detached HEAD'}): uncommitted work, no open PR")
+    return found
+
+
+def check_branches(repo, slug, args):
+    base = f"origin/{default_branch(repo)}"
+    heads, tips = open_pr_heads(need(slug)), merged_pr_tips(slug)
+    in_use = {b for _, b in worktrees(repo) if b}
+    current = git(repo, "branch", "--show-current").strip()
+    merged = set(git(repo, "branch", "--merged", base, "--format=%(refname:short)").split())
+    found, cutoff = [], time.time() - args.stale_days * 86400
+    skip = {base.removeprefix("origin/"), current} | in_use
+    for line in git(repo, "for-each-ref", "refs/heads",
+                    "--format=%(refname:short) %(objectname) %(committerdate:unix)").splitlines():
+        name, sha, stamp = line.rsplit(" ", 2)
+        if name in skip:
+            continue
+        if name in merged:
+            found.append(f"{name}: merged into {base}\n  ! git -C {repo} branch -d {name}"
+                         f"   (removes only the branch name; its commits are in {base})")
+        elif sha in tips:
+            found.append(f"{name}: its PR merged with this exact tip (squash merge)\n"
+                         f"  ! git -C {repo} branch -D {name}"
+                         f"   (removes only the branch name; the PR's content is on {base})")
+        elif int(stamp) < cutoff and name not in heads:
+            found.append(f"{name}: unmerged, no commit for {args.stale_days}+ days, no open PR"
+                         f" (no delete proposed: its commits are on no merged PR)")
+    return found
+
+
+def check_runs(repo, slug, args):
+    found = []
+    for wf in gh_list(slug, "workflow", "name,state"):
+        if wf["state"] != "active":
+            continue
+        runs = gh_list(slug, "run", "workflowName,conclusion,url,createdAt",
+                       "--workflow", wf["name"], "--event", "schedule")
+        if runs:
+            r = max(runs, key=lambda r: r["createdAt"])
+            if r["conclusion"] in RED:
+                found.append(f"{wf['name']}: latest scheduled run {r['conclusion']} ({r['createdAt']}) {r['url']}")
+    return found
+
+
+@functools.lru_cache(maxsize=None)
+def open_issues(slug):
+    return gh_list(slug, "issue", "number,title,labels,author,comments,assignees", "--state", "open")
+
+
+def check_unlabelled(repo, slug, args):
+    return [f"#{i['number']} {i['title']}" for i in open_issues(need(slug)) if not i["labels"]]
+
+
+def is_bot(author):
+    return bool(author and (author.get("is_bot") or author.get("login", "").endswith("[bot]")))
+
+
+def check_bot(repo, slug, args):
+    return [f"#{i['number']} {i['title']}  (by {i['author']['login']})"
+            for i in open_issues(need(slug))
+            if is_bot(i["author"]) and not i["comments"] and not i["assignees"]]
+
+
+def check_ignored(repo, slug, args):
+    top = Path(git(repo, "rev-parse", "--show-toplevel").strip())
+    holds = [Path(p).resolve() for p, _ in worktrees(repo)]
+    found, floor_kb = [], args.min_ignored_mb * 1024
+    for entry in git(top, "status", "--ignored", "--porcelain", "-z", quiet=True).split("\0"):
+        if not entry.startswith("!! "):
+            continue
+        p = top / entry[3:]
+        out = run(["du", "-sk", "--", str(p)])  # any unreadable entry fails the whole check
+        kb = int(out.split()[0])
+        if kb < floor_kb:
+            continue
+        rel, mb = entry[3:], f"{kb / 1024:.0f} MB"
+        inside = [w for w in holds if p.resolve() in w.parents or p.resolve() == w]
+        nested = run(["find", str(p), "-name", ".git", "-print", "-quit"]).strip()
+        if inside or nested:
+            why = f"worktree {inside[0]}" if inside else f"a git checkout at {nested}"
+            found.append((kb, f"{rel}: {mb} ignored by git; holds {why}, so no delete proposed"))
+        else:
+            found.append((kb, f"{rel}: {mb} ignored by git\n"
+                              f"  ! rm -r -- {str(p).rstrip('/')}   (removes {mb} of ignored files; no tracked file, worktree or nested .git inside)"))
+    return [text for _, text in sorted(found, reverse=True)]
+
+
+CHECKS = [
+    ("worktrees", check_worktrees),
+    ("branches", check_branches),
+    ("scheduled runs", check_runs),
+    ("unlabelled tickets", check_unlabelled),
+    ("bot tickets", check_bot),
+    ("ignored folders", check_ignored),
+]
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="repo-hygiene", description=__doc__.split("\n")[0])
+    ap.add_argument("--repo", default=".", help="a checkout of the repo (default: current directory)")
+    ap.add_argument("--stale-days", type=int, default=30)
+    ap.add_argument("--min-ignored-mb", type=int, default=50)
+    args = ap.parse_args(argv)
+    repo = Path(args.repo).resolve()
+
+    try:
+        slug = github_slug(repo)
+    except DidNotRun as e:
+        slug = e
+
+    not_run = 0
+    for name, check in CHECKS:
+        print(f"== {name} ==")
+        try:
+            found = check(repo, slug, args)
+        except DidNotRun as e:
+            not_run += 1
+            print(f"did not run: {e}")
+        else:
+            print("\n".join(found) if found else "none")
+        print()
+    return NOT_RUN_EXIT if not_run else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

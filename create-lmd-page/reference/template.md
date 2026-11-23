@@ -44,7 +44,10 @@ short. `flex-wrap` stacks both variants vertically on narrow screens.
   </div>
 
   <!-- Sign-off: discreet, last thing in the section (below the rules). A <div>, so LMD's 35em cap does not apply.
-       Glyph + text are one link; the glyph is Twitch's mark as inline SVG. Not yet confirmed that LMD keeps <svg> on a live page; if it strips it, the link still works. -->
-  <div style="margin-top: 18px; text-align: center; font-size: 0.8em;"><a href="https://www.twitch.tv/chinstrap45" style="color: #889; font-weight: normal; text-decoration: none;"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="#9146FF" aria-hidden="true" style="vertical-align: -0.15em; margin-right: 4px;"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 13.5V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>Watch me solve live</a></div>
+       Glyph + text are one link. The glyph is a filled purple Twitch bubble with two white bars, drawn in CSS spans
+       (Chris, 000W76, 2026-11-23: no cut corners): LMD strips <svg>, drops a style holding clip-path: path(...),
+       an <img:ID> glyph becomes a second og:image that Discord previews show, and a raw <img src> in the link is
+       stripped with the link's text. -->
+  <div style="margin-top: 18px; text-align: center; font-size: 0.8em;"><a href="https://www.twitch.tv/chinstrap45" style="color: #889; font-weight: normal; text-decoration: none;"><span style="display: inline-block; position: relative; width: 10px; height: 12px; vertical-align: -2px; margin-right: 4px;"><span style="position: absolute; left: 0; top: 0; width: 10px; height: 9px; background: #9146FF; border-radius: 0 0 1px 0;"></span><span style="position: absolute; left: 2px; top: 9px; width: 0; height: 0; border-top: 3px solid #9146FF; border-right: 3px solid transparent;"></span><span style="position: absolute; left: 3px; top: 2px; width: 1.5px; height: 3.5px; background: #fff;"></span><span style="position: absolute; left: 6px; top: 2px; width: 1.5px; height: 3.5px; background: #fff;"></span></span>Watch me solve live</a></div>
 </section>
 ```

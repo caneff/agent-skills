@@ -137,7 +137,13 @@ def status_rows(base, lock_path, extras_path):
     for it in items:
         r = subprocess.run(["git", "rev-parse", f"{base}:{it['name']}"], capture_output=True, text=True)
         local = r.stdout.strip() if r.returncode == 0 else "MISSING"
-        if not it["owner"]:
+        if local == "MISSING" and not os.path.lexists(it["name"]):
+            # Gone from the tree and from the disk: its own state, never
+            # "edited". The update would reinstall it, and safe-update.sh
+            # removes it again. A folder on disk the base does not hold (a
+            # fresh install, or a base that could not be read) is not this.
+            status = "DELETED locally (update keeps it deleted)"
+        elif not it["owner"]:
             status = "non-github source (skip)"
         else:
             t = upstream_tree(it["owner"], it["repo"], cache)

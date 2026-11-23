@@ -11,6 +11,7 @@ every commit here is a backup.
 | Repo path | Live location | What it is |
 |---|---|---|
 | `bin/issue-counts` | `~/.local/bin/issue-counts` | Open-issue counts per wayfinder group for the current repo |
+| `bin/repo-hygiene` | `~/.local/bin/repo-hygiene` | What a repo's tracker and checkout have left lying around: dirty worktrees with no PR, stale branches, red scheduled runs, unlabelled and unread bot tickets, big ignored folders. Lists, never deletes; a check that cannot run says so and exits 3 (#2013) |
 | `bin/automode-entry` | `~/.local/bin/automode-entry` | Add, edit or remove autoMode entries in `claude/settings.json` in place, then commit and push (`add`, or `open` then `apply`) |
 | `bin/wsl-interop-repoint.sh` | not linked: `env.BASH_ENV` in `claude/settings.json` and a line in `~/.bashrc` source it | Moves a dead `WSL_INTEROP` to a socket reaching a user session in each new shell (#1625) |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions (hard rules, the two gates) |
