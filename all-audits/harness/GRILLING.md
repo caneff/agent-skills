@@ -100,6 +100,7 @@ it. Skip any name below that has no report in this run:
 11. `test-audit` — tests that prove nothing or check the wrong thing.
 12. `comment-audit` — comments that do not earn their place.
 13. `audit-instructions` — instruction files against Anthropic's current guidance.
+14. `mechanism-audit` — stated rules with no mechanism, and mechanisms nothing reaches.
 
 Read the findings from the audit's own record: for an audit that writes
 `findings.jsonl` (see [`findings-schema.md`](findings-schema.md)), the full
@@ -192,7 +193,7 @@ An area closes on its own.
    edges and seams too, the cross-area edges marked with their direction), and wait for one
    approval covering all of it. Nothing is written to the tracker until it
    lands; asked for changes, redraft and show again; declined outright, stop —
-   the draft stays in this session only. A thirteen-audit sweep can propose
+   the draft stays in this session only. A sweep of the whole set can propose
    twenty-plus tickets in one go, so this is the one point in the whole run
    the agent writes something the user would otherwise delete by hand.
 3. **On approval, publish — specs first, unlabelled, then tickets, then

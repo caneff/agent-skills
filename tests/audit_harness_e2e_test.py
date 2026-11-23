@@ -32,7 +32,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 AUDIT_SCRIPTS = [
     "crap-audit/audit.py", "dead-code/audit.py", "docstring-coverage/audit.py",
-    "duplication/audit.py", "error-handling/audit.py", "mutation-audit/audit.py",
+    "duplication/audit.py", "error-handling/audit.py", "mechanism-audit/audit.py",
+    "mutation-audit/audit.py",
     "skill-audit/audit.py", "test-audit/audit.py",
     "all-audits/harness/auditlib.py", "create-lmd-page/extract_puzzle.py",
 ]

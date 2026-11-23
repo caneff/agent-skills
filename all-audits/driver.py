@@ -704,7 +704,7 @@ def execute(repo, plan, run, jobs):
 
     The first audit runs alone as a smoke test: if the `-p` slash invocation
     is rejected by the model-invocation guard, every audit would fail the
-    same way, so the sweep aborts instead of fanning thirteen failures out.
+    same way, so the sweep aborts instead of fanning every audit's failure out.
     Returns the names of the audits that failed (#1278).
     """
     if not plan.to_run:
