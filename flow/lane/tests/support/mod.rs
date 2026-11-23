@@ -139,6 +139,40 @@ impl Fixture {
         dir
     }
 
+    /// What a worktree's Node install needs (#1624): the real shared
+    /// `common/` linked where the lane looks for it, and an `npm` stub on
+    /// the fake PATH that logs its call to `$NPM_LOG` and makes
+    /// `node_modules` in its cwd (or prints a line and fails when
+    /// `$NPM_RED` is set). Returns the log's path.
+    pub fn stub_npm(&self) -> PathBuf {
+        let skills = self.home().join(".agents/skills");
+        std::fs::create_dir_all(&skills).unwrap();
+        std::os::unix::fs::symlink(concat!(env!("CARGO_MANIFEST_DIR"), "/../../common"), skills.join("common")).unwrap();
+        let npm = self.tmp.path().join("bin/npm");
+        std::fs::write(
+            &npm,
+            "#!/bin/sh\necho \"npm $* in $(pwd)\" >> \"$NPM_LOG\"\ntest -n \"$NPM_RED\" && { echo 'npm ERR! registry unreachable'; exit 1; }\nmkdir node_modules\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&npm, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        self.tmp.path().join("npm.log")
+    }
+
+    /// Commits `package-lock.json` to the fixture's origin branch, so a
+    /// worktree cut from `origin/<branch>` has one at its root.
+    pub fn push_lockfile(&self, repo: &Path, branch: &str) {
+        let dir = repo.to_str().unwrap();
+        // The clone lags origin by one commit, so the lockfile goes on
+        // origin's tip from a detached head, and the clone returns to its
+        // own branch untouched.
+        run_ok("git", &["-C", dir, "checkout", "-q", "--detach", &format!("origin/{branch}")], None);
+        std::fs::write(repo.join("package-lock.json"), "{}\n").unwrap();
+        run_ok("git", &["-C", dir, "add", "package-lock.json"], None);
+        run_ok("git", &["-C", dir, "commit", "-qm", "lock"], None);
+        run_ok("git", &["-C", dir, "push", "-q", "origin", &format!("HEAD:{branch}")], None);
+        run_ok("git", &["-C", dir, "checkout", "-q", branch], None);
+    }
+
     pub fn path_env(&self) -> String {
         let real = std::env::var("PATH").unwrap_or_default();
         format!("{}:{}", self.tmp.path().join("bin").display(), real)

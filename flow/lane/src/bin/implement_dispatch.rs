@@ -151,6 +151,12 @@ ticket declaring its blockers twice refuse; so does a body that cannot be
 read, except on a documentation-labelled ticket, which keeps its
 heavy-and-label-kept reading and is checked on GitHub's edges alone.
 
+A worktree whose root holds a package-lock.json gets `npm ci` right after it is
+created (`common/scratch_run.py install`). A failed install fails the dispatch
+non-zero with npm's last lines and the command to re-run, leaving the
+workspace in place and printing each ticket's release command; a repo with no
+lockfile runs no install.
+
 After the brief is sent, the pane is read back (`herdr agent read --source
 visible`, up to 5 reads, LANE_BRIEF_POLL_MS apart, 1000 by default) for the
 `/implement <n>` or `/implement-spec <n>` line. A pane that never shows it, or
@@ -438,6 +444,13 @@ fn ensure_workspaces_ignored(primary: &str, branch: &str) -> Result<(), String> 
 /// `LANE_GIT_MUTATION_TIMEOUT_MS` shortens it for tests.
 fn git_mutation_timeout() -> std::time::Duration {
     env_ms_or("LANE_GIT_MUTATION_TIMEOUT_MS", 30_000)
+}
+
+/// The bound on `npm ci` in a new worktree, passed to `scratch_run.py install`
+/// so the script's own failure (npm's tail, the re-run line) is what a slow
+/// install reports. `LANE_NODE_INSTALL_TIMEOUT_MS` shortens it for tests.
+fn node_install_timeout() -> std::time::Duration {
+    env_ms_or("LANE_NODE_INSTALL_TIMEOUT_MS", 900_000)
 }
 
 /// OS-level bound for a `gh` read (`issue view`) — a GitHub API round trip,
@@ -1710,6 +1723,25 @@ fn run() -> Result<(), ExitCode> {
         git_mutation_timeout(),
     );
     claim.step("git worktree add", wa, None)?;
+    // A lockfile at the worktree's root gets its own `node_modules` before
+    // anyone is handed the tree (#1624): a bare worktree fails `Cannot find
+    // package` or, worse, resolves the primary checkout's by walking up and
+    // misses what only this branch adds. The install is `scratch_run.py`'s,
+    // the one drain's scratch worktree uses, and a failure fails the
+    // dispatch with npm's tail and the re-run line, never a skip.
+    if wt.join("package-lock.json").is_file() {
+        let script = format!("{home}/.agents/skills/common/scratch_run.py");
+        let bound = node_install_timeout();
+        // The OS-level backstop outlasts the script's own bound, so a slow
+        // `npm ci` is reported by the script and not as a bare timeout.
+        let install = run_in_timeout(
+            None,
+            "python3",
+            &[&script, "install", &wt.to_string_lossy(), &bound.as_secs().to_string()],
+            bound + Duration::from_secs(60),
+        );
+        claim.step("installing Node dependencies", install, Some("timed out"))?;
+    }
     // Where the branch started: merge-cleanup counts a branch as landed by
     // the ancestor test only when its tip has moved off this sha.
     let fork = claim.step("reading the fork point", run_timeout("git", &["-C", &primary, "rev-parse", "--verify", &format!("refs/heads/{branch}^{{commit}}")], git_query_timeout()), None)?;
