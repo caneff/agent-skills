@@ -32,6 +32,7 @@ link() {
 }
 
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
+link bin/repo-hygiene           "$HOME/.local/bin/repo-hygiene"
 link bin/automode-entry         "$HOME/.local/bin/automode-entry"
 link bin/job-run                "$HOME/.local/bin/job-run"
 link bin/drain                  "$HOME/.local/bin/drain"
