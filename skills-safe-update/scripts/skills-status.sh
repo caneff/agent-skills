@@ -6,6 +6,7 @@
 #   OUT OF DATE        — upstream moved past the version you installed
 #   EDITED+STALE       — your edits sit on an OLD upstream (update => manual merge)
 #   ORPHAN             — installed but gone from upstream (renamed/removed)
+#   DELETED locally    — the folder is gone from your tree; safe-update.sh keeps it so
 #
 # Three hashes per skill, two independent comparisons:
 #   local    = git tree SHA of your working copy

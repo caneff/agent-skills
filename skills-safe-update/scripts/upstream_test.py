@@ -252,7 +252,12 @@ def test_status_rows_missing_folder_is_deleted_locally_not_edited(tmp_path, monk
         {"path": "keep", "type": "tree", "sha": local["keep"]},
         {"path": "gone", "type": "tree", "sha": "newer"},
     ]))
+    (repo / "fresh").mkdir()   # on disk, not in the base: a fresh install, not a deletion
+    (repo / "fresh" / "SKILL.md").write_text("f")
+    lock = _lock(tmp_path, {**json.load(open(lock))["skills"],
+                            "fresh": _entry(url, "fresh", "h")})
     rows = upstream.status_rows("HEAD", lock, None)
+    assert not any(n == "fresh" and st.startswith("DELETED") for st, n in rows)
     assert ("DELETED locally (update keeps it deleted)", "gone") in rows
     assert ("DELETED locally (update keeps it deleted)", "gone-orphan") in rows
     assert ("clean", "keep") in rows

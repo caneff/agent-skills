@@ -242,21 +242,30 @@ protect_skills(){
 # keep_deleted <pre> <prelock-file>
 # A lock-tracked skill whose folder is absent from <pre> was deleted on purpose,
 # but `npx skills update` reinstalls it (and re-links CLAUDE_SKILLS/<name>) and
-# the extras sync re-extracts it. Remove whatever came back, so the deletion
-# stands: only a path <pre> lacks is touched, so none of your work can go. Sets
-# the global `kept_deleted` and prints one line per skill.
+# the extras sync re-extracts it. Remove what came back, so the deletion
+# stands. Touched: a folder under $SKILLS that <pre> lacks (a gitlink counts as
+# present, so a nested repo is never removed), and a symlink at
+# CLAUDE_SKILLS/<name> only when it points into that folder. Sets the global
+# `kept_deleted` to the skills it removed something for, and prints one line
+# each, naming what went. A deleted skill nothing came back for is not listed.
 keep_deleted(){
-  local pre=$1 prelock=$2 name hash
+  local pre=$1 prelock=$2 name dir link root removed
   kept_deleted=()
   [ -s "$prelock" ] || return 0
-  while IFS=$'\t' read -r name hash; do
+  root=$(readlink -m "$SKILLS")
+  while IFS=$'\t' read -r name _; do
     case $name in ""|.|..|*/*) continue ;; esac
-    git cat-file -e "$pre:$name" 2>/dev/null && continue
-    [ -e "$name" ] || [ -L "$CLAUDE_SKILLS/$name" ] || { kept_deleted+=("$name"); continue; }
-    rm -rf -- "${SKILLS:?}/$name"
-    [ -L "$CLAUDE_SKILLS/$name" ] && rm -f -- "$CLAUDE_SKILLS/$name"
+    git -C "$SKILLS" rev-parse -q --verify "$pre:$name" >/dev/null 2>&1 && continue
+    dir=$SKILLS/$name; link=$CLAUDE_SKILLS/$name; removed=()
+    if [ -L "$link" ]; then
+      case $(readlink -m "$link") in "$root/$name"|"$root/$name"/*) removed+=("link $link") ;; esac
+    fi
+    [ -e "$dir" ] || [ -L "$dir" ] && removed+=("folder $dir")
+    [ ${#removed[@]} -gt 0 ] || continue
+    case " ${removed[*]} " in *" link "*) rm -f -- "$link" ;; esac
+    case " ${removed[*]} " in *" folder "*) rm -rf -- "${SKILLS:?}/$name" ;; esac
     kept_deleted+=("$name")
-    echo "kept deleted: $name (you deleted it; the update's reinstall and link were removed)"
+    echo "kept deleted: $name (you deleted it; removed what the update brought back: ${removed[*]})"
   done < "$prelock"
 }
 
