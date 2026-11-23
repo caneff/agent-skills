@@ -3,7 +3,8 @@
 strict YAML and skips a skill it cannot parse. An unquoted `description:` that
 holds a `: ` reads as a nested mapping and the skill silently stops updating
 (create-lmd-page did). The real-tree case loads every tracked SKILL.md's
-frontmatter with PyYAML's safe loader (pinned in pyproject.toml's dev group)
+frontmatter with PyYAML's safe loader (declared in pyproject.toml's dev group,
+locked in uv.lock)
 and fails on one that does not parse to a mapping with a non-empty string
 `name` and `description`; a duplicate key fails too, as in npm `yaml`. The
 other cases feed `problems` fixtures, so each failure is caught by its own
@@ -79,6 +80,8 @@ def test_sound_frontmatter_has_no_problems():
     ("---\n- a\n- b\n---\n", "not a mapping"),
     ("---\nname: x\n---\n", "`description` is not a non-empty string"),
     ("---\nname: 12\ndescription: d\n---\n", "`name` is not a non-empty string"),
+    ("---\nname: x\ndescription: '  '\n---\n", "`description` is not a non-empty string"),
+    ("---\nname: ''\ndescription: d\n---\n", "`name` is not a non-empty string"),
 ])
 def test_each_malformed_frontmatter_is_reported(text, needle):
     assert any(needle in p for p in problems(text)), problems(text)
