@@ -179,12 +179,9 @@ Deploy = collections.namedtuple("Deploy", "command markers")
 
 
 def deploy_in(text):
-    """`(Deploy, None)` for an `AGENTS.md` whose § End-to-end seam declares a
-    `- **Deploy**: `<command>`` line (#1726), `(None, None)` when it
-    declares none, `(None, why)` when it cannot say: no section, or a line
-    that names no command. The last two are never "no deploy" (class 1). An
-    `- **Owed marker**:` line lists, in backticks, the output-line starts
-    that mark a look the deploy leaves owed."""
+    """`(Deploy, None)`, `(None, None)` when no `Deploy` line is declared, or
+    `(None, why)` when the section or the line cannot be read, never "no
+    deploy" (class 1). The grammar is `implement-spec/references/closing-ticket.md`'s."""
     found = declaration(text)
     if found is None:
         return None, "AGENTS.md has no `## End-to-end seam` section"

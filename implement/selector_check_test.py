@@ -17,6 +17,8 @@ import sys
 import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../common"))
 import fixture_identity  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import selector_check  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "selector_check.py")
@@ -508,9 +510,6 @@ def test_an_edit_to_prose_naming_a_backticked_file_reads_same(tmp_path):
 
 
 # --- `deploy_of` (#1726): the optional post-merge deploy line drain reads ---
-sys.path.insert(0, HERE)
-import selector_check  # noqa: E402
-
 SEAM_HEAD = "## End-to-end seam\n\n- **Seam**: `npm test`\n- **Blind to**: x\n"
 
 
