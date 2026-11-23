@@ -52,18 +52,66 @@ def test_the_seeded_findings_are_valid():
 @pytest.mark.parametrize("mutate, message", [
     (lambda r: r["extra"].pop("searched"), "searched"),
     (lambda r: r["extra"].update(searched=[]), "searched"),
-    (lambda r: r["extra"].update(searched=[{"where": "rg x", "result": ""}]), "result"),
-    (lambda r: r["extra"].update(searched=[{"result": "none"}]), "where"),
+    (lambda r: r["extra"].update(searched=[{"where": "rg x", "result": "", "ok": True}] * 2), "result"),
+    (lambda r: r["extra"].update(searched=[{"result": "none", "ok": True}] * 2), "where"),
     (lambda r: r.pop("extra"), "searched"),
     (lambda r: r.update(category="vibes"), "category"),
     (lambda r: r.update(line="3"), "line"),
+    (lambda r: r.update(line=True), "line"),
+    (lambda r: r.update(file="/abs/AGENTS.md"), "file"),
     (lambda r: r.update(failure=""), "failure"),
+    (lambda r: r.pop("bucket"), "bucket"),
+    (lambda r: r.update(bucket="Gap"), "bucket"),
+    (lambda r: r.update(bucket="carried"), "bucket"),
+    (lambda r: r.update(category="has-mechanism"), "bucket"),
+    (lambda r: r["extra"]["searched"][0].pop("ok"), "ok"),
+    (lambda r: r["extra"]["searched"][0].update(ok=False), "failed"),
+    (lambda r: r["extra"].update(searched=r["extra"]["searched"][:1]), "two"),
 ])
 def test_a_gap_finding_missing_its_evidence_is_rejected(mutate, message):
     row = _rows()[0]
     mutate(row)
     errors = validate([row])
-    assert len(errors) == 1 and message in errors[0], errors
+    assert errors and all(message in e for e in errors), errors
+
+
+def test_a_dot_claude_instruction_file_is_read(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "CLAUDE.md").write_text("Never skip this.\n", encoding="utf-8")
+    assert [(c["file"], c["line"]) for c in candidates(str(tmp_path))] == [(".claude/CLAUDE.md", 1)]
+
+
+def test_flow_claude_docs_are_instruction_files_only_on_a_path_boundary(tmp_path):
+    for d in ("flow/claude", "myflow/claude"):
+        (tmp_path / d).mkdir(parents=True)
+        (tmp_path / d / "X.md").write_text("Never skip this.\n", encoding="utf-8")
+    assert [c["file"] for c in candidates(str(tmp_path))] == ["flow/claude/X.md"]
+
+
+def test_single_quote_docstrings_and_block_comments_are_read(tmp_path):
+    (tmp_path / "a.py").write_text("\'\'\'Doc.\nRefuses a bad id.\n\'\'\'\n", encoding="utf-8")
+    (tmp_path / "b.js").write_text("/* header\n * Falls back to the cache.\n */\n", encoding="utf-8")
+    got = {(c["file"], c["line"]) for c in candidates(str(tmp_path))}
+    assert got == {("a.py", 2), ("b.js", 2)}
+
+
+def test_a_dangling_symlink_does_not_abort_pass_one(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("Never skip this.\n", encoding="utf-8")
+    os.symlink(str(tmp_path / "gone.md"), str(tmp_path / "SKILL.md"))
+    assert [c["file"] for c in candidates(str(tmp_path))] == ["AGENTS.md"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads every directory")
+def test_an_unreadable_directory_stops_pass_one_rather_than_being_skipped(tmp_path):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "AGENTS.md").write_text("Never skip this.\n", encoding="utf-8")
+    locked.chmod(0)
+    try:
+        with pytest.raises(OSError):
+            candidates(str(tmp_path))
+    finally:
+        locked.chmod(0o700)
 
 
 def test_the_validate_cli_names_a_corrupt_line_and_exits_1(tmp_path):
@@ -76,3 +124,14 @@ def test_the_validate_cli_names_a_corrupt_line_and_exits_1(tmp_path):
     ok = subprocess.run([sys.executable, os.path.join(HERE, "audit.py"), "validate", FINDINGS],
                         capture_output=True, text=True)
     assert (ok.returncode, ok.stdout) == (0, "")
+
+
+def test_the_validate_cli_rejects_an_invalid_row(tmp_path):
+    import subprocess
+    row = _rows()[0]
+    row["extra"].pop("searched")
+    log = tmp_path / "findings.jsonl"
+    log.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, os.path.join(HERE, "audit.py"), "validate", str(log)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "row 1" in r.stdout and "searched" in r.stdout, r.stdout

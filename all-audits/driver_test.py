@@ -2677,6 +2677,14 @@ def test_git_state_of_a_non_repo_is_dirty_never_clean(tmp_path):
     assert driver.git_state(str(tmp_path), None) == {"dirty": True, "changed_files": []}
 
 
+def _load_module(name, path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_mechanism_audit_is_in_the_default_sweep_and_not_the_short_one(tmp_path):
     """A default sweep plans mechanism-audit ungated and unconditionally, on
     a repo with no Python too; `--short` leaves it out (#1364)."""
@@ -2686,8 +2694,12 @@ def test_mechanism_audit_is_in_the_default_sweep_and_not_the_short_one(tmp_path)
     assert "mechanism-audit" not in SHORT_SET
 
     repo, cache_dir = _mkdirs(tmp_path, "repo", "cache_dir")
-    _init_git_repo(repo)
+    env = driver.scrubbed_env()
+    subprocess.run(["git", "-C", repo, "init", "-q"], check=True, env=env)
+    open(os.path.join(repo, "app.js"), "w").write("export const a = 1;\n")
+    subprocess.run(["git", "-C", repo, "add", "."], check=True, env=env)
     plan = driver.plan_sweep(repo, list(driver.AUDIT_NAMES), force=False, base=cache_dir)
+    assert "dead-code" in plan.not_applicable, "setup: this repo has no Python"
     assert "mechanism-audit" in plan.to_run
     assert "mechanism-audit" not in plan.not_applicable
 
@@ -2698,9 +2710,8 @@ def test_a_sweep_runs_mechanism_audit_over_the_seeded_fixture_and_its_findings_v
     row parses under mechanism-audit's own validation."""
     here = os.path.dirname(os.path.abspath(__file__))
     mech = os.path.join(here, "..", "mechanism-audit")
-    sys.path.insert(0, mech)
-    from audit import validate
-    import findings_log
+    audit = _load_module("mechanism_audit_audit", os.path.join(mech, "audit.py"))
+    findings_log = audit.findings_log
 
     tmp, cache_dir, bin_dir = _mkdirs(tmp_path, "tmp", "cache_dir", "bin_dir")
     repo = os.path.join(tmp, "repo")
@@ -2718,5 +2729,5 @@ def test_a_sweep_runs_mechanism_audit_over_the_seeded_fixture_and_its_findings_v
     assert len(logs) == 1, logs
     log = findings_log.read(logs[0])
     assert log.corrupt == [] and len(log.rows) == 3
-    assert validate(log.rows) == []
+    assert audit.validate(log.rows) == []
     assert sorted(r["category"] for r in log.rows) == ["has-mechanism", "never-reached", "no-mechanism"]

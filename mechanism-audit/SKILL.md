@@ -6,17 +6,17 @@ argument-hint: "[path]"
 ---
 
 Find the rules a repo states and nothing carries out (defect class 2,
-`docs/agents/defect-classes.md` § 2). A rule that reads as policy and has no
+`~/.agents/skills/docs/agents/defect-classes.md` § 2). A rule that reads as policy and has no
 mechanism is decoration; per-PR review sees one diff, so it misses an old rule
 and a rule in one file broken by a change in another. This audit reads the
 whole tree. It touches no code and fixes nothing.
 
-**Mechanism** is as `GLOSSARY.md` defines it: code, a hook wired in
-`settings.json`, a test, a scheduled job, or a skill step that something
-reliably triggers on the rule's occasion (a slash command the flow runs, a
-calling skill, a hook). A rule whose only carrier is someone remembering has
-none. Class 1 and class 3 stay with `error-handling`, `test-audit` and
-`mutation-audit`.
+**Mechanism** is defined in `~/.agents/skills/GLOSSARY.md` and means exactly that:
+the code, hook, test, scheduled job, or reliably triggered skill step that
+carries out a stated rule. A skill step counts only when something invokes that
+skill on the rule's occasion (a slash command the flow runs, a calling skill, a
+hook); a rule whose only carrier is someone remembering has none. Class 1 and
+class 3 stay with `error-handling`, `test-audit` and `mutation-audit`.
 
 ## Buckets & categories
 
@@ -63,13 +63,16 @@ none. Class 1 and class 3 stay with `error-handling`, `test-audit` and
    hook wiring and the calling skill, since a function that exists proves
    nothing); one found and reached is `carried`.
 
-4. **Every row carries its searches.** `extra.searched` is a non-empty list of
+4. **Every row carries its searches.** `extra.searched` is a list of
    `{"where": "<the grep pattern, the hooks file, the crontab, the calling
-   skill>", "result": "<what it returned>"}`, one per place looked. A search
-   that failed (a file unreadable, a command erroring) is recorded as failed
-   and is never read as "nothing there": a row whose search failed is not a
-   `gap`. `file`/`line` is the rule itself, `path:line`. A `gap`'s `failure`
-   names what goes wrong while the mechanism is missing.
+   skill>", "result": "<what it returned>", "ok": true|false}`, one per place
+   looked. `ok` is false when the search itself failed (a file unreadable, a
+   command erroring, a timeout): a failed search is never an absence, and
+   `validate` refuses a `gap` carrying one, so rerun it or leave the rule out.
+   A `gap` lists at least two places, the swept repo and then the harness
+   (settings hooks, the skills checkout, `~/.local/bin`). `file`/`line` is the
+   rule itself, `path:line`. A `gap`'s `failure` names what goes wrong while the
+   mechanism is missing.
 
 5. **Validate, then write the log and render the summary.**
    ```sh
@@ -84,7 +87,7 @@ none. Class 1 and class 3 stay with `error-handling`, `test-audit` and
    (`~/.agents/skills/all-audits/harness/IGNORE-FILE.md`), as for every audit.
    This skill's own shape:
 
-   - **Log** — one line per judged rule, per `findings-schema.md`.
+   - **Log** — one line per judged rule, per `~/.agents/skills/all-audits/harness/findings-schema.md`.
    - **Summary** — the verdict, the `G gap` metabar (`N no-mechanism · M
      never-reached`), findings grouped by category with counts. `carried` is
      not actionable and has no tile. Close with a `vt-callout` naming the

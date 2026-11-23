@@ -30,23 +30,35 @@ TRIGGER = re.compile(
     r"\botherwise\b|\bfalls? back\b|\bif absent\b|\brefuses?\b|\bevery\b.*\bmust\b", re.I)
 IMPERATIVE = re.compile(TRIGGER.pattern + r"|\bmust\b|\bnever\b|\balways\b|\bevery\b", re.I)
 
-CATEGORIES = ("no-mechanism", "never-reached", "has-mechanism")
-GAP_BUCKET = "gap"
+BUCKET_OF = {"no-mechanism": "gap", "never-reached": "gap", "has-mechanism": "carried"}
+MIN_GAP_SEARCHES = 2
 
 
 def _is_instruction_file(rel):
     return os.path.basename(rel) in INSTRUCTION_NAMES or (
-        rel.endswith(".md") and "flow/claude/" in "/" + rel)
+        rel.endswith(".md") and "/flow/claude/" in "/" + rel)
 
 
 def _comment_lines(lines):
-    """(line number, comment or docstring text) for each such line."""
-    in_doc = False
+    """(line number, comment or docstring text) for each such line: `#` and
+    `//` comments, triple-quoted docstrings and `/* */` blocks."""
+    closer = None
     for number, line in enumerate(lines, 1):
-        quotes = line.count('"""')
-        if in_doc or quotes:
+        if closer:
             yield number, line
-            in_doc ^= quotes % 2 == 1
+            if closer in line:
+                closer = None
+            continue
+        opened = None
+        for mark, end in (('"""', '"""'), ("'''", "'''"), ("/*", "*/")):
+            if mark in line:
+                opened = (mark, end)
+                break
+        if opened:
+            mark, end = opened
+            yield number, line
+            if end not in line.split(mark, 1)[1]:
+                closer = end
             continue
         stripped = line.strip()
         if stripped.startswith(("#", "//")):
@@ -55,46 +67,49 @@ def _comment_lines(lines):
             yield number, line.split(" #", 1)[1]
 
 
-def _row(rel, number, text, trigger):
-    return {"file": rel, "line": number, "text": text.strip(), "trigger": trigger.group(0)}
-
-
 def candidates(root):
     """Rows `{file, line, text, trigger}` for every rule-stating line under
-    `root`, in path then line order."""
+    `root`, in path then line order. An unreadable directory raises: a pass
+    that skipped it would report a smaller tree as the whole one."""
+    def fail(error):
+        raise error
+
     rows = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames
-                             if d not in auditlib.EXCLUDED_DIRS and not d.startswith("."))
+    for dirpath, dirnames, filenames in os.walk(root, onerror=fail):
+        dirnames[:] = sorted(d for d in dirnames if d not in auditlib.EXCLUDED_DIRS
+                             and (d == ".claude" or not d.startswith(".")))
         for name in sorted(filenames):
             path = os.path.join(dirpath, name)
             rel = os.path.relpath(path, root).replace(os.sep, "/")
             instruction = _is_instruction_file(rel)
-            if not instruction and not name.endswith(CODE_SUFFIXES):
+            if not os.path.isfile(path) or (not instruction and not name.endswith(CODE_SUFFIXES)):
                 continue
             with open(path, encoding="utf-8", errors="replace") as f:
                 lines = f.read().splitlines()
-            if instruction:
-                found = ((n, t) for n, t in enumerate(lines, 1))
-                pattern = IMPERATIVE
-            else:
-                found, pattern = _comment_lines(lines), TRIGGER
+            found = enumerate(lines, 1) if instruction else _comment_lines(lines)
+            pattern = IMPERATIVE if instruction else TRIGGER
             for number, text in found:
                 hit = pattern.search(text)
                 if hit:
-                    rows.append(_row(rel, number, text, hit))
+                    rows.append({"file": rel, "line": number, "text": text.strip(), "trigger": hit.group(0)})
     return rows
 
 
-def _search_errors(searched):
+def _search_errors(searched, bucket):
     if not isinstance(searched, list) or not searched:
-        return ["extra.searched must be a non-empty list of {where, result}"]
+        return ["extra.searched must be a non-empty list of {where, result, ok}"]
     errors = []
     for place in searched:
+        place = place if isinstance(place, dict) else {}
         for key in ("where", "result"):
-            value = place.get(key) if isinstance(place, dict) else None
-            if not isinstance(value, str) or not value.strip():
+            if not isinstance(place.get(key), str) or not place[key].strip():
                 errors.append(f"extra.searched entry needs a non-empty {key}: {place!r}")
+        if not isinstance(place.get("ok"), bool):
+            errors.append(f"extra.searched entry needs ok: true or false: {place!r}")
+        elif not place["ok"] and bucket == "gap":
+            errors.append(f"a search that failed is not an absence, so this is not a gap: {place!r}")
+    if bucket == "gap" and len(searched) < MIN_GAP_SEARCHES:
+        errors.append(f"a gap lists at least two places searched (the repo, then the harness), got {len(searched)}")
     return errors
 
 
@@ -103,18 +118,23 @@ def validate(rows):
     errors = []
     for index, row in enumerate(rows, 1):
         problems = []
-        if row.get("category") not in CATEGORIES:
-            problems.append(f"category must be one of {', '.join(CATEGORIES)}")
-        if not isinstance(row.get("file"), str) or not row.get("file"):
+        category = row.get("category")
+        if category not in BUCKET_OF:
+            problems.append(f"category must be one of {', '.join(BUCKET_OF)}")
+        elif row.get("bucket") != BUCKET_OF[category]:
+            problems.append(f"bucket must be {BUCKET_OF[category]!r} for category {category!r}, got {row.get('bucket')!r}")
+        file = row.get("file")
+        if not isinstance(file, str) or not file or os.path.isabs(file):
             problems.append("file must be a repo-relative path")
         if not isinstance(row.get("line"), int) or isinstance(row.get("line"), bool):
             problems.append("line must be an integer")
         if not row.get("summary"):
             problems.append("summary is empty")
-        if row.get("bucket") == GAP_BUCKET and not row.get("failure"):
+        if row.get("bucket") == "gap" and not row.get("failure"):
             problems.append("a gap needs a failure naming what goes wrong")
         extra = row.get("extra")
-        problems += _search_errors(extra.get("searched") if isinstance(extra, dict) else None)
+        searched = extra.get("searched") if isinstance(extra, dict) else None
+        problems += _search_errors(searched, row.get("bucket"))
         errors += [f"row {index}: {p}" for p in problems]
     return errors
 
