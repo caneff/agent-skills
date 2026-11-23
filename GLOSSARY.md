@@ -96,3 +96,7 @@ _Avoid_: progress page, run page, summary page
 **Audit record**:
 The GitHub issue a `multi` sweep opens in the swept repo, labelled with its triage label, holding every finding and every fact about the sweep as text (body, then ordered comments past GitHub's length limit). One per repo per sweep, and only when the sweep found something or an audit failed. Its stored sweep keeps the issue number in `audit-record.json`; closing it, which `/all-audits triage` does, frees that stored sweep for deletion.
 _Avoid_: report (one audit's HTML), manifest (one audit's `claude -p` answer), finding (one row inside a record)
+
+**Mechanism**:
+The code, hook, test, scheduled job, or reliably triggered skill step that carries out a stated rule. A skill step counts only when something invokes that skill on the rule's occasion (a slash command the flow runs, a calling skill, a hook); a rule whose only carrier is someone remembering has none.
+_Avoid_: enforcement, backing, guard (a guard is one kind of mechanism)
