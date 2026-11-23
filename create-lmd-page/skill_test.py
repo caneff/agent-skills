@@ -248,9 +248,10 @@ def test_template_ends_with_a_quiet_twitch_signoff_below_the_rules():
     assert "text-decoration: none" in style and "font-weight: normal" in style
     assert "color: #889" in style, "sign-off text must stay the muted grey, not Play Now's #557"
     assert re.search(r"font-size: 0\.8em", m.group(1).split("<a", 1)[0]), "sign-off must be smaller than Play Now"
-    # Text only (000W76): LMD strips <svg>, an <img:ID> glyph becomes a second og:image (Discord previews),
+    # A CSS-drawn glyph (000W76): LMD strips <svg>, an <img:ID> glyph becomes a second og:image (Discord shows it),
     # and a raw <img src> in the link is stripped together with the link text.
-    assert inner.strip() == "Watch me solve live"
+    assert "<svg" not in inner and "<img" not in inner and "#9146FF" in inner
+    assert inner.rstrip().endswith("Watch me solve live")
     assert "twitch.tv" not in re.sub(r"<[^>]*>", "", inner), "the URL must not be visible"
 
 

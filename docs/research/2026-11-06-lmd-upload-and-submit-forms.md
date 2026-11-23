@@ -208,6 +208,9 @@ list is accepted is not known.
 - A raw `<img src=...>` inside an `<a>`, whether a `data:` URI or LMD's own `/Dateien/bild.php?data=...`
   address, comes back as an empty `<a></a>`: the image and the link's text are both gone (000W76, two edits,
   2026-11-23, read back logged out). Text alone in the link survives.
+- Nested `<span>`s with inline `position: absolute`, `border` and `background` styles survive inside a link
+  and render (000W76's CSS-drawn Twitch glyph, read back and screenshotted logged out, 2026-11-23). Discord
+  previews show every `og:image` (Chris pasted 000W1E: two images).
 - After "Create", the author opens `Raetsel/zeigen.php?id=…` and clicks
   "Aktivieren" in the right-hand box. A puzzle can be deactivated and edited
   later.
