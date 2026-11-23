@@ -38,6 +38,7 @@ It classifies each lock-tracked skill by comparing three tree SHAs (`local` = yo
 - **edited, on latest** — your edits sit on the current upstream; nothing to rebase.
 - **OUT OF DATE** — upstream moved past your installed version; `safe-update.sh` will pull it.
 - **EDITED+STALE (merge needed)** — your edits sit on an *old* upstream; `safe-update.sh` will three-way merge them, and asks for you only where the hunks overlap.
+- **DELETED locally (update keeps it deleted)** — the folder is tracked (lockfile or `.extra-skills.json`) but you removed it. `safe-update.sh` removes whatever `npx skills update` reinstalls for it, and the `~/.claude/skills/<name>` link when it points into the skills folder (override the directory with `CLAUDE_SKILLS_DIR`), and reports it as `Kept deleted`. A deleted skill the update did not bring back is not listed. To get it back, restore the folder from git.
 - **ORPHAN** — installed but gone from its recorded `skillPath` upstream. Could be a rename, a move between category folders, or a real removal — the script can't tell. Resolve with [reference/renames-and-moves.md](reference/renames-and-moves.md) after the pull.
 
 ## Hand-installed skills (.extra-skills.json)
@@ -67,6 +68,7 @@ DIGEST_PRE=<sha>          DIGEST_POST=<sha>
 DIGEST_SKILLS_DIR=<dir>   DIGEST_CHANGED=<space-separated skill names>
 DIGEST_MERGED=<space-separated skills merged clean with upstream>
 DIGEST_CONFLICTED=<space-separated skills with conflict markers to resolve>
+DIGEST_DELETED=<space-separated skills you deleted that the update brought back and the run removed again>
 DIGEST_KEPT=<space-separated skills kept whole-file, not merged>
 ```
 

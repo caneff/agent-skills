@@ -8,6 +8,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
+# where npx links each installed skill for Claude Code
+CLAUDE_SKILLS="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}"
 
 # commit_staged <message> — commit what is staged, with the checkout's own
 # identity (no `-c user.*` override: the commit-identity guard refuses one).
@@ -237,6 +239,36 @@ protect_skills(){
   fi
 }
 
+# keep_deleted <pre> <prelock-file>
+# A lock-tracked skill whose folder is absent from <pre> was deleted on purpose,
+# but `npx skills update` reinstalls it (and re-links CLAUDE_SKILLS/<name>) and
+# the extras sync re-extracts it. Remove what came back, so the deletion
+# stands. Touched: a folder under $SKILLS that <pre> lacks (a gitlink counts as
+# present, so a nested repo is never removed), and a symlink at
+# CLAUDE_SKILLS/<name> only when it points into that folder. Sets the global
+# `kept_deleted` to the skills it removed something for, and prints one line
+# each, naming what went. A deleted skill nothing came back for is not listed.
+keep_deleted(){
+  local pre=$1 prelock=$2 name dir link root removed
+  kept_deleted=()
+  [ -s "$prelock" ] || return 0
+  root=$(readlink -m "$SKILLS")
+  while IFS=$'\t' read -r name _; do
+    case $name in ""|.|..|*/*) continue ;; esac
+    git -C "$SKILLS" rev-parse -q --verify "$pre:$name" >/dev/null 2>&1 && continue
+    dir=$SKILLS/$name; link=$CLAUDE_SKILLS/$name; removed=()
+    if [ -L "$link" ]; then
+      case $(readlink -m "$link") in "$root/$name"|"$root/$name"/*) removed+=("link $link") ;; esac
+    fi
+    [ -e "$dir" ] || [ -L "$dir" ] && removed+=("folder $dir")
+    [ ${#removed[@]} -gt 0 ] || continue
+    case " ${removed[*]} " in *" link "*) rm -f -- "$link" ;; esac
+    case " ${removed[*]} " in *" folder "*) rm -rf -- "${SKILLS:?}/$name" ;; esac
+    kept_deleted+=("$name")
+    echo "kept deleted: $name (you deleted it; removed what the update brought back: ${removed[*]})"
+  done < "$prelock"
+}
+
 main(){
 cd "$SKILLS"
 
@@ -284,6 +316,9 @@ if [ -f "$EXTRA" ]; then
   python3 "$SCRIPT_DIR/upstream.py" sync-extras --extras "$EXTRA"
 fi
 
+# a skill you deleted on purpose stays deleted (#2023)
+keep_deleted "$PRE" "$PRELOCK"
+
 # record upstream result: npx rewrote the live lock, so mirror the new one in
 snap_lock
 git add -A
@@ -312,6 +347,9 @@ for s in $changed; do
 done
 echo "Updated from upstream (${#updated[@]}):"
 for s in "${updated[@]:-}"; do [ -n "$s" ] && echo "  $s"; done
+if [ ${#kept_deleted[@]} -gt 0 ]; then
+  echo "Kept deleted (${#kept_deleted[@]}): ${kept_deleted[*]}"
+fi
 if [ ${#merged[@]} -gt 0 ]; then
   echo "Your edits merged with upstream (${#merged[@]}): ${merged[*]}"
 fi
@@ -344,6 +382,7 @@ echo "DIGEST_SKILLS_DIR=$SKILLS"
 echo "DIGEST_CHANGED=$(echo $changed | tr '\n' ' ')"
 echo "DIGEST_MERGED=${merged[*]:-}"
 echo "DIGEST_CONFLICTED=${conflicted[*]:-}"
+echo "DIGEST_DELETED=${kept_deleted[*]:-}"
 echo "DIGEST_KEPT=${nobase[*]:-}"
 echo
 echo "undo everything:  git -C $SKILLS reset --hard $PRE"
