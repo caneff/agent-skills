@@ -9,3 +9,4 @@
 ~/src/sudokumaker-custom-constraints workflow=ci.yml
 ~/src/grid-hunts workflow=ci.yml
 ~/src/twitch-rules-scroller
+~/src/sudokupad-art
