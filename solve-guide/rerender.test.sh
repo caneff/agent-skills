@@ -70,6 +70,13 @@ if [ "$rc" -ne 0 ] || [ ! -f "$i/guide-r2.html" ] || [ "$(head -c 5 "$i/guide-r2
   echo "FAIL: --pdf did not print guide-r2.pdf beside guide-r2.html (rc=$rc): $out"; fail=1
 fi
 
+p="$tmp/pdf-rounds"
+mkdir -p "$p"; echo v1 > "$p/guide.json"; touch "$p/original.scl.txt" "$p/guide-r3.pdf"
+out=$(run "$p"); rc=$?
+if [ "$rc" -ne 0 ] || [ "$out" != "$p/guide-r4.html" ]; then
+  echo "FAIL: a run after guide-r3.pdf did not take guide-r4.html (rc=$rc): $out"; fail=1
+fi
+
 e="$tmp/empty"
 mkdir -p "$e"; touch "$e/original.scl.txt"
 out=$(run "$e"); rc=$?

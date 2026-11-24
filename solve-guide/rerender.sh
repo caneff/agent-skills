@@ -8,7 +8,8 @@
 # original.scl.txt (a link import) or else rules.json (an image import). Runs
 # `kit.sh solve-guide <input> out --max-steps 0 --guide guide.json`, so the
 # record is redrawn and never searched, then copies out/guide.html to the next
-# free guide-r<n>.html beside it and prints that path. --pdf also prints it to
+# free guide-r<n>.html beside it, counting earlier rounds' .html and .pdf
+# files, and prints that path. --pdf also prints it to
 # guide-r<n>.pdf through print_pdf.py and prints that path. Flags after `--`
 # go to solve-guide as they are: the --time-limit or --proof-limit the record
 # was built under, or --image.
@@ -35,8 +36,8 @@ fi
 (cd "$dir" && "$here/kit.sh" solve-guide "$input" out --max-steps 0 --guide guide.json "$@") >&2 || exit
 
 n=1
-for f in "$dir"/guide-r*.html; do
-  k=${f##*/guide-r}; k=${k%.html}
+for f in "$dir"/guide-r*.html "$dir"/guide-r*.pdf; do
+  k=${f##*/guide-r}; k=${k%.*}
   case $k in ''|*[!0-9]*) continue ;; esac
   [ "$k" -ge "$n" ] && n=$((k + 1))
 done
