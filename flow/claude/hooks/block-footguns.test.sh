@@ -4,7 +4,8 @@
 #   #1860 a bare `rg` (no path, stdin not supplied) hangs on the harness stdin;
 #   #1704 a Python `open(p,'w')` that reads p in the same statement empties p;
 #   #1923 a backtick command substitution trips Claude Code's built-in rm check;
-#   #2047 mv/install/ln/sed -i onto ~/.claude/settings.json replaces its symlink.
+#   #2047 mv/install/ln/cp --remove-destination/sed -i/perl -i onto
+#         ~/.claude/settings.json replaces its symlink.
 # Run: bash flow/claude/hooks/block-footguns.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -162,7 +163,10 @@ allows "numbered list in a double-quoted printf" "gh pr create --body \"\$(print
 # ---- replacing the ~/.claude/settings.json symlink (#2047) ----
 # ~/.claude/settings.json is a symlink into flow/claude/; a command whose
 # destination is that path replaces the link instead of writing through it.
-sj="replaces the symlink"
+# The hook reads `~` from $HOME, so these cases run under a HOME of their own.
+sj="replaces ~/.claude/settings.json"
+real_home="$HOME"
+export HOME="$tmp/home"; mkdir -p "$HOME"
 H="$HOME/.claude/settings.json"
 blocks "mv onto the symlink, ~ form" 'mv /tmp/s.json ~/.claude/settings.json' "$sj"
 blocks "mv onto the symlink, \$HOME form" 'mv "$tmp" "$HOME/.claude/settings.json"' "$sj"
@@ -202,6 +206,22 @@ allows "mv named in a heredoc body" "cat > notes.md <<'EOF'
 mv x ~/.claude/settings.json
 EOF"
 allows "ln -s of another path" 'ln -s /tmp/a ~/.claude/other.json'
+# Directory destinations, clustered -t, wrappers (P1, C1, C3).
+blocks "mv a settings.json into ~/.claude/" 'mv /tmp/settings.json ~/.claude/' "$sj"
+blocks "mv a settings.json into ~/.claude" 'mv /tmp/settings.json ~/.claude' "$sj"
+blocks "cp --remove-destination into ~/.claude/" 'cp --remove-destination /tmp/settings.json ~/.claude/' "$sj"
+blocks "mv -vt DIR cluster" 'mv -vt ~/.claude /tmp/settings.json' "$sj"
+blocks "mv -t attached" 'mv -t$HOME/.claude /tmp/settings.json' "$sj"
+blocks "mv under sudo" 'sudo mv x ~/.claude/settings.json' "$sj"
+blocks "mv under env" 'FOO=1 env mv x ~/.claude/settings.json' "$sj"
+blocks "mv under timeout" 'timeout 5 mv x ~/.claude/settings.json' "$sj"
+allows "mv another file into ~/.claude" 'mv /tmp/other.json ~/.claude/'
+# A lone operand is a source (C4); a value flag's rest is text, not -i (C2, C5).
+allows "ln -s with one operand" 'ln -s ~/.claude/settings.json'
+allows "sed -e script containing an i" "sed -es/i/x/ ~/.claude/settings.json"
+allows "perl -Mstrict reads" "perl -Mstrict -ne 'print' ~/.claude/settings.json"
+allows "perl -I path reads" "perl -I/usr/lib -ne 'print' ~/.claude/settings.json"
+export HOME="$real_home"
 
 terminates() { # terminates <name> <command>: the guard answers, whatever its verdict
   run "$2"

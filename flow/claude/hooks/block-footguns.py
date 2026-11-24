@@ -32,7 +32,8 @@ stderr blocks; every other path exits 0.
    `cp --remove-destination` and `sed -i` / `perl -i` (without sed's
    `--follow-symlinks`) put a plain file where the link was and detach the
    live config from the repo. Refused when the destination operand is that path,
-   written literally, as `~/` or as `$HOME/`. Plain `cp`, a redirect, and any
+   written literally, as `~/`, `$HOME/` or `${HOME}/`, or as the `~/.claude`
+   directory a `settings.json` is moved into. Plain `cp`, a redirect, and any
    edit of the real file under `flow/claude/` write through the link and pass.
    A relative spelling after a `cd` is not seen.
 
@@ -443,7 +444,9 @@ def is_settings_link(word):
 
 
 def in_place_flag(arg, value_flags):
-    """True when a short-option cluster or `--in-place` asks for in-place edit."""
+    """True when a short-option cluster or `--in-place` asks for in-place edit.
+    `value_flags` are the letters whose value is the rest of the cluster
+    (`-es/i/x/`, `-Mstrict`), so an `i` after one is text, not the flag."""
     if arg.startswith("--"):
         return arg.split("=", 1)[0] == "--in-place"
     if not arg.startswith("-") or len(arg) < 2:
@@ -457,8 +460,9 @@ def in_place_flag(arg, value_flags):
 
 
 def destinations(args):
-    """The paths a mv/install/ln/cp writes: the last operand, or each source's
-    name inside the `-t DIR` directory."""
+    """The paths a mv/install/ln/cp writes: the last operand, plus each source's
+    name inside it in case it is a directory, or each source's name inside the
+    `-t DIR` directory (`-t` may sit in a cluster, `-vt DIR`)."""
     ops, target, i = [], None, 0
     while i < len(args):
         a = args[i]
@@ -471,18 +475,27 @@ def destinations(args):
             i += 1
         elif a.startswith("--target-directory="):
             target = a.split("=", 1)[1]
-        elif a.startswith("-t") and not a.startswith("--") and len(a) > 2:
-            target = a[2:]
+        elif a.startswith("-") and not a.startswith("--") and "t" in a[1:]:
+            rest = a[a.index("t", 1) + 1:]
+            if rest:
+                target = rest
+            else:
+                target = args[i] if i < len(args) else None
+                i += 1
         elif a.startswith("-") and len(a) > 1:
             continue
         else:
             ops.append(a)
     if target is not None:
         return [target.rstrip("/") + "/" + os.path.basename(o) for o in ops]
-    return ops[-1:] if len(ops) > 1 else []
+    if len(ops) < 2:
+        return []  # a lone operand is a source (`ln -s x` links in the cwd)
+    last = ops[-1]
+    return [last] + [last.rstrip("/") + "/" + os.path.basename(o) for o in ops[:-1]]
 
 
 def replaces_settings_link(scan):
+    """True when a command in `scan` replaces the settings.json symlink."""
     if "settings.json" not in scan:
         return False
     for words, _, _ in scan_commands(scan):
@@ -500,7 +513,7 @@ def replaces_settings_link(scan):
                    and "--follow-symlinks" not in args
                    and any(is_settings_link(a) for a in args))
         elif name == "perl":
-            hit = (any(in_place_flag(a, "e") for a in args)
+            hit = (any(in_place_flag(a, "eEMmIxdDF") for a in args)
                    and any(is_settings_link(a) for a in args))
         else:
             hit = False
@@ -538,10 +551,10 @@ def main():
                   "use `git grep <pattern>`.", file=sys.stderr)
             return 2
         if replaces_settings_link(scan):
-            print(f"BLOCKED: '{command[:200]}' replaces the symlink "
-                  "~/.claude/settings.json, which points into "
-                  "~/.agents/skills/flow/claude/settings.json: the new plain file "
-                  "detaches the live config from the repo. Edit it in place "
+            print(f"BLOCKED: '{command[:200]}' replaces ~/.claude/settings.json, "
+                  "which is meant to be a symlink to "
+                  "~/.agents/skills/flow/claude/settings.json: a plain file put "
+                  "there detaches the live config from the repo. Edit it in place "
                   "instead: the Edit tool on the file, `cp` or a redirect "
                   "(both write through the link), or `sed -i --follow-symlinks`.",
                   file=sys.stderr)
