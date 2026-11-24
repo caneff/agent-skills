@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Contract test for block-footguns.py: synthetic PreToolUse JSON on stdin ->
-# exit 0 (allow) or exit 2 + message on stderr (block). Three guards:
+# exit 0 (allow) or exit 2 + message on stderr (block). Four guards:
 #   #1860 a bare `rg` (no path, stdin not supplied) hangs on the harness stdin;
 #   #1704 a Python `open(p,'w')` that reads p in the same statement empties p;
-#   #1923 a backtick command substitution trips Claude Code's built-in rm check.
+#   #1923 a backtick command substitution trips Claude Code's built-in rm check;
+#   #2047 mv/install/ln/cp --remove-destination/sed -i/perl -i onto
+#         ~/.claude/settings.json replaces its symlink.
 # Run: bash flow/claude/hooks/block-footguns.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -158,6 +160,69 @@ allows "quoted paren in a double-quoted dollar-paren, then a single-quoted backt
 allows "close paren in an inner double-quoted string" "echo \"\$(printf \"1) a\")\" && gh pr comment 5 --body 'the \`rg\` flag'"
 allows "escaped paren in a double-quoted dollar-paren" "echo \"\$(echo \\( )\" '\`x\`'"
 allows "numbered list in a double-quoted printf" "gh pr create --body \"\$(printf '1) run \`x\`')\""
+# ---- replacing the ~/.claude/settings.json symlink (#2047) ----
+# ~/.claude/settings.json is a symlink into flow/claude/; a command whose
+# destination is that path replaces the link instead of writing through it.
+# The hook reads `~` from $HOME, so these cases run under a HOME of their own.
+sj="replaces ~/.claude/settings.json"
+real_home="$HOME"
+export HOME="$tmp/home"; mkdir -p "$HOME"
+H="$HOME/.claude/settings.json"
+blocks "mv onto the symlink, ~ form" 'mv /tmp/s.json ~/.claude/settings.json' "$sj"
+blocks "mv onto the symlink, \$HOME form" 'mv "$tmp" "$HOME/.claude/settings.json"' "$sj"
+blocks "mv onto the symlink, braced HOME" 'mv x ${HOME}/.claude/settings.json' "$sj"
+blocks "mv onto the symlink, literal path" "mv x $H" "$sj"
+blocks "mv onto the symlink, unnormalized path" "mv x $HOME/.claude/../.claude//settings.json" "$sj"
+blocks "mv -f onto the symlink" 'mv -f x ~/.claude/settings.json' "$sj"
+blocks "mv -t into .claude" 'mv -t ~/.claude /tmp/settings.json' "$sj"
+blocks "install onto the symlink" 'install -m 644 x ~/.claude/settings.json' "$sj"
+blocks "ln -s onto the symlink" 'ln -s /tmp/s.json ~/.claude/settings.json' "$sj"
+blocks "ln -sf onto the symlink" 'ln -sf /tmp/s.json ~/.claude/settings.json' "$sj"
+blocks "cp --remove-destination" 'cp --remove-destination x ~/.claude/settings.json' "$sj"
+blocks "sed -i on the symlink" "sed -i 's/a/b/' ~/.claude/settings.json" "$sj"
+blocks "sed -i.bak on the symlink" "sed -i.bak 's/a/b/' ~/.claude/settings.json" "$sj"
+blocks "sed -ni on the symlink" "sed -ni 's/a/b/p' ~/.claude/settings.json" "$sj"
+blocks "sed --in-place on the symlink" "sed --in-place 's/a/b/' ~/.claude/settings.json" "$sj"
+blocks "perl -pi on the symlink" "perl -pi -e 's/a/b/' ~/.claude/settings.json" "$sj"
+blocks "perl -i.bak on the symlink" "perl -i.bak -pe 's/a/b/' ~/.claude/settings.json" "$sj"
+blocks "mv after a separator" 'cd x && mv y ~/.claude/settings.json' "$sj"
+blocks "mv in a bash -c script" "bash -c 'mv y ~/.claude/settings.json'" "$sj"
+blocks "message says to edit in place" 'mv x ~/.claude/settings.json' "in place"
+allows "plain cp writes through the link" 'cp /tmp/s.json ~/.claude/settings.json'
+allows "cp -f writes through the link" 'cp -f /tmp/s.json ~/.claude/settings.json'
+allows "sed -i --follow-symlinks" "sed -i --follow-symlinks 's/a/b/' ~/.claude/settings.json"
+allows "sed without -i prints" "sed 's/a/b/' ~/.claude/settings.json"
+allows "sed -n reads only" "sed -n '1,5p' ~/.claude/settings.json"
+allows "perl without -i reads" "perl -ne 'print' ~/.claude/settings.json"
+allows "mv the real file under flow/claude" 'mv x ~/.agents/skills/flow/claude/settings.json'
+allows "sed -i the real file under flow/claude" "sed -i 's/a/b/' ~/.agents/skills/flow/claude/settings.json"
+allows "mv a file named like it elsewhere" 'mv x ~/other/.claude/settings.json'
+allows "mv away from the symlink" 'mv ~/.claude/settings.json /tmp/old.json'
+allows "mv a project settings.json" 'mv x .claude/settings.json'
+allows "redirect writes through the link" 'echo {} > ~/.claude/settings.json'
+allows "cat the symlink" 'cat ~/.claude/settings.json'
+allows "mv named in a quoted string" "echo 'mv x ~/.claude/settings.json'"
+allows "mv named in a heredoc body" "cat > notes.md <<'EOF'
+mv x ~/.claude/settings.json
+EOF"
+allows "ln -s of another path" 'ln -s /tmp/a ~/.claude/other.json'
+# Directory destinations, clustered -t, wrappers (P1, C1, C3).
+blocks "mv a settings.json into ~/.claude/" 'mv /tmp/settings.json ~/.claude/' "$sj"
+blocks "mv a settings.json into ~/.claude" 'mv /tmp/settings.json ~/.claude' "$sj"
+blocks "cp --remove-destination into ~/.claude/" 'cp --remove-destination /tmp/settings.json ~/.claude/' "$sj"
+blocks "mv -vt DIR cluster" 'mv -vt ~/.claude /tmp/settings.json' "$sj"
+blocks "mv -t attached" 'mv -t$HOME/.claude /tmp/settings.json' "$sj"
+blocks "mv under sudo" 'sudo mv x ~/.claude/settings.json' "$sj"
+blocks "mv under env" 'FOO=1 env mv x ~/.claude/settings.json' "$sj"
+blocks "mv under timeout" 'timeout 5 mv x ~/.claude/settings.json' "$sj"
+allows "mv another file into ~/.claude" 'mv /tmp/other.json ~/.claude/'
+# A lone operand is a source (C4); a value flag's rest is text, not -i (C2, C5).
+allows "ln -s with one operand" 'ln -s ~/.claude/settings.json'
+allows "sed -e script containing an i" "sed -es/i/x/ ~/.claude/settings.json"
+allows "perl -Mstrict reads" "perl -Mstrict -ne 'print' ~/.claude/settings.json"
+allows "perl -I path reads" "perl -I/usr/lib -ne 'print' ~/.claude/settings.json"
+export HOME="$real_home"
+
 terminates() { # terminates <name> <command>: the guard answers, whatever its verdict
   run "$2"
   if [ "$rc" = 0 ] || [ "$rc" = 2 ]; then echo "PASS: $1"

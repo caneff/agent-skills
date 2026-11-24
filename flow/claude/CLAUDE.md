@@ -70,8 +70,8 @@ doc-vs-code contradiction is mine to rule on: report both sides.
   `~/.agents/skills/flow/claude/RESEARCH-FIRST.md`.
 - When I say "always" about a recurring output's shape, change the skill that
   makes it.
-- `~/.claude/settings.json` is a symlink: edit it in place, never replace it
-  through a temp file and `mv`.
+- `~/.claude/settings.json` is a symlink: edit it in place. `block-footguns.py`
+  refuses a command that replaces it.
 - My desktop is Windows; WSL is the shell only, never a Linux GUI.
 - Before you show me a file, window or page, judge visual work, or when an
   image I pasted did not reach you: read
