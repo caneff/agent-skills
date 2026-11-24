@@ -1,6 +1,6 @@
 ---
 name: solve-guide
-description: Turn one of Chris's puzzles (a SudokuPad link, or an image plus its rules text) into a short illustrated PDF solve guide.
+description: Turn one of Chris's puzzles (a SudokuPad link, or an image plus its rules text) into a short illustrated solve guide page.
 disable-model-invocation: true
 ---
 
@@ -16,7 +16,7 @@ you write must cover its step record exactly (the Refusals section of
 record.
 
 **A guide is a solution path.** It lives only under the work directory below
-and the PDF destination, both outside every repo; it is never committed,
+(and a printout's destination), outside every repo; it is never committed,
 attached, pasted into a ticket or PR, or published (the Solution paths
 section of sudoku-kit's `AGENTS.md`). `print_pdf.py` refuses a destination
 inside a git work tree.
@@ -132,7 +132,7 @@ the message:
 Do § 5 to § 7 on the record as it stands: a partial guide. The library ends
 the page with "The search is stuck here" over the stuck-point grid and its
 candidates; a record with no steps takes an empty `entries` list, so that grid
-is the whole guide. Hand Chris the PDF, say which cells are still open, and
+is the whole guide. Open it for Chris (§ 7), say which cells are still open, and
 offer the hint loop:
 
 1. Chris gives a hint in chat ("r3c4 is 5 because of the black dot and box 2").
@@ -225,7 +225,6 @@ Its entries cover every step once, in order, as key ideas and fill stretches.
 
 ```
 $K solve-guide <input> out --max-steps 0 --guide guide.json
-python3 ~/.agents/skills/solve-guide/print_pdf.py out/guide.html <destination>
 ```
 
 `--max-steps 0` draws the record as it stands: the render never searches, so
@@ -233,11 +232,27 @@ a stuck record keeps its stuck point. It exits 0 when it drew the page,
 whether the record is solved or stuck. Exit 2 names what the guide file gets
 wrong; fix it and run again. Exit 5 is § 3's second cause.
 
-The destination is the path Chris names, else
-`~/.cache/solve-guide/<slug>/guide.pdf`; `print_pdf.py` refuses a path inside
-a git work tree, so a named path inside a repo goes back to him. Give each
-round a fresh file name. Look at every key idea before handing it over: the
-PDF prints `out/guide.html`, so screenshot that
-(`shot-scraper out/guide.html -o guide-check.png --silent`) and open the image
-(`flow/claude/VISUAL-INSPECTION.md` § Judging visual work). Then open the PDF
-for Chris with `wslview <destination>` and say which key ideas it has.
+The HTML page is the guide. It is self-contained, so copy `out/guide.html` to
+a fresh name each round, `~/.cache/solve-guide/<slug>/guide-r<n>.html`: the
+library rewrites `out/guide.html` on every call, and a reused name serves
+Chris the last round from cache. Look at every key idea before handing it
+over: screenshot the copy
+(`shot-scraper <copy> -o guide-check.png --silent`) and open the image
+(`flow/claude/VISUAL-INSPECTION.md` § Judging visual work). Then open the
+copy for Chris in his personal Chrome profile and say which key ideas it
+has:
+
+```
+"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" --profile-directory=Default "$(wslpath -w <copy>)"
+```
+
+**A printout only when Chris asks for one:**
+
+```
+python3 ~/.agents/skills/solve-guide/print_pdf.py <copy> <destination>
+```
+
+The destination is the path he names, else
+`~/.cache/solve-guide/<slug>/guide-r<n>.pdf`; `print_pdf.py` refuses a path
+inside a git work tree, so a named path inside a repo goes back to him. Open
+it with `wslview <destination>`.
