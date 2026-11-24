@@ -293,14 +293,14 @@ class GhTracker:
         that starts with `prefix` to read `body`, else post `body` as a new comment."""
         login = self.viewer_login()
         comments = self._pages(self._path(f"issues/{int(number)}/comments"), "comments")
-        if not all(isinstance(c, dict) for c in comments):
-            raise TrackerError(f"#{number}: a comment came back malformed")
-        mine = [c for c in comments if (c.get("user") or {}).get("login") == login
-                and (c.get("body") or "").startswith(prefix)]
+        if not all(isinstance(c, dict) and isinstance(c.get("id"), int) and isinstance(c.get("body"), str)
+                   and isinstance(c.get("user"), (dict, type(None))) for c in comments):
+            raise TrackerError(f"#{number}: a comment came back without an id, a body or a user")
+        mine = [c for c in comments if (c["user"] or {}).get("login") == login and c["body"].startswith(prefix)]
         if not mine:
             self.comment(number, body)
             return
-        self._run(["api", "-X", "PATCH", self._path(f"issues/comments/{int(mine[-1]['id'])}"), "-f", f"body={body}"])
+        self._run(["api", "-X", "PATCH", self._path(f"issues/comments/{mine[-1]['id']}"), "-f", f"body={body}"])
 
     def merge(self, pr, head):
         """Squash-merge `pr`, only if its head is still `head`."""
@@ -432,9 +432,8 @@ class MemoryTracker:
         if not at:
             self.comment(number, body)
             return
-        old = self.comments[at[-1]][1]
         self.comments[at[-1]] = (number, body)
-        posted = [c for c in self._issues.get(number, {}).get("comments", []) if c["body"] == old]
+        posted = [c for c in self._issues.get(number, {}).get("comments", []) if c["body"].startswith(prefix)]
         if posted:
             posted[-1]["body"] = body
 

@@ -422,7 +422,8 @@ def test_upsert_comment_edits_the_viewers_own_latest_note_with_the_prefix():
     calls, run = note_gh([{"id": 1, "user": {"login": "me"}, "body": "deferred: old"},
                           {"id": 2, "user": {"login": "other"}, "body": "deferred: theirs"},
                           {"id": 3, "user": {"login": "me"}, "body": "selector: listed"},
-                          {"id": 4, "user": {"login": "me"}, "body": "deferred: older still"}])
+                          {"id": 4, "user": {"login": "me"}, "body": "deferred: older still"},
+                          {"id": 5, "user": {"login": "me"}, "body": "a later note of the viewer's"}])
     tracker.GhTracker("o/r", run=run).upsert_comment(7, "deferred:", "deferred: new")
     assert calls[1] == ["api", "--paginate", "--slurp", "repos/o/r/issues/7/comments"]
     assert calls[-1] == ["api", "-X", "PATCH", "repos/o/r/issues/comments/4", "-f", "body=deferred: new"]
@@ -438,6 +439,10 @@ def test_upsert_comment_posts_when_the_viewer_has_no_such_note():
 def test_upsert_comment_refuses_a_comment_list_it_cannot_read():
     with pytest.raises(tracker.TrackerError):
         tracker.GhTracker("o/r", run=note_gh(["not a comment"])[1]).upsert_comment(7, "deferred:", "x")
+    for bad in ({"user": {"login": "me"}, "body": "deferred: x"}, {"id": 1, "user": "me", "body": "deferred: x"},
+                {"id": 1, "user": {"login": "me"}, "body": None}):
+        with pytest.raises(tracker.TrackerError):
+            tracker.GhTracker("o/r", run=note_gh([bad])[1]).upsert_comment(7, "deferred:", "x")
 
 
 def test_memory_upsert_comment_replaces_its_note_in_place_and_posts_the_first():

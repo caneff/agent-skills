@@ -18,14 +18,11 @@ steps below.
 
 drain gates each merge on the command a repo declares in its `AGENTS.md`
 § End-to-end seam, run on the PR merged into current main. Exit 0 merges.
-**Exit 75** (`EX_TEMPFAIL`, "try again later") defers the PR: it stays open
-and queued with no failed-build comment, drain posts or updates one
-`deferred: <the seam's last output line>` comment on it, works the rest of
-the queue, and runs the seam on it again after each other bundle (#2035). A
-drain whose queue holds only deferred PRs ends and names them; the next drain
-resumes them. Every other non-zero exit is a failed build. A repo's step that
+**Exit 75** (`EX_TEMPFAIL`, "try again later") says "not now": drain defers
+the PR and tries it again later, as `drain/drain.py`'s docstring states
+(#2035). Every other non-zero exit is a failed build. A repo's step that
 cannot run now, such as a live check while OBS streams, exits 75 and prints
-why as its last line.
+why as its last line, which becomes the PR's `deferred:` note.
 
 ## Start
 
@@ -120,8 +117,8 @@ then the summary:
   `moot (closed, no PR)` is a ticket closed by hand, which landed nothing.
 - **handed to Chris**: each ticket set with the reason, as drain printed it.
 - **deferred**: each ticket set with its PR and the seam's last line, as
-  printed: an open PR whose seam said "not now" (§ The seam's exit codes),
-  which the next drain tries again.
+  printed: an open PR whose seam said "not now" (§ The seam's exit
+  codes), which the next drain tries again.
 - **stopped**: the reason, when drain printed one.
 - **ended**: the closing `ended: <cause>` line, as printed (its causes are
   in the `drain/drain.py` docstring), then each `passed over:` ticket with

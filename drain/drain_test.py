@@ -790,6 +790,7 @@ def test_a_deferred_seam_leaves_the_pr_open_and_the_drain_merges_it_after_the_ne
     assert sb.handed_comment(1) == [] and "ready-for-human" not in sb.labels(1)
     assert not [c for c in sb.herdr_calls() if c[:2] == ["agent", "prompt"]]
     assert deferred_notes(sb) == ["deferred: obs: recording"]
+    assert "\ndeferred:\n" not in r.stdout  # merged since: the summary lists no deferred PR
     assert sb.ended_lines(r)[:3] == ["bundle ended: #1  deferred: obs: streaming",
                                      f"bundle ended: #2  merged  https://example.test/pull/102  m{sb.state()['merged'][0][1]}",
                                      "bundle ended: #1  deferred: obs: recording"]
@@ -807,6 +808,21 @@ def test_a_drain_left_with_only_a_deferred_pr_ends_naming_it_and_the_next_drain_
     assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
     assert len(sb.dispatch_runs()) == 1
     assert deferred_notes(sb) == ["deferred: obs: streaming"]
+
+
+def test_a_deferral_counts_toward_no_limit_so_the_rest_of_the_queue_is_still_worked(sb):
+    sb.write_state({1: {}, 2: {}, 3: {}})
+    defer_seam(sb, "streaming", "streaming", "streaming")
+    r = sb.drain("--max", "2")
+    assert [m[0] for m in sb.state()["merged"]] == [[2], [3]], r.stdout
+    assert "ended: --max 2 reached" in r.stdout
+
+
+def test_a_seam_that_defers_saying_nothing_is_noted_as_such_not_with_drains_own_lines(sb):
+    sb.write_state({1: {}})
+    sb.set_seam("test -e work-1.txt && exit 75; true")
+    sb.drain("--once")
+    assert deferred_notes(sb) == ["deferred: the seam exited 75 with no output"]
 
 
 @pytest.mark.parametrize("code", [1, 74, 76])

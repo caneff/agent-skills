@@ -77,15 +77,16 @@ declares a `Narrowed` line gets that run's listing as one `selector:` comment
 on the PR, posted before the command, as the lane's merge step does (#1593).
 A section that declares no command merges nothing. No full seam runs in
 drain: the nightly backstop (`backstop/`) is the only full run.
-A run that exits `DEFER_EXIT` (75) defers the PR rather than failing it
-(#2035, `drain/SKILL.md` § The seam's exit codes): the PR, its worker and its
-claims stay as they are, one `deferred: <the run's last line>` comment on the
-PR is posted or edited to match, `bundle ended: <tickets>  deferred: <line>`
-goes to the progress file, and the loop moves on. The deferral counts toward
-`--max` and `--once` and is no failure. After each later bundle that ends any
-other way, every deferred PR is resumed and checked again; one still deferred
-when the drain ends is listed under `deferred:` in the summary, and the next
-drain resumes it as it resumes any anchored ticket.
+A run that exits `DEFER_EXIT` (75, the code `drain/SKILL.md` § The seam's
+exit codes reserves for repos) defers the PR rather than failing it (#2035):
+the PR, its worker and its claims stay as they are, one `deferred: <the
+command's last output line>` comment on the PR is posted or edited to match,
+`bundle ended: <tickets>  deferred: <line>` goes to the progress file, and
+the loop moves on. A deferral is no failure and counts toward neither `--max`
+nor `--once`. After each later bundle that ends any other way, every deferred
+PR is resumed and checked again; one still deferred when the drain ends is
+listed under `deferred:` in the summary, and the next drain resumes it as it
+resumes any anchored ticket.
 After each merge, before the next bundle starts, a repo that declares a
 `- **Deploy**: `<command>`` line in that section (#1726; `{before}` is
 current main's sha just before the merge) has the primary checkout
@@ -113,7 +114,8 @@ Progress is one flushed line per event on stdout, which `job-run` copies into
 the run's progress file as it happens: `bundle started: #<n> <title>; ...
 pane <repo-short>-<anchor>` when a bundle's worker exists, `bundle ended: #<n>
 ... merged <pr> <sha>` or `... handed to Chris: <reason>` or `... deferred:
-<line>` or `... stopped: <reason>` when it ends, then the summary. Before the first bundle, one
+<line>` or `... stopped: <reason>` when it ends, then the summary. Before
+the first bundle, one
 `unresolved at start: #<n> <title>  <why>` per ready ticket with no
 readable `Blocked by`, worded as its `passed over:` line; the run goes on
 without it. A ticket the worker closed with no
@@ -588,8 +590,8 @@ def resumable(ctx, ended):
     `implement-dispatch` started has none, and a ticket drain handed to Chris
     ends in `HANDED_NOTE`, so neither is taken.
     The open list can still carry a ticket just closed, so each candidate's
-    state and labels are read again, and an anchor this drain already took up
-    (`ended`) is never taken twice."""
+    state and labels are read again, and an anchor in `ended` (taken up by
+    this drain and not since released as deferred) is never taken twice."""
     for issue in claimed_issues(ctx):
         if issue["number"] in ended:
             continue
@@ -901,13 +903,17 @@ def run_in_scratch_tree(ctx, cmd, log, head, main):
 
 
 def last_line(log):
-    """The log's last non-blank line, cut to one short line, or what stands for it when there is none."""
+    """The per-change command's last non-blank output line (what the log holds
+    after its `RUNNING` line), cut to one short line; what stands for it when
+    the command printed nothing, or when the log cannot be read."""
     try:
         with open(log, errors="replace") as f:
-            lines = [x for x in f.read().splitlines() if x.strip()]
-    except OSError:
-        lines = []
-    return one_line(lines[-1], 200) if lines else f"the seam exited {DEFER_EXIT} with no output"
+            lines = f.read().splitlines()
+    except OSError as exc:
+        return f"the seam exited {DEFER_EXIT}; its log could not be read ({one_line(exc, 150)})"
+    start = max((i for i, x in enumerate(lines) if x.startswith(RUNNING)), default=-1)
+    said = [x for x in lines[start + 1:] if x.strip()]
+    return one_line(said[-1], 200) if said else f"the seam exited {DEFER_EXIT} with no output"
 
 
 SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "implement", "selector_check.py")
@@ -1005,9 +1011,9 @@ def seam(ctx, head, log, pr, body):
     tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
     base = f"--root . --rev {shlex.quote(main)}"
     cmd = (f"export TESTS_JOBS={seam_jobs()}; cmd=$({tool} command {base}) || exit 1; "
-           f"printf '{RUNNING}%s\\n' \"$cmd\"; "
            f"if {tool} list {base} --state {state}; then "
            f"{tool} comment {base} --state {state} --pr {pr} --repo {shlex.quote(ctx.repo)}; fi; "
+           f"printf '{RUNNING}%s\\n' \"$cmd\"; "
            'sh -c "$cmd"')
     try:
         run_in_scratch_tree(ctx, cmd, log, head, main)
@@ -1471,7 +1477,9 @@ class Progress:
         self.preflight = False  # the `unresolved at start:` lines are out
         self.started = []  # the tickets of a bundle whose start line is out and whose end line is not
         self.told = set()  # stranded slices already named this drain
-        self.ended = set()  # the anchors this drain has taken up: added before `work()`, so none is taken twice
+        # the anchors this drain has taken up: added before `work()`, so none is taken twice, bar a
+        # deferred one `record_bundle` releases after another bundle has ended
+        self.ended = set()
         self.cause, self.seen = None, None  # the cause the drain ended on, and the last queue read `(queue, waiting, passed)`
 
 
@@ -1511,8 +1519,8 @@ def next_anchor(ctx, prog):
 def record_bundle(ctx, prog, anchor, kind, results, reason):
     """Say how the bundle ended and file it: its results as merged or closed, or,
     when it failed, hand it to Chris. Returns the stop reason when the failures
-    in a row reach the limit, else `None`. A deferred bundle counts toward the
-    limits and leaves the failure count alone; any other outcome releases every
+    in a row reach the limit, else `None`. A deferred bundle counts toward no
+    limit and leaves the failure count alone; any other outcome releases every
     deferred PR to be tried again."""
     if results and results[0]["outcome"] == DEFERRED:
         result = results[0]
@@ -1520,7 +1528,6 @@ def record_bundle(ctx, prog, anchor, kind, results, reason):
             + (f" ({result['note']})" if result["note"] else ""))
         prog.started.clear()
         prog.deferred[anchor] = result
-        prog.done += len(result["tickets"])
         return None
     prog.deferred.pop(anchor, None)
     prog.ended -= set(prog.deferred)
