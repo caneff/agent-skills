@@ -148,6 +148,8 @@ allows "backtick in a comment" 'ls # `date`'
 allows "dollar-paren beside a single-quoted backtick" "echo \$(date) '\`x\`'"
 allows "backtick in a single-quoted gh body" "gh pr comment 5 --body 'the \`rg\` flag'"
 allows "escaped backtick" 'echo \`date\`'
+allows "single-quoted backtick in a dollar-paren inside double quotes" "gh pr create --body \"\$(printf 'the \`shellcheck\` step')\""
+blocks "backtick in a dollar-paren inside double quotes" 'echo "now $(echo `date`)"' "$bt"
 
 # ---- the guard never fails silently ----
 # A tool call with no command is reported, not read as a clean command (S2).
