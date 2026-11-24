@@ -50,12 +50,36 @@ REDIRECTS = STDIN_OPS | {">", ">>", ">&", "&>"}
 
 def close_paren(s, start):
     """The index of the `)` closing a `$(` whose body starts at `start`, or
-    len(s) when it never closes."""
-    depth, end = 1, start
-    while end < len(s) and depth:
-        depth += {"(": 1, ")": -1}.get(s[end], 0)
-        end += 1
-    return end - 1 if depth == 0 else len(s)
+    len(s) when it never closes. A paren in quotes or after a backslash is
+    text, so `$(printf '(')` closes at its own `)`."""
+    depth, i, n = 1, start, len(s)
+    while i < n:
+        c = s[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'":
+            j = s.find("'", i + 1)
+            if j < 0:
+                return n
+            i = j + 1
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n and s[j] != '"':
+                j += 2 if s[j] == "\\" else 1
+            if j >= n:
+                return n
+            i = j + 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return n
 
 
 def tokenize(s, nested, ticks=None):
@@ -104,6 +128,12 @@ def tokenize(s, nested, ticks=None):
                     # A `$(...)` body is a script of its own, where quotes count
                     # again: `"$(printf 'a `x` b')"` holds no substitution.
                     end = close_paren(s, j + 2)
+                    if end >= n:
+                        # Never closed: read on as plain double-quoted text,
+                        # so the string still ends at its own `"`.
+                        buf += s[j]
+                        j += 1
+                        continue
                     nested.append(s[j + 2:end])
                     buf += "$x"
                     j = end + 1

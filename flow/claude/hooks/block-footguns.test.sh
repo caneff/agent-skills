@@ -15,7 +15,7 @@ fails=0
 # run <command> -> sets rc and err
 run() {
   printf '%s' "$1" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' > "$tmp/in.json"
-  err=$(python3 -I "$hook" < "$tmp/in.json" 2>&1 >"$tmp/out"); rc=$?
+  err=$(timeout 10 python3 -I "$hook" < "$tmp/in.json" 2>&1 >"$tmp/out"); rc=$?
 }
 blocks() { # blocks <name> <command> <substring of the message>
   run "$2"
@@ -150,6 +150,23 @@ allows "backtick in a single-quoted gh body" "gh pr comment 5 --body 'the \`rg\`
 allows "escaped backtick" 'echo \`date\`'
 allows "single-quoted backtick in a dollar-paren inside double quotes" "gh pr create --body \"\$(printf 'the \`shellcheck\` step')\""
 blocks "backtick in a dollar-paren inside double quotes" 'echo "now $(echo `date`)"' "$bt"
+blocks "rg after a double-quoted dollar-paren holding a quoted paren" "n=\"\$(grep -c 'def tokenize(' hook.py)\"; rg close_paren" "Pass a path"
+blocks "rg after a double-quoted printf of a lone paren" "echo \"\$(printf '(')\" && rg foo" "Pass a path"
+blocks "rg inside a double-quoted dollar-paren" 'echo "$(rg foo)"' "Pass a path"
+blocks "real backtick after a double-quoted lone paren" "echo \"\$(printf ':(')\" && echo \"it's \`date\`\"" "$bt"
+allows "quoted paren in a double-quoted dollar-paren, then a single-quoted backtick" "git commit -m \"\$(printf 'fix: handle :( input')\" && gh pr comment 5 --body 'the \`rg\` flag'"
+allows "close paren in an inner double-quoted string" "echo \"\$(printf \"1) a\")\" && gh pr comment 5 --body 'the \`rg\` flag'"
+allows "escaped paren in a double-quoted dollar-paren" "echo \"\$(echo \\( )\" '\`x\`'"
+allows "numbered list in a double-quoted printf" "gh pr create --body \"\$(printf '1) run \`x\`')\""
+terminates() { # terminates <name> <command>: the guard answers, whatever its verdict
+  run "$2"
+  if [ "$rc" = 0 ] || [ "$rc" = 2 ]; then echo "PASS: $1"
+  else echo "FAIL: $1 — want an answer, got $rc (124 is a hang): $err"; fails=1; fi
+}
+terminates "unclosed backtick" 'echo `date'
+terminates "unclosed dollar-paren" 'echo $(date'
+terminates "unclosed dollar-paren in double quotes" 'echo "$(date'
+terminates "unclosed quote in a double-quoted dollar-paren" "echo \"\$(printf 'x)\""
 
 # ---- the guard never fails silently ----
 # A tool call with no command is reported, not read as a clean command (S2).
