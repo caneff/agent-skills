@@ -184,7 +184,13 @@ Its entries cover every step once, in order, as key ideas and fill stretches.
   passes through a digit a clue cannot hold beside its partner is false even
   when its conclusion is right: rewrite it, never ship it.
 - **A fill stretch is one sentence** for a run of routine steps (singles,
-  house completion) between key ideas.
+  house completion) between key ideas. It says what the stretch achieved,
+  in plain words ("the 9s are placed", "row 7 is finished"), and lists no
+  removals: the stretch's collapsed step list carries the detail.
+- **Name a clue as the picture draws it.** Two diagonal clues that the
+  rules file holds as two ids but the picture draws as one dot at a corner
+  are one dot in the words: "the black dot where r1c1, r1c2, r2c1 and r2c2
+  meet", never "the black dots r1c1-r2c2 and r1c2-r2c1".
 - **A clue whose digits are forced is a key idea.** When a dot, cage or
   line can hold only one pair or set (a two-cell cage of 3 holds 1 and 2), say
   so in the key idea whose steps depend on it, with the counting that proves
