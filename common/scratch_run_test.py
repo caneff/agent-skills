@@ -85,6 +85,16 @@ def test_a_red_command_raises_naming_it_and_still_removes_the_worktree(repo, tmp
     assert worktrees(repo) == [f"worktree {repo}"]
 
 
+def test_a_red_command_carries_its_own_exit_code_and_a_failure_before_it_carries_none(repo, tmp_path):
+    log = str(tmp_path / "run.log")
+    with pytest.raises(scratch_run.ScratchError) as red:
+        scratch_run.run_in_scratch_tree(repo, "HEAD", "exit 75", log, 30)
+    assert red.value.code == 75
+    with pytest.raises(scratch_run.ScratchError) as early:
+        scratch_run.run_in_scratch_tree(repo, "no-such-rev", "true", log, 30)
+    assert early.value.code is None
+
+
 def test_head_is_merged_in_before_the_command(repo, tmp_path):
     base = git(repo, "rev-parse", "HEAD~1")
     git(repo, "checkout", "-q", "-b", "side", base)

@@ -14,6 +14,19 @@ batch is what it lists); with flags while one is alive, `job-run` refuses a
 second run, and the refusal is reported as it stands. Neither case runs the
 steps below.
 
+## The seam's exit codes
+
+drain gates each merge on the command a repo declares in its `AGENTS.md`
+§ End-to-end seam, run on the PR merged into current main. Exit 0 merges.
+**Exit 75** (`EX_TEMPFAIL`, "try again later") defers the PR: it stays open
+and queued with no failed-build comment, drain posts or updates one
+`deferred: <the seam's last output line>` comment on it, works the rest of
+the queue, and runs the seam on it again after each other bundle (#2035). A
+drain whose queue holds only deferred PRs ends and names them; the next drain
+resumes them. Every other non-zero exit is a failed build. A repo's step that
+cannot run now, such as a live check while OBS streams, exits 75 and prints
+why as its last line.
+
 ## Start
 
 1. **Resolve the primary checkout.** `<dir>` is `--repo` if given, else this
@@ -94,7 +107,7 @@ argparse error, `drain.py: ...`) is reported verbatim as a start that never
 ran, not as a crash. A drain that ran ends with drain's summary, in
 `~/.cache/agent-jobs/drain-<repo-short>/progress` after the timestamp on each
 line, starting at the line `merged:`, `closed, no PR:`, `handed to Chris:`,
-`stopped:` or `nothing to drain`, and ending with its `ended:` line. Open
+`deferred:`, `stopped:` or `nothing to drain`, and ending with its `ended:` line. Open
 the report with every bundle this drain worked, one per
 `bundle started:` line in the progress file with its `bundle ended:` outcome,
 then the summary:
@@ -106,6 +119,9 @@ then the summary:
 - **closed, no PR**: each ticket set with how drain recorded it, as printed:
   `moot (closed, no PR)` is a ticket closed by hand, which landed nothing.
 - **handed to Chris**: each ticket set with the reason, as drain printed it.
+- **deferred**: each ticket set with its PR and the seam's last line, as
+  printed: an open PR whose seam said "not now" (§ The seam's exit codes),
+  which the next drain tries again.
 - **stopped**: the reason, when drain printed one.
 - **ended**: the closing `ended: <cause>` line, as printed (its causes are
   in the `drain/drain.py` docstring), then each `passed over:` ticket with

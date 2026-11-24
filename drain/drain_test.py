@@ -44,6 +44,16 @@ if args[:2] == ["issue", os.environ.get("FAIL_VERB")] or (
     sys.stderr.write("fake gh: injected failure\n"); sys.exit(1)
 if args[:2] == ["api", "user"]:
     print(state["login"])
+elif args[0] == "api" and re.search(r"/issues/\d+/comments$", args[-1]):
+    # a PR's comments, each with its id (its place in `pr_comments`) and drain's login as author
+    n = re.search(r"/issues/(\d+)/comments$", args[-1]).group(1)
+    out([[dict(id=i, user=dict(login=state["login"]), body=b)
+          for i, (p, b) in enumerate(state.get("pr_comments", [])) if p == n]])
+elif args[:3] == ["api", "-X", "PATCH"]:
+    if os.environ.get("PR_COMMENT_FAIL"):
+        sys.stderr.write("fake gh: pr comment refused\n"); sys.exit(1)
+    state["pr_comments"][int(re.search(r"comments/(\d+)$", args[3]).group(1))][1] = opt("-f")[len("body="):]
+    save()
 elif args[0] == "api":
     url = args[-1]
     m = re.search(r"/issues/(\d+)(/parent)?$", url)
@@ -754,6 +764,69 @@ def test_a_red_seam_is_a_failed_build(sb):
     sb.drain("--once")
     assert "merged" not in sb.state()
     assert "seam `false` failed" in sb.handed_comment(1)[0]
+
+
+def defer_seam(sb, *lines):
+    """A seam that defers the PR of ticket 1 (the tree holds `work-1.txt`) once per line of
+    `lines`, printing `obs: <line>` last and exiting 75, then passes; every other tree passes."""
+    left = os.path.join(sb.tmp, "defers-left")
+    write(left, "".join(x + "\n" for x in lines))
+    sb.set_seam(f'if test -e work-1.txt && test -s {left}; then echo starting; '
+                f'echo "obs: $(head -n 1 {left})"; sed -i 1d {left}; exit 75; fi')
+
+
+def deferred_notes(sb, pr=101):
+    return [b for p, b in sb.state().get("pr_comments", []) if p == str(pr) and b.startswith("deferred:")]
+
+
+def test_a_deferred_seam_leaves_the_pr_open_and_the_drain_merges_it_after_the_next_bundle(sb):
+    sb.write_state({1: {}, 2: {}, 3: {}})
+    defer_seam(sb, "streaming", "recording")
+    r = sb.drain("--max", "9")
+    assert r.returncode == 0, r.stderr
+    # #1 is retried after each other bundle: it defers again after #2, and merges after #3.
+    assert [m[0] for m in sb.state()["merged"]] == [[2], [3], [1]], r.stdout
+    assert [c["n"] for c in sb.dispatch_runs()] == ["1", "2", "3"]
+    assert sb.handed_comment(1) == [] and "ready-for-human" not in sb.labels(1)
+    assert not [c for c in sb.herdr_calls() if c[:2] == ["agent", "prompt"]]
+    assert deferred_notes(sb) == ["deferred: obs: recording"]
+    assert sb.ended_lines(r)[:3] == ["bundle ended: #1  deferred: obs: streaming",
+                                     f"bundle ended: #2  merged  https://example.test/pull/102  m{sb.state()['merged'][0][1]}",
+                                     "bundle ended: #1  deferred: obs: recording"]
+
+
+def test_a_drain_left_with_only_a_deferred_pr_ends_naming_it_and_the_next_drain_merges_it(sb):
+    sb.write_state({1: {}})
+    defer_seam(sb, "streaming")
+    r = sb.drain()
+    assert r.returncode == 0, r.stderr
+    assert "merged" not in sb.state()
+    assert "deferred:\n  #1  https://example.test/pull/101  obs: streaming" in r.stdout
+    assert "in-progress" in sb.labels(1) and sb.handed_comment(1) == []
+    r = sb.drain()
+    assert [m[0] for m in sb.state()["merged"]] == [[1]], r.stdout
+    assert len(sb.dispatch_runs()) == 1
+    assert deferred_notes(sb) == ["deferred: obs: streaming"]
+
+
+@pytest.mark.parametrize("code", [1, 74, 76])
+def test_any_other_seam_exit_is_still_a_failed_build_with_no_deferred_note(sb, code):
+    sb.write_state({1: {}})
+    sb.set_seam(f"echo nope; exit {code}")
+    r = sb.drain("--once")
+    assert "merged" not in sb.state()
+    assert sb.handed_comment(1) and deferred_notes(sb) == []
+    assert "deferred" not in r.stdout
+
+
+def test_a_deferred_note_that_cannot_be_posted_still_defers_and_says_so(sb):
+    sb.write_state({1: {}})
+    defer_seam(sb, "streaming")
+    r = sb.drain("--once", env={"PR_COMMENT_FAIL": "1"})
+    assert sb.handed_comment(1) == [] and "merged" not in sb.state()
+    [line] = sb.ended_lines(r)
+    assert line.startswith("bundle ended: #1  deferred: obs: streaming (note not posted: ")
+    assert line.endswith("fake gh: pr comment refused)")
 
 
 def test_the_seam_runs_on_the_pr_merged_into_current_main(sb):
