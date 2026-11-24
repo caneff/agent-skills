@@ -198,6 +198,14 @@ Its entries cover every step once, in order, as key ideas and fill stretches.
   same steps cell by cell, so look for it in the clues themselves: for each
   clue, list the digit sets its rule allows on its cells and ask whether the
   houses it sits in cut them down to one.
+- **Words ahead of the record go in `early_removals`.** When a key idea's
+  words rule out a digit the record has not removed by the end of that
+  idea's steps, list it in the entry's `early_removals`
+  (`{"cell": "r7c8", "digits": [9]}`), so its grid strikes the digit and
+  every later grid starts without it. Write no label for it. Exit 2 naming
+  a digit already gone means the record removed it first: drop the entry.
+  Exit 2 naming the cell's solution digit means the words are wrong: fix
+  them.
 - Every claim the words make is a step of the record, or true reasoning
   from the puzzle's clues that proves one; a claim no step makes is not
   written.
