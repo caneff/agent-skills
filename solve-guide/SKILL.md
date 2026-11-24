@@ -224,35 +224,58 @@ Its entries cover every step once, in order, as key ideas and fill stretches.
 ## 7. Render
 
 ```
-$K solve-guide <input> out --max-steps 0 --guide guide.json
+~/.agents/skills/solve-guide/rerender.sh ~/.cache/solve-guide/<slug> [-- <carried limits>]
 ```
 
-`--max-steps 0` draws the record as it stands: the render never searches, so
-a stuck record keeps its stuck point. It exits 0 when it drew the page,
-whether the record is solved or stuck. Exit 2 names what the guide file gets
-wrong; fix it and run again. Exit 5 is § 3's second cause.
+It renders `guide.json` against the record with `--max-steps 0`, so it never
+searches and a stuck record keeps its stuck point, then copies the page to
+the next free `guide-r<n>.html` in the work directory and prints that path.
+A fresh name each round matters: a reused one serves Chris the last round
+from cache. Flags after `--` go to `solve-guide` as they are (the limits the
+record was built under, or `--image` when Chris asks for the original
+beside the guide). Exit 2 names what the guide file gets wrong (§ 8 lists
+the refusals); fix it and run again. Exit 5 is § 3's second cause.
 
-The HTML page is the guide. It is self-contained, so copy `out/guide.html` to
-a fresh name each round, `~/.cache/solve-guide/<slug>/guide-r<n>.html`: the
-library rewrites `out/guide.html` on every call, and a reused name serves
-Chris the last round from cache. Look at every key idea before handing it
-over: screenshot the copy
-(`shot-scraper <copy> -o guide-check.png --silent`) and open the image
-(`flow/claude/VISUAL-INSPECTION.md` § Judging visual work). Then open the
-copy for Chris in his personal Chrome profile and say which key ideas it
-has:
+The HTML page is the guide. Look at every key idea before handing it over:
+screenshot the copy (`shot-scraper <copy> -o guide-check.png --silent`) and
+open the image (`flow/claude/VISUAL-INSPECTION.md` § Judging visual work).
+Then open the copy for Chris in his personal Chrome profile and say which
+key ideas it has:
 
 ```
 "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" --profile-directory=Default "$(wslpath -w <copy>)"
 ```
 
-**A printout only when Chris asks for one:**
+**A printout only when Chris asks for one.** Add `--pdf` before the `--`:
+the page is also printed to `guide-r<n>.pdf` beside it. For a destination he
+names, run
+`python3 ~/.agents/skills/solve-guide/print_pdf.py <copy> <destination>`,
+which refuses a path inside a git work tree, so a named path inside a repo
+goes back to him. Open a printout with `wslview <path>`.
 
-```
-python3 ~/.agents/skills/solve-guide/print_pdf.py <copy> <destination>
-```
+## 8. Editing a guide
 
-The destination is the path he names, else
-`~/.cache/solve-guide/<slug>/guide-r<n>.pdf`; `print_pdf.py` refuses a path
-inside a git work tree, so a named path inside a repo goes back to him. Open
-it with `wslview <destination>`.
+Chris polishes a guide by hand, or asks for help with it. Start from the
+files already there, never from a new search.
+
+- **The source** is `~/.cache/solve-guide/<slug>/guide.json`, in the format
+  `$SUDOKU_KIT/docs/guide-file.md` defines. Edit only that file.
+  `out/steps.json` is the step record, and `guide-r<n>.html` and
+  `guide-r<n>.pdf` are rendered copies; none of them is edited by hand.
+- **Safe to change:** a `heading`, a key idea's `paragraphs`, a fill's
+  `sentence`, which key idea carries `break_in`, and its `marks`. An entry's
+  `first` and `last` may move, and entries may merge or split, as long as
+  the entries still cover every step once, in order.
+- **Checked by the library** (exit 2, naming the entry, cell and digit; the
+  Refusals section of `$SUDOKU_KIT/docs/guide-file.md` has the full list): a
+  skipped, repeated or reordered step; more than one break-in; an `explains`
+  step outside its entry's run; a supposition digit that is not a candidate
+  there; an early removal that is no longer a candidate or is the cell's
+  solution digit; a missing field, an unknown field, or one of the wrong
+  kind.
+- **Not checked:** whether the words are true. Reasoning that changes, or an
+  entry whose steps move, gets § 6's checks again against `$K
+  solve-deductions out`. A changed supposition or `early_removals` must still
+  match the words.
+- **Re-render** with § 7's command, carrying the record's limits, and open
+  the new copy for Chris.
