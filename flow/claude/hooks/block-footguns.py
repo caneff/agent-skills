@@ -48,6 +48,40 @@ STDIN_OPS = {"<", "<<", "<<-", "<<<", "<&"}
 REDIRECTS = STDIN_OPS | {">", ">>", ">&", "&>"}
 
 
+def close_paren(s, start):
+    """The index of the `)` closing a `$(` whose body starts at `start`, or
+    len(s) when it never closes. A paren in quotes or after a backslash is
+    text, so `$(printf '(')` closes at its own `)`."""
+    depth, i, n = 1, start, len(s)
+    while i < n:
+        c = s[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'":
+            j = s.find("'", i + 1)
+            if j < 0:
+                return n
+            i = j + 1
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n and s[j] != '"':
+                j += 2 if s[j] == "\\" else 1
+            if j >= n:
+                return n
+            i = j + 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return n
+
+
 def tokenize(s, nested, ticks=None):
     """[(kind, text)], kind 'w' (a word, quotes removed) or 'o' (an operator;
     a newline outside quotes is the operator '\\n'). A `$(...)` or backtick
@@ -90,6 +124,20 @@ def tokenize(s, nested, ticks=None):
             while j < n and s[j] != '"':
                 if s[j] == "\\" and j + 1 < n:
                     j += 1
+                elif s[j] == "$" and s[j + 1:j + 2] == "(":
+                    # A `$(...)` body is a script of its own, where quotes count
+                    # again: `"$(printf 'a `x` b')"` holds no substitution.
+                    end = close_paren(s, j + 2)
+                    if end >= n:
+                        # Never closed: read on as plain double-quoted text,
+                        # so the string still ends at its own `"`.
+                        buf += s[j]
+                        j += 1
+                        continue
+                    nested.append(s[j + 2:end])
+                    buf += "$x"
+                    j = end + 1
+                    continue
                 elif s[j] == "`" and ticks is not None:
                     end = s.find("`", j + 1)
                     end = n if end < 0 else end
@@ -106,13 +154,9 @@ def tokenize(s, nested, ticks=None):
             start = i + (1 if c == "`" else 2)
             if c == "`":
                 end = s.find("`", start)
+                end = n if end < 0 else end
             else:
-                depth, end = 1, start
-                while end < n and depth:
-                    depth += {"(": 1, ")": -1}.get(s[end], 0)
-                    end += 1
-                end = end - 1 if depth == 0 else -1
-            end = n if end < 0 else end
+                end = close_paren(s, start)
             nested.append(s[start:end])
             if c == "`" and ticks is not None:
                 ticks.append(s[start:end])
