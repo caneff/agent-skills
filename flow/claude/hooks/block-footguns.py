@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Footgun guard (PreToolUse, Bash): refuse three command shapes that destroy,
+"""Footgun guard (PreToolUse, Bash): refuse four command shapes that destroy,
 hang or get denied, and say what to run instead. Exit 2 with the reason on
 stderr blocks; every other path exits 0.
 
@@ -26,6 +26,15 @@ stderr blocks; every other path exits 0.
    heredoc body, with the `$(...)` rewrite in the message. A backtick in single
    quotes, a quoted-delimiter heredoc, a comment or after a backslash is text
    and passes.
+
+4. A command that replaces the `~/.claude/settings.json` symlink (#2047). That
+   path links into `flow/claude/settings.json`; `mv`, `install`, `ln`,
+   `cp --remove-destination` and `sed -i` / `perl -i` (without sed's
+   `--follow-symlinks`) put a plain file where the link was and detach the
+   live config from the repo. Refused when the destination operand is that path,
+   written literally, as `~/` or as `$HOME/`. Plain `cp`, a redirect, and any
+   edit of the real file under `flow/claude/` write through the link and pass.
+   A relative spelling after a `cd` is not seen.
 
 A failure of the guard itself is said out loud (a systemMessage, exit 0): a
 guard that crashed quietly would read as a command with nothing wrong in it.
@@ -417,6 +426,89 @@ def strip_heredocs(command, expanded=None):
     return "\n".join(out)
 
 
+# ---- guard 4: replacing the settings.json symlink ----
+
+HOME_FORMS = ("~/", "$HOME/", "${HOME}/")
+
+
+def is_settings_link(word):
+    """True when `word` spells ~/.claude/settings.json (text only: realpath
+    would resolve the link, and the real file is the allowed target)."""
+    home = os.path.expanduser("~")
+    for form in HOME_FORMS:
+        if word.startswith(form):
+            word = home + "/" + word[len(form):]
+            break
+    return os.path.normpath(word) == os.path.join(home, ".claude", "settings.json")
+
+
+def in_place_flag(arg, value_flags):
+    """True when a short-option cluster or `--in-place` asks for in-place edit."""
+    if arg.startswith("--"):
+        return arg.split("=", 1)[0] == "--in-place"
+    if not arg.startswith("-") or len(arg) < 2:
+        return False
+    for ch in arg[1:]:
+        if ch == "i":
+            return True
+        if ch in value_flags:
+            return False
+    return False
+
+
+def destinations(args):
+    """The paths a mv/install/ln/cp writes: the last operand, or each source's
+    name inside the `-t DIR` directory."""
+    ops, target, i = [], None, 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a == "--":
+            ops += args[i:]
+            break
+        if a in ("-t", "--target-directory"):
+            target = args[i] if i < len(args) else None
+            i += 1
+        elif a.startswith("--target-directory="):
+            target = a.split("=", 1)[1]
+        elif a.startswith("-t") and not a.startswith("--") and len(a) > 2:
+            target = a[2:]
+        elif a.startswith("-") and len(a) > 1:
+            continue
+        else:
+            ops.append(a)
+    if target is not None:
+        return [target.rstrip("/") + "/" + os.path.basename(o) for o in ops]
+    return ops[-1:] if len(ops) > 1 else []
+
+
+def replaces_settings_link(scan):
+    if "settings.json" not in scan:
+        return False
+    for words, _, _ in scan_commands(scan):
+        words = strip_prefix(words)
+        if not words:
+            continue
+        name, args = os.path.basename(words[0]), words[1:]
+        if name in ("mv", "install", "ln"):
+            hit = any(is_settings_link(d) for d in destinations(args))
+        elif name == "cp":
+            hit = "--remove-destination" in args and any(
+                is_settings_link(d) for d in destinations(args))
+        elif name == "sed":
+            hit = (any(in_place_flag(a, "efl") for a in args)
+                   and "--follow-symlinks" not in args
+                   and any(is_settings_link(a) for a in args))
+        elif name == "perl":
+            hit = (any(in_place_flag(a, "e") for a in args)
+                   and any(is_settings_link(a) for a in args))
+        else:
+            hit = False
+        if hit:
+            return True
+    return False
+
+
 # ---- main ----
 
 def main():
@@ -444,6 +536,15 @@ def main():
                   "stdin is neither a tty nor /dev/null, so rg reads stdin and the "
                   "call hangs until its timeout. Pass a path (`rg <pattern> .`) or "
                   "use `git grep <pattern>`.", file=sys.stderr)
+            return 2
+        if replaces_settings_link(scan):
+            print(f"BLOCKED: '{command[:200]}' replaces the symlink "
+                  "~/.claude/settings.json, which points into "
+                  "~/.agents/skills/flow/claude/settings.json: the new plain file "
+                  "detaches the live config from the repo. Edit it in place "
+                  "instead: the Edit tool on the file, `cp` or a redirect "
+                  "(both write through the link), or `sed -i --follow-symlinks`.",
+                  file=sys.stderr)
             return 2
         ticks = backtick_bodies(scan) if "`" in scan else []
         ticks += re.findall(r"(?<!\\)`([^`]*)`", "\n".join(expanded))
