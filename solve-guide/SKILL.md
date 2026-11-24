@@ -171,8 +171,13 @@ Its entries cover every step once, in order, as key ideas and fill stretches.
   a narrowed set, its `heading` names the move, and its explanation runs about
   three short sentences. Use `explains` to draw only the steps the move is
   about when its run also holds routine ones.
-- **The break-in is flagged** (`break_in: true`): the first key idea a solver
-  needs to get anywhere.
+- **What is not a key idea.** A move that uses one clue, or only singles,
+  goes in a fill. A key idea that an earlier one already covers is dropped:
+  its steps fold into a fill, or into that earlier idea's run. Aim for about
+  3 to 5 key ideas on a 6x6; with more, say why when you hand the guide
+  over.
+- **The break-in is flagged** (`break_in: true`) on the first key idea that
+  is not routine.
 - **A "suppose" argument** ("if this cell were 4, then ... clash") gets a
   `supposition` diagram: the assumed digit, the digits it forces in order,
   and the clash cells. Setup the supposition leans on is its own key idea
@@ -189,15 +194,21 @@ Its entries cover every step once, in order, as key ideas and fill stretches.
   removals: the stretch's collapsed step list carries the detail.
 - **Name a clue as the picture draws it.** Two diagonal clues that the
   rules file holds as two ids but the picture draws as one dot at a corner
-  are one dot in the words: "the black dot where r1c1, r1c2, r2c1 and r2c2
-  meet", never "the black dots r1c1-r2c2 and r1c2-r2c1".
+  are one dot in the words: "the black dot at r78c89", never "the black dots
+  r7c8-r8c9 and r7c9-r8c8".
+- **Group a list of cells.** Cells that fill a block of rows by columns are
+  written as one: "r7c8, r7c9, r8c8 and r8c9" is "r78c89", and "r4c1, r4c2
+  and r4c3" is "r4c123". The words use this; the guide file's JSON fields
+  keep one cell each, as its format defines.
 - **A clue whose digits are forced is a key idea.** When a dot, cage or
   line can hold only one pair or set (a two-cell cage of 3 holds 1 and 2), say
-  so in the key idea whose steps depend on it, with the counting that proves
-  it. The record rarely states such a fact, because the search proves the
-  same steps cell by cell, so look for it in the clues themselves: for each
-  clue, list the digit sets its rule allows on its cells and ask whether the
-  houses it sits in cut them down to one.
+  so with the counting that proves it, at the earliest point a solver could
+  see it: it needs only the clues, so it can be the break-in. Its
+  `early_removals` carry what it rules out ahead of the record. The record
+  rarely states such a fact, because the search proves the same steps cell
+  by cell, so look for it in the clues themselves: for each clue, list the
+  digit sets its rule allows on its cells and ask whether the houses it sits
+  in cut them down to one.
 - **Words ahead of the record go in `early_removals`.** When a key idea's
   words rule out a digit the record has not removed by the end of that
   idea's steps, list it in the entry's `early_removals`
