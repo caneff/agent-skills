@@ -16,8 +16,9 @@ steps below.
 
 ## The seam's exit codes
 
-drain gates each merge on the command a repo declares in its `AGENTS.md`
-§ End-to-end seam, run on the PR merged into current main. Exit 0 merges.
+drain gates each merge on the command a repo declares in its
+`AGENTS.md` § End-to-end seam, run on the PR merged into current main.
+Exit 0 merges.
 **Exit 75** (`EX_TEMPFAIL`, "try again later") says "not now": drain defers
 the PR and tries it again later, as `drain/drain.py`'s docstring states
 (#2035). Every other non-zero exit is a failed build. A repo's step that
