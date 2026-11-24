@@ -288,6 +288,20 @@ class GhTracker:
         """Comment on issue or PR `number`."""
         self._run(["issue", "comment", str(number), "--repo", self.repo, "--body", body])
 
+    def upsert_comment(self, number, prefix, body):
+        """One note kept current: edit the viewer's own latest comment on issue or PR `number`
+        that starts with `prefix` to read `body`, else post `body` as a new comment."""
+        login = self.viewer_login()
+        comments = self._pages(self._path(f"issues/{int(number)}/comments"), "comments")
+        if not all(isinstance(c, dict) and isinstance(c.get("id"), int) and isinstance(c.get("body"), str)
+                   and isinstance(c.get("user"), (dict, type(None))) for c in comments):
+            raise TrackerError(f"#{number}: a comment came back without an id, a body or a user")
+        mine = [c for c in comments if (c["user"] or {}).get("login") == login and c["body"].startswith(prefix)]
+        if not mine:
+            self.comment(number, body)
+            return
+        self._run(["api", "-X", "PATCH", self._path(f"issues/comments/{mine[-1]['id']}"), "-f", f"body={body}"])
+
     def merge(self, pr, head):
         """Squash-merge `pr`, only if its head is still `head`."""
         self._run(["pr", "merge", str(pr), "--repo", self.repo, "--squash", "--match-head-commit", head])
@@ -411,6 +425,17 @@ class MemoryTracker:
             stamp = (datetime.datetime(2000, 1, 1) + datetime.timedelta(seconds=len(posted))).isoformat()
             posted.append({"author": {"login": self._viewer}, "body": body, "createdAt": stamp + "Z",
                            "isMinimized": False})
+
+    def upsert_comment(self, number, prefix, body):
+        self._check("upsert_comment", number)
+        at = [k for k, (n, b) in enumerate(self.comments) if n == number and b.startswith(prefix)]
+        if not at:
+            self.comment(number, body)
+            return
+        self.comments[at[-1]] = (number, body)
+        posted = [c for c in self._issues.get(number, {}).get("comments", []) if c["body"].startswith(prefix)]
+        if posted:
+            posted[-1]["body"] = body
 
     def create_issue_from_file(self, title, body_file, labels):
         return self.create_issue(title, self._read(body_file), labels)

@@ -19,7 +19,12 @@ import shellcmd
 
 
 class ScratchError(Exception):
-    """A run failed: it could not start, passed its wall clock, or exited non-zero."""
+    """A run failed: it could not start, passed its wall clock, or exited non-zero. `code` is
+    the command's own exit status when it ran and exited non-zero, else `None`."""
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
 
 
 def one_line(text, limit=300):
@@ -73,7 +78,8 @@ def run_in_scratch_tree(root, rev, cmd, log, timeout, head=None):
     merged in first when given (the merge commit uses the identity the repo is configured with).
     Each directory holding a tracked `package-lock.json` gets `npm ci` before `cmd`, since a bare
     worktree has no `node_modules` (#1445, #1502). Everything after the merge writes to `log`.
-    Raises `ScratchError` on a failed add, a conflict, a failed install or a non-zero exit."""
+    Raises `ScratchError` on a failed add, a conflict, a failed install or a non-zero exit, the
+    last one carrying the exit status as `code`."""
     scratch = tempfile.mkdtemp(prefix="scratch-run-")
     try:
         with shellcmd.scratch_worktree(root, rev, scratch):
@@ -92,7 +98,7 @@ def run_in_scratch_tree(root, rev, cmd, log, timeout, head=None):
                         raise ScratchError(f"{exc} (output in {log})") from None
                 code, _ = run_group(["sh", "-c", cmd], scratch, timeout, out=out)
             if code:
-                raise ScratchError(f"`{cmd}` failed (output in {log})")
+                raise ScratchError(f"`{cmd}` failed (output in {log})", code=code)
     except shellcmd.CmdError as exc:
         raise ScratchError(str(exc)) from None
     except OSError as exc:

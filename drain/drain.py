@@ -77,6 +77,16 @@ declares a `Narrowed` line gets that run's listing as one `selector:` comment
 on the PR, posted before the command, as the lane's merge step does (#1593).
 A section that declares no command merges nothing. No full seam runs in
 drain: the nightly backstop (`backstop/`) is the only full run.
+A run that exits `DEFER_EXIT` (75, the code `drain/SKILL.md` § The seam's
+exit codes reserves for repos) defers the PR rather than failing it (#2035):
+the PR, its worker and its claims stay as they are, one `deferred: <the
+command's last output line>` comment on the PR is posted or edited to match,
+`bundle ended: <tickets>  deferred: <line>` goes to the progress file, and
+the loop moves on. A deferral is no failure and counts toward neither `--max`
+nor `--once`. After each later bundle that ends any other way, every deferred
+PR is resumed and checked again; one still deferred when the drain ends is
+listed under `deferred:` in the summary, and the next drain resumes it as it
+resumes any anchored ticket.
 After each merge, before the next bundle starts, a repo that declares a
 `- **Deploy**: `<command>`` line in that section (#1726; `{before}` is
 current main's sha just before the merge) has the primary checkout
@@ -103,8 +113,9 @@ job notices, "PR up" is its stop), and `drain` waits for that stop.
 Progress is one flushed line per event on stdout, which `job-run` copies into
 the run's progress file as it happens: `bundle started: #<n> <title>; ...
 pane <repo-short>-<anchor>` when a bundle's worker exists, `bundle ended: #<n>
-... merged <pr> <sha>` or `... handed to Chris: <reason>` or `... stopped:
-<reason>` when it ends, then the summary. Before the first bundle, one
+... merged <pr> <sha>` or `... handed to Chris: <reason>` or `... deferred:
+<line>` or `... stopped: <reason>` when it ends, then the summary. Before
+the first bundle, one
 `unresolved at start: #<n> <title>  <why>` per ready ticket with no
 readable `Blocked by`, worded as its `passed over:` line; the run goes on
 without it. A ticket the worker closed with no
@@ -237,6 +248,15 @@ TICKET, SPEC = "ticket", "spec"
 
 class DrainError(Exception):
     """A step failed; the message is the reason handed to Chris."""
+
+
+class Deferred(Exception):
+    """The seam exited `DEFER_EXIT`: the PR waits, open and queued, for a later pass (#2035).
+    `line` is the seam's last output line; `view` is the PR, set by `check_merge`."""
+
+    def __init__(self, line, view=None):
+        super().__init__(line)
+        self.line, self.view = line, view
 
 
 class DrainStop(Exception):
@@ -570,8 +590,8 @@ def resumable(ctx, ended):
     `implement-dispatch` started has none, and a ticket drain handed to Chris
     ends in `HANDED_NOTE`, so neither is taken.
     The open list can still carry a ticket just closed, so each candidate's
-    state and labels are read again, and an anchor this drain already took up
-    (`ended`) is never taken twice."""
+    state and labels are read again, and an anchor in `ended` (taken up by
+    this drain and not since released as deferred) is never taken twice."""
     for issue in claimed_issues(ctx):
         if issue["number"] in ended:
             continue
@@ -871,12 +891,29 @@ def open_pr(ctx, branch):
 
 def run_in_scratch_tree(ctx, cmd, log, head, main):
     """`scratch_run.run_in_scratch_tree` on `main` (current main's sha) with
-    `head` merged in, under the worker's wall clock; any failure there is a
-    `DrainError`."""
+    `head` merged in, under the worker's wall clock. The command exiting
+    `DEFER_EXIT` is a `Deferred` carrying the log's last line; any other
+    failure there is a `DrainError`."""
     try:
         scratch_run.run_in_scratch_tree(ctx.root, main, cmd, log, WALL_CLOCK_SECONDS, head=head)
     except scratch_run.ScratchError as exc:
+        if exc.code == DEFER_EXIT:
+            raise Deferred(last_line(log)) from None
         raise DrainError(str(exc)) from None
+
+
+def last_line(log):
+    """The per-change command's last non-blank output line (what the log holds
+    after its `RUNNING` line), cut to one short line; what stands for it when
+    the command printed nothing, or when the log cannot be read."""
+    try:
+        with open(log, errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError as exc:
+        return f"the seam exited {DEFER_EXIT}; its log could not be read ({one_line(exc, 150)})"
+    start = max((i for i, x in enumerate(lines) if x.startswith(RUNNING)), default=-1)
+    said = [x for x in lines[start + 1:] if x.strip()]
+    return one_line(said[-1], 200) if said else f"the seam exited {DEFER_EXIT} with no output"
 
 
 SELECTOR_CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "implement", "selector_check.py")
@@ -892,6 +929,12 @@ SEAM_JOBS = 4
 # How many times main may move under the merge's check before drain gives up:
 # each move means the checked tree is not the one the merge would land.
 BASE_CHECKS = 3
+# The seam exit that defers a PR instead of failing it (#2035): sysexits.h's
+# `EX_TEMPFAIL`, "try again later". `drain/SKILL.md` § The seam's exit codes states it
+# for the repos that declare a seam; every other non-zero exit is a failed build.
+DEFER_EXIT = 75
+# What opens drain's one note on a deferred PR, kept current rather than posted again.
+DEFERRED_NOTE = "deferred:"
 # The PR body line a worker under drain writes for the commit its green run
 # covered (#1949).
 SEAM_RUN_AT = re.compile(r"^Seam run at: ([0-9a-f]{40})\s*$", re.MULTILINE)
@@ -923,7 +966,9 @@ def skip_reason(ctx, head, body, main):
     and the seam section is the same at both. A fourth keeps the module
     docstring's rule that a section declaring no command merges nothing:
     main's section must resolve a command. Any check that cannot answer
-    keeps the rerun."""
+    keeps the rerun. The skip never passes over a step that would defer
+    (`DEFER_EXIT`): the worker's run is the same command on the same tree,
+    and a deferral there is no green run, so it writes no `Seam run at:`."""
     if worker_ran_on(body) != head:
         return None
     try:
@@ -966,9 +1011,9 @@ def seam(ctx, head, log, pr, body):
     tool = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.normpath(SELECTOR_CHECK))}"
     base = f"--root . --rev {shlex.quote(main)}"
     cmd = (f"export TESTS_JOBS={seam_jobs()}; cmd=$({tool} command {base}) || exit 1; "
-           f"printf '{RUNNING}%s\\n' \"$cmd\"; "
            f"if {tool} list {base} --state {state}; then "
            f"{tool} comment {base} --state {state} --pr {pr} --repo {shlex.quote(ctx.repo)}; fi; "
+           f"printf '{RUNNING}%s\\n' \"$cmd\"; "
            'sh -c "$cmd"')
     try:
         run_in_scratch_tree(ctx, cmd, log, head, main)
@@ -1037,7 +1082,11 @@ def check_merge(ctx, branch, view):
     `DrainError`."""
     log = os.path.join(ctx.log_dir, f"{branch}-seam.log")
     for _ in range(BASE_CHECKS):
-        checked = seam(ctx, view["headRefOid"], log, view["number"], view.get("body"))
+        try:
+            checked = seam(ctx, view["headRefOid"], log, view["number"], view.get("body"))
+        except Deferred as exc:
+            exc.view = view
+            raise
         git(["fetch", "-q", "origin"], cwd=ctx.root)
         if git(["rev-parse", ctx.default], cwd=ctx.root) == checked:
             return
@@ -1058,7 +1107,7 @@ def cleanup_notes(ctx, branch):
 
 # What a result is: a PR drain merged (or a commit that landed on main), or a
 # close with no PR that no sha stands behind.
-MERGED, CLOSED, UNVERIFIED = "merged", "closed", "unverified"
+MERGED, CLOSED, UNVERIFIED, DEFERRED = "merged", "closed", "unverified", "deferred"
 LANDED_LABEL, MOOT_LABEL = "(landed on main, no PR)", "moot (closed, no PR)"
 
 
@@ -1329,6 +1378,8 @@ def work(ctx, anchor, others, resumed, started, kind):
                                 ci=lambda: pr_settle.runs_on_pull_request(ctx.tracker))
             except pr_settle.SettleError as exc:
                 raise DrainError(f"{view['url']} {exc}") from exc
+        except Deferred as exc:
+            return [defer(ctx, tickets, exc)], None
         except DrainError as exc:
             reason = one_line(exc)
             if not started:  # a failure before the announce (a dispatch that failed after the claim): the bundle was still worked
@@ -1339,6 +1390,19 @@ def work(ctx, anchor, others, resumed, started, kind):
         else:
             return finish(ctx, anchor, branch, view, kind), None
     return None, reason
+
+
+def defer(ctx, tickets, exc):
+    """The `DEFERRED` result of a PR whose seam deferred it: the PR, its
+    worker and its claims are left as they are, and its one `deferred:` note
+    is posted or brought up to date. A note that cannot be posted is said in
+    the result, never a reason to fail the build."""
+    view, note = exc.view, ""
+    try:
+        ctx.tracker.upsert_comment(view["number"], DEFERRED_NOTE, f"{DEFERRED_NOTE} {exc.line}")
+    except tracker.TrackerError as err:
+        note = f"note not posted: {one_line(err, 150)}"
+    return {"tickets": tickets, "via": view["url"], "line": exc.line, "note": note, "outcome": DEFERRED}
 
 
 def hand_to_chris(ctx, anchor, reason, kind):
@@ -1356,7 +1420,7 @@ def hand_to_chris(ctx, anchor, reason, kind):
     return bundle
 
 
-Result = collections.namedtuple("Result", "merged closed handed stop ended passed unread")
+Result = collections.namedtuple("Result", "merged closed handed deferred stop ended passed unread")
 
 
 def survey(ctx, retry=True):
@@ -1406,11 +1470,16 @@ class Progress:
 
     def __init__(self, want):
         self.merged, self.closed, self.handed = [], [], []
+        # anchor -> its `DEFERRED` result, while its PR waits. Its anchor stays in `ended` until
+        # another bundle has been worked, so the deferred PR is tried once per such bundle (#2035).
+        self.deferred = {}
         self.failures, self.done, self.want = 0, 0, want
         self.preflight = False  # the `unresolved at start:` lines are out
         self.started = []  # the tickets of a bundle whose start line is out and whose end line is not
         self.told = set()  # stranded slices already named this drain
-        self.ended = set()  # the anchors this drain has taken up: added before `work()`, so none is taken twice
+        # the anchors this drain has taken up: added before `work()`, so none is taken twice, bar a
+        # deferred one `record_bundle` releases after another bundle has ended
+        self.ended = set()
         self.cause, self.seen = None, None  # the cause the drain ended on, and the last queue read `(queue, waiting, passed)`
 
 
@@ -1450,7 +1519,18 @@ def next_anchor(ctx, prog):
 def record_bundle(ctx, prog, anchor, kind, results, reason):
     """Say how the bundle ended and file it: its results as merged or closed, or,
     when it failed, hand it to Chris. Returns the stop reason when the failures
-    in a row reach the limit, else `None`."""
+    in a row reach the limit, else `None`. A deferred bundle counts toward no
+    limit and leaves the failure count alone; any other outcome releases every
+    deferred PR to be tried again."""
+    if results and results[0]["outcome"] == DEFERRED:
+        result = results[0]
+        say(f"bundle ended: {refs(result['tickets'])}  deferred: {result['line']}"
+            + (f" ({result['note']})" if result["note"] else ""))
+        prog.started.clear()
+        prog.deferred[anchor] = result
+        return None
+    prog.deferred.pop(anchor, None)
+    prog.ended -= set(prog.deferred)
     if results:
         for result in results:
             if result["outcome"] == MERGED:
@@ -1507,7 +1587,7 @@ def drain(ctx, limit, limit_name):
         say(f"bundle ended: {refs(prog.started)}  stopped: {stop}")
     if stop:
         prog.cause = "stopped"
-    return Result(prog.merged, prog.closed, prog.handed, stop, prog.cause,
+    return Result(prog.merged, prog.closed, prog.handed, list(prog.deferred.values()), stop, prog.cause,
                *passed_at_exit(ctx, prog))
 
 
@@ -1553,9 +1633,11 @@ def summary(result):
                                         + (f"  ({m['note']})" if m["note"] else "") for m in result.closed]
     if result.handed:
         lines += ["handed to Chris:"] + [f"  {refs(b)}  {r}" for b, r in result.handed]
+    if result.deferred:
+        lines += ["deferred:"] + [f"  {refs(d['tickets'])}  {d['via']}  {d['line']}" for d in result.deferred]
     if result.stop:
         lines.append(f"stopped: {result.stop}")
-    if not (result.merged or result.closed or result.handed or result.stop):
+    if not (result.merged or result.closed or result.handed or result.deferred or result.stop):
         lines.append("nothing to drain")
     if result.passed is None:
         lines.append(f"passed over: {result.unread}")
